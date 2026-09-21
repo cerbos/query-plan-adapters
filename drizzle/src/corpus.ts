@@ -161,9 +161,7 @@ export function classifyActionsForAdapter(
     ),
   );
   const oracleActions = [
-    ...manifest.conformance.filter(
-      (action) => !unsupportedActions.has(action),
-    ),
+    ...manifest.conformance.filter((action) => !unsupportedActions.has(action)),
     ...supportedExpected,
   ];
   const throwingActions: ThrowingAction[] = [
@@ -232,7 +230,9 @@ function operandFromWire(
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt)),
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {
@@ -456,6 +456,7 @@ export interface AdversarialSchema {
     createdBy: AnyColumn;
     scope: AnyColumn;
     createdAt: AnyColumn;
+    updatedAt: AnyColumn;
   };
   parents: Table & {
     id: AnyColumn;
@@ -504,6 +505,7 @@ export function sqliteSchema() {
       createdBy: text("created_by").notNull(),
       scope: text("scope"),
       createdAt: text("created_at"),
+      updatedAt: text("updated_at"),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -574,6 +576,10 @@ export function postgresSchema() {
       createdBy: pgText("created_by").notNull(),
       scope: pgText("scope"),
       createdAt: timestamp("created_at", {
+        withTimezone: true,
+        mode: "string",
+      }),
+      updatedAt: timestamp("updated_at", {
         withTimezone: true,
         mode: "string",
       }),
@@ -662,6 +668,7 @@ export function mysqlSchema() {
       createdBy: varchar("created_by", { length: 64 }).notNull(),
       scope: varchar("scope", { length: 255 }),
       createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
+      updatedAt: datetime("updated_at", { mode: "string", fsp: 6 }),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -751,6 +758,10 @@ export function buildMapper(
     "request.resource.attr.scope": schema.resources.scope,
     "request.resource.attr.createdAt": {
       column: schema.resources.createdAt,
+      valueType: "timestamp",
+    },
+    "request.resource.attr.updatedAt": {
+      column: schema.resources.updatedAt,
       valueType: "timestamp",
     },
     // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the

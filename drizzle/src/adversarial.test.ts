@@ -119,6 +119,7 @@ const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
   "createdAt",
+  "updatedAt",
   "scope",
   "labels",
 ] as const;
@@ -142,6 +143,11 @@ const PRINCIPAL_ATTR_KEYS = [
   "context",
   "fewTeams",
   "manyTeams",
+  "zero",
+  "emptyTeams",
+  "manyStructs",
+  "nullableStructs",
+  "missingStructs",
 ] as const;
 
 /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
@@ -149,6 +155,7 @@ interface DerivedEntry {
   createdBy: string;
   aDouble: number | null;
   createdAt: string | null;
+  updatedAt: string | null;
   scope: string | null;
   labels: (string | null)[];
 }
@@ -182,18 +189,36 @@ function assertKeys(
   }
 }
 
-/**
- * One principal attribute, checked against the two JSON shapes the corpus carries. A key-set guard
- * says nothing about a change inside a value and three of the four attributes are lists, so the
- * element type is asserted for the same reason the seed guard descends into `tags[]`.
- */
+/** Principal attributes have explicit value shapes, including absent versus null struct members. */
 function assertPrincipalAttrShape(label: string, value: unknown): void {
-  if (typeof value === "string") return;
-  if (Array.isArray(value) && value.every((el) => typeof el === "string")) {
+  const key = label.slice(label.lastIndexOf(".") + 1);
+  if (key === "context" && typeof value === "string") return;
+  if (key === "zero" && value === 0) return;
+  if (
+    ["allowedTags", "fewTeams", "manyTeams", "emptyTeams"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string")
+  )
     return;
-  }
+  if (
+    ["manyStructs", "nullableStructs", "missingStructs"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+        return false;
+      if (key === "missingStructs") return Object.keys(entry).length === 0;
+      return (
+        Object.keys(entry).length === 1 &&
+        "name" in entry &&
+        (key === "nullableStructs"
+          ? entry.name === null
+          : typeof entry.name === "string")
+      );
+    })
+  )
+    return;
   throw new Error(
-    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`,
+    `${label} does not match its declared corpus principal shape`,
   );
 }
 
@@ -380,6 +405,26 @@ const DEGENERACY_GUARD_ACTIONS = [
   "string-size-gt0",
   "in-map-keys",
   "double-huge-gt",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "hasint-map-null",
+  "hasint-map-null-vf",
+  "hasint-map-vf",
+  "hasint-null-vf",
+  "in-numbers",
+  "in-var-var-omitted",
+  "in-var-var-omitted-neg",
+  "lambda-in-literal",
+  "lambda-in-literal-neg",
+  "lambda-ternary",
+  "not-hasint-empty-chain",
+  "not-nan-ord-le",
+  "pv-not-all",
+  "pv-not-exists",
+  "pv-shadow",
+  "root-not-bool",
+  "size-ge-one",
+  "wildcard-contains",
+  "wildcard-endswith",
 ] as const;
 
 /**
@@ -400,6 +445,30 @@ const DEGENERACY_LIVENESS_PROBES = [
   // adapter never translates.
   "hier-empty-delim",
   "matches-alt",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "div-by-division",
+  "eq-list",
+  "except-eq",
+  "except-size",
+  "hier-overlaps-list-prefix",
+  "ne-list",
+  "not-concat-unsolvable",
+  "not-concat-unsolvable-ne",
+  "pv-exists-one",
+  "pv-filter",
+  "pv-map",
+  "pv-structs",
+  "regex-alternation",
+  "regex-brace",
+  "regex-case",
+  "regex-digit",
+  "regex-dot",
+  "regex-grouped",
+  "regex-optional-operators",
+  "regex-posix",
+  "regex-repetition",
+  "regex-unanchored",
+  "temporal-raw-eq",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -491,6 +560,7 @@ interface ResourceRow {
   createdBy: string;
   scope: string | null;
   createdAt: string | null;
+  updatedAt: string | null;
 }
 
 interface TagRow {
@@ -569,6 +639,7 @@ function seedRows(): SeedRows {
       createdBy: isoFor(seed),
       scope: scopeFor(seed),
       createdAt: timestampFor(seed),
+      updatedAt: derivedFor(seed).updatedAt,
     });
     const parentSeed = parentSeedOf(seed);
     if (parentSeed !== undefined) {
@@ -674,8 +745,15 @@ interface AdversarialStore {
 
 function sqliteStore(): AdversarialStore {
   const schema = sqliteSchema();
-  const { resources, parents, inners, tags, categories, subCategories, labels } =
-    schema;
+  const {
+    resources,
+    parents,
+    inners,
+    tags,
+    categories,
+    subCategories,
+    labels,
+  } = schema;
 
   // Dedicated file (adversarial.db, gitignored) rather than :memory:, so a failing run leaves
   // the seeded rows behind to inspect.
@@ -699,7 +777,8 @@ function sqliteStore(): AdversarialStore {
           a_optional_string TEXT,
           created_by TEXT NOT NULL,
           scope TEXT,
-          created_at TEXT
+          created_at TEXT,
+          updated_at TEXT
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
@@ -814,8 +893,15 @@ const POSTGRES_IMAGE =
  */
 function postgresStore(): AdversarialStore {
   const schema = postgresSchema();
-  const { resources, parents, inners, tags, categories, subCategories, labels } =
-    schema;
+  const {
+    resources,
+    parents,
+    inners,
+    tags,
+    categories,
+    subCategories,
+    labels,
+  } = schema;
 
   let container: StartedPostgreSqlContainer | undefined;
   let pool: Pool | undefined;
@@ -847,7 +933,8 @@ function postgresStore(): AdversarialStore {
           a_optional_string  text,
           created_by         text NOT NULL,
           scope              text,
-          created_at         timestamptz
+          created_at         timestamptz,
+          updated_at         timestamptz
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
@@ -1005,8 +1092,15 @@ const MYSQL_COLLATION =
  */
 function mysqlStore(): AdversarialStore {
   const schema = mysqlSchema();
-  const { resources, parents, inners, tags, categories, subCategories, labels } =
-    schema;
+  const {
+    resources,
+    parents,
+    inners,
+    tags,
+    categories,
+    subCategories,
+    labels,
+  } = schema;
 
   let container: StartedMySqlContainer | undefined;
   let pool: mysql.Pool | undefined;
@@ -1034,7 +1128,8 @@ function mysqlStore(): AdversarialStore {
        a_optional_string  varchar(255),
        created_by         varchar(64) NOT NULL,
        scope              varchar(255),
-       created_at         datetime(6)
+       created_at         datetime(6),
+       updated_at         datetime(6)
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
@@ -1169,18 +1264,23 @@ function mysqlStore(): AdversarialStore {
  * oracle-compared on this leg like every other action.
  */
 function toMysqlResourceRow(row: ResourceRow): ResourceRow {
-  if (row.createdAt === null) {
-    return row;
-  }
-  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z$/.exec(
-    row.createdAt,
-  );
-  if (!match) {
-    throw new Error(
-      `derived-fields.json createdAt "${row.createdAt}" is not the RFC-3339 UTC instant this store rewrites`,
+  function timestamp(value: string | null): string | null {
+    if (value === null) return null;
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z$/.exec(
+      value,
     );
+    if (!match) {
+      throw new Error(
+        `derived-fields.json timestamp "${value}" is not the RFC-3339 UTC instant this store rewrites`,
+      );
+    }
+    return `${match[1]} ${match[2]}`;
   }
-  return { ...row, createdAt: `${match[1]} ${match[2]}` };
+  return {
+    ...row,
+    createdAt: timestamp(row.createdAt),
+    updatedAt: timestamp(row.updatedAt),
+  };
 }
 
 /** Container start dominates the PostgreSQL and MySQL legs' setup; SQLite finishes instantly. */
@@ -1307,6 +1407,10 @@ function asCheckResource(seed: Seed): Resource {
       parentAttr["inner"] = relationAttr(innerSeed);
     }
     attr["parent"] = parentAttr;
+  }
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) {
+    attr["updatedAt"] = updatedAt;
   }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
@@ -1457,11 +1561,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(205);
+    expect(MANIFEST_ACTIONS.size).toBe(272);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(23);
+    expect(THROWING_ACTIONS).toHaveLength(54);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1739,4 +1843,84 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       await expectNonDegenerateOracle(action);
     }
   });
+  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
+  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
+  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
+  test.each([
+    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
+    {
+      action: "pv-empty-not-exists",
+      kind: PlanKind.ALWAYS_ALLOWED,
+      total: true,
+    },
+    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
+    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
+    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "pv-structs-missing",
+      kind: PlanKind.ALWAYS_DENIED,
+      total: false,
+    },
+    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "type-hierarchy-number",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
+    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
+  ])(
+    "$action preserves its intentional empty/total oracle and planner shape",
+    async ({ action, kind, total }) => {
+      const [plan, ids] = await Promise.all([
+        cerbos.planResources({
+          principal: seedsFile.principal,
+          resource: { kind: seedsFile.resourceKind },
+          action,
+        }),
+        oracleAllowedIds(action),
+      ]);
+      expect(plan.kind).toBe(kind);
+      expect(ids).toEqual(total ? SEEDS.map((seed) => seed.id).sort() : []);
+    },
+  );
 });

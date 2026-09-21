@@ -30,7 +30,16 @@ from cerbos.sdk.model import (
 )
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import Boolean, DateTime, String, column, func, literal, table
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    String,
+    column,
+    create_engine,
+    func,
+    literal,
+    table,
+)
 from sqlalchemy.dialects import postgresql
 
 
@@ -283,6 +292,28 @@ class TestAttributeNullRepresentation:
             self._comparison("in", "request.resource.attr.owner", ["x", "y"]),
         )
         assert "IS NOT NULL" in compiled
+
+    @pytest.mark.parametrize("operator, expected", [("eq", []), ("ne", [1, 2])])
+    def test_explicit_null_does_not_enable_string_number_coercion(
+        self, resource_table, operator, expected
+    ):
+        engine = create_engine("sqlite://")
+        resource_table.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                resource_table.__table__.insert(),
+                [{"id": 1, "name": "0"}, {"id": 2, "name": None}],
+            )
+            query = get_query(
+                _conditional_plan(
+                    self._comparison(operator, "request.resource.attr.owner", 0)
+                ),
+                resource_table,
+                self._attr_map(resource_table),
+                attribute_null_representation=self._declared(),
+            )
+            assert [row.id for row in connection.execute(query)] == expected
+        engine.dispose()
 
     def test_two_explicit_nulls_match_field_to_field(self, resource_table):
         compiled = self._compiled(

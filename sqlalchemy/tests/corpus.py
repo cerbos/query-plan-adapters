@@ -39,6 +39,7 @@ from cerbos_image import CONFORMANCE_DIR
 from google.protobuf.json_format import ParseDict
 
 from cerbos_sqlalchemy import require_hops
+from cerbos_sqlalchemy.query import OPERATOR_FNS
 from sqlalchemy import (
     Boolean,
     Column,
@@ -437,6 +438,7 @@ class AdvResource(AdvBase):
     created_by = Column(String, nullable=False)
     scope = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AdvTag(AdvBase):
@@ -720,10 +722,15 @@ def _size_fn(target: Any, _: Any):
                 else_=_count_subquery(rel, body),
             ),
         )
-    return func.length(target)
+    return OPERATOR_FNS["size"](target, None)
 
 
 def _has_intersection_fn(mapped: Any, values: Any):
+    if isinstance(mapped, list):
+        mapped, values = values, mapped
+    if isinstance(values, list) and not values:
+        rel = mapped if isinstance(mapped, _Relation) else mapped[1]
+        return _require_hops(rel, false())
     if isinstance(mapped, _Relation):
         if mapped.member_field is None:
             raise ValueError(
@@ -761,6 +768,10 @@ def _scalar_membership(column: Any, values: Any):
 
 
 def _relation_membership(relation: _Relation, value: Any):
+    if isinstance(value, (list, dict)):
+        raise ValueError(
+            "Membership with a structured element has no scalar SQL lowering"
+        )
     if relation.member_field is None:
         raise ValueError(f"in over relation without member field: {relation!r}")
     member = relation.member_field
@@ -807,6 +818,7 @@ OPERATOR_OVERRIDES = {
 # definite for these two attributes and leaves it untouched for every other
 # mapping (cerbos/query-plan-adapters#308).
 ATTRIBUTE_NULL_REPRESENTATION = {
+    "tagName": "explicit",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
 }
@@ -867,6 +879,7 @@ ATTR_MAP = {
     "request.resource.attr.coOwner": AdvResource.scope,
     "request.resource.attr.scope": AdvResource.scope,
     "request.resource.attr.createdAt": AdvResource.created_at,
+    "request.resource.attr.updatedAt": AdvResource.updated_at,
     # obj.inner is not a real nested column — mirrors aString, the same trick
     # the spring-data and prisma reference harnesses use for the p-struct probe.
     "request.resource.attr.obj.inner": AdvResource.a_string,
@@ -890,6 +903,7 @@ ATTR_MAP = {
     "request.resource.attr.tags": TAGS,
     "request.resource.attr.tagNames": TAG_NAMES,
     "t": TAGS,
+    "tagName": AdvTag.name,
     "t.id": AdvTag.tag_id,
     "t.name": AdvTag.name,
     "request.resource.attr.categories": CATEGORIES,

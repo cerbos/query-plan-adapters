@@ -17,6 +17,8 @@ export type MapperConfig = {
   /** Treat a stored null as a missing Cerbos attribute and exclude it from comparisons. */
   nullable?: boolean;
   valueParser?: (value: any) => any;
+  /** Stored scalar type; dateTime loses the original CEL timestamp string spelling. */
+  valueType?: "number" | "string" | "boolean" | "dateTime";
   relation?: {
     name: string;
     type: "one" | "many";
@@ -196,12 +198,36 @@ const isRfc3339Timestamp = (value: string): boolean => {
 /**
  * Converts a Cerbos query plan to a Mongoose filter
  */
+function rejectNullConstructor(
+  operand: PlanExpressionOperand,
+  inConstructor = false,
+): void {
+  if (isValue(operand)) {
+    if (
+      inConstructor &&
+      (operand.value === null ||
+        (Array.isArray(operand.value) && operand.value.includes(null)))
+    ) {
+      assertNullOperandTranslatable(
+        "a null literal in a collection or struct constructor",
+      );
+    }
+  } else if (isExpression(operand)) {
+    const nested =
+      inConstructor ||
+      ["list", "struct", "set-field"].includes(operand.operator);
+    operand.operands.forEach((child) => rejectNullConstructor(child, nested));
+  }
+}
+
 export function queryPlanToMongoose({
   queryPlan,
   mapper = {},
   nullAttributeRepresentation = "explicit",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   nullRepresentation = nullAttributeRepresentation;
+  if (queryPlan.kind === PlanKind.CONDITIONAL)
+    rejectNullConstructor(queryPlan.condition);
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return {
@@ -765,7 +791,17 @@ const buildAggregationExpressionFromExpression = (
       const inner = buildAggregationExpression(operand, mapper);
       // Works for both arrays and strings: $size for arrays, $strLenCP otherwise.
       const size = {
-        $cond: [{ $isArray: inner }, { $size: inner }, { $strLenCP: inner }],
+        $cond: [
+          { $isArray: inner },
+          { $size: inner },
+          {
+            $cond: [
+              { $eq: [{ $type: inner }, "string"] },
+              { $strLenCP: inner },
+              null,
+            ],
+          },
+        ],
       };
       const parentPath = isVariable(operand)
         ? resolveFieldReference(operand.name, mapper).relation?.requiresParent
@@ -809,16 +845,28 @@ const buildAggregationExpressionFromExpression = (
       }
       const receiver = buildAggregationExpression(receiverOperand, mapper);
       const needle = buildAggregationExpression(needleOperand, mapper);
+      const checked = (value: unknown): MongooseFilter => ({
+        $cond: [
+          {
+            $and: [
+              { $eq: [{ $type: receiver }, "string"] },
+              { $eq: [{ $type: needle }, "string"] },
+            ],
+          },
+          value,
+          null,
+        ],
+      });
       const index = { $indexOfCP: [receiver, needle] };
       if (operator === "contains") {
-        return { $gte: [index, 0] };
+        return checked({ $gte: [index, 0] });
       }
       if (operator === "startsWith") {
-        return { $eq: [index, 0] };
+        return checked({ $eq: [index, 0] });
       }
       const receiverLength = { $strLenCP: receiver };
       const needleLength = { $strLenCP: needle };
-      return {
+      return checked({
         $cond: {
           if: { $gte: [receiverLength, needleLength] },
           then: {
@@ -835,7 +883,7 @@ const buildAggregationExpressionFromExpression = (
           },
           else: false,
         },
-      };
+      });
     }
     case "timestamp": {
       const operand = operands[0];
@@ -940,6 +988,7 @@ const collectGuardedExpressions = (
     return [operand, ...nested];
   }
   if (
+    ["size", "contains", "startsWith", "endsWith"].includes(operand.operator) ||
     operand.operator === "string" ||
     operand.operator === "double" ||
     operand.operator === "int" ||
@@ -972,6 +1021,9 @@ const buildEvaluationGuard = (
     };
   }
   if (
+    ["size", "contains", "startsWith", "endsWith"].includes(
+      expression.operator,
+    ) ||
     expression.operator === "string" ||
     expression.operator === "double" ||
     expression.operator === "int"
@@ -1056,6 +1108,15 @@ const getOperandAt = (
 const createScopedMapper =
   (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
   (key: string) => {
+    if (key === variableName) {
+      const config =
+        typeof fullMapper === "function"
+          ? fullMapper(collectionPath)
+          : fullMapper[collectionPath];
+      const field = config?.relation?.field;
+      if (!field) return { field: key };
+      return config.relation?.fields?.[field] ?? { field };
+    }
     if (key.startsWith(variableName + ".")) {
       const strippedKey = key.replace(variableName + ".", "");
 
@@ -1150,6 +1211,16 @@ const buildHierarchyFilter = (
   }
   const left = parseHierarchyOperand(leftOperand);
   const right = parseHierarchyOperand(rightOperand);
+  for (const operand of [left, right]) {
+    if (operand.kind === "field") {
+      const type = resolveMapperConfig(operand.name, mapper)?.valueType;
+      if (type !== undefined && type !== "string") {
+        throw new Error(
+          "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix",
+        );
+      }
+    }
+  }
   if (left.separator !== right.separator) {
     throw new Error(
       `${operator} requires one field and one value with the same separator`,
@@ -1538,6 +1609,28 @@ const buildMongooseFilterFromCerbosExpression = (
         `${operator} operator requires a right operand`,
       );
 
+      if (
+        isVariable(leftOperand) &&
+        isVariable(rightOperand) &&
+        [leftOperand, rightOperand].some(
+          (operand) =>
+            resolveMapperConfig(operand.name, mapper)?.valueType === "dateTime",
+        )
+      ) {
+        throw new Error(
+          "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead",
+        );
+      }
+      if (
+        (isVariable(leftOperand) || isVariable(rightOperand)) &&
+        [leftOperand, rightOperand].some(
+          (operand) => isValue(operand) && Array.isArray(operand.value),
+        )
+      ) {
+        throw new Error(
+          "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value",
+        );
+      }
       // If either operand is a (non-relational) expression, emit a `$expr`
       // with aggregation-pipeline operators. This covers arithmetic, type
       // conversion, ternary, `index`, `size`, `matches` etc. on either side
@@ -1602,6 +1695,21 @@ const buildMongooseFilterFromCerbosExpression = (
         variableOperand.name,
         mapper,
       );
+      const config = resolveMapperConfig(variableOperand.name, mapper);
+      if (
+        (effectiveOperator === "eq" || effectiveOperator === "ne") &&
+        config?.valueType &&
+        config.valueType !== "dateTime" &&
+        valueOperand.value !== null &&
+        typeof valueOperand.value !== config.valueType &&
+        !config.valueParser
+      ) {
+        return withNullableGuards(
+          { $expr: { $eq: [effectiveOperator === "ne", true] } },
+          [variableOperand],
+          mapper,
+        );
+      }
       const comparison = {
         [mongoOperators[effectiveOperator]]: applyValueParser(
           variableOperand.name,
@@ -1675,6 +1783,11 @@ const buildMongooseFilterFromCerbosExpression = (
         );
       }
 
+      if (isValue(leftOperand) && Array.isArray(leftOperand.value)) {
+        throw new Error(
+          "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
+        );
+      }
       if (isValue(leftOperand) && isVariable(rightOperand)) {
         const { path, relation } = resolveFieldReference(
           rightOperand.name,
@@ -1764,7 +1877,10 @@ const buildMongooseFilterFromCerbosExpression = (
       if (
         !isVariable(leftOperand) ||
         !isValue(rightOperand) ||
-        typeof rightOperand.value !== "string"
+        typeof rightOperand.value !== "string" ||
+        (resolveMapperConfig(leftOperand.name, mapper)?.valueType !==
+          undefined &&
+          resolveMapperConfig(leftOperand.name, mapper)?.valueType !== "string")
       ) {
         if (collectionDepth > 0) {
           throw new Error(
@@ -1775,7 +1891,7 @@ const buildMongooseFilterFromCerbosExpression = (
           {
             $expr: buildAggregationExpressionFromExpression(expression, mapper),
           },
-          [leftOperand, rightOperand],
+          [expression],
           mapper,
         );
       }
@@ -1818,6 +1934,13 @@ const buildMongooseFilterFromCerbosExpression = (
     }
 
     case "hasIntersection": {
+      if (
+        operands.some(
+          (operand) => isValue(operand) && carriesNullOperand(operand.value),
+        )
+      ) {
+        assertNullOperandTranslatable("a null element in hasIntersection");
+      }
       if (operands.length !== 2) {
         throw new Error("hasIntersection requires exactly two operands");
       }
@@ -1834,7 +1957,8 @@ const buildMongooseFilterFromCerbosExpression = (
       // list arrives FIRST when the policy spells it first. The operands are not
       // interchangeable in the emitted query — one becomes the field path, the other the `$in`
       // list — so normalize to collection-first instead of reading them positionally.
-      const valueFirst = isValue(firstOperand) && Array.isArray(firstOperand.value);
+      const valueFirst =
+        isValue(firstOperand) && Array.isArray(firstOperand.value);
       const leftOperand = valueFirst ? secondOperand : firstOperand;
       const rightOperand = valueFirst ? firstOperand : secondOperand;
 

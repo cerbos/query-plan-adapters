@@ -1,0 +1,7 @@
+{
+  "action": "pv-structs-missing",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_ALWAYS_DENIED"
+  }
+}

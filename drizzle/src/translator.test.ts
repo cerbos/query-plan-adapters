@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { describe, expect, test } from "@jest/globals";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import { eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
@@ -303,7 +306,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 180, unconditional: 2, throwing: 23 });
+    }).toEqual({ conditional: 211, unconditional: 7, throwing: 54 });
   });
 
   /**
@@ -392,18 +395,23 @@ describe("rendering across the claimed dialects", () => {
   const mysqlRendered = (action: string): string =>
     render("mysql", action, filterFor("mysql", action)).sql;
 
-  test.each(CONDITIONAL_ACTIONS)("%s uses no SQLite-only string function", (action) => {
-    // instr() exists on SQLite and MySQL but not PostgreSQL; replace/substr/length are common to
-    // all three. PostgreSQL's own evaluation of the string operators is proved by the corpus's
-    // cr-contains, cs-*, f2f-* and hier-* actions on the executed PostgreSQL leg.
-    for (const dialect of GOLDEN_STORES) {
-      const rendered = render(dialect, action, filterFor(dialect, action));
-      expect({ dialect, usesInstr: rendered.sql.includes("instr(") }).toEqual({
-        dialect,
-        usesInstr: false,
-      });
-    }
-  });
+  test.each(CONDITIONAL_ACTIONS)(
+    "%s uses no SQLite-only string function",
+    (action) => {
+      // instr() exists on SQLite and MySQL but not PostgreSQL; replace/substr/length are common to
+      // all three. PostgreSQL's own evaluation of the string operators is proved by the corpus's
+      // cr-contains, cs-*, f2f-* and hier-* actions on the executed PostgreSQL leg.
+      for (const dialect of GOLDEN_STORES) {
+        const rendered = render(dialect, action, filterFor(dialect, action));
+        expect({ dialect, usesInstr: rendered.sql.includes("instr(") }).toEqual(
+          {
+            dialect,
+            usesInstr: false,
+          },
+        );
+      }
+    },
+  );
 
   test.each(CONDITIONAL_ACTIONS)(
     "%s casts to 53-bit floating point, never to single precision",
@@ -453,9 +461,8 @@ describe("rendering across the claimed dialects", () => {
     (action) => {
       expect({
         action,
-        collapsesNullToFalse: mysqlRendered(action).includes(
-          "is null then false",
-        ),
+        collapsesNullToFalse:
+          mysqlRendered(action).includes("is null then false"),
       }).toEqual({ action, collapsesNullToFalse: false });
     },
   );
@@ -533,11 +540,7 @@ describe("mapper forms", () => {
         filterFor("postgresql", DEEP_ACTION, { mapper: asFunction }),
       ),
     ).toEqual(
-      render(
-        "postgresql",
-        DEEP_ACTION,
-        filterFor("postgresql", DEEP_ACTION),
-      ),
+      render("postgresql", DEEP_ACTION, filterFor("postgresql", DEEP_ACTION)),
     );
   });
 
@@ -567,16 +570,17 @@ describe("mapper forms", () => {
     // and the value it binds is the one the transform produced rather than the plan's literal.
     expect(rendered.sql).toContain("lower(");
     expect(rendered.params).toEqual(
-      (pinned as { rendered: Record<GoldenStore, RenderedFilter> }).rendered
-        .postgresql.params.map((param) => String(param).toLowerCase()),
+      (
+        pinned as { rendered: Record<GoldenStore, RenderedFilter> }
+      ).rendered.postgresql.params.map((param) => String(param).toLowerCase()),
     );
   });
 
   test("an unmapped reference is refused rather than dropped", () => {
     // Dropping it would emit a filter that answers a different question from the policy.
-    expect(() =>
-      translate("postgresql", "cs-eq", { mapper: {} }),
-    ).toThrow(/No mapping/);
+    expect(() => translate("postgresql", "cs-eq", { mapper: {} })).toThrow(
+      /No mapping/,
+    );
   });
 });
 
@@ -659,6 +663,35 @@ describe("nullAttributeRepresentation", () => {
     )?.messages?.[ADAPTER],
   );
 
+  test.each(["eq", "ne"])(
+    "mixed scalar types preserve explicit-null %s",
+    (operator) => {
+      const resources = postgresSchema().resources;
+      const mapper: Mapper = {
+        ...MAPPERS.postgresql,
+        "request.resource.attr.aString": {
+          column: resources.aOptionalString,
+          nullAttributeRepresentation: "explicit",
+        },
+        "request.resource.id": {
+          column: resources.aNumber,
+          nullAttributeRepresentation: "explicit",
+        },
+      };
+      const rendered = render(
+        "postgresql",
+        "mixed explicit null",
+        filterFor("postgresql", operator === "eq" ? "id-f2f" : "id-f2f-ne", {
+          mapper,
+        }),
+      );
+      expect(rendered.sql).toContain(
+        '"adversarial_resources"."a_optional_string" is null and "adversarial_resources"."a_number" is null',
+      );
+      expect(rendered.sql.includes("not ")).toBe(operator === "ne");
+    },
+  );
+
   test("explicit: a null operand becomes an IS NULL filter", () => {
     expect(
       render(
@@ -720,11 +753,7 @@ describe("nullAttributeRepresentation", () => {
   // orderings must keep propagating it rather than being made definite.
   test("an ordering comparison keeps propagating UNKNOWN", () => {
     expect(
-      render(
-        "postgresql",
-        "vf-le",
-        filterFor("postgresql", "vf-le"),
-      ).sql,
+      render("postgresql", "vf-le", filterFor("postgresql", "vf-le")).sql,
     ).not.toContain("is null");
   });
 });
@@ -771,7 +800,10 @@ describe("timestamp literals", () => {
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
     ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
-    ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
+    [
+      "an offset that pushes past the maximum instant",
+      "9999-12-31T23:00:00-02:00",
+    ],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC-3339|millisecond|instant range/);
   });

@@ -107,7 +107,7 @@ var arithmeticOps = map[string]ArithOp{
 
 // Operators whose second operand is a lambda binding an iteration variable.
 var lambdaBinding = map[string]bool{
-	"exists": true, "exists_one": true, "all": true, "filter": true, "map": true, "except": true,
+	"exists": true, "exists_one": true, "all": true, "filter": true, "map": true,
 }
 
 // Collection macros that fold into a flat boolean combination of their per-element bodies when the
@@ -236,6 +236,13 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 
 	left, right := n.operands[0], n.operands[1]
 	operator := n.operator
+	if _, comparison := comparisonOps[operator]; comparison && left.isVariable() && right.isVariable() {
+		l, lok := m.Resolve(left.variable)
+		r, rok := m.Resolve(right.variable)
+		if lok && rok && (l.ValueType == ValueTimestamp || r.ValueType == ValueTimestamp) {
+			return nil, fmt.Errorf("bare temporal attributes compare RFC 3339 strings in CEL; stored timestamps lose the original spelling; use timestamp() on both operands")
+		}
+	}
 
 	// `x in <collection>` where the collection is stored in another table needs a correlated
 	// subquery, not an IN list. This is checked before the value-first normalisation below,
@@ -329,7 +336,14 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 	alias := b.newAlias()
 	elementCol := Column{Qualifier: alias, Name: rel.Field.Column}
 
-	body, err := b.elementMatches(elementCol, needleValue)
+	omitted := b.opts.NullRepresentation == NullOmitted
+	if needle.isVariable() {
+		if entry, ok := m.Resolve(needle.variable); ok && entry.NullConvention != NullConventionUnset {
+			omitted = entry.NullConvention == NullConventionOmitted
+		}
+	}
+	nullSafe := !omitted || rel.Field.NullConvention == NullConventionExplicit
+	body, err := b.elementMatches(elementCol, needleValue, nullSafe)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +351,11 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 	// Membership is an `exists` fold, so it carries the same three-valued semantics: a NULL
 	// element makes the comparison UNKNOWN, which must stay UNKNOWN rather than decaying to
 	// false — otherwise `!(x in tagNames)` would allow a row the PDP denies.
-	return b.triStateExists(rel, alias, parent, body, existsSemantics, negated), nil
+	result := b.triStateExists(rel, alias, parent, body, existsSemantics, negated)
+	if needleExpr, ok := needleValue.(Expr); ok && omitted {
+		return Case{Whens: []When{{Cond: IsNull{X: needleExpr, Negate: true}, Then: result}}}, nil
+	}
+	return result, nil
 }
 
 // elementMatches builds the per-element predicate for membership against a stored collection.
@@ -346,7 +364,10 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 // so a NULL element is a real null member rather than a missing one and `null in tagNames` has to
 // be true. SQL equality never matches two NULLs, so the both-null case is spelled out — and only
 // when the needle is itself a column, since a literal null needle collapses to a plain IS NULL.
-func (b *builder) elementMatches(element Column, needle value) (Expr, error) {
+func (b *builder) elementMatches(element Column, needle value, nullSafe bool) (Expr, error) {
+	if _, list := needle.([]any); list {
+		return nil, fmt.Errorf("membership with a list-valued element cannot be represented by scalar SQL equality")
+	}
 	if needle == nil {
 		return IsNull{X: element}, nil
 	}
@@ -356,16 +377,10 @@ func (b *builder) elementMatches(element Column, needle value) (Expr, error) {
 		return compare(OpEq, element, needle)
 	}
 
-	// Null-safe equality is only correct under the EXPLICIT convention, where a null is a real
-	// value: a null element and a null needle are equal, and a null on one side alone is a
-	// mismatch rather than UNKNOWN. Plain `=` would leave those rows UNKNOWN, which survives an
-	// enclosing negation and would drop them from `!(x in coll)` even though CEL allows them.
-	//
-	// Under NullOmitted a NULL column carries no attribute at all, so CEL raises a
-	// missing-attribute error and denies. Treating it as a definite non-match would make the
-	// macro FALSE and the negation TRUE — returning exactly the rows the PDP refuses. Plain
-	// equality keeps it UNKNOWN, which is the deny.
-	if b.opts.NullRepresentation == NullOmitted {
+	// Collection elements are explicit values. The outer membership guard preserves
+	// a missing needle before this definite per-element equality is evaluated.
+
+	if !nullSafe {
 		return Cmp{Op: OpEq, L: element, R: needleExpr}, nil
 	}
 	return NotDistinct{L: element, R: needleExpr}, nil
@@ -542,7 +557,7 @@ func (b *builder) triStateExists(rel *Relation, alias, parent string, body Expr,
 	return negate(b.requireHops(rel, parent, triState), negated)
 }
 
-// collectionMacro lowers exists/all/exists_one/except (and rejects filter/map).
+// collectionMacro lowers exists/all/exists_one (and rejects filter/map).
 func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf("'%s' requires exactly two operands", n.operator)
@@ -587,13 +602,6 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 
 	case "all":
 		return b.triStateExists(rel, alias, entry.Qualifier, bodyExpr, allSemantics, negated), nil
-
-	case "except":
-		sub := Subquery{
-			Kind: SubqueryExists, From: from, Correlate: correlate,
-			Where: Not{X: bodyExpr},
-		}
-		return negate(b.requireHops(rel, entry.Qualifier, sub), negated), nil
 
 	case "exists_one":
 		// exists_one never absorbs an erroring element, so the UNKNOWN witness is checked first
@@ -1026,6 +1034,9 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 	if err != nil {
 		return nil, err
 	}
+	if kind := scalarKind(v); kind != "" && kind != "string" {
+		return Lit{V: nil}, nil
+	}
 	return Call{Name: FuncCharLength, Args: []Expr{e}}, nil
 }
 
@@ -1224,6 +1235,7 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 		ExplicitNull: entry.NullConvention == NullConventionExplicit,
 		IsBool:       entry.ValueType == ValueBool,
 		IsString:     entry.ValueType == ValueString,
+		IsNumber:     entry.ValueType == ValueNumber,
 	}, nil
 }
 
@@ -1247,6 +1259,7 @@ func (b *builder) scalarThroughHop(entry Entry) Expr {
 			ExplicitNull: entry.NullConvention == NullConventionExplicit,
 			IsBool:       entry.ValueType == ValueBool,
 			IsString:     entry.ValueType == ValueString,
+			IsNumber:     entry.ValueType == ValueNumber,
 		},
 	}
 }

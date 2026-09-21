@@ -29,6 +29,7 @@ model AdversarialResource {
   createdBy       String
   scope           String?
   createdAt       DateTime?
+  updatedAt       DateTime?
   tags            AdversarialTag[]
   categories      AdversarialCategory[]
   parent          AdversarialParent?

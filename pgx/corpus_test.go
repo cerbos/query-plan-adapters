@@ -71,6 +71,7 @@ type SeedsFile struct {
 // missing check() attribute; a nil element of Labels is a NULL label name.
 type DerivedEntry struct {
 	CreatedAt *string   `json:"createdAt"`
+	UpdatedAt *string   `json:"updatedAt"`
 	Scope     *string   `json:"scope"`
 	ADouble   *float64  `json:"aDouble"`
 	CreatedBy string    `json:"createdBy"`
@@ -155,7 +156,7 @@ var tagKeys = []string{"id", "name"}
 
 // derivedKeys is the exact set of per-seed derived fields this harness consumes, guarded the same
 // way and for the same reason as seedKeys.
-var derivedKeys = []string{"aDouble", "createdAt", "createdBy", "labels", "scope"}
+var derivedKeys = []string{"aDouble", "createdAt", "createdBy", "labels", "scope", "updatedAt"}
 
 // principalKeys is the exact set of top-level keys the corpus principal carries.
 //
@@ -175,7 +176,7 @@ var principalKeys = []string{"attr", "id", "roles"}
 // hostile shape", step 7). This harness hands Principal.Attr to the SDK verbatim, which is correct;
 // the guard is what proves it still does, in both directions — a corpus attribute nothing here
 // consumes, and a consumed attribute the corpus no longer carries.
-var principalAttrKeys = []string{"allowedTags", "context", "fewTeams", "manyTeams"}
+var principalAttrKeys = []string{"allowedTags", "context", "fewTeams", "manyTeams", "zero", "emptyTeams", "manyStructs", "nullableStructs", "missingStructs"}
 
 // Corpus is the parsed corpus plus this adapter's derived classification.
 type Corpus struct {
@@ -473,19 +474,49 @@ func assertPrincipalCoverage(tb testing.TB, principal map[string]json.RawMessage
 	}
 }
 
-// assertPrincipalAttrShape fails unless the value is one of the two shapes the corpus carries.
+// assertPrincipalAttrShape checks the declared shape of each principal attribute.
 func assertPrincipalAttrShape(tb testing.TB, label string, value json.RawMessage) {
 	tb.Helper()
 
+	if strings.HasSuffix(label, ".zero") {
+		var number float64
+		require.NotEqual(tb, "null", string(value), label)
+		require.NoError(tb, json.Unmarshal(value, &number), label)
+		return
+	}
+	for _, name := range []string{"manyStructs", "nullableStructs", "missingStructs"} {
+		if !strings.HasSuffix(label, "."+name) {
+			continue
+		}
+		var elements []map[string]json.RawMessage
+		require.NoError(tb, json.Unmarshal(value, &elements), label)
+		require.NotNil(tb, elements, label)
+		for _, element := range elements {
+			require.NotNil(tb, element, label)
+			if name == "missingStructs" {
+				assertKeys(tb, label, keysOf(element), nil)
+				continue
+			}
+			assertKeys(tb, label, keysOf(element), []string{"name"})
+			if name == "nullableStructs" {
+				require.Equal(tb, "null", string(element["name"]), label)
+			} else {
+				var member string
+				require.NotEqual(tb, "null", string(element["name"]), label)
+				require.NoError(tb, json.Unmarshal(element["name"], &member), label)
+			}
+		}
+		return
+	}
 	var scalar string
-	if json.Unmarshal(value, &scalar) == nil {
+	if string(value) != "null" && json.Unmarshal(value, &scalar) == nil {
 		return
 	}
 	var list []string
-	if json.Unmarshal(value, &list) == nil {
+	if string(value) != "null" && json.Unmarshal(value, &list) == nil {
 		return
 	}
-	tb.Fatalf("%s is neither a string nor a list of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once", label)
+	tb.Fatalf("%s is neither a string nor a list of strings: a reshaped principal attribute feeds the plan and the check() oracle at once", label)
 }
 
 // assertKeys fails unless got is exactly want, ignoring order, plus any of the optional keys.
@@ -560,6 +591,8 @@ func (c *Corpus) createdBy(s Seed) string { return c.derived(s).CreatedBy }
 func (c *Corpus) aDouble(s Seed) *float64 { return c.derived(s).ADouble }
 
 func (c *Corpus) createdAt(s Seed) *string { return c.derived(s).CreatedAt }
+
+func (c *Corpus) updatedAt(s Seed) *string { return c.derived(s).UpdatedAt }
 
 func (c *Corpus) scopeOf(s Seed) *string { return c.derived(s).Scope }
 

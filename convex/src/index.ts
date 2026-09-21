@@ -17,8 +17,7 @@ export type MapperConfig = {
 };
 
 export type Mapper =
-  | Record<string, MapperConfig>
-  | ((key: string) => MapperConfig);
+  Record<string, MapperConfig> | ((key: string) => MapperConfig);
 
 /**
  * How the caller represents a NULL field when building the attributes it sends to `check()`.
@@ -304,6 +303,15 @@ const validateStructure = (expression: PlanExpressionOperand): void => {
     // zeros that are only computed at evaluation time.
     const numerator = expression.operands[0];
     const denominator = expression.operands[1];
+    if (
+      denominator !== undefined &&
+      isExpression(denominator) &&
+      denominator.operator === "div"
+    ) {
+      throw new Error(
+        "division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity",
+      );
+    }
     if (
       denominator !== undefined &&
       isValue(denominator) &&
@@ -756,6 +764,7 @@ const compareValues = (
   ) {
     return EVALUATION_ERROR;
   }
+  if (Number.isNaN(left) || Number.isNaN(right)) return EVALUATION_ERROR;
   switch (operator) {
     case "lt":
       return left < right;

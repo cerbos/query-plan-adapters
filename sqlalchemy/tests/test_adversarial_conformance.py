@@ -89,7 +89,7 @@ SEED_NOTE_KEY = "note"
 # dropped from both sides of the differential just as silently as a top-level
 # one, so it is guarded the same way.
 TAG_KEYS = {"id", "name"}
-DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
+DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels", "updatedAt"}
 
 # The corpus principal is guarded the same way and for the same reason. It feeds
 # the PLAN under test AND the check() oracle, so an attribute dropped on the way
@@ -106,7 +106,17 @@ DERIVED_KEYS = {"createdBy", "aDouble", "createdAt", "scope", "labels"}
 # attribute is a reason to expect the assertion to stay quiet, not a reason to
 # omit it.
 PRINCIPAL_KEYS = {"id", "roles", "attr"}
-PRINCIPAL_ATTR_KEYS = {"allowedTags", "context", "fewTeams", "manyTeams"}
+PRINCIPAL_ATTR_KEYS = {
+    "allowedTags",
+    "context",
+    "fewTeams",
+    "manyTeams",
+    "zero",
+    "emptyTeams",
+    "manyStructs",
+    "nullableStructs",
+    "missingStructs",
+}
 
 
 def _assert_keys(
@@ -130,20 +140,31 @@ def _assert_keys(
 
 
 def _assert_principal_attr_shape(label: str, value: Any) -> None:
-    """One principal attribute, checked against the two JSON shapes the corpus carries.
-
-    A key-set guard says nothing about a change inside a value and three of the
-    four attributes are lists, so the element type is asserted for the same
-    reason the seed guard descends into ``tags[]``.
-    """
+    """Validate new scalar and struct-list attributes without weakening old guards."""
+    key = label.rsplit(".", 1)[-1]
+    if key == "zero" and type(value) in (int, float):
+        return
+    if key in {"manyStructs", "nullableStructs", "missingStructs"}:
+        assert isinstance(value, list), label
+        for item in value:
+            assert isinstance(item, dict), label
+            if key == "missingStructs":
+                _assert_keys(label, set(item), set())
+            else:
+                _assert_keys(label, set(item), {"name"})
+                assert (
+                    isinstance(item["name"], str)
+                    if key == "manyStructs"
+                    else item["name"] is None
+                ), label
+        return
     if isinstance(value, str):
         return
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return
     raise AssertionError(
-        f"{label} is neither a string nor a list of strings, the only two shapes "
-        "this harness consumes: a reshaped principal attribute feeds the plan and "
-        "the check() oracle at once"
+        f"{label} is neither a string nor a list of strings: a reshaped principal "
+        "attribute feeds the plan and the check() oracle at once"
     )
 
 
@@ -343,6 +364,84 @@ DEGENERACY_LIVENESS_PROBES = (
 # machine-readable definition is what makes that impossible.
 
 
+# #414: pin the observed compared/refused split and the intentional identities.
+DEGENERACY_GUARD_ACTIONS += (
+    "wildcard-contains",
+    "wildcard-endswith",
+    "size-ge-one",
+    "in-numbers",
+    "pv-shadow",
+    "pv-not-exists",
+    "pv-not-all",
+    "root-not-bool",
+    "lambda-in-literal",
+    "lambda-in-literal-neg",
+    "lambda-ternary",
+    "in-var-var-omitted",
+    "in-var-var-omitted-neg",
+    "not-concat-unsolvable",
+    "not-concat-unsolvable-ne",
+    "not-hasint-empty-chain",
+    "not-nan-ord-le",
+    "hasint-null-vf",
+    "hasint-map-vf",
+    "hasint-map-null",
+    "hasint-map-null-vf",
+)
+DEGENERACY_LIVENESS_PROBES += (
+    "regex-digit",
+    "regex-case",
+    "regex-posix",
+    "regex-unanchored",
+    "regex-dot",
+    "regex-alternation",
+    "regex-grouped",
+    "regex-brace",
+    "regex-repetition",
+    "regex-optional-operators",
+    "except-size",
+    "except-eq",
+    "pv-structs",
+    "pv-exists-one",
+    "pv-filter",
+    "pv-map",
+    "hier-overlaps-list-prefix",
+    "div-by-division",
+    "temporal-raw-eq",
+    "eq-list",
+    "ne-list",
+)
+EMPTY_ORACLE_ACTIONS = (
+    "except-root",
+    "pv-empty-exists",
+    "pv-empty-not-all",
+    "pv-structs-null",
+    "pv-structs-missing",
+    "type-string-number",
+    "type-number-string",
+    "type-columns",
+    "type-size-bool",
+    "type-size-number",
+    "type-hierarchy-number",
+    "type-number-contains",
+    "type-needle-contains",
+    "type-number-startswith",
+    "type-needle-startswith",
+    "type-number-endswith",
+    "type-needle-endswith",
+    "eq-map",
+    "eq-map-null",
+    "in-nested-list",
+    "in-list-element",
+    "hasint-map-element",
+)
+TOTAL_ORACLE_ACTIONS = (
+    "pv-empty-not-exists",
+    "pv-empty-all",
+    "ne-map",
+)
+
+
 def _derived_for(seed: Dict[str, Any]) -> Dict[str, Any]:
     entry = DERIVED.get(seed["id"])
     if entry is None:
@@ -362,8 +461,8 @@ def _double_for(seed: Dict[str, Any]):
     return _derived_for(seed)["aDouble"]
 
 
-def _timestamp_for(seed: Dict[str, Any]):
-    value = _derived_for(seed)["createdAt"]
+def _timestamp_for(seed: Dict[str, Any], field: str = "createdAt"):
+    value = _derived_for(seed)[field]
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
@@ -448,6 +547,7 @@ def adv_engine():
                 "created_by": _iso_for(seed),
                 "scope": _scope_for(seed),
                 "created_at": _timestamp_for(seed),
+                "updated_at": _timestamp_for(seed, "updatedAt"),
             }
         )
         # The to-one chain, one owned row per level. A seed with no parent gets no
@@ -601,8 +701,9 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
         attr["aDouble"] = a_double
     if (scope := _scope_for(seed)) is not None:
         attr["scope"] = scope
-    if (created_at := _timestamp_for(seed)) is not None:
-        attr["createdAt"] = created_at.isoformat().replace("+00:00", "Z")
+    for field in ("createdAt", "updatedAt"):
+        if (raw := _derived_for(seed)[field]) is not None:
+            attr[field] = raw
     # mainCategory mirrors the row's category graph as ONE nested object (the
     # seeder creates at most one category per seed); rows without a category get
     # NO attribute — a CEL missing-attr error (deny), matching the adapter's
@@ -704,11 +805,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 205
-        assert len(SEEDS) == 22
+        assert len(MANIFEST_ACTIONS) == 272
+        assert len(SEEDS) == 26
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 21
+        assert len(THROWING_ACTIONS) == 50
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported
@@ -993,3 +1094,10 @@ class TestAdversarialConformance:
         for action in DEGENERACY_LIVENESS_PROBES:
             assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
             assert_non_degenerate(action)
+
+        for action in EMPTY_ORACLE_ACTIONS:
+            assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
+        for action in TOTAL_ORACLE_ACTIONS:
+            assert sorted(_oracle_allowed_ids(adv_cerbos_client, action)) == sorted(
+                seed["id"] for seed in SEEDS
+            )

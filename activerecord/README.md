@@ -42,11 +42,20 @@ error is a bug report.
 The adapter never changes an operator into a weaker operator. It never changes `exists_one`
 into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards stay.
 
+The issue #414 probes tighten translation: size and string operations reject numeric or
+boolean columns; raw temporal-column comparisons require `timestamp()` wrappers because
+SQL discards RFC-3339 spelling. Nested list membership is refused before SQL rendering.
+These are breaking changes for shapes that previously emitted an incorrect or invalid filter.
+Negated scalar-list macros, omitted scalar membership, hierarchy prefix shortcuts and NaN
+ordering now preserve CEL's null/error behavior through negation. Comparisons between known
+heterogeneous scalar types preserve CEL equality and missing values instead of allowing SQL
+to coerce a string such as `"0"` into a number; two declared explicit nulls still compare equal.
+
 ### Conformance contract
 
 The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
 `../conformance/CERBOS_IMAGE_DIGEST`. For each action, the test makes a
-plan with a real PDP, translates the plan, runs the query against 22 difficult rows, and
+plan with a real PDP, translates the plan, runs the query against 26 difficult rows, and
 compares the ids in the result with the decisions of `checkResource` for each row. The PDP
 gives the results for both sides. No person writes the expected results. The Spring Data
 adapter gives the reference behaviour.
@@ -58,8 +67,8 @@ server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 182 corpus actions |
-| Fail-closed | 20 actions: 9 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
+| Tested against the oracle | 214 corpus actions |
+| Fail-closed | 55 actions: 44 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 

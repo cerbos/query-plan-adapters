@@ -123,9 +123,9 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		// Spelled as a tautology rather than the TRUE/FALSE keywords: MySQL accepts both, but a
 		// bare boolean literal is not portable to every dialect ent targets.
 		if t.V {
-			b.WriteString("1 = 1")
+			b.WriteString("(1 = 1)")
 		} else {
-			b.WriteString("1 = 0")
+			b.WriteString("(1 = 0)")
 		}
 		return nil
 

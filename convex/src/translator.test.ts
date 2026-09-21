@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { describe, expect, test } from "@jest/globals";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 
 // The mapper the adversarial harness and the Convex backend both read, so the filters pinned here
 // describe a mapping that is actually executed against seeded documents somewhere.
@@ -296,7 +299,9 @@ const RECORDED_ACTIONS = [...RECORDED.keys()];
 const byPath = (want: string): string[] =>
   RECORDED_ACTIONS.filter((action) => {
     const expectation = RECORDED.get(action)!.expectation;
-    return expectation.kind === PlanKind.CONDITIONAL && expectation.path === want;
+    return (
+      expectation.kind === PlanKind.CONDITIONAL && expectation.path === want
+    );
   });
 
 /** The actions Convex's own filter engine sees at all — `db` in full, `split` in part. */
@@ -357,7 +362,7 @@ describe("corpus shapes", () => {
       post: POST_ACTIONS.length,
       unconditional: UNCONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ pushed: 24, post: 172, unconditional: 2, throwing: 7 });
+    }).toEqual({ pushed: 30, post: 207, unconditional: 7, throwing: 28 });
   });
 });
 
@@ -459,8 +464,9 @@ describe("what the adapter asks Convex to do", () => {
         before: "post",
       });
     }
-    expect(PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)))
-      .toBe(true);
+    expect(
+      PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)),
+    ).toBe(true);
   });
 });
 
@@ -530,7 +536,8 @@ describe("mapper forms", () => {
    */
   test("an unmapped reference falls back to the plan path verbatim", () => {
     const { filter } = translate("cs-eq", { mapper: {} });
-    if (!filter) throw new Error("cs-eq emitted no filter under an empty mapper");
+    if (!filter)
+      throw new Error("cs-eq emitted no filter under an empty mapper");
     expect(recordFilter("cs-eq (empty mapper)", filter)).toEqual({
       op: "eq",
       args: [{ op: "field", args: ["request.resource.attr.aString"] }, "one"],
@@ -581,9 +588,7 @@ describe("nullAttributeRepresentation", () => {
       const node = operand as Record<string, unknown>;
       if ("value" in node) {
         const value = node["value"];
-        return (
-          value === null || (Array.isArray(value) && value.includes(null))
-        );
+        return value === null || (Array.isArray(value) && value.includes(null));
       }
       const operands = node["operands"];
       return Array.isArray(operands) && operands.some(carriesNull);
@@ -778,12 +783,20 @@ describe("shapes the corpus does not reach yet", () => {
 
     test("an empty collection keeps CEL's identity elements", () => {
       expect(
-        macroPostFilter("exists", [], compare("eq", { name: "t" }))({
+        macroPostFilter(
+          "exists",
+          [],
+          compare("eq", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(false);
       expect(
-        macroPostFilter("all", [], compare("ne", { name: "t" }))({
+        macroPostFilter(
+          "all",
+          [],
+          compare("ne", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(true);

@@ -52,9 +52,20 @@ final class HierarchyTranslator {
 
     Predicate handleOverlaps(List<Operand> operands, Scope scope) {
         Hierarchy[] both = extractHierarchyOperands("overlaps", operands, scope);
-        Hierarchy left = both[0];
-        Hierarchy right = both[1];
+        Predicate result = overlaps(both[0], both[1]);
+        List<Path<?>> fields = new ArrayList<>();
+        for (Hierarchy hierarchy : both) {
+            if (hierarchy instanceof Hierarchy.Segmented segmented) {
+                for (Seg segment : segmented.segments()) {
+                    if (segment instanceof Seg.FieldSeg field) fields.add(field.path());
+                }
+            }
+        }
+        return fields.isEmpty() ? result : new TriPredicate(cb).baseUnlessUnknown(result,
+                () -> cb.or(fields.stream().map(cb::isNull).toArray(Predicate[]::new)));
+    }
 
+    private Predicate overlaps(Hierarchy left, Hierarchy right) {
         if (left instanceof Hierarchy.FieldRef || right instanceof Hierarchy.FieldRef) {
             return handleFieldOverlaps(left, right);
         }
@@ -291,6 +302,7 @@ final class HierarchyTranslator {
     }
 
     private Predicate startsWithLiteral(Path<?> path, String prefix) {
+        if (!String.class.equals(path.getJavaType())) return new TriPredicate(cb).unknown();
         return cb.like(path.as(String.class), PlanValues.escapeLike(prefix) + "%", '\\');
     }
 

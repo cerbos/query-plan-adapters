@@ -193,14 +193,27 @@ undeclared side needs UNKNOWN — so the adapter throws rather than picking a di
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 
+Mapper `valueType` also accepts `"string"`, `"number"` and `"boolean"`. Declare the actual
+Prisma scalar type so the adapter can reject incompatible comparisons and string operations
+before handing a filter to the client. An undeclared type keeps the existing behavior; the
+adapter cannot infer your Prisma schema. Hierarchy segments preserve missing-value errors
+even when a constant prefix does not inspect them; `nullable: false` explicitly disables
+that guard for a column that cannot be NULL.
+
+The issue #414 changes are breaking for invalid shapes that previously returned a filter:
+non-scalar comparison/membership literals and bare comparisons between mapped DateTime
+columns now throw. Use `timestamp()` on both temporal operands to request instant comparison;
+bare CEL attributes compare RFC-3339 strings whose spelling the database discarded. Negated
+ternary comparisons and unsolvable string concatenation now retain CEL's error behavior.
+
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 22 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 26 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 139 reference actions |
-| Fail-closed | 53 reference actions plus the 11 reference-unsupported shapes (64 actions total) |
+| Oracle-tested | 164 reference actions |
+| Fail-closed | 95 reference actions plus the 11 reference-unsupported shapes (106 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -680,7 +693,7 @@ The mapper configuration is also fully typed:
 ```ts
 type MapperConfig = {
   field?: string;
-  valueType?: "dateTime";
+  valueType?: "dateTime" | "string" | "number" | "boolean";
   nullable?: boolean;
   relation?: {
     name: string;

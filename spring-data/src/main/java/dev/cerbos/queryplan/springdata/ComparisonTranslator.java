@@ -82,6 +82,7 @@ final class ComparisonTranslator {
             Set.of("contains", "startsWith", "endsWith");
 
     private final CriteriaBuilder cb;
+    private final TriPredicate tri;
     private final LeafTranslator leaf;
     private final TernaryTranslator ternary;
     private final SizeTranslator sizes;
@@ -90,6 +91,7 @@ final class ComparisonTranslator {
     ComparisonTranslator(CriteriaBuilder cb, TriPredicate tri, LeafTranslator leaf,
                          TernaryTranslator ternary, SizeTranslator sizes) {
         this.cb = cb;
+        this.tri = tri;
         this.leaf = leaf;
         this.ternary = ternary;
         this.sizes = sizes;
@@ -593,10 +595,8 @@ final class ComparisonTranslator {
         Object addConst = PlanValues.protoValueToJava(fpc.constant().getValue());
         Object solved = PlanValues.solveAdd(otherValue, addConst, fpc.fieldIsLeft());
         if (solved == null) {
-            if ("eq".equals(op)) {
-                return cb.disjunction();
-            }
-            return cb.isNotNull(scope.path(fpc.fieldVariable()));
+            return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
+                    () -> cb.isNull(scope.path(fpc.fieldVariable())));
         }
         return leaf.applyLeaf(op, scope.path(fpc.fieldVariable()), solved);
     }
@@ -709,8 +709,8 @@ final class ComparisonTranslator {
      * {@code 0.0}), so {@code Double.compare} would collapse {@code gt}/{@code ge}
      * against a NaN constant — reachable via an unfolded {@code div(0,0)}, e.g. the
      * else arm of {@code (aBool ? 1.0 : 0.0/0.0) > 0.5} — to always-true, returning
-     * rows the PDP denies. CEL/IEEE define every ordering comparison involving NaN as
-     * false → {@code cb.disjunction()} (exclusion).
+     * rows the PDP denies. CEL raises for an unordered NaN pair, so the result must remain SQL UNKNOWN
+     * under negation as well as positively.
      */
     Predicate constantComparison(String op, Object left, Object right) {
         boolean result;
@@ -722,6 +722,7 @@ final class ComparisonTranslator {
         } else if (left instanceof Number ln && right instanceof Number rn) {
             double l = ln.doubleValue();
             double r = rn.doubleValue();
+            if (Double.isNaN(l) || Double.isNaN(r)) return tri.unknown();
             result = switch (op) {
                 case "lt" -> l < r;
                 case "gt" -> l > r;
@@ -767,8 +768,17 @@ final class ComparisonTranslator {
                                              Scope scope) {
         jakarta.persistence.criteria.Expression<?> left = scope.path(leftVar);
         jakarta.persistence.criteria.Expression<?> right = scope.path(rightVar);
+        if (java.time.temporal.Temporal.class.isAssignableFrom(left.getJavaType())
+                || java.time.temporal.Temporal.class.isAssignableFrom(right.getJavaType())) {
+            throw Refusals.unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
+        }
         boolean leftExplicit = leaf.isExplicitNull(leftVar, scope);
         boolean rightExplicit = leaf.isExplicitNull(rightVar, scope);
+        if (!LeafTranslator.compatibleTypes(left.getJavaType(), right.getJavaType())) {
+            return "eq".equals(op) || "ne".equals(op)
+                    ? leaf.definiteEquality(op, left, right, leftExplicit, rightExplicit)
+                    : tri.unknown();
+        }
         // Mixing the two conventions across one comparison has no faithful rendering.
         // The declared side needs a definite answer for its NULL (CEL holds a null
         // VALUE); the undeclared side needs UNKNOWN for its NULL (a missing attribute,

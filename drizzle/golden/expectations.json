@@ -321,7 +321,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when ? = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when ? = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when ? = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / ?) > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when ? = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when ? = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when ? = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / ?) > ?\n    end)",
           "params": [
             0,
             0,
@@ -331,7 +331,7 @@
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when $1 = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when $2 = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when $3 = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / $4) > $5\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when $1 = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when $2 = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when $3 = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / $4) > $5\n    end)",
           "params": [
             0,
             0,
@@ -341,7 +341,7 @@
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null then null \n      when ? = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when ? = 0 and `adversarial_resources`.`a_number` > 0 then false\n      when ? = 0 then true\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / ?) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null then null \n      when ? = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when ? = 0 and `adversarial_resources`.`a_number` > 0 then false\n      when ? = 0 then true\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / ?) > ?\n    end)",
           "params": [
             0,
             0,
@@ -356,19 +356,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > ?\n    end)",
           "params": [
             0
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > $1\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > $1\n    end)",
           "params": [
             0
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_double` is null then null \n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_double` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_double`) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_double` is null then null \n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_double` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_double`) > ?\n    end)",
           "params": [
             0
           ]
@@ -379,21 +379,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + ?) > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + ?) > ?\n    end)",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + $1) > $2\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + $1) > $2\n    end)",
           "params": [
             1,
             1
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else ((cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) + ?) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else ((cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) + ?) > ?\n    end)",
           "params": [
             1,
             1
@@ -431,19 +431,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast(? as float(53))\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast(? as float(53))\n    end)",
           "params": [
             0.5
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast($1 as float(53))\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast($1 as float(53))\n    end)",
           "params": [
             0.5
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) > cast(? as float(53))\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) > cast(? as float(53))\n    end)",
           "params": [
             0.5
           ]
@@ -946,6 +946,101 @@
           "sql": "`adversarial_resources`.`a_number` > ?",
           "params": [
             1
+          ]
+        }
+      }
+    },
+    "hasint-map-null": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in (?) or \"adversarial_tags\".\"name\" is null))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in ($1) or \"adversarial_tags\".\"name\" is null))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "(exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` in (?) or `adversarial_tags`.`name` is null))) and not exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` is null)))",
+          "params": [
+            "public"
+          ]
+        }
+      }
+    },
+    "hasint-map-null-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in (?) or \"adversarial_tags\".\"name\" is null))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in ($1) or \"adversarial_tags\".\"name\" is null))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "(exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` in (?) or `adversarial_tags`.`name` is null))) and not exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` is null)))",
+          "params": [
+            "public"
+          ]
+        }
+      }
+    },
+    "hasint-map-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" in (?, ?))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public",
+            "other"
+          ]
+        },
+        "postgresql": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" in ($1, $2))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public",
+            "other"
+          ]
+        },
+        "mysql": {
+          "sql": "(exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` in (?, ?))) and not exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` is null)))",
+          "params": [
+            "public",
+            "other"
+          ]
+        }
+      }
+    },
+    "hasint-null-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in (?) or \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" in ($1) or \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` in (?) or `adversarial_tags`.`name` is null)))",
+          "params": [
+            "public"
           ]
         }
       }
@@ -1457,6 +1552,35 @@
         }
       }
     },
+    "in-numbers": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_number\" in (?, ?, ?)",
+          "params": [
+            2,
+            3,
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_number\" in ($1, $2, $3)",
+          "params": [
+            2,
+            3,
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_number` in (?, ?, ?)",
+          "params": [
+            2,
+            3,
+            5
+          ]
+        }
+      }
+    },
     "in-single": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1514,6 +1638,40 @@
         }
       }
     },
+    "in-var-var-omitted": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_optional_string\" is null then null else exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_resources\".\"a_optional_string\" = \"adversarial_tags\".\"name\" or (\"adversarial_resources\".\"a_optional_string\" is null and \"adversarial_tags\".\"name\" is null)))) end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_optional_string\" is null then null else exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_resources\".\"a_optional_string\" = \"adversarial_tags\".\"name\" or (\"adversarial_resources\".\"a_optional_string\" is null and \"adversarial_tags\".\"name\" is null)))) end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_optional_string` is null then null else exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_resources`.`a_optional_string` = `adversarial_tags`.`name` or (`adversarial_resources`.`a_optional_string` is null and `adversarial_tags`.`name` is null)))) end)",
+          "params": []
+        }
+      }
+    },
+    "in-var-var-omitted-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when \"adversarial_resources\".\"a_optional_string\" is null then null else exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_resources\".\"a_optional_string\" = \"adversarial_tags\".\"name\" or (\"adversarial_resources\".\"a_optional_string\" is null and \"adversarial_tags\".\"name\" is null)))) end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "not (case when \"adversarial_resources\".\"a_optional_string\" is null then null else exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_resources\".\"a_optional_string\" = \"adversarial_tags\".\"name\" or (\"adversarial_resources\".\"a_optional_string\" is null and \"adversarial_tags\".\"name\" is null)))) end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "not (case when `adversarial_resources`.`a_optional_string` is null then null else exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_resources`.`a_optional_string` = `adversarial_tags`.`name` or (`adversarial_resources`.`a_optional_string` is null and `adversarial_tags`.`name` is null)))) end)",
+          "params": []
+        }
+      }
+    },
     "lambda-field-to-field": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1528,6 +1686,70 @@
         "mysql": {
           "sql": "(case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = `adversarial_resources`.`a_string`) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = `adversarial_resources`.`a_string`) is null)) then null else false end)",
           "params": []
+        }
+      }
+    },
+    "lambda-in-literal": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in (?, ?))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in (?, ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in ($1, $2))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in ($3, $4))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` in (?, ?))) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` in (?, ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
+        }
+      }
+    },
+    "lambda-in-literal-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in (?, ?))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in (?, ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in ($1, $2))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((\"adversarial_tags\".\"name\" is not null and \"adversarial_tags\".\"name\" in ($3, $4))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` in (?, ?))) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` is not null and `adversarial_tags`.`name` in (?, ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            "other",
+            "public",
+            "other"
+          ]
         }
       }
     },
@@ -1559,6 +1781,50 @@
             "special",
             "public",
             "special"
+          ]
+        }
+      }
+    },
+    "lambda-ternary": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (((\"adversarial_tags\".\"name\" = ? and \"adversarial_resources\".\"a_bool\" = ?) or (not \"adversarial_tags\".\"name\" = ? and not \"adversarial_resources\".\"a_bool\" = ?))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (((\"adversarial_tags\".\"name\" = ? and \"adversarial_resources\".\"a_bool\" = ?) or (not \"adversarial_tags\".\"name\" = ? and not \"adversarial_resources\".\"a_bool\" = ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            1,
+            "public",
+            1,
+            "public",
+            1,
+            "public",
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (((\"adversarial_tags\".\"name\" = $1 and \"adversarial_resources\".\"a_bool\" = $2) or (not \"adversarial_tags\".\"name\" = $3 and not \"adversarial_resources\".\"a_bool\" = $4))) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (((\"adversarial_tags\".\"name\" = $5 and \"adversarial_resources\".\"a_bool\" = $6) or (not \"adversarial_tags\".\"name\" = $7 and not \"adversarial_resources\".\"a_bool\" = $8))) is null)) then null else false end)",
+          "params": [
+            "public",
+            true,
+            "public",
+            true,
+            "public",
+            true,
+            "public",
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "(case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (((`adversarial_tags`.`name` = ? and `adversarial_resources`.`a_bool` = ?) or (not `adversarial_tags`.`name` = ? and not `adversarial_resources`.`a_bool` = ?))) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (((`adversarial_tags`.`name` = ? and `adversarial_resources`.`a_bool` = ?) or (not `adversarial_tags`.`name` = ? and not `adversarial_resources`.`a_bool` = ?))) is null)) then null else false end)",
+          "params": [
+            "public",
+            true,
+            "public",
+            true,
+            "public",
+            true,
+            "public",
+            true
           ]
         }
       }
@@ -1956,7 +2222,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))))",
           "params": [
             1,
             1,
@@ -1967,7 +2233,7 @@
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and 0 = 1))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and 0 = 1))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and null))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and null))))",
           "params": [
             true,
             true,
@@ -1978,7 +2244,7 @@
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))))",
           "params": [
             true,
             true,
@@ -1994,21 +2260,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and 0 = 1))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and null))",
           "params": [
             true,
             true
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))",
           "params": [
             true,
             true
@@ -2020,21 +2286,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and 0 = 1))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and null))",
           "params": [
             true,
             true
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))",
           "params": [
             true,
             true
@@ -2209,6 +2475,23 @@
         }
       }
     },
+    "not-hasint-empty-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then false end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "not (case when exists (select 1 from \"adversarial_categories\" where (\"adversarial_categories\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then false end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "not (case when exists (select 1 from `adversarial_categories` where (`adversarial_categories`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then false end)",
+          "params": []
+        }
+      }
+    },
     "not-lt": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -2228,6 +2511,44 @@
           "sql": "not `adversarial_resources`.`a_number` < ?",
           "params": [
             2
+          ]
+        }
+      }
+    },
+    "not-nan-ord-le": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))))",
+          "params": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and null))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and null))))",
+          "params": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))))",
+          "params": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
           ]
         }
       }
@@ -3178,6 +3499,18 @@
         }
       }
     },
+    "pv-empty-all": {
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
+    "pv-empty-exists": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-all": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-exists": {
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
     "pv-exists": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -3259,6 +3592,201 @@
           ]
         }
       }
+    },
+    "pv-not-all": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ? or not \"adversarial_resources\".\"a_optional_string\" = ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_optional_string\" = $1 or not \"adversarial_resources\".\"a_optional_string\" = $2 or not \"adversarial_resources\".\"a_optional_string\" = $3 or not \"adversarial_resources\".\"a_optional_string\" = $4 or not \"adversarial_resources\".\"a_optional_string\" = $5 or not \"adversarial_resources\".\"a_optional_string\" = $6 or not \"adversarial_resources\".\"a_optional_string\" = $7 or not \"adversarial_resources\".\"a_optional_string\" = $8 or not \"adversarial_resources\".\"a_optional_string\" = $9 or not \"adversarial_resources\".\"a_optional_string\" = $10 or not \"adversarial_resources\".\"a_optional_string\" = $11)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ? or not `adversarial_resources`.`a_optional_string` = ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ? and not \"adversarial_resources\".\"a_optional_string\" = ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_optional_string\" = $1 and not \"adversarial_resources\".\"a_optional_string\" = $2 and not \"adversarial_resources\".\"a_optional_string\" = $3 and not \"adversarial_resources\".\"a_optional_string\" = $4 and not \"adversarial_resources\".\"a_optional_string\" = $5 and not \"adversarial_resources\".\"a_optional_string\" = $6 and not \"adversarial_resources\".\"a_optional_string\" = $7 and not \"adversarial_resources\".\"a_optional_string\" = $8 and not \"adversarial_resources\".\"a_optional_string\" = $9 and not \"adversarial_resources\".\"a_optional_string\" = $10 and not \"adversarial_resources\".\"a_optional_string\" = $11)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ? and not `adversarial_resources`.`a_optional_string` = ?)",
+          "params": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-shadow": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = ?) is null)) then null else false end))",
+          "params": [
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $1) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $2) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $3) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $4) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $5) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $6) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $7) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $8) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $9) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $10) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $11) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $12) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $13) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $14) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $15) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $16) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $17) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $18) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $19) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $20) is null)) then null else false end) or (case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $21) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and (\"adversarial_tags\".\"name\" = $22) is null)) then null else false end))",
+          "params": [
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "((case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end) or (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` = ?) is null)) then null else false end))",
+          "params": [
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public",
+            "public"
+          ]
+        }
+      }
+    },
+    "pv-structs-missing": {
+      "kind": "KIND_ALWAYS_DENIED"
     },
     "rel-bool-hop": {
       "kind": "KIND_CONDITIONAL",
@@ -3643,6 +4171,29 @@
         }
       }
     },
+    "root-not-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not \"adversarial_resources\".\"a_bool\" = ?",
+          "params": [
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "not \"adversarial_resources\".\"a_bool\" = $1",
+          "params": [
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "not `adversarial_resources`.`a_bool` = ?",
+          "params": [
+            true
+          ]
+        }
+      }
+    },
     "root-or": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -3694,6 +4245,29 @@
           "params": [
             "public",
             "public",
+            1
+          ]
+        }
+      }
+    },
+    "size-ge-one": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(select count(*) from \"adversarial_tags\" where \"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\") >= ?",
+          "params": [
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "(select count(*) from \"adversarial_tags\" where \"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\") >= $1",
+          "params": [
+            1
+          ]
+        },
+        "mysql": {
+          "sql": "(select count(*) from `adversarial_tags` where `adversarial_tags`.`resource_id` = `adversarial_resources`.`id`) >= ?",
+          "params": [
             1
           ]
         }
@@ -4121,6 +4695,222 @@
           "params": [
             "2024-06-01T00:00:00Z"
           ]
+        }
+      }
+    },
+    "type-columns": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null or \"adversarial_resources\".\"a_number\" is null then null else false end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null or \"adversarial_resources\".\"a_number\" is null then null else false end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_string` is null or `adversarial_resources`.`a_number` is null then null else false end)",
+          "params": []
+        }
+      }
+    },
+    "type-hierarchy-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-needle-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-needle-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-needle-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-number-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-number-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-number-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "null",
+          "params": []
+        },
+        "mysql": {
+          "sql": "null",
+          "params": []
+        }
+      }
+    },
+    "type-number-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_number\" is null then null else false end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_number\" is null then null else false end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_number` is null then null else false end)",
+          "params": []
+        }
+      }
+    },
+    "type-size-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null > ?",
+          "params": [
+            0
+          ]
+        },
+        "postgresql": {
+          "sql": "null > $1",
+          "params": [
+            0
+          ]
+        },
+        "mysql": {
+          "sql": "null > ?",
+          "params": [
+            0
+          ]
+        }
+      }
+    },
+    "type-size-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "null > ?",
+          "params": [
+            0
+          ]
+        },
+        "postgresql": {
+          "sql": "null > $1",
+          "params": [
+            0
+          ]
+        },
+        "mysql": {
+          "sql": "null > ?",
+          "params": [
+            0
+          ]
+        }
+      }
+    },
+    "type-string-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null then null else false end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null then null else false end)",
+          "params": []
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_string` is null then null else false end)",
+          "params": []
         }
       }
     },
@@ -4656,6 +5446,58 @@
             1,
             "public",
             "public"
+          ]
+        }
+      }
+    },
+    "wildcard-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null then null when ? = '' then true else length(replace(\"adversarial_resources\".\"a_string\", ?, '')) < length(\"adversarial_resources\".\"a_string\") end)",
+          "params": [
+            "*?b",
+            "*?b"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_string\" is null then null when $1 = '' then true else length(replace(\"adversarial_resources\".\"a_string\", $2, '')) < length(\"adversarial_resources\".\"a_string\") end)",
+          "params": [
+            "*?b",
+            "*?b"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_string` is null then null when ? = '' then true else length(replace(`adversarial_resources`.`a_string`, ?, '')) < length(`adversarial_resources`.`a_string`) end)",
+          "params": [
+            "*?b",
+            "*?b"
+          ]
+        }
+      }
+    },
+    "wildcard-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "substr(\"adversarial_resources\".\"a_string\", length(\"adversarial_resources\".\"a_string\") - length(?) + 1) = ?",
+          "params": [
+            "*?b",
+            "*?b"
+          ]
+        },
+        "postgresql": {
+          "sql": "substr(\"adversarial_resources\".\"a_string\", length(\"adversarial_resources\".\"a_string\") - length($1) + 1) = $2",
+          "params": [
+            "*?b",
+            "*?b"
+          ]
+        },
+        "mysql": {
+          "sql": "substr(`adversarial_resources`.`a_string`, length(`adversarial_resources`.`a_string`) - length(?) + 1) = ?",
+          "params": [
+            "*?b",
+            "*?b"
           ]
         }
       }

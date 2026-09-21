@@ -7,7 +7,10 @@ import {
   PlanExpressionValue,
   PlanExpressionVariable,
 } from "@cerbos/core";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import type { Where } from "chromadb";
 
 import { PlanKind, queryPlanToChromaDB } from ".";
@@ -60,7 +63,7 @@ import type { GoldenExpectation } from "./corpus";
  *
  * **This file reads as mostly-throws, and that is the adapter.** Chroma's `where` clause compares
  * flat scalar metadata on the document being matched: no joins, no collections, no arithmetic, no
- * pattern matching, no null. 164 of the corpus's 199 shapes are therefore fail-closed here, and
+ * pattern matching, no null. 225 of the corpus's 272 shapes are therefore fail-closed here, and
  * every one of them is asserted against the message `actions.json` pins rather than a bare "it
  * threw" — which for an adapter with this ratio is the difference between a suite and a formality
  * (cerbos/query-plan-adapters#326).
@@ -270,7 +273,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 36, unconditional: 2, throwing: 167 });
+    }).toEqual({ conditional: 40, unconditional: 7, throwing: 225 });
   });
 });
 
@@ -279,7 +282,7 @@ describe("corpus shapes", () => {
  *
  * `actions.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 164 of 199 shapes that is the more interesting property:
+ * together, and on an adapter that refuses 225 of 272 shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -288,7 +291,7 @@ describe("corpus shapes", () => {
  * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
  * change that moves a shape from one site to another shows up as a diff even though both sites throw
  * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
- * `binaryOperands` rejecting a computed operand is the single mechanism behind 101 of the 164, and
+ * `binaryOperands` rejecting a computed operand is the single mechanism behind 130 of the 225, and
  * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
  * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
  * a bare metadata key or a literal.
@@ -300,7 +303,10 @@ describe("the rejection sites the corpus reaches", () => {
     // `binaryOperands`: both sides are metadata keys, and a Where clause compares one to a literal.
     ["field-to-field", /^Variable-to-variable comparisons are not supported/],
     // `mapComparison` / `mapBooleanVariable`: $ne and $nin match a document missing the key.
-    ["inequality over an optional key", / is unsafe for optional Chroma metadata/],
+    [
+      "inequality over an optional key",
+      / is unsafe for optional Chroma metadata/,
+    ],
     // `whereFor`: the operator has no Chroma equivalent at all.
     ["no such operator", /^Unsupported operator /],
     // `negateOperand`: the operator is not in NEGATED_OPERATOR, so there is nothing to invert.
@@ -343,13 +349,13 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 103,
-      "no such operator": 19,
-      "inequality over an optional key": 12,
-      "not negatable": 11,
-      "field-to-field": 10,
-      "mirrored membership": 5,
-      "non-scalar literal": 4,
+      "computed operand": 130,
+      "no such operator": 36,
+      "inequality over an optional key": 13,
+      "not negatable": 15,
+      "field-to-field": 17,
+      "mirrored membership": 6,
+      "non-scalar literal": 5,
       "operand arity": 2,
       "fractional threshold": 1,
     });
@@ -544,9 +550,9 @@ describe("mapper forms", () => {
     const asFunction: FieldMapper = (reference) =>
       FIELD_NAME_MAPPER[reference] ?? reference;
 
-    expect(
-      translate(RECORD_ACTION, { fieldNameMapper: asFunction }),
-    ).toEqual(translate(RECORD_ACTION));
+    expect(translate(RECORD_ACTION, { fieldNameMapper: asFunction })).toEqual(
+      translate(RECORD_ACTION),
+    );
   });
 
   /**
@@ -569,11 +575,14 @@ describe("mapper forms", () => {
   test.each([
     ["a plain-string mapping", { "request.resource.attr.aString": "aString" }],
     ["an unmapped reference", {}],
-  ])("%s is optional, so an inequality over it is refused", (_label, mapper) => {
-    expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
-      /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
-    );
-  });
+  ])(
+    "%s is optional, so an inequality over it is refused",
+    (_label, mapper) => {
+      expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
+        /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
+      );
+    },
+  );
 
   /**
    * An unmapped reference is used verbatim as the metadata key. It is documented behaviour rather

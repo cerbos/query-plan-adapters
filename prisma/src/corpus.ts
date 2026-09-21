@@ -273,16 +273,20 @@ export const MAPPER: Record<string, MapperConfig> = {
   // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
   // actions). It is a mapping like any other here, which is the point: an adapter that resolves
   // references by stripping a `request.resource.attr.` prefix never sees this name.
-  "request.resource.id": { field: "id" },
-  "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "aString" },
-  "request.resource.attr.aNumber": { field: "aNumber" },
-  "request.resource.attr.aDouble": { field: "aDouble" },
-  "request.resource.attr.aOptionalString": { field: "aOptionalString" },
-  "request.resource.attr.createdBy": { field: "createdBy" },
-  "request.resource.attr.scope": { field: "scope" },
+  "request.resource.id": { field: "id", valueType: "string" },
+  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
+  "request.resource.attr.aString": { field: "aString", valueType: "string" },
+  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
+  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
+  "request.resource.attr.aOptionalString": { field: "aOptionalString", valueType: "string", nullable: true },
+  "request.resource.attr.createdBy": { field: "createdBy", valueType: "string" },
+  "request.resource.attr.scope": { field: "scope", valueType: "string", nullable: true },
   "request.resource.attr.createdAt": {
     field: "createdAt",
+    valueType: "dateTime",
+  },
+  "request.resource.attr.updatedAt": {
+    field: "updatedAt",
     valueType: "dateTime",
   },
   // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
@@ -302,7 +306,7 @@ export const MAPPER: Record<string, MapperConfig> = {
   // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
   // reference harness uses for the p-struct probe. `parent.inner` below is the opposite: a real
   // two-level join. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": { field: "aString" },
+  "request.resource.attr.obj.inner": { field: "aString", valueType: "string" },
   // The corpus's one REAL to-one chain (the `rel-*` actions). `type: "one"` is what makes the
   // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
   // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests
@@ -313,20 +317,20 @@ export const MAPPER: Record<string, MapperConfig> = {
       type: "one",
       model: "AdversarialParent",
       fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
-        aOptionalString: { field: "aOptionalString", nullable: true },
+        aBool: { field: "aBool", valueType: "boolean" },
+        aString: { field: "aString", valueType: "string" },
+        aNumber: { field: "aNumber", valueType: "number" },
+        aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true  },
         inner: {
           relation: {
             name: "inner",
             type: "one",
             model: "AdversarialInner",
             fields: {
-              aBool: { field: "aBool" },
-              aString: { field: "aString" },
-              aNumber: { field: "aNumber" },
-              aOptionalString: { field: "aOptionalString", nullable: true },
+              aBool: { field: "aBool", valueType: "boolean" },
+              aString: { field: "aString", valueType: "string" },
+              aNumber: { field: "aNumber", valueType: "number" },
+              aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true  },
             },
           },
         },
@@ -344,7 +348,7 @@ export const MAPPER: Record<string, MapperConfig> = {
       model: "AdversarialTag",
       fields: {
         id: { field: "tagId" },
-        name: { field: "name", nullable: true },
+        name: { field: "name", valueType: "string", nullable: true  },
       },
     },
   },
@@ -353,7 +357,7 @@ export const MAPPER: Record<string, MapperConfig> = {
       name: "tags",
       type: "many",
       field: "name",
-      fields: { name: { field: "name", nullable: true } },
+      fields: { name: { field: "name", valueType: "string", nullable: true  } },
     },
   },
   "request.resource.attr.categories": {
@@ -361,19 +365,19 @@ export const MAPPER: Record<string, MapperConfig> = {
       name: "categories",
       type: "many",
       fields: {
-        name: { field: "name" },
+        name: { field: "name", valueType: "string" },
         subCategories: {
           relation: {
             name: "subCategories",
             type: "many",
             fields: {
-              name: { field: "name" },
+              name: { field: "name", valueType: "string" },
               labels: {
                 relation: {
                   name: "labels",
                   type: "many",
                   fields: {
-                    name: { field: "name", nullable: true },
+                    name: { field: "name", valueType: "string", nullable: true  },
                   },
                 },
               },
@@ -391,12 +395,12 @@ export const MAPPER: Record<string, MapperConfig> = {
       name: "categories",
       type: "many",
       fields: {
-        name: { field: "name" },
+        name: { field: "name", valueType: "string" },
         subCategories: {
           relation: {
             name: "subCategories",
             type: "many",
-            fields: { name: { field: "name" } },
+            fields: { name: { field: "name", valueType: "string" } },
           },
         },
         // subNames: the same 2-hop chain but with a bare `field`, so plain `in` membership

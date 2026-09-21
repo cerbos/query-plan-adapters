@@ -78,6 +78,9 @@ final class MembershipTranslator {
         Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
         if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
+            if (rawOperands.get(0).getNodeCase() == Operand.NodeCase.VALUE && val instanceof List<?>) {
+                return subqueries.chainContains(scope, relRef, (sub, tailJoin, rebased) -> cb.disjunction());
+            }
             return collectionContainsAny(scope, relRef, asList(val));
         }
 
@@ -156,16 +159,17 @@ final class MembershipTranslator {
         // Relation-valued member would be masked by chainSubquery's own failure (the
         // bulk-delete guard). The path itself has to be rebuilt against the REBASED scope
         // below to be a legal correlation reference, so this call is a check, not a value.
-        scope.path(memberVar);
-        return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
+        Path<?> member = scope.path(memberVar);
+        boolean explicit = leaf.isExplicitNull(memberVar, scope);
+        Predicate membership = subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
             Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
             // The outer scalar resolves through the REBASED scope so the produced path is
             // a legal correlation reference inside the subquery.
             Path<?> outer = rebased.path(memberVar);
-            return cb.or(
-                    cb.equal(element, outer),
-                    cb.and(cb.isNull(element), cb.isNull(outer)));
+            return explicit ? cb.or(cb.equal(element, outer),
+                    cb.and(cb.isNull(element), cb.isNull(outer))) : cb.equal(element, outer);
         });
+        return explicit ? membership : tri.baseUnlessUnknown(membership, () -> cb.isNull(member));
     }
 
     /**
@@ -310,7 +314,7 @@ final class MembershipTranslator {
         // Intersection with an empty value set is always false — and an EXISTS wrapping an
         // empty `IN ()` is dialect-dependent — so short-circuit before building the subquery.
         if (values.isEmpty()) {
-            return cb.disjunction();
+            return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> cb.disjunction());
         }
         // CEL membership/intersection with a null constant is satisfied by a collection
         // element that IS null (PDP-verified for both routes here: `null in R.attr.xs`

@@ -104,7 +104,8 @@ CREATE TABLE adversarial_resource (
 	a_optional_string  text,
 	created_by         text    NOT NULL,
 	scope              text,
-	created_at         text
+	created_at         text,
+	updated_at         text
 );
 CREATE TABLE adversarial_tag (
 	pk           integer PRIMARY KEY AUTOINCREMENT,
@@ -158,7 +159,8 @@ CREATE TABLE adversarial_resource (
 	a_optional_string  text,
 	created_by         text             NOT NULL,
 	scope              text,
-	created_at         timestamptz
+	created_at         timestamptz,
+	updated_at         timestamptz
 );
 CREATE TABLE adversarial_tag (
 	pk           bigserial PRIMARY KEY,
@@ -230,7 +232,8 @@ CREATE TABLE adversarial_resource (
 	a_optional_string  varchar(255) COLLATE utf8mb4_bin,
 	created_by         varchar(64) COLLATE utf8mb4_bin NOT NULL,
 	scope              varchar(255) COLLATE utf8mb4_bin,
-	created_at         datetime(6)
+	created_at         datetime(6),
+	updated_at         datetime(6)
 );
 CREATE TABLE adversarial_tag (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
@@ -346,6 +349,9 @@ func buildMapper() cerbosent.Mapper {
 		},
 	}
 
+	tagNames := *tags
+	tagNames.Field = &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionExplicit}
+
 	labels := &cerbosent.Relation{
 		Table:        labelTable,
 		SourceColumn: "id", TargetColumn: "sub_category_id",
@@ -411,9 +417,9 @@ func buildMapper() cerbosent.Mapper {
 		// the operator is overloaded and the plan carries no operand types, so an
 		// undeclared pair fails closed rather than emitting a numeric `+`.
 		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString},
-		"request.resource.attr.aNumber":         {Column: "a_number"},
-		"request.resource.attr.aDouble":         {Column: "a_double"},
-		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString},
+		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber},
+		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber},
+		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
 		// the OTHER null convention: the oracle sends a real null attribute for them rather than
@@ -423,12 +429,13 @@ func buildMapper() cerbosent.Mapper {
 		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
 		"request.resource.attr.scope":     {Column: "scope"},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
+		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// spring-data and prisma reference harnesses use for the p-struct probe.
 		"request.resource.attr.obj.inner": {Column: "a_string"},
 
 		"request.resource.attr.tags":       {Relation: tags},
-		"request.resource.attr.tagNames":   {Relation: tags},
+		"request.resource.attr.tagNames":   {Relation: &tagNames},
 		"request.resource.attr.categories": {Relation: categories},
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
@@ -535,11 +542,12 @@ func (h *harness) seed(t *testing.T) {
 		h.exec(t, resourceTable,
 			[]string{
 				"id", "a_bool", "a_string", "a_number", "a_double",
-				"a_optional_string", "created_by", "scope", "created_at",
+				"a_optional_string", "created_by", "scope", "created_at", "updated_at",
 			},
 			seed.ID, seed.ABool, seed.AString, seed.ANumber, nullableFloat(h.corpus.aDouble(seed)),
 			nullableString(seed.AOptionalString), h.corpus.createdBy(seed),
-			nullableString(h.corpus.scopeOf(seed)), h.storedTimestamp(t, seed))
+			nullableString(h.corpus.scopeOf(seed)), h.storedTimestamp(t, h.corpus.createdAt(seed)),
+			h.storedTimestamp(t, h.corpus.updatedAt(seed)))
 
 		// The to-one chain, one owned row per level. A seed with no parent gets no row at all,
 		// which is what makes the absent-parent hazard reachable through a SCALAR rather than
@@ -581,16 +589,15 @@ func (h *harness) seed(t *testing.T) {
 // PostgreSQL has a real instant type and takes the time.Time directly. SQLite stores text and
 // compares it lexicographically, so it gets the adapter's documented fixed-width layout — the same
 // one the adapter binds its own timestamp parameters in.
-func (h *harness) storedTimestamp(t *testing.T, seed Seed) any {
+func (h *harness) storedTimestamp(t *testing.T, raw *string) any {
 	t.Helper()
 
-	raw := h.corpus.createdAt(seed)
 	if raw == nil {
 		return nil
 	}
 
 	parsed, err := time.Parse(time.RFC3339Nano, *raw)
-	require.NoError(t, err, "parsing derived createdAt for %s", seed.ID)
+	require.NoError(t, err, "parsing derived timestamp")
 
 	if h.target.dialect == dialect.SQLite {
 		return parsed.UTC().Format(cerbosent.SQLiteTimestampLayout)
@@ -694,6 +701,9 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 	}
 	if ts := h.corpus.createdAt(seed); ts != nil {
 		attr["createdAt"] = *ts
+	}
+	if ts := h.corpus.updatedAt(seed); ts != nil {
+		attr["updatedAt"] = *ts
 	}
 
 	// mainCategory mirrors the row's category graph as ONE nested object. Rows without a
@@ -832,11 +842,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 205, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 22, "seed count changed")
+		require.Len(t, seen, 272, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, h.corpus.Seeds.Seeds, 26, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 17, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 46, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -929,7 +939,15 @@ func runConformance(t *testing.T, h *harness) {
 				// Anti-vacuity: pin WHY the rejection is required. Under the default explicit
 				// representation this adapter emits IS NULL and returns rows the PDP denies, so
 				// the rejection is load-bearing rather than incidental.
-				overGranted, err := h.adapterFilteredIDs(t, entry.Action)
+				explicitHarness := *h
+				explicitHarness.mapper = cerbosent.MapperFunc(func(ref string) (cerbosent.Entry, bool) {
+					mapped, ok := h.mapper.Resolve(ref)
+					if ref == "request.resource.attr.aOptionalString" {
+						mapped.NullConvention = cerbosent.NullConventionExplicit
+					}
+					return mapped, ok
+				})
+				overGranted, err := explicitHarness.adapterFilteredIDs(t, entry.Action)
 				require.NoError(t, err, "the explicit representation must still translate %s", entry.Action)
 				require.NotEmpty(t, overGranted,
 					"%s must return rows under the explicit representation, else the rejection proves nothing",
@@ -1087,6 +1105,28 @@ func runConformance(t *testing.T, h *harness) {
 			// literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle by
 			// construction and sits in neither list; its sibling carries the group.
 			"string-size-gt0", "in-map-keys", "double-huge-gt",
+			// #414: the observed classification of every new discriminating action.
+			"wildcard-contains",
+			"wildcard-endswith",
+			"size-ge-one",
+			"in-numbers",
+			"pv-shadow",
+			"pv-not-exists",
+			"pv-not-all",
+			"root-not-bool",
+			"lambda-in-literal",
+			"lambda-in-literal-neg",
+			"lambda-ternary",
+			"in-var-var-omitted",
+			"in-var-var-omitted-neg",
+			"not-concat-unsolvable",
+			"not-concat-unsolvable-ne",
+			"not-hasint-empty-chain",
+			"not-nan-ord-le",
+			"hasint-null-vf",
+			"hasint-map-vf",
+			"hasint-map-null",
+			"hasint-map-null-vf",
 		}
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
@@ -1105,6 +1145,43 @@ func runConformance(t *testing.T, h *harness) {
 			// An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex
 			// with a top-level alternation is a matches(), never translated here.
 			"hier-empty-delim", "matches-alt",
+			// #414: the observed classification of every new discriminating action.
+			"regex-digit",
+			"regex-case",
+			"regex-posix",
+			"regex-unanchored",
+			"regex-dot",
+			"regex-alternation",
+			"regex-grouped",
+			"regex-brace",
+			"regex-repetition",
+			"regex-optional-operators",
+			"except-size",
+			"except-eq",
+			"pv-structs",
+			"pv-exists-one",
+			"pv-filter",
+			"pv-map",
+			"hier-overlaps-list-prefix",
+			"div-by-division",
+			"temporal-raw-eq",
+			"eq-list",
+			"ne-list",
+		}
+
+		// These oracles are empty by construction: planner identities, type errors,
+		// or heterogeneous equality. Pin that outcome instead of a vacuous comparison.
+		for _, action := range []string{"except-root", "pv-empty-exists", "pv-empty-not-all", "pv-structs-null", "pv-structs-missing", "type-string-number", "type-number-string", "type-columns", "type-size-bool", "type-size-number", "type-hierarchy-number", "type-number-contains", "type-needle-contains", "type-number-startswith", "type-needle-startswith", "type-number-endswith", "type-needle-endswith", "eq-map", "eq-map-null", "in-nested-list", "in-list-element", "hasint-map-element"} {
+			t.Run("empty oracle/"+action, func(t *testing.T) {
+				require.Empty(t, h.oracleAllowedIDs(t, action))
+			})
+		}
+		// These oracles are total by construction: planner identities, type errors,
+		// or heterogeneous equality. Pin that outcome instead of a vacuous comparison.
+		for _, action := range []string{"pv-empty-not-exists", "pv-empty-all", "ne-map"} {
+			t.Run("total oracle/"+action, func(t *testing.T) {
+				require.Equal(t, h.allSeedIDs(), h.oracleAllowedIDs(t, action))
+			})
 		}
 
 		oracleCompared := h.corpus.OracleComparedActions()

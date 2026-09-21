@@ -1384,11 +1384,11 @@ resourcePolicy:
           expr: 'size(R.attr.aString) < 4294967296'
 
     # ==================== constant NaN / ±Infinity ordering ====================
-    # CEL/IEEE define every ordering comparison involving NaN as false. The planner does
-    # NOT fold div(0,0): the else arm below arrives as an unfolded div(0,0) subtree, so
-    # the adapter folds it to NaN in Java and must order with IEEE semantics — a
-    # Double.compare total order ranks NaN above every number and would turn the else arm
-    # into always-true, returning every aBool=false row the PDP denies.
+    # CEL denies every ordering comparison involving NaN. not-nan-ord-le below proves
+    # this is an evaluation error, not false: negation must keep the NaN arm denied.
+    # The planner does NOT fold div(0,0), so the else arm arrives as a division subtree.
+    # Double.compare ranks NaN above every number and would turn the else arm into
+    # always-true, returning every aBool=false row the PDP denies.
     - actions: ["nan-ord-ternary"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -2462,3 +2462,541 @@ resourcePolicy:
       condition:
         match:
           expr: 'hierarchy(R.attr.scope, "").descendentOf(hierarchy("dept.eng", ""))'
+
+    # -- Issue #414: migrated corpus gaps and hostile follow-up probes --
+
+    # h1 matches literal wildcard characters; h2/h3 are wildcard near misses.
+    - actions: ["wildcard-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.contains("*?b")'
+
+    # h1 matches literal wildcard characters; h2/h3 are wildcard near misses.
+    - actions: ["wildcard-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.endsWith("*?b")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-digit"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("\\d")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-case"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("(?i)^one$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-posix"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("[[:digit:]]")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-unanchored"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("ne")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-dot"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^a.*b$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-alternation"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^a|b$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-grouped"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^(ab|b)$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-brace"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^a{q}[*][?]b$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-repetition"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^(ab){1,2}$")'
+
+    # Exercise RE2 syntax or matching semantics beyond a literal prefix; h2 carries a newline.
+    - actions: ["regex-optional-operators"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^[ab@#&~<>]+$")'
+
+    # Exercise the real two-list function, preserving its arrival position in the planner tree.
+    - actions: ["except-root"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames.except(["public"])'
+
+    # Exercise the real two-list function, preserving its arrival position in the planner tree.
+    - actions: ["except-size"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.tagNames.except(["public"])) > 0'
+
+    # Exercise the real two-list function, preserving its arrival position in the planner tree.
+    - actions: ["except-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames.except(["public"]) == ["private"]'
+
+    # Non-empty collection spelling absent from the previous corpus.
+    - actions: ["size-ge-one"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.tags) >= 1'
+
+    # Numeric membership binds exact integral values rather than strings.
+    - actions: ["in-numbers"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber in [2, 3, 5]'
+
+    # Pinned empty principal collection proves CEL macro identity and planner folding.
+    - actions: ["pv-empty-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
+
+    # Pinned empty principal collection proves CEL macro identity and planner folding.
+    - actions: ["pv-empty-not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
+
+    # Pinned empty principal collection proves CEL macro identity and planner folding.
+    - actions: ["pv-empty-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
+
+    # Pinned empty principal collection proves CEL macro identity and planner folding.
+    - actions: ["pv-empty-not-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
+
+    # Eleven principal structs force a value-list lambda; projected members include null or missing variants.
+    - actions: ["pv-structs"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.manyStructs.exists(t, t.name == R.attr.aOptionalString)'
+
+    # Eleven principal structs force a value-list lambda; projected members include null or missing variants.
+    - actions: ["pv-structs-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.nullableStructs.exists(t, t.name == R.attr.aOptionalString)'
+
+    # Eleven principal structs force a value-list lambda; projected members include null or missing variants.
+    - actions: ["pv-structs-missing"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.missingStructs.exists(t, t.name == R.attr.aOptionalString)'
+
+    # Inner lambda rebinds t and must shadow the outer principal-list substitution.
+    - actions: ["pv-shadow"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.manyTeams.exists(t, R.attr.tags.exists(t, t.name == "public"))'
+
+    # Negated principal-value macro must retain omitted optional-attribute errors.
+    - actions: ["pv-not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(P.attr.manyTeams.exists(t, t == R.attr.aOptionalString))'
+
+    # Negated principal-value macro must retain omitted optional-attribute errors.
+    - actions: ["pv-not-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(P.attr.manyTeams.all(t, t == R.attr.aOptionalString))'
+
+    # Unfoldable principal-list macro must translate correctly or refuse its real wire shape.
+    - actions: ["pv-exists-one"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'P.attr.manyTeams.exists_one(t, t == R.attr.aOptionalString)'
+
+    # Unfoldable principal-list macro must translate correctly or refuse its real wire shape.
+    - actions: ["pv-filter"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(P.attr.manyTeams.filter(t, t == R.attr.aOptionalString)) > 0'
+
+    # Unfoldable principal-list macro must translate correctly or refuse its real wire shape.
+    - actions: ["pv-map"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString in P.attr.manyTeams.map(t, t + R.attr.aString)'
+
+    # Negation at root preserves a bare resource boolean.
+    - actions: ["root-not-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.aBool'
+
+    # Literal value-list fold inside a resource lambda must preserve lambda scope.
+    - actions: ["lambda-in-literal"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+
+    # Literal value-list fold inside a resource lambda must preserve lambda scope.
+    - actions: ["lambda-in-literal-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+
+    # Ternary is the lambda body rather than a comparison operand.
+    - actions: ["lambda-ternary"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, t.name == "public" ? R.attr.aBool : !R.attr.aBool)'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-string-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == P.attr.zero'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-number-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber == P.attr.context'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-columns"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == R.attr.aNumber'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-size-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aBool) > 0'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-size-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(R.attr.aNumber) > 0'
+
+    # Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant.
+    - actions: ["type-hierarchy-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy(R.attr.aNumber).descendentOf(hierarchy("1.2"))'
+
+    # Non-string receiver must not be coerced to text by the datastore.
+    - actions: ["type-number-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber.contains("2")'
+
+    # Non-string needle must not be coerced to text by the datastore.
+    - actions: ["type-needle-contains"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.contains(R.attr.aNumber)'
+
+    # Non-string receiver must not be coerced to text by the datastore.
+    - actions: ["type-number-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber.startsWith("2")'
+
+    # Non-string needle must not be coerced to text by the datastore.
+    - actions: ["type-needle-startswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.startsWith(R.attr.aNumber)'
+
+    # Non-string receiver must not be coerced to text by the datastore.
+    - actions: ["type-number-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber.endsWith("2")'
+
+    # Non-string needle must not be coerced to text by the datastore.
+    - actions: ["type-needle-endswith"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.endsWith(R.attr.aNumber)'
+
+    # Omitted optional scalar differs from explicitly-null owner under variable membership.
+    - actions: ["in-var-var-omitted"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aOptionalString in R.attr.tagNames)'
+
+    # Omitted optional scalar differs from explicitly-null owner under variable membership.
+    - actions: ["in-var-var-omitted-neg"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aOptionalString in R.attr.tagNames)'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["not-concat-unsolvable"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aOptionalString + "!") == "nope")'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["not-concat-unsolvable-ne"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '(R.attr.aOptionalString + "!") != "nope"'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["hier-overlaps-list-prefix"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hierarchy("dept", ".").overlaps(hierarchy(["dept", R.attr.scope]))'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["not-hasint-empty-chain"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.mainCategory.subNames, P.attr.emptyTeams)'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["div-by-division"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber / (R.attr.aDouble / R.attr.aNumber) > 0'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["temporal-raw-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.createdAt == R.attr.updatedAt'
+
+    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    - actions: ["not-nan-ord-le"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0))'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["hasint-null-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(["public", null], R.attr.tagNames)'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["hasint-map-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(["public", "other"], R.attr.tags.map(t, t.name))'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["hasint-map-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", null])'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["hasint-map-null-vf"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(["public", null], R.attr.tags.map(t, t.name))'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["eq-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames == ["public"]'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["ne-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames != ["public"]'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["eq-map"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == {"a": 1}'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["ne-map"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString != {"a": 1}'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["eq-map-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == {"a": null}'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["in-nested-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString in [["one"], ["same"]]'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["in-list-element"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '["public"] in R.attr.tagNames'
+
+    # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
+    - actions: ["hasint-map-element"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tagNames, [{"a": 1}])'

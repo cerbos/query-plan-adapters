@@ -305,6 +305,7 @@ final class Corpus {
             Map.entry("request.resource.attr.aOptionalString", "aOptionalString"),
             Map.entry("request.resource.attr.createdBy", "createdBy"),
             Map.entry("request.resource.attr.createdAt", "createdAt"),
+            Map.entry("request.resource.attr.updatedAt", "updatedAt"),
             Map.entry("request.resource.attr.owner", "owner"),
             // `coOwner` is the explicit-null alias of the `scope` field, the second half of
             // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the
@@ -356,6 +357,16 @@ final class Corpus {
     static final ElasticsearchQueryPlanAdapter.Options OPTIONS =
             ElasticsearchQueryPlanAdapter.Options.of(FIELD_MAP)
                     .withNestedPaths(NESTED_PATHS)
+                    .withScalarTypes(Map.ofEntries(
+                            Map.entry("aString", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
+                            Map.entry("aOptionalString", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
+                            Map.entry("aNumber", ElasticsearchQueryPlanAdapter.ScalarType.NUMBER),
+                            Map.entry("aDouble", ElasticsearchQueryPlanAdapter.ScalarType.NUMBER),
+                            Map.entry("aBool", ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN),
+                            Map.entry("createdAt", ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP),
+                            Map.entry("updatedAt", ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP),
+                            Map.entry("createdBy", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
+                            Map.entry("scope", ElasticsearchQueryPlanAdapter.ScalarType.STRING)))
                     .withCollectionFields(COLLECTION_FIELDS)
                     .withExplicitNullAttributes(EXPLICIT_NULL_ATTRIBUTES);
 

@@ -562,8 +562,6 @@ func TestSubqueryFilterNarrowsEveryShapeBuiltOnTheRelation(t *testing.T) {
 		{name: "negated exists", cond: expr("not", tagsExists(t))},
 		{name: "all", cond: expr("all", variable("request.resource.attr.tags"),
 			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
-		{name: "except", cond: expr("except", variable("request.resource.attr.tags"),
-			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
 		{name: "exists_one", cond: expr("exists_one", variable("request.resource.attr.tags"),
 			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
 		{name: "count", cond: expr("gt", expr("size", variable("request.resource.attr.tags")), val(t, 2))},
@@ -772,4 +770,67 @@ func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
 	_, err = cerbospgx.Translate(conditional(nullEq), "resource", omitted)
 	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 	require.Contains(t, err.Error(), "null operand")
+}
+
+// The corpus fixes scalar semantics; these vary the caller's mapping to a related
+// column, whose declared type must survive the scalar subquery wrapper.
+func TestRelatedScalarTypeDeclaration(t *testing.T) {
+	t.Parallel()
+	mapper := cerbospgx.MapperMap{
+		"request.resource.attr.count": {
+			Column: "amount", ValueType: cerbospgx.ValueNumber,
+			ScalarRelation: &cerbospgx.Relation{Table: "details", SourceColumn: "id", TargetColumn: "resource_id"},
+		},
+	}
+	for _, operator := range []string{"contains", "startsWith", "endsWith"} {
+		t.Run(operator, func(t *testing.T) {
+			t.Parallel()
+			cond := expr(operator, variable("request.resource.attr.count"), val(t, "x"))
+			result, err := cerbospgx.Translate(conditional(cond), "resource", mapper)
+			require.NoError(t, err)
+			query := result.Where
+			require.Contains(t, query, "NULL")
+			require.NotContains(t, query, "LIKE")
+		})
+	}
+	cond := expr("ne", variable("request.resource.attr.count"), val(t, "x"))
+	result, err := cerbospgx.Translate(conditional(cond), "resource", mapper)
+	require.NoError(t, err)
+	query := result.Where
+	require.Contains(t, query, "IS NOT NULL", "a missing related row must remain UNKNOWN under negation")
+	require.NotContains(t, query, "<> ", "declared numbers must not be compared to SQL strings")
+}
+
+// These contracts vary type/null declarations and relation mappings that the corpus fixes.
+func TestMixedScalarTypesPreserveExplicitNullEquality(t *testing.T) {
+	t.Parallel()
+	mapper := cerbospgx.MapperMap{
+		"request.resource.attr.name":  {Column: "name", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.count": {Column: "count", ValueType: cerbospgx.ValueNumber, NullConvention: cerbospgx.NullConventionExplicit},
+	}
+	for _, operator := range []string{"eq", "ne"} {
+		cond := expr(operator, variable("request.resource.attr.name"), variable("request.resource.attr.count"))
+		result := translateWith(t, mapper, cond)
+		query := result.Where
+		require.Contains(t, query, `"resource"."name" IS NULL`)
+		require.Contains(t, query, `"resource"."count" IS NULL`)
+		if operator == "ne" {
+			require.Contains(t, query, "NOT")
+		}
+	}
+}
+
+func TestOmittedRelatedMembershipNeedlePreservesMissing(t *testing.T) {
+	t.Parallel()
+	mapper := cerbospgx.MapperMap{
+		"request.resource.attr.name": {
+			Column: "name", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted,
+			ScalarRelation: &cerbospgx.Relation{Table: "details", SourceColumn: "id", TargetColumn: "resource_id"},
+		},
+		"request.resource.attr.tags": {Relation: &cerbospgx.Relation{Table: "tag", SourceColumn: "id", TargetColumn: "resource_id", Field: &cerbospgx.Entry{Column: "name", NullConvention: cerbospgx.NullConventionExplicit}}},
+	}
+	cond := expr("not", expr("in", variable("request.resource.attr.name"), variable("request.resource.attr.tags")))
+	result := translateWith(t, mapper, cond)
+	query := result.Where
+	require.Contains(t, query, `IS NOT NULL) THEN (NOT (CASE`, "a missing related needle must remain UNKNOWN even for an empty collection")
 }

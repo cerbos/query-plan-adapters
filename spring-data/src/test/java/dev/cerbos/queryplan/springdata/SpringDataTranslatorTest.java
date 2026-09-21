@@ -450,7 +450,7 @@ class SpringDataTranslatorTest {
         // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
         // shape gets dropped from an asset nobody reads end to end.
         assertEquals(
-                Map.of("conditional", 183, "unconditional", 1, "throwing", 21),
+                Map.of("conditional", 222, "unconditional", 3, "throwing", 47),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -476,7 +476,7 @@ class SpringDataTranslatorTest {
         // translate that faithfully — an unfiltered SELECT — and this is the assertion that says
         // the empty WHERE belongs to that shape rather than to a translation that quietly stopped
         // emitting a filter.
-        assertEquals(List.of("p-has"), unconditionalActions());
+        assertEquals(List.of("p-has", "pv-empty-all", "pv-empty-not-exists"), unconditionalActions());
         assertTrue(ACTIONS.skippedDivergences(Corpus.ADAPTER).contains("p-has"));
     }
 
@@ -511,12 +511,14 @@ class SpringDataTranslatorTest {
      */
     static final List<String> RENDERING_DIFFERS_ON_HIBERNATE_7 = List.of(
             "double-negation",
+            "lambda-ternary",
             "nan-ord-inf",
             "nan-ord-le",
             "nan-ord-ternary",
             "nan-ord-ternary-vf",
             "nary-and",
             "not-and",
+            "not-nan-ord-le",
             "or-eq-exists",
             "or-eq-in",
             "outer-attr-depth2",
@@ -531,6 +533,7 @@ class SpringDataTranslatorTest {
             "rel-hop2-or-exists",
             "rel-not-bool-hop",
             "root-bare-bool",
+            "root-not-bool",
             "root-or",
             "ternary-bare",
             "ternary-cmp",
@@ -699,6 +702,15 @@ class SpringDataTranslatorTest {
          * to the part that identifies the site rather than the action.
          */
         private final Map<String, String> sites = Map.ofEntries(
+                Map.entry("two-list difference", "except is not supported:"),
+                Map.entry("computed macro collection", "exists first operand must be a variable"),
+                Map.entry("literal exists-one", "exists_one over a literal collection value"),
+                Map.entry("computed filter size", "Unsupported size(filter(...)) expression"),
+                Map.entry("computed membership", "Unsupported in operand combination:"),
+                Map.entry("bare temporal comparison", "Bare temporal comparison cannot preserve"),
+                Map.entry("whole-list comparison", "comparison against a list"),
+                Map.entry("computed intersection", "Unsupported hasIntersection operand shape:"),
+
                 // leafOperandError: the operand slot of a comparison holds a computed
                 // sub-expression the resolver has no case for — a cast, a positional read, a
                 // struct member access, a lambda. A Criteria predicate compares a path against a
@@ -771,8 +783,17 @@ class SpringDataTranslatorTest {
             }
 
             assertEquals(new TreeMap<>(Map.ofEntries(
-                            Map.entry("computed leaf operand", 8),
-                            Map.entry("operator the reference never translates", 2),
+                            Map.entry("two-list difference", 3),
+                            Map.entry("computed macro collection", 2),
+                            Map.entry("literal exists-one", 1),
+                            Map.entry("computed filter size", 1),
+                            Map.entry("computed membership", 2),
+                            Map.entry("bare temporal comparison", 1),
+                            Map.entry("whole-list comparison", 2),
+                            Map.entry("computed intersection", 1),
+
+                            Map.entry("computed leaf operand", 11),
+                            Map.entry("operator the reference never translates", 12),
                             Map.entry("filter() in boolean position", 2),
                             Map.entry("non-numeric arithmetic operand", 2),
                             Map.entry("division inside further arithmetic", 2),
@@ -898,7 +919,7 @@ class SpringDataTranslatorTest {
             List<String> offenders = new ArrayList<>();
             for (String action : recordedActions) {
                 emitted.get(action).forEach((dialect, statement) -> {
-                    if (statement.contains("?")) {
+                    if (statement.replaceAll("'([^']|'')*'", "").contains("?")) {
                         offenders.add(action + " (" + dialect + "): " + statement);
                     }
                 });

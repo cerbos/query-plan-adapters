@@ -31,6 +31,8 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Integer,
+    Numeric,
     String,
     Table,
     and_,
@@ -143,6 +145,23 @@ def _escape_like_column(needle: Any) -> Any:
     return func.replace(escaped, "[", _LIKE_ESCAPE_CHAR + "[", type_=String)
 
 
+def _scalar_kind(value: Any) -> str:
+    if isinstance(value, str) or isinstance(getattr(value, "type", None), String):
+        return "string"
+    if isinstance(value, bool) or isinstance(getattr(value, "type", None), Boolean):
+        return "bool"
+    if isinstance(value, (int, float)) or isinstance(
+        getattr(value, "type", None), (Integer, Numeric)
+    ):
+        return "number"
+    return ""
+
+
+def _string_size(value: Any, _: Any) -> Any:
+    kind = _scalar_kind(value)
+    return null() if kind and kind != "string" else func.length(value)
+
+
 def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> Any:
     """Translate CEL contains/startsWith/endsWith to an escaped LIKE.
 
@@ -155,6 +174,8 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
     case-sensitive, so case-insensitive dialects (e.g. SQLite without
     `PRAGMA case_sensitive_like`) need it configured for exact semantics.
     """
+    if any(_scalar_kind(value) not in ("", "string") for value in (receiver, needle)):
+        return null()
     if isinstance(receiver, str):
         receiver = literal(receiver, String)
     if isinstance(needle, str):
@@ -368,6 +389,13 @@ def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
 
 
 def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
+    left_kind, right_kind = _scalar_kind(left), _scalar_kind(right)
+    if left_kind and right_kind and left_kind != right_kind:
+        result = literal(operator == "ne") if operator in ("eq", "ne") else null()
+        for value in (left, right):
+            if hasattr(value, "is_"):
+                result = case((value.isnot(None), result))
+        return result
     left_is_ieee = isinstance(left, _IEEEConstant)
     right_is_ieee = isinstance(right, _IEEEConstant)
     if left_is_ieee or right_is_ieee:
@@ -376,6 +404,8 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
         left_is_nan = left_is_ieee and math.isnan(left_value)
         right_is_nan = right_is_ieee and math.isnan(right_value)
         if left_is_nan or right_is_nan:
+            if operator not in ("eq", "ne"):
+                return null()
             other = right_value if left_is_nan else left_value
             if isinstance(other, (int, float)):
                 # CEL follows IEEE: NaN is unequal to everything and unordered.
@@ -574,7 +604,7 @@ __operator_fns: OperatorFnMap = {
     "double": lambda *_: _reject_numeric_cast("double"),
     "int": lambda *_: _reject_numeric_cast("int"),
     # size() over a string column — collection-typed columns require an override.
-    "size": lambda c, _: func.length(c),
+    "size": _string_size,
     "timestamp": _timestamp,
     "hierarchy": _hierarchy,
     "ancestorOf": _ancestor_of,
@@ -1136,6 +1166,22 @@ def get_query(
         propagating UNKNOWN for it. A null-safe operator would match the two
         NULLs and over-grant.
         """
+        left_kind, right_kind = _scalar_kind(left_column), _scalar_kind(right)
+        if left_kind and right_kind and left_kind != right_kind:
+            equality = (
+                and_(left_column.is_(None), right.is_(None))
+                if left_explicit and right_explicit
+                else literal(False)
+            )
+            result = not_(equality) if operator == "ne" else equality
+            for operand, explicit in (
+                (left_column, left_explicit),
+                (right, right_explicit),
+            ):
+                if not explicit and hasattr(operand, "is_"):
+                    result = case((operand.isnot(None), result))
+            return result
+
         present = []
         if left_explicit:
             present.append(left_column.isnot(None))
@@ -1167,6 +1213,8 @@ def get_query(
         membership lowered to, which composes with an override rather than
         replacing it.
         """
+        if operator == "in" and not left_explicit and hasattr(left, "is_"):
+            return case((left.isnot(None), plain))
         if (left_explicit or right_explicit) and right is not None:
             if operator in ("eq", "ne"):
                 overridden = (
@@ -1280,6 +1328,17 @@ def get_query(
         """
         operator = expression["operator"]
         child_operands = expression["operands"]
+        if (
+            operator in ("eq", "ne", "in")
+            and len(child_operands) == 2
+            and all(
+                "variable" in operand or "value" in operand
+                for operand in child_operands
+            )
+        ):
+            # A lambda body is evaluated as a value. Preserve the same per-attribute
+            # NULL conventions that apply when this leaf is at the filter root.
+            return traverse_and_map_operands(expression)
 
         # Boolean combinators can appear nested inside value expressions
         # (e.g. a lambda body of `and(...)`); route them back through the
@@ -1450,6 +1509,14 @@ def get_query(
         if "variable" in left_operand and "variable" in right_operand:
             left_column = resolve_variable(left_operand["variable"])
             right_column = resolve_variable(right_operand["variable"])
+            if operator in ("eq", "ne", "lt", "le", "gt", "ge") and any(
+                isinstance(getattr(column, "type", None), DateTime)
+                for column in (left_column, right_column)
+            ):
+                raise ValueError(
+                    "Bare temporal attributes compare RFC 3339 strings in CEL; stored "
+                    "timestamps lose the original spelling; use timestamp() on both operands"
+                )
             # Mixing the two conventions across one comparison has no faithful
             # rendering. The declared side needs a definite answer for its NULL
             # (CEL holds a null VALUE); the undeclared side needs UNKNOWN for its
@@ -1469,13 +1536,12 @@ def get_query(
                     "attribute_null_representation for both attributes, or for "
                     "neither."
                 )
-            both_explicit = left_explicit and right_explicit
             return with_null_conventions(
                 operator,
                 left_column,
                 right_column,
-                both_explicit,
-                both_explicit,
+                left_explicit,
+                right_explicit,
                 get_operator_fn(operator, left_column, right_column),
             )
 

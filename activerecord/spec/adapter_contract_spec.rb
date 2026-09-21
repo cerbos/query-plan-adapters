@@ -784,6 +784,28 @@ RSpec.describe Cerbos::ActiveRecord do
       ).to_sql
     end
 
+    it "preserves CEL scalar types under explicit null conventions" do
+      numeric_text = EdgeDocument.create!(title: "0", n: 0)
+      nulls = EdgeDocument.create!(title: nil, n: nil)
+      begin
+        {"eq" => [], "ne" => [numeric_text.id, nulls.id]}.each do |operator, expected|
+          query = described_class.query_plan_to_relation(
+            plan: conditional(expression(operator, variable("e"), value(0))),
+            model: EdgeDocument, attributes: declared
+          )
+          expect(query.where(id: [numeric_text.id, nulls.id]).order(:id).pluck(:id)).to eq(expected)
+        end
+        query = described_class.query_plan_to_relation(
+          plan: conditional(expression("eq", variable("e"), variable("f"))),
+          model: EdgeDocument, attributes: declared
+        )
+        expect(query.where(id: [numeric_text.id, nulls.id]).pluck(:id)).to eq([nulls.id])
+      ensure
+        numeric_text.destroy!
+        nulls.destroy!
+      end
+    end
+
     it "guards a declared column in an equality against a constant" do
       sql = declared_sql(expression("eq", variable("e"), value("x")))
       expect(sql).to match(/"title" IS NOT NULL/)

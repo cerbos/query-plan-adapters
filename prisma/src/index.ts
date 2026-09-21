@@ -111,17 +111,18 @@ export type PrismaFilter = Record<string, any>;
 export type MapperConfig = {
   field?: string;
   /**
-   * Declares the database value kind when the Cerbos expression wraps a field in a typed
-   * constructor. Date-time metadata is required for timestamp(field) so a string column is
-   * never silently treated as a temporal column merely because it happens to contain ISO text.
+   * Declares the Prisma scalar kind so incompatible operands are rejected before query
+   * execution. Undeclared scalar kinds preserve the historical behavior. Date-time metadata
+   * is required for timestamp(field); raw DateTime column comparisons lose lexical spelling.
    */
-  valueType?: "dateTime";
+  valueType?: "dateTime" | "string" | "number" | "boolean";
   /**
    * Marks the mapped column as nullable in the database. Cerbos treats a missing attribute as
    * an evaluation error (deny), which matches SQL three-valued logic for simple predicates —
    * but relation subqueries (some/every/none) collapse UNKNOWN to false at the EXISTS boundary,
    * so collection macros over elements with NULL fields need an explicit guard to stay
-   * deny-aligned. Declaring nullability here enables those guards.
+   * deny-aligned. Declaring nullability here enables those collection guards. Scalar hierarchy segments
+   * preserve missing-value errors by default; nullable: false declares that a segment cannot be NULL.
    */
   nullable?: boolean;
   /**
@@ -505,8 +506,10 @@ type RelationConfig = {
 
 type ResolvedFieldReference = {
   path: string[];
+  nullable?: boolean;
+  timestampWrapped?: boolean;
   relations?: RelationConfig[];
-  valueType?: "dateTime";
+  valueType?: MapperConfig["valueType"];
   nullAttributeRepresentation?: NullAttributeRepresentation;
 };
 
@@ -598,10 +601,44 @@ function guardedFieldFilter(
   });
 }
 
+function assertScalarValue(
+  fieldRef: ResolvedFieldReference,
+  value: Value,
+  operator: string,
+): void {
+  if (value !== null && typeof value === "object") {
+    throw new Error(
+      `${operator} requires scalar values: Prisma cannot compare list or map elements`,
+    );
+  }
+  if (
+    value !== null &&
+    fieldRef.valueType !== undefined &&
+    fieldRef.valueType !== "dateTime" &&
+    typeof value !== fieldRef.valueType
+  ) {
+    throw new Error(
+      `${operator} value type does not match mapped ${fieldRef.valueType} field`,
+    );
+  }
+}
+
+function assertStringField(
+  fieldRef: ResolvedFieldReference,
+  operator: string,
+): void {
+  if (fieldRef.valueType !== undefined && fieldRef.valueType !== "string") {
+    throw new Error(
+      `${operator} requires a string field, got ${fieldRef.valueType}`,
+    );
+  }
+}
+
 function buildMembershipFilter(
   fieldRef: ResolvedFieldReference,
-  values: Value[]
+  values: Value[],
 ): PrismaFilter {
+  for (const value of values) assertScalarValue(fieldRef, value, "in");
   const nonNullValues = values.filter((value) => value !== null);
   const carriesNull = nonNullValues.length !== values.length;
   if (carriesNull) {
@@ -685,6 +722,33 @@ function assertNullOperandTranslatable(
   }
 }
 
+function assertStructuralNulls(
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+  declared?: NullAttributeRepresentation,
+): void {
+  if (!isOperatorOperand(operand)) return;
+  const sibling = operand.operands.find(isNamedOperand);
+  const mapping =
+    sibling &&
+    (typeof mapper === "function"
+      ? mapper(sibling.name)
+      : mapper[sibling.name]);
+  const convention = mapping?.nullAttributeRepresentation ?? declared;
+  if (
+    operand.operator === "set-field" &&
+    operand.operands.some((part) => isValueOperand(part) && part.value === null)
+  ) {
+    assertNullOperandTranslatable(
+      "a null member in a struct literal",
+      convention,
+    );
+  }
+  operand.operands.forEach((part) =>
+    assertStructuralNulls(part, mapper, convention),
+  );
+}
+
 /**
  * Converts a Cerbos query plan to a Prisma filter.
  */
@@ -703,6 +767,7 @@ export function queryPlanToPrisma({
     case PlanKind.CONDITIONAL: {
       lambdaScopes = [];
       rootModelName = model;
+      assertStructuralNulls(queryPlan.condition, mapper);
       const condition = constantFoldExpression(
         hoistOuterScopeReferences(queryPlan.condition, [])
       );
@@ -1113,7 +1178,7 @@ function constantFoldExpression(
  */
 function resolveFieldReference(
   reference: string,
-  mapper: Mapper
+  mapper: Mapper,
 ): ResolvedFieldReference {
   const parts = reference.split(".");
   const config =
@@ -1201,6 +1266,7 @@ function resolveFieldReference(
       path: field ? [field] : remainingParts,
       relations,
       valueType: activeConfig.valueType,
+      nullable: activeConfig.nullable,
       nullAttributeRepresentation: activeConfig.nullAttributeRepresentation,
     };
   }
@@ -1209,6 +1275,7 @@ function resolveFieldReference(
   return {
     path: [activeConfig?.field || reference],
     valueType: activeConfig?.valueType,
+    nullable: activeConfig?.nullable,
     nullAttributeRepresentation: activeConfig?.nullAttributeRepresentation,
   };
 }
@@ -1442,7 +1509,7 @@ function resolveOperand(
 
 function resolveTimestampOperand(
   expression: OperatorOperand,
-  mapper: Mapper
+  mapper: Mapper,
 ): ResolvedOperand {
   if (expression.operands.length !== 1) {
     throw new Error("timestamp() requires exactly one operand");
@@ -1459,7 +1526,7 @@ function resolveTimestampOperand(
         `timestamp() field ${operand.name} must be mapped with valueType: \"dateTime\"`
       );
     }
-    return fieldRef;
+    return { ...fieldRef, timestampWrapped: true };
   }
 
   if (!isValueOperand(operand) || typeof operand.value !== "string") {
@@ -1720,8 +1787,35 @@ function referencesChainedRelation(
  */
 function buildNegatedFilter(
   operand: PlanExpressionOperand,
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
+  if (isOperatorOperand(operand)) {
+    if (operand.operator === "not") {
+      return buildPrismaFilterFromCerbosExpression(
+        assertDefined(operand.operands[0], "not requires an operand"),
+        mapper,
+      );
+    }
+    const complement: Record<string, string> = {
+      eq: "ne",
+      ne: "eq",
+      lt: "ge",
+      le: "gt",
+      gt: "le",
+      ge: "lt",
+    };
+    const opposite = complement[operand.operator];
+    if (
+      opposite &&
+      operand.operands.some(
+        (part) => isOperatorOperand(part) && part.operator === "if",
+      )
+    ) {
+      // Negate the comparison in each ternary arm. Unordered NaN stays denied instead
+      // of turning a discarded error arm into true through an outer NOT.
+      return handleRelationalOperator(opposite, operand.operands, mapper);
+    }
+  }
   if (isNamedOperand(operand)) {
     const { relations, ...fieldRef } = resolveFieldReference(
       operand.name,
@@ -2220,7 +2314,7 @@ function handleSizeComparison(
 function handleRelationalOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
   const ternaryFilter = tryHandleTernaryComparison(
     operator,
@@ -2281,6 +2375,24 @@ function handleRelationalOperator(
   const right = resolveOperand(rightOperand, mapper);
 
   if (isResolvedFieldReference(left) && isResolvedFieldReference(right)) {
+    if (
+      left.valueType === "dateTime" &&
+      right.valueType === "dateTime" &&
+      (!left.timestampWrapped || !right.timestampWrapped)
+    ) {
+      throw new Error(
+        "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()",
+      );
+    }
+    if (
+      left.valueType !== undefined &&
+      right.valueType !== undefined &&
+      left.valueType !== right.valueType
+    ) {
+      throw new Error(
+        "Cannot compare fields with different mapped value types",
+      );
+    }
     return buildFieldToFieldFilter(
       operator,
       leftOperand,
@@ -2335,12 +2447,14 @@ function handleRelationalOperator(
 function buildComparisonFilter(
   fieldRef: ResolvedFieldReference,
   operator: string,
-  value: Value
+  value: Value,
 ): PrismaFilter {
   const prismaOperator = assertDefined(
     CERBOS_TO_PRISMA_OPERATOR[operator],
     `Unsupported operator: ${operator}`
   );
+
+  assertScalarValue(fieldRef, value, operator);
 
   if (value === null) {
     assertNullOperandTranslatable(
@@ -2585,7 +2699,7 @@ const MAX_ENUMERATED_NEEDLES = 1000;
 function handleStringOperator(
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error(`${operator} requires exactly two operands`);
@@ -2598,6 +2712,9 @@ function handleStringOperator(
     assertDefined(operands[1], `${operator} requires a needle operand`),
     mapper
   );
+
+  if (isResolvedFieldReference(receiver)) assertStringField(receiver, operator);
+  if (isResolvedFieldReference(needle)) assertStringField(needle, operator);
 
   // Column receiver, constant needle: Prisma's LIKE-based filter.
   if (isResolvedFieldReference(receiver) && isResolvedValue(needle)) {
@@ -2683,7 +2800,7 @@ function handleStringOperator(
  */
 function handleHasIntersectionOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
   if (operands.length !== 2) {
     throw new Error("hasIntersection requires exactly two operands");
@@ -2706,8 +2823,8 @@ function handleHasIntersectionOperator(
   // Check if left operand is a map operation
   if (isOperatorOperand(leftOperand) && leftOperand.operator === "map") {
     if (!isValueOperand(rightOperand)) {
-      throw new Error("Second operand of hasIntersection must be a value");
-    }
+    throw new Error("Second operand of hasIntersection must be a value");
+  }
 
     const collection = assertDefined(
       leftOperand.operands[0],
@@ -2719,8 +2836,8 @@ function handleHasIntersectionOperator(
     );
 
     if (!isNamedOperand(collection)) {
-      throw new Error("First operand of map must be a collection reference");
-    }
+    throw new Error("First operand of map must be a collection reference");
+  }
 
     // Get variable name from lambda
     if (!isOperatorOperand(lambda)) {
@@ -2728,19 +2845,19 @@ function handleHasIntersectionOperator(
     }
 
     const variable = assertDefined(
-      lambda.operands[1],
-      "Lambda variable must have a name"
-    );
+    lambda.operands[1],
+    "Lambda variable must have a name"
+  );
     if (!isNamedOperand(variable)) {
-      throw new Error("Lambda variable must have a name");
-    }
+    throw new Error("Lambda variable must have a name");
+  }
 
     // Create scoped mapper for the collection
     const scopedMapper = createScopedMapper(
-      collection.name,
-      variable.name,
-      mapper
-    );
+    collection.name,
+    variable.name,
+    mapper
+  );
 
     const { relations } = resolveFieldReference(collection.name, mapper);
     if (!relations || relations.length === 0) {
@@ -2771,9 +2888,15 @@ function handleHasIntersectionOperator(
     }
     const fieldName = getLeafField(resolved.path);
 
-    const base = buildNestedRelationFilter(relations, {
-      [fieldName]: { in: rightOperand.value },
-    });
+    if (!Array.isArray(rightOperand.value))
+      throw new Error("hasIntersection requires a literal list");
+    const base = buildNestedRelationFilter(
+      relations,
+      buildMembershipFilter(
+        { ...resolved, path: [fieldName], relations: [] },
+        rightOperand.value,
+      ),
+    );
     if (scope.nullableFields.size === 0) {
       return base;
     }
@@ -3263,7 +3386,7 @@ function handleArithmeticComparison(
   arithExpr: OperatorOperand,
   otherOperand: PlanExpressionOperand,
   arithIsLeft: boolean,
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
   const arithOp = arithExpr.operator;
   const arithLeftOp = assertDefined(
@@ -3347,8 +3470,13 @@ function handleArithmeticComparison(
     }
     const solvedValue = solveAdd(other.value, constant, fieldIsLeft);
     if (solvedValue === null) {
-      if (effectiveOperator === "eq") return buildImpossibleFilter(fieldRef);
-      return {};
+      // A contradictory / exhaustive pair remains SQL UNKNOWN for a missing field.
+      // An empty IN or an empty filter loses that error when an outer NOT is applied.
+      const equality = buildFieldFilter(fieldRef, "equals", other.value);
+      const inequality = buildFieldFilter(fieldRef, "not", other.value);
+      return effectiveOperator === "eq"
+        ? { AND: [equality, inequality] }
+        : { OR: [equality, inequality] };
     }
     return buildComparisonFilter(fieldRef, effectiveOperator, solvedValue);
   }
@@ -3625,7 +3753,7 @@ function checkPrefixConditions(
 
 function handleOverlapsOperator(
   operands: PlanExpressionOperand[],
-  mapper: Mapper
+  mapper: Mapper,
 ): PrismaFilter {
   const [left, right] = extractHierarchyOperands("overlaps", operands, mapper);
 
@@ -3643,20 +3771,46 @@ function handleOverlapsOperator(
     (c): c is PrismaFilter => c !== null
   );
 
+  // Hierarchy construction evaluates every segment, including a trailing segment that
+  // neither prefix comparison needs. Preserve its SQL UNKNOWN under outer negation too.
+  const fields = [...leftSegs, ...rightSegs]
+    .filter((segment): segment is FieldSegment => segment.type === "field")
+    .filter((segment) => segment.fieldRef.nullable !== false);
+  const pairs = fields.map(({ fieldRef }) => ({
+    equal: buildFieldFilter(fieldRef, "equals", ""),
+    unequal: buildFieldFilter(fieldRef, "not", ""),
+  }));
+  const presence = pairs.map(({ equal, unequal }) => ({
+    OR: [equal, unequal],
+  }));
+  const unknown = pairs.map(({ equal, unequal }) => ({
+    AND: [equal, unequal],
+  }));
+
   if (validConditions.length === 0) {
-    const allSegs = [...leftSegs, ...rightSegs];
-    const fieldSeg = allSegs.find(
-      (s): s is FieldSegment => s.type === "field"
+    if (unknown.length > 0) return { OR: unknown };
+    const field = [...leftSegs, ...rightSegs].find(
+      (segment): segment is FieldSegment => segment.type === "field",
     );
-    if (fieldSeg) return buildImpossibleFilter(fieldSeg.fieldRef);
+    if (field) return buildImpossibleFilter(field.fieldRef);
     throw new Error("Cannot determine overlap: no field references found");
   }
 
-  if (validConditions.some((c) => Object.keys(c).length === 0)) return {};
+  if (
+    validConditions.some((condition) => Object.keys(condition).length === 0)
+  ) {
+    return presence.length === 0 ? {} : { AND: presence };
+  }
 
-  // When both directions are valid (equal-length hierarchies), they produce
-  // identical conditions since the same segment pairs are compared in both.
-  return validConditions[0]!;
+  // Equal-length comparisons are identical in either direction. A contradiction is
+  // FALSE for a present field and UNKNOWN for NULL, restoring errors even if the
+  // prefix comparison is FALSE (FALSE AND NULL alone would lose that error).
+  const condition = validConditions[0]!;
+  return presence.length === 0
+    ? condition
+    : {
+        OR: [{ AND: [condition, ...presence] }, ...unknown],
+      };
 }
 
 /**
@@ -3751,7 +3905,7 @@ function getStrictPrefixes(segments: string[], delimiter: string): string[] {
 function handleAncestorDescendantOperator(
   operands: PlanExpressionOperand[],
   mapper: Mapper,
-  direction: "ancestor" | "descendant"
+  direction: "ancestor" | "descendant",
 ): PrismaFilter {
   const operatorName = direction === "ancestor" ? "ancestorOf" : "descendentOf";
   const [left, right] = extractHierarchyOperands(operatorName, operands, mapper);
@@ -3760,6 +3914,10 @@ function handleAncestorDescendantOperator(
   // descendentOf(A, B) = B is strict prefix of A
   const ancestor = direction === "ancestor" ? left : right;
   const descendant = direction === "ancestor" ? right : left;
+  if (ancestor.type === "field")
+    assertStringField(ancestor.fieldRef, operatorName);
+  if (descendant.type === "field")
+    assertStringField(descendant.fieldRef, operatorName);
 
   if (ancestor.type === "constant" && descendant.type === "field") {
     const prefix =

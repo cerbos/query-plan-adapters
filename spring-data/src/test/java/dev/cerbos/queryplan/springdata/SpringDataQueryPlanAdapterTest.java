@@ -1117,6 +1117,20 @@ class SpringDataQueryPlanAdapterTest {
             return e;
         }
 
+        @Test
+        void explicitNullDeclarationDoesNotEnableHeterogeneousCoercion() {
+            ResourceEntity row = new ResourceEntity("typed-explicit-owner");
+            row.setaOptionalString("0");
+            withResource(row, () -> {
+                assertEquals(0, count(exprOp("eq", var("request.resource.attr.owner"), nval(0))));
+                assertEquals(1, count(exprOp("ne", var("request.resource.attr.owner"), nval(0))));
+            });
+            withResource(nullOwner(), () -> {
+                assertEquals(0, count(exprOp("eq", var("request.resource.attr.owner"), nval(0))));
+                assertEquals(1, count(exprOp("ne", var("request.resource.attr.owner"), nval(0))));
+            });
+        }
+
         /**
          * The equality family only. An ordering comparison against a null receiver is a
          * no-overload error in CEL, which denies under both polarities — exactly what UNKNOWN
@@ -1870,47 +1884,6 @@ class SpringDataQueryPlanAdapterTest {
     // unreachable from any real plan and has been removed.
 
     /**
-     * <strong>Corpus gap.</strong> {@code size(R.attr.tags.except([...])) > 0} is a policy any
-     * application can write, and Cerbos {@code except(list, list)} arrives as a two-list
-     * expression; the corpus carries no {@code except} action.
-     */
-    @Test
-    void sizeOfExceptThrowsNamedError() {
-        assertConditionThrows(
-                exprOp("gt",
-                        exprOp("size",
-                                exprOp("except",
-                                        var("request.resource.attr.tags"), listOp("archived"))),
-                        nval(0)),
-                "except is not supported", "except(list, list)", "exists");
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> The same two-list {@code except}, compared to a list constant.
-     */
-    @Test
-    void exceptComparedToListThrowsNamedError() {
-        assertConditionThrows(
-                exprOp("eq",
-                        exprOp("except",
-                                var("request.resource.attr.tags"), listOp("archived")),
-                        listOp()),
-                "except is not supported", "except(list, list)");
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> The same two-list {@code except}, in boolean position.
-     */
-    @Test
-    void bareExceptThrowsNamedError() {
-        // The lambda-form except(collection, lambda) once asserted here was a phantom no plan carries.
-        assertConditionThrows(
-                exprOp("except",
-                        var("request.resource.attr.tags"), listOp("archived")),
-                "except is not supported", "except(list, list)");
-    }
-
-    /**
      * <strong>Corpus gap.</strong> {@code exists-one-multi} carries a single-equality body; a
      * disjunctive body is not carried.
      */
@@ -1972,8 +1945,8 @@ class SpringDataQueryPlanAdapterTest {
     class StructuredConstantComparison {
 
         /**
-         * <strong>Corpus gap.</strong> {@code R.attr.x == ["a", "b"]} is a policy any application
-         * can write; the corpus carries no list-constant equality.
+         * The corpus's {@code literal-list-eq} covers the refusal. This assertion additionally
+         * pins attribute context, list cardinality, and absence of element values in the error.
          */
         @Test
         void eqFieldAgainstListConstantThrowsNamedError() {
@@ -1983,7 +1956,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The {@code ne} half of the same gap.
+         * The {@code literal-list-ne} refusal's diagnostic context and value-redaction contract.
          */
         @Test
         void neFieldAgainstListConstantThrowsNamedError() {
@@ -2087,50 +2060,6 @@ class SpringDataQueryPlanAdapterTest {
         withResource(row, () -> assertEquals(0, runCount(cond)));
     }
 
-    /**
-     * <strong>Corpus gap.</strong> A concatenation no column value can satisfy is not carried.
-     */
-    @Test
-    void addNoSolutionEqProducesImpossibleFilter() {
-        // eq("nope", add("projects:", R.attr.aString))
-        //   "nope" doesn't start with "projects:" → no solution → eq becomes 1=0
-        Operand cond = exprOp("eq",
-                sval("nope"),
-                exprOp("add", sval("projects:"), var("request.resource.attr.aString")));
-        // 1=0 filter → 0 results expected (table is empty anyway, this just confirms no exception)
-        assertEquals(0, runCount(cond));
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> The negation of a concatenation no column value can satisfy,
-     * which must still exclude the NULL row, is not carried.
-     */
-    @Test
-    void addNoSolutionNeExcludesNullRows() {
-        // ne("abc", add("users:", R.attr.aOptionalString)): no field value can make the
-        // concatenation equal "abc", BUT a missing attribute makes `"users:" + null` a CEL
-        // evaluation error → deny. An always-true collapse would leak the NULL row; the
-        // correct translation is IS NOT NULL (non-NULL rows in, NULL rows out).
-        Operand neCond = exprOp("ne",
-                sval("abc"),
-                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
-        Operand eqCond = exprOp("eq",
-                sval("abc"),
-                exprOp("add", sval("users:"), var("request.resource.attr.aOptionalString")));
-
-        ResourceEntity withValue = new ResourceEntity("ne-add-1");
-        withValue.setaOptionalString("x");
-        ResourceEntity withNull = new ResourceEntity("ne-add-2");
-        withNull.setaOptionalString(null);
-
-        withResource(withValue, () -> withResource(withNull, () -> {
-            // Only the non-NULL row survives ne; the NULL row is a CEL error → deny.
-            assertEquals(1, runCount(neCond));
-            // eq stays always-false: neither row matches (NULL row denied there too).
-            assertEquals(0, runCount(eqCond));
-        }));
-    }
-
     // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
 
     @Nested
@@ -2225,17 +2154,6 @@ class SpringDataQueryPlanAdapterTest {
                     var("request.resource.attr.aBool"), bval(false))));
         }
 
-        /**
-         * <strong>Corpus gap.</strong> {@code in} over a numeric list is not carried; {@code
-         * in-single} is a string.
-         */
-        @Test
-        void inNumberList() {
-            assertEquals(0, runCount(exprOp("in",
-                    var("request.resource.attr.aNumber"),
-                    listOpNumbers(1, 2, 3))));
-        }
-
     }
 
     // -- Collection macro composition (PR #235) --
@@ -2306,78 +2224,6 @@ class SpringDataQueryPlanAdapterTest {
             ListValue.Builder list = ListValue.newBuilder();
             for (String v : values) list.addValues(structElement(field, v));
             return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> The corpus principal's collections are never empty, so no
-         * action reaches the empty literal collection.
-         */
-        @Test
-        void emptyValueListKeepsCelIdentitySemantics() {
-            ResourceEntity r = new ResourceEntity("kvc-empty");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                // exists over [] is false; all over [] is true.
-                assertEquals(0, runCount(exprOp("exists", listOp(),
-                        lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t"))))));
-                assertEquals(1, runCount(exprOp("all", listOp(),
-                        lambda("t", exprOp("ne", var("request.resource.attr.aString"), var("t"))))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> The corpus's principal collections are lists of scalars, so
-         * no action substitutes a lambda variable into a struct element.
-         */
-        @Test
-        void structElementPathSubstitution() {
-            ResourceEntity r = new ResourceEntity("kvc-struct");
-            r.setaString("alpha");
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("exists", structListOp("name", "alpha", "beta"),
-                        lambda("t", exprOp("eq",
-                                var("request.resource.attr.aString"), var("t.name"))))));
-                assertEquals(0, runCount(exprOp("exists", structListOp("name", "x"),
-                        lambda("t", exprOp("eq",
-                                var("request.resource.attr.aString"), var("t.name"))))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> No corpus action rebinds an outer macro's iteration variable
-         * inside a nested macro.
-         *
-         * A nested lambda rebinding the variable shadows it: the inner {@code t.name} must stay
-         * symbolic. An incorrect substitution would try to drill {@code .name} into the outer
-         * string element and fail translation.
-         */
-        @Test
-        void nestedLambdaShadowsOuterVariable() {
-            assertEquals(0, runCount(exprOp("exists", listOp("outer1", "outer2"),
-                    lambda("t", exprOp("exists", var("request.resource.attr.tags"),
-                            lambda("t", exprOp("eq", var("t.name"), sval("public"))))))));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> {@code exists_one} over a literal collection is not carried.
-         */
-        @Test
-        void existsOneOverValueListFailsClosed() {
-            assertConditionThrows(exprOp("exists_one", listOp("a"),
-                    lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
-                    "exists_one over a literal collection value is not supported");
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> A struct element path the element does not carry is not
-         * carried.
-         */
-        @Test
-        void missingElementFieldFailsClosed() {
-            assertConditionThrows(exprOp("exists", structListOp("name", "alpha"),
-                    lambda("t", exprOp("eq",
-                            var("request.resource.attr.aString"), var("t.missing")))),
-                    "Cannot resolve \"t.missing\"", "has no field \"missing\"");
         }
 
     }
@@ -2455,29 +2301,6 @@ class SpringDataQueryPlanAdapterTest {
                     nullVal(), var("request.resource.attr.aOptionalString"));
             withOwnerRows(() ->
                     assertEquals(Set.of("in-null-nul"), runIds(cond)));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> {@code in-null-elem-hasint} pins a null element against the
-         * scalar {@code tagNames} projection; the {@code map()} projection is not carried.
-         */
-        @Test
-        void mapIntersectionNullElementIsInertAndNullProjectionStaysUnknown() {
-            // For map(t, t.name) member ACCESS — unlike the scalar tagNames projection — a
-            // NULL member column is a MISSING element attribute (CEL error): check() denies
-            // tags=[{}] under BOTH polarities even with a null element in the constant list
-            // (PDP-verified), and only an explicitly-null projection (unrepresentable in the
-            // column model) could match that element. The null element must be inert and the
-            // NULL-projection row must stay UNKNOWN.
-            java.util.function.Supplier<Operand> cond = () -> exprOp("hasIntersection",
-                    exprOp("map", var("request.resource.attr.tags"),
-                            lambda("t", var("t.name"))),
-                    listOpNullable("x", null));
-            withTagRows(() -> {
-                assertEquals(Set.of("in-null-tag-x"), runIds(cond.get()));
-                assertEquals(Set.of("in-null-tag-none"),
-                        runIds(exprOp("not", cond.get())));
-            });
         }
 
     }

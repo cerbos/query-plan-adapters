@@ -526,6 +526,7 @@ if ! jq -e '
     ((.createdBy | type) == "string")
     and ((.aDouble | type) == "number" or .aDouble == null)
     and ((.createdAt | type) == "string" or .createdAt == null)
+    and ((.updatedAt | type) == "string" or .updatedAt == null)
     and ((.scope | type) == "string" or .scope == null)
     and ((.labels | type) == "array")
     and all(.labels[]; type == "string" or . == null))
@@ -558,7 +559,10 @@ derived_drift="$(jq -r -s '
          | if ($fixed | has($seed.id)) then $fixed[$seed.id]
            elif $seed.aNumber >= 2 then "2036-06-06T06:06:06Z"
            else "2021-05-05T05:05:05Z" end
-       ) then "createdAt" else empty end)
+       ) then "createdAt" else empty end),
+      (if $entry.updatedAt != (
+         {"a1": "2020-03-15T10:30:00.000Z", "a4": "2024-06-01T00:00:00Z"}[$seed.id]
+       ) then "updatedAt" else empty end)
     ]
   | select(length > 0)
   | "  \($seed.id): \(join(", "))"
@@ -598,7 +602,11 @@ cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
   "d2": { "scope": "e:prod:eu",             "labels": [] },
   "e1": { "scope": null,                    "labels": [] },
   "f1": { "scope": null,                    "labels": [] },
-  "g1": { "scope": null,                    "labels": [] }
+  "g1": { "scope": null,                    "labels": [] },
+  "h1": { "scope": null,                    "labels": [] },
+  "h2": { "scope": null,                    "labels": [] },
+  "h3": { "scope": null,                    "labels": [] },
+  "h4": { "scope": null,                    "labels": [] }
 }
 JSON
 jq -S '.derived | map_values({scope, labels})' derived-fields.json \

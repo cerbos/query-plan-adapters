@@ -1,0 +1,24 @@
+{
+  "action": "in-numbers",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": [
+              2,
+              3,
+              5
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

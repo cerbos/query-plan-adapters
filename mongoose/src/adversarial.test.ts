@@ -62,6 +62,7 @@ interface DerivedEntry {
   createdBy: string;
   aDouble: number | null;
   createdAt: string | null;
+  updatedAt: string | null;
   scope: string | null;
   labels: (string | null)[];
 }
@@ -130,6 +131,7 @@ const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
   "createdAt",
+  "updatedAt",
   "scope",
   "labels",
 ] as const;
@@ -153,6 +155,11 @@ const PRINCIPAL_ATTR_KEYS = [
   "context",
   "fewTeams",
   "manyTeams",
+  "zero",
+  "emptyTeams",
+  "manyStructs",
+  "nullableStructs",
+  "missingStructs",
 ] as const;
 
 /**
@@ -180,36 +187,53 @@ function assertSeedKeyCoverage(value: unknown): void {
   });
 }
 
-/**
- * Asserted against the RAW json for the same reason as the seed keys: parsePrincipal rebuilds `id`
- * and `roles`, so a rebuilt principal could only ever report the keys this harness already names.
- *
- * The attribute VALUES are asserted too. parsePrincipal accepts any Cerbos `Value`, but the corpus
- * carries exactly two shapes — a string and a list of strings — and every other harness converts on
- * that basis, so a third has to fail here rather than be reshaped by one adapter and passed through
- * by another. A key-set guard says nothing about a change inside a value, and three of the four
- * attributes are lists; this is the same reason the seed guard descends into `tags[]`.
- */
+/** Principal attributes have explicit value shapes, including absent versus null struct members. */
+function assertPrincipalAttrShape(label: string, value: unknown): void {
+  const key = label.slice(label.lastIndexOf(".") + 1);
+  if (key === "context" && typeof value === "string") return;
+  if (key === "zero" && value === 0) return;
+  if (
+    ["allowedTags", "fewTeams", "manyTeams", "emptyTeams"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string")
+  )
+    return;
+  if (
+    ["manyStructs", "nullableStructs", "missingStructs"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+        return false;
+      if (key === "missingStructs") return Object.keys(entry).length === 0;
+      return (
+        Object.keys(entry).length === 1 &&
+        "name" in entry &&
+        (key === "nullableStructs"
+          ? entry.name === null
+          : typeof entry.name === "string")
+      );
+    })
+  )
+    return;
+  throw new Error(
+    `${label} does not match its declared corpus principal shape`,
+  );
+}
+
 function assertPrincipalKeyCoverage(value: unknown): void {
   const principal = expectRecord(
     expectRecord(value, "seeds.json")["principal"],
-    "seeds.json principal"
+    "seeds.json principal",
   );
   assertKeys("seeds.json principal", Object.keys(principal), PRINCIPAL_KEYS);
   const attr = expectRecord(principal["attr"], "seeds.json principal.attr");
   assertKeys(
     "seeds.json principal.attr",
     Object.keys(attr),
-    PRINCIPAL_ATTR_KEYS
+    PRINCIPAL_ATTR_KEYS,
   );
   for (const [key, entry] of Object.entries(attr)) {
-    if (typeof entry === "string") continue;
-    if (Array.isArray(entry) && entry.every((el) => typeof el === "string")) {
-      continue;
-    }
-    throw new Error(
-      `seeds.json principal.attr.${key} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`
-    );
+    assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, entry);
   }
 }
 
@@ -219,6 +243,10 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
   const aDouble = record["aDouble"];
   if (aDouble !== null && typeof aDouble !== "number") {
     throw new Error(`${label}.aDouble must be a number or null`);
+  }
+  const updatedAt = record["updatedAt"];
+  if (updatedAt !== null && typeof updatedAt !== "string") {
+    throw new Error(`${label}.updatedAt must be a string or null`);
   }
   const createdAt = record["createdAt"];
   if (createdAt !== null && typeof createdAt !== "string") {
@@ -239,6 +267,7 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
     createdBy: expectString(record["createdBy"], `${label}.createdBy`),
     aDouble,
     createdAt,
+    updatedAt,
     scope,
     labels,
   };
@@ -248,16 +277,16 @@ function parseDerivedFile(value: unknown): DerivedFile {
   const record = expectRecord(value, "derived-fields.json");
   const fields = expectStringArray(
     record["fields"],
-    "derived-fields.json fields"
+    "derived-fields.json fields",
   );
   assertKeys("derived-fields.json fields", fields, DERIVED_KEYS);
   const derived: Record<string, DerivedEntry> = {};
   for (const [id, entry] of Object.entries(
-    expectRecord(record["derived"], "derived-fields.json derived")
+    expectRecord(record["derived"], "derived-fields.json derived"),
   )) {
     derived[id] = parseDerivedEntry(
       entry,
-      `derived-fields.json derived["${id}"]`
+      `derived-fields.json derived["${id}"]`,
     );
   }
   return { fields, derived };
@@ -285,11 +314,11 @@ function parseSeed(value: unknown, index: number): Seed {
     aNumber: expectNumber(record["aNumber"], `${label}.aNumber`),
     aOptionalString: optional,
     tags: tags.map((tag, tagIndex) =>
-      parseTag(tag, `${label}.tags[${tagIndex}]`)
+      parseTag(tag, `${label}.tags[${tagIndex}]`),
     ),
     subCategoryNames: expectStringArray(
       record["subCategoryNames"],
-      `${label}.subCategoryNames`
+      `${label}.subCategoryNames`,
     ),
     parentSeedId,
   };
@@ -320,7 +349,7 @@ if (Object.keys(derivedFile.derived).length !== SEEDS.length) {
   throw new Error(
     `derived-fields.json has ${
       Object.keys(derivedFile.derived).length
-    } entries for ${SEEDS.length} seeds`
+    } entries for ${SEEDS.length} seeds`,
   );
 }
 for (const seed of SEEDS) {
@@ -425,6 +454,22 @@ const DEGENERACY_GUARD_ACTIONS = [
   "string-size-gt0",
   "in-map-keys",
   "double-huge-gt",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "hasint-map-null",
+  "hasint-map-null-vf",
+  "hasint-map-vf",
+  "hasint-null-vf",
+  "in-numbers",
+  "lambda-in-literal",
+  "not-concat-unsolvable-ne",
+  "not-hasint-empty-chain",
+  "pv-shadow",
+  "regex-dot",
+  "regex-unanchored",
+  "root-not-bool",
+  "size-ge-one",
+  "wildcard-contains",
+  "wildcard-endswith",
 ] as const;
 
 /**
@@ -459,6 +504,34 @@ const DEGENERACY_LIVENESS_PROBES = [
   // above already probes, and a probe per rejection SITE is what these lists are for.
   "not-contains",
   "map-eq-list",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "div-by-division",
+  "eq-list",
+  "except-eq",
+  "except-size",
+  "hier-overlaps-list-prefix",
+  "in-var-var-omitted",
+  "in-var-var-omitted-neg",
+  "lambda-in-literal-neg",
+  "lambda-ternary",
+  "ne-list",
+  "not-concat-unsolvable",
+  "not-nan-ord-le",
+  "pv-exists-one",
+  "pv-filter",
+  "pv-map",
+  "pv-not-all",
+  "pv-not-exists",
+  "pv-structs",
+  "regex-alternation",
+  "regex-brace",
+  "regex-case",
+  "regex-digit",
+  "regex-grouped",
+  "regex-optional-operators",
+  "regex-posix",
+  "regex-repetition",
+  "temporal-raw-eq",
 ] as const;
 
 interface AdversarialLabel {
@@ -497,6 +570,7 @@ interface AdversarialResourceDocument {
   createdBy: string;
   scope: string | null;
   createdAt: Date | null;
+  updatedAt: Date | null;
   tags: Tag[];
   categories: AdversarialCategory[];
   parent: AdversarialParent | null;
@@ -507,25 +581,25 @@ const tagSchema = new Schema<Tag>(
     id: { type: String, required: true },
     name: { type: String, default: null },
   },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 const labelSchema = new Schema<AdversarialLabel>(
   { name: { type: String, default: null } },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 const subCategorySchema = new Schema<AdversarialSubCategory>(
   {
     name: { type: String, required: true },
     labels: { type: [labelSchema], default: [] },
   },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 const categorySchema = new Schema<AdversarialCategory>(
   {
     name: { type: String, required: true },
     subCategories: { type: [subCategorySchema], default: [] },
   },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 // The corpus's one real to-one relation. A document store has no join, so both levels are
 // embedded subdocuments — but the SHAPE is the same to-one chain every other store carries, and
@@ -538,7 +612,7 @@ const innerSchema = new Schema<AdversarialRelationLevel>(
     aNumber: { type: Number, required: true },
     aOptionalString: { type: String, default: null },
   },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 const parentSchema = new Schema<AdversarialParent>(
   {
@@ -548,7 +622,7 @@ const parentSchema = new Schema<AdversarialParent>(
     aOptionalString: { type: String, default: null },
     inner: { type: innerSchema, default: null },
   },
-  { _id: false, id: false }
+  { _id: false, id: false },
 );
 const resourceSchema = new Schema<AdversarialResourceDocument>(
   {
@@ -562,15 +636,16 @@ const resourceSchema = new Schema<AdversarialResourceDocument>(
     createdBy: { type: String, required: true },
     scope: { type: String, default: null },
     createdAt: { type: Date, default: null },
+    updatedAt: { type: Date, default: null },
     tags: { type: [tagSchema], default: [] },
     categories: { type: [categorySchema], default: [] },
     parent: { type: parentSchema, default: null },
   },
-  { id: false }
+  { id: false },
 );
 const AdversarialResource = model<AdversarialResourceDocument>(
   "MongooseAdversarialResource",
-  resourceSchema
+  resourceSchema,
 );
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -626,7 +701,7 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const parent = SEEDS_BY_ID.get(id);
   if (parent === undefined) {
     throw new Error(
-      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`
+      `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
     );
   }
   return parent;
@@ -715,6 +790,10 @@ function asCheckResource(seed: Seed): Resource {
   if (scope !== null) {
     attr["scope"] = scope;
   }
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) {
+    attr["updatedAt"] = updatedAt;
+  }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
     attr["createdAt"] = createdAt;
@@ -742,11 +821,14 @@ function asCheckResource(seed: Seed): Resource {
 }
 
 beforeAll(async () => {
-  await mongoose.connect("mongodb://127.0.0.1:27017/cerbos_mongoose_adversarial");
+  await mongoose.connect(
+    "mongodb://127.0.0.1:27017/cerbos_mongoose_adversarial",
+  );
   await AdversarialResource.deleteMany({});
   await AdversarialResource.create(
     SEEDS.map((seed) => {
       const createdAt = timestampFor(seed);
+      const updatedAt = derivedFor(seed).updatedAt;
       return {
         resourceId: seed.id,
         aBool: seed.aBool,
@@ -757,6 +839,7 @@ beforeAll(async () => {
         createdBy: createdByFor(seed),
         scope: scopeFor(seed),
         createdAt: createdAt === null ? null : new Date(createdAt),
+        updatedAt: updatedAt === null ? null : new Date(updatedAt),
         tags: seed.tags,
         categories: seed.subCategoryNames.map((name) => ({
           name: "business",
@@ -769,7 +852,7 @@ beforeAll(async () => {
         })),
         parent: storedParent(seed),
       };
-    })
+    }),
   );
 }, 30_000);
 
@@ -787,7 +870,7 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
         actions: [action],
       });
       return { id: seed.id, allowed: result.isAllowed(action) };
-    })
+    }),
   );
   return decisions
     .filter((decision) => decision.allowed)
@@ -807,7 +890,7 @@ async function expectNonDegenerateOracle(action: string): Promise<void> {
 
 async function adapterFilteredIds(
   action: string,
-  nullAttributeRepresentation: "explicit" | "omitted" = "explicit"
+  nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
 ): Promise<string[]> {
   const queryPlan = await cerbos.planResources({
     principal: seedsFile.principal,
@@ -823,7 +906,7 @@ async function adapterFilteredIds(
     return [];
   }
   const rows = await AdversarialResource.find(
-    result.kind === PlanKind.CONDITIONAL ? result.filters : {}
+    result.kind === PlanKind.CONDITIONAL ? result.filters : {},
   )
     .select({ resourceId: 1, _id: 0 })
     .lean()
@@ -844,22 +927,21 @@ function planCarriesNullLiteral(operand: unknown): boolean {
 }
 
 describe("adversarial conformance corpus", () => {
-
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
   test("a throwing action with no pinned message fails classification", () => {
     expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/
+      /pins no throw message/,
     );
     expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/
+      /pins no throw message/,
     );
   });
-  test("manifest assigns all 199 actions exactly one Mongoose outcome", () => {
+  test("manifest assigns all policy actions exactly one Mongoose outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map((entry) => entry.action));
     const nullOmitted = new Set(
-      NULL_REPRESENTATION_OMITTED.map((entry) => entry.action)
+      NULL_REPRESENTATION_OMITTED.map((entry) => entry.action),
     );
     const misclassified = [...MANIFEST_ACTIONS].filter((action) => {
       const count = [
@@ -871,11 +953,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(205);
-    expect(unsupportedCount).toBe(45);
+    expect(MANIFEST_ACTIONS.size).toBe(272);
+    expect(unsupportedCount).toBe(81);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(151);
-    expect(THROWING_ACTIONS).toHaveLength(52);
+    expect(ORACLE_ACTIONS).toHaveLength(182);
+    expect(THROWING_ACTIONS).toHaveLength(88);
     expect(misclassified).toEqual([]);
   });
 
@@ -892,8 +974,8 @@ describe("adversarial conformance corpus", () => {
             mongoose: [{ action: "not-a-declared-shape", reason: "synthetic" }],
           },
         },
-        "mongoose"
-      )
+        "mongoose",
+      ),
     ).toThrow(/declares no such shape to promote/);
   });
 
@@ -927,9 +1009,9 @@ describe("adversarial conformance corpus", () => {
           queryPlan,
           mapper: MAPPER,
           nullAttributeRepresentation: "explicit",
-        })
+        }),
       ).toThrow(message);
-    }
+    },
   );
 
   // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
@@ -949,11 +1031,11 @@ describe("adversarial conformance corpus", () => {
     expect(survivingHalf.length).toBeLessThan(SEEDS.length);
 
     const entry = THROWING_ACTIONS.find(
-      ({ action }) => action === "filter-as-conjunct"
+      ({ action }) => action === "filter-as-conjunct",
     );
     expect(entry).toBeDefined();
     await expect(adapterFilteredIds("filter-as-conjunct")).rejects.toThrow(
-      entry?.message
+      entry?.message,
     );
   });
 
@@ -976,16 +1058,16 @@ describe("adversarial conformance corpus", () => {
       // The same column WITHOUT `nullable` keeps the explicit-null translation, so the empty
       // result above is the mapper flag talking, not a filter that matches nothing everywhere.
       expect(await adapterFilteredIds("null-eq", "explicit")).toEqual(
-        await oracleAllowedIds("null-eq")
+        await oracleAllowedIds("null-eq"),
       );
       expect((await oracleAllowedIds("null-eq")).length).toBeGreaterThan(0);
 
       // The global switch is still the fail-closed backstop for callers who omit attributes
       // without declaring `nullable` on every affected mapper entry.
       await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
-        message
+        message,
       );
-    }
+    },
   );
 
   // #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
@@ -1022,7 +1104,9 @@ describe("adversarial conformance corpus", () => {
         // transport error or mapper typo counting as the required rejection is the silent pass
         // the corpus README warns about.
         if (!String(error).includes(NULL_OMITTED_MESSAGE)) {
-          notRejected.push(`${action} (rejected for the wrong reason: ${String(error)})`);
+          notRejected.push(
+            `${action} (rejected for the wrong reason: ${String(error)})`,
+          );
         }
       }
     }
@@ -1054,7 +1138,7 @@ describe("adversarial conformance corpus", () => {
   // reaches (cerbos/query-plan-adapters#316).
   test("every count threshold over the chain inherits the absent-parent guard", async () => {
     const chain = new PlanExpressionVariable(
-      "request.resource.attr.mainCategory.subCategories"
+      "request.resource.attr.mainCategory.subCategories",
     );
     const size = new PlanExpression("size", [chain]);
     const compare = (operator: string, threshold: number) =>
@@ -1063,7 +1147,7 @@ describe("adversarial conformance corpus", () => {
       new PlanExpression("not", [condition]);
 
     const filteredIdsFor = async (
-      condition: PlanExpressionOperand
+      condition: PlanExpressionOperand,
     ): Promise<string[]> => {
       const result = queryPlanToMongoose({
         queryPlan: {
@@ -1078,7 +1162,7 @@ describe("adversarial conformance corpus", () => {
       });
       expect(result.kind).toBe(PlanKind.CONDITIONAL);
       const rows = await AdversarialResource.find(
-        result.kind === PlanKind.CONDITIONAL ? result.filters : {}
+        result.kind === PlanKind.CONDITIONAL ? result.filters : {},
       )
         .select({ resourceId: 1, _id: 0 })
         .lean()
@@ -1163,7 +1247,7 @@ describe("adversarial conformance corpus", () => {
   test("the seeded to-one chain matches the corpus relation", async () => {
     const withParent = SEEDS.filter((seed) => parentSeedOf(seed) !== undefined);
     const withInner = SEEDS.filter(
-      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined
+      (seed) => parentSeedOf(parentSeedOf(seed)) !== undefined,
     );
     expect(withParent.length).toBeGreaterThan(0);
     expect(withInner.length).toBeGreaterThan(0);
@@ -1171,15 +1255,15 @@ describe("adversarial conformance corpus", () => {
 
     const stored = await AdversarialResource.find(
       {},
-      { resourceId: 1, "parent.aString": 1, "parent.inner.aString": 1, _id: 0 }
+      { resourceId: 1, "parent.aString": 1, "parent.inner.aString": 1, _id: 0 },
     ).lean();
     expect(
       Object.fromEntries(
         stored.map((doc) => [
           doc.resourceId,
           [doc.parent?.aString ?? null, doc.parent?.inner?.aString ?? null],
-        ])
-      )
+        ]),
+      ),
     ).toEqual(
       Object.fromEntries(
         SEEDS.map((seed) => [
@@ -1188,8 +1272,8 @@ describe("adversarial conformance corpus", () => {
             parentSeedOf(seed)?.aString ?? null,
             parentSeedOf(parentSeedOf(seed))?.aString ?? null,
           ],
-        ])
-      )
+        ]),
+      ),
     );
   });
 
@@ -1212,4 +1296,84 @@ describe("adversarial conformance corpus", () => {
       await expectNonDegenerateOracle(action);
     }
   });
+  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
+  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
+  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
+  test.each([
+    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
+    {
+      action: "pv-empty-not-exists",
+      kind: PlanKind.ALWAYS_ALLOWED,
+      total: true,
+    },
+    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
+    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
+    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "pv-structs-missing",
+      kind: PlanKind.ALWAYS_DENIED,
+      total: false,
+    },
+    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "type-hierarchy-number",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
+    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
+  ])(
+    "$action preserves its intentional empty/total oracle and planner shape",
+    async ({ action, kind, total }) => {
+      const [plan, ids] = await Promise.all([
+        cerbos.planResources({
+          principal: seedsFile.principal,
+          resource: { kind: seedsFile.resourceKind },
+          action,
+        }),
+        oracleAllowedIds(action),
+      ]);
+      expect(plan.kind).toBe(kind);
+      expect(ids).toEqual(total ? SEEDS.map((seed) => seed.id).sort() : []);
+    },
+  );
 });

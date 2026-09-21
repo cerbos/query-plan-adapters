@@ -19,6 +19,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
     - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
     - [The absent to-one parent](#the-absent-to-one-parent)
   - [Shapes that live only in a unit test](#shapes-that-live-only-in-a-unit-test)
+  - [Issue #414 port and planner evidence](#issue-414-port-and-planner-evidence)
   - [The real to-one relation](#the-real-to-one-relation)
   - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
   - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
@@ -68,8 +69,8 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   "The oracle recipe" below. Every key except `note` must be consumed by every harness; that is
   asserted, not assumed (see "Deterministic derived fields"). `parentSeedId` is the one key that
   resolves against another row — see "The real to-one relation" below.
-- `derived-fields.json` — the five attributes derived from each seed (`createdBy`, `aDouble`,
-  `createdAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
+- `derived-fields.json` — the six attributes derived from each seed (`createdBy`, `aDouble`,
+  `createdAt`, `updatedAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
   instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
   from `seeds.json` and fails on drift. See "Deterministic derived fields" below.
 - `actions.json` — every action in `policies/adversarial.yaml`, grouped into `adapters` (the
@@ -174,7 +175,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 22 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 26 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -242,7 +243,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 22 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 26 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -381,47 +382,24 @@ carries any more is a stale entry, not a licence.
   asked of none of the others; each is a bridge tracked by
   [#414](https://github.com/cerbos/query-plan-adapters/issues/414) and is deleted when its corpus
   action lands. Every one opens with *Corpus gap.* in the test:
-  - `aValueListElementMissingTheProjectedFieldIsRefused` — a struct element without the projected
-    field, under a principal list of structs;
-  - `containsEscapesTheWildcardMetacharactersInItsNeedle` and
-    `endsWithEscapesTheWildcardMetacharactersInItsNeedle` — no seed value carries a `*` or a `?`,
-    so no corpus action exercises the escaping this adapter actually needs (the surface suite
-    executes it against Lucene);
-  - `aRegexOutsideTheSharedRe2LuceneSubsetIsRefused`,
-    `aTopLevelAlternationInAnAnchoredRegexIsRefusedAndAParenthesisedOneTranslates` and
-    `aBraceThatDoesNotBeginARepetitionIntervalIsRefused`, plus the surface suite's
-    `luceneOptionalOperatorsAreLiteralsBecauseTheAdapterDisablesThem`,
-    `luceneDotMatchesANewlineWhichIsWhyTheAdapterRefusesIt` and
-    `luceneAlternationIsWholeFieldWhichIsWhyATopLevelBarIsRefused` — the corpus's one `matches()`
-    action (`p-matches`) lowers to a `prefix` query and never reaches Lucene's regex engine;
-  - `anUnfoldableMacroOverAValueListIsRefusedByName` — `exists_one`, `filter` and `map` over a
-    principal value list;
-  - `exceptIsRefusedByNameWhereverItAppears` — `except(list, list)` in every position it can
-    arrive in. The nested `must_not` the adapter once emitted for a *lambda* form of `except` was
-    unreachable from any real plan and is gone; what remains is a refusal by name;
-  - `aTernaryAsALambdaBodyIsRefusedByName` — the ternary that *is* the lambda body;
-  - `anEmptyValueListKeepsCelIdentitySemantics`,
-    `aNegatedValueListMacroFoldsExactlyAsTheUnrolledChainDoes`,
-    `aValueListElementFieldIsDrilledIntoDuringTheFold`,
-    `aStructElementHoldingANullMemberIsRefusedRatherThanCrashing` and
-    `aNestedLambdaRebindingTheVariableShadowsTheSubstitution` — the value-list fold under shapes
-    the corpus principal never produces: an empty list, a negated macro, struct elements, a null
-    member, a rebound iteration variable;
-  - `everySpellingOfNonEmptinessIsTheSameCheck` — `size(c) >= 1` and `size(c) != 0`;
-  - `sizeOverAStringOrANumberIsRefusedRatherThanLoweredToExists` — **the suspected live
-    over-grant**: `size(R.attr.aString) > 0` used to lower to `exists`, which matches the indexed
-    empty string `a8` carries while `check()` denies it. The corpus's string-length actions are all
-    thresholds, so none reaches the branch;
-  - `membershipOverNumbersBindsIntegralValuesAsIntegers`,
-    `anIntegralLiteralOutsideTheLongRangeStaysADouble` and
-    `aNonFiniteNumericLiteralIsRefusedAtTheLeaf` — numeric literal conversion the corpus's string
-    `terms` and unfolded `nan-ord-*` divisions never exercise;
-  - `hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt` and
-    `hasIntersectionWithTheProjectionOnEitherSideEmitsTheSameNestedQuery` — the symmetric operand
-    positions `in-null-elem-hasint` and the `map()` projection do not cover;
-  - `aNonScalarLiteralWhereAScalarIsExpectedIsRefused` — list and map literals where a `term` or
-    `range` expects a scalar;
-  - `anEmptyHierarchyDelimiterIsRefused` — `hierarchy(R.attr.scope, "")`.
+  - `anUnfoldableMacroOverAValueListIsRefusedByName` — direct boolean-root `filter` and
+    `map` results; the new actions use computed collections as operands instead;
+  - `exceptIsRefusedByNameWhereverItAppears` — directly negated and nested-lambda arrival
+    positions; root, size and equality positions are now corpus actions;
+  - `everySpellingOfNonEmptinessIsTheSameCheck` — direct flat-collection `size != 0` and its
+    negation; `size-ge-one` covers the inclusive threshold;
+  - `hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt` — intersection
+    inside a nested lambda; the flat and projected operand orders are now corpus actions;
+  - `aNonScalarLiteralWhereAScalarIsExpectedIsRefused` — raw protobuf structured values in
+    ordering and string operations. The new equality actions also cover the planner's
+    `list`/`struct` expression representation, which is a distinct wire shape.
+
+The numeric decoder's exact signed-long boundaries and non-finite protobuf values remain
+wire contracts. The pinned PDP cannot serialize a non-finite literal (see the evidence below).
+The regex surface tests remain mechanism tests against Lucene: they demonstrate why the
+classified regex actions are refused, a property the corpus's refusal assertion cannot measure.
+
+The empty hierarchy delimiter is now covered by `hier-empty-delim`.
 
 **spring-data** (`SpringDataQueryPlanAdapterTest`; the banners in the class are the source, and
 every kind-3 test opens with *Corpus gap.*):
@@ -443,15 +421,53 @@ every kind-3 test opens with *Corpus gap.*):
 - **Kind 3 — a corpus gap wearing a unit test.** Bridges tracked by
   [#414](https://github.com/cerbos/query-plan-adapters/issues/414), grouped as the banners group
   them: `size(collection)` against an arbitrary threshold and the fractional and out-of-int-range
-  thresholds; `except(list, list)` in every arrival shape (the lambda-form assertion that once sat
-  beside them was a phantom no plan produces and is gone); the empty-list intersection
-  short-circuit; `eq`/`ne` against a list or map constant; the `add` solve forms; the CEL primitive
+  thresholds; empty-list intersection over a direct scalar, relation or map projection (the new action
+  covers an absent to-one parent); value-first and relation structured comparisons; suffix and integral `add` solve forms; the CEL primitive
   and minor-operator shapes; collection-macro composition; value-first operand orders beyond the
   ones the corpus carries; the ternary rewrite's nested, negated and value-first forms; the
-  error-message context and no-value-leak discipline; the SQL Server `[` escaping (a gap of the
+  SQL Server `[` escaping (a gap of the
   *store* dimension — no leg executes on SQL Server); the constant-receiver string matches;
   arithmetic as a comparison operand; constant NaN and infinity ordering; and the
   `timestamp(field)` operator cells the corpus does not reach.
+
+Error-message context, list cardinality and value redaction remain independent translator
+contracts even where a corpus action already proves the refusal.
+
+### Issue #414 port and planner evidence
+
+The port adds 67 actions. The original families now have corpus spellings: wildcard needles,
+ten regex patterns beyond a literal prefix, the three arrival positions of two-list `except`,
+`size-ge-one`, `in-numbers`, the four empty-list macro identities, principal struct projections,
+variable shadowing, negated principal macros, `root-not-bool`, and literal membership inside a
+lambda. `h4` carries the string `"0"` beside numeric `0`, so heterogeneous equality is also tested
+against SQLite's numeric-string coercion. `h1` carries `a{q}*?b`, `h2` carries `a\nb`, and `h3` carries `ab`: together they distinguish
+literal wildcard escaping, RE2's newline rule, a literal brace, and a real regex match. The
+principal struct fixtures contain `list`/`struct`/`set-field` expressions, which is what the pinned
+planner actually emits; they must not be replaced with assumed protobuf value-list fixtures.
+
+The September 18 follow-up adds heterogeneous equality and string-operation probes, omitted
+variable membership, unsolvable concatenation under negation, a hierarchy prefix whose list
+still reads a missing attribute, empty intersection through an absent parent, a nested divisor,
+and raw temporal equality. `type-string-number` uses principal `zero: 0`, so MySQL coercing a
+non-numeric string to zero is observable. The type probes deliberately have empty oracles: their
+purpose is to catch a datastore matching values CEL cannot compare or operate on. Empty macro
+identities and non-scalar literal probes also need explicit empty/total-oracle assertions rather
+than inclusion in the non-degeneracy lists.
+
+`not-nan-ord-le` settles the NaN question by distinguishing the ternary arms. The boolean-true
+arm compares `1 <= 0.5`, so negation allows it. The boolean-false arm compares `0.5 <= NaN`, and
+**remains denied under negation**. Thus folding that unordered comparison to false is wrong:
+CEL raises an error on this arm, and negation does not turn the error into an allow.
+
+One requested spelling cannot produce a JSON fixture with the pinned PDP:
+`R.attr.aNumber / (0.0 / 0.0) > 0` compiles, but `PlanResources` returns HTTP 500 with
+`proto: google.protobuf.Value.number_value: invalid NaN value`. It is excluded from the active
+manifest because no adapter receives a plan. This is an upstream serialization limitation,
+not an adapter refusal; the nested finite-divisor case is carried by `div-by-division`.
+
+The Java unit-test registry above remains authoritative for finer operator cells not replaced
+by these actions. A broad family action does not establish coverage of every refusal location,
+operand order, or caller contract; a surviving *Corpus gap.* label is still pending port work.
 
 ### The real to-one relation
 
@@ -656,7 +672,7 @@ only inside a shape some adapters throw on is not proven for those adapters.
 
 `root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
 specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 22 seeds. A total oracle is exactly what the degeneracy guard below exists
+that spelling allows all 26 seeds. A total oracle is exactly what the degeneracy guard below exists
 to catch, and it would have passed against any filter whatsoever.
 
 ### Hazard classes the corpus missed
@@ -814,7 +830,7 @@ prompt to move the action back into the oracle run.
 
 ### Deterministic derived fields
 
-The corpus keeps raw relational rows compact; five resource attributes and stored columns are
+The corpus keeps raw relational rows compact; six resource attributes and stored columns are
 derived from each seed. **The values live in `derived-fields.json`, one entry per seed id, and
 every harness reads them from there.** They used to be hand-transcribed once per harness, which is
 how a transcription error becomes invisible: the same copy feeds the stored row *and* the check()
@@ -836,6 +852,10 @@ The rules the file materialises:
 - `createdAt`: `a1 = 2020-03-15T10:30:00Z`, `a2 = 2037-01-01T00:00:00Z`, `a3 = NULL`/missing,
   `a4 = 2024-06-01T00:00:00Z`, `a5 = 2020-03-15T10:30:00.123456Z`; otherwise use
   `2036-06-06T06:06:06Z` when `aNumber >= 2`, or `2021-05-05T05:05:05Z`.
+- `updatedAt`: `a1 = 2020-03-15T10:30:00.000Z`, `a4 = 2024-06-01T00:00:00Z`; otherwise
+  NULL/missing. `a1` equals `createdAt` as an instant but differs as an RFC 3339 string, while
+  `a4` is equal under both readings. Oracle attributes must preserve these original strings;
+  parsing them and serializing the normalized instant would erase the witness.
 - third-level `labels[].name`: `a1 = ["gold", "silver"]`, `a6 = [missing, "silver"]`,
   `a8 = ["silver"]`, `c1 = ["Gold"]`, otherwise empty.
 - `scope`: `a1=dept`, `a2=dept.eng`, `a3=dept.eng.platform`,
@@ -859,7 +879,7 @@ one permitted exclusion: it is corpus prose no harness reads. The same assertion
 the one nested object array a seed carries; a key added inside an element is dropped just as
 silently as a top-level one.
 
-The same assertion covers `derived-fields.json`: each harness declares the five fields it consumes
+The same assertion covers `derived-fields.json`: each harness declares the six fields it consumes
 and fails if the file's `fields` list, or any entry's key set, differs. Concretely this is
 `DisallowUnknownFields` plus a key-set assertion in Go, records without
 `@JsonIgnoreProperties(ignoreUnknown = true)` plus a key-set assertion in Java, and an explicit
@@ -879,11 +899,12 @@ role dropped on the way in changes every policy decision at once; that it is les
 projected away than an attribute is a reason to expect that half of the assertion to stay quiet, not
 a reason to omit it.
 
-The attribute *values* are asserted too, because the key set says nothing about a change inside one
-and three of the four attributes are lists. The corpus carries exactly two shapes — a string and a
-list of strings — and the Java harnesses convert on exactly that basis, so a third shape has to fail
-at the declaration rather than be reshaped by one adapter's SDK and passed through untyped by
-another. That is the same reason the seed guard descends into `tags[]`.
+The attribute *values* are asserted too: string scalars, the numeric `zero`, string lists
+(including `emptyTeams`), and three lists of structs. `manyStructs` has a string `name` on every
+element, `nullableStructs` has an explicit null `name`, and `missingStructs` has empty objects.
+Each struct list has eleven elements to cross the planner's unrolling threshold. The guards
+validate each nested key and value shape so an SDK cannot silently erase a missing/null
+distinction. That is the same reason the seed guard descends into `tags[]`.
 
 The construction itself stays verbatim pass-through: the guard exists to keep it that way, not to
 replace it. `scripts/regenerate-wire-fixtures.sh` needs no equivalent — it copies `.principal`

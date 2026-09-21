@@ -55,6 +55,7 @@ const (
 	ValueTimestamp = queryplan.ValueTimestamp
 	ValueBool      = queryplan.ValueBool
 	ValueString    = queryplan.ValueString
+	ValueNumber    = queryplan.ValueNumber
 )
 
 // Restriction comparisons, for Relation.SubqueryFilter and Hop.SubqueryFilter.

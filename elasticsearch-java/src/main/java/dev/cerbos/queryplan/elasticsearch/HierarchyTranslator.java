@@ -41,8 +41,10 @@ import java.util.Map;
 final class HierarchyTranslator {
 
     private final Scope root;
+    private final Map<String, ElasticsearchQueryPlanAdapter.ScalarType> scalarTypes;
 
-    HierarchyTranslator(Scope root) {
+    HierarchyTranslator(Scope root, Map<String, ElasticsearchQueryPlanAdapter.ScalarType> scalarTypes) {
+        this.scalarTypes = scalarTypes;
         this.root = root;
     }
 
@@ -80,6 +82,19 @@ final class HierarchyTranslator {
      * already needs.
      */
     Map<String, Object> translate(String operator, List<Operand> operands, Polarity polarity) {
+        for (Operand operand : operands) {
+            if (operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && "hierarchy".equals(operand.getExpression().getOperator())
+                    && operand.getExpression().getOperandsCount() > 0) {
+                Operand value = operand.getExpression().getOperands(0);
+                if (value.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    ElasticsearchQueryPlanAdapter.ScalarType type = scalarTypes.get(root.field(value.getVariable()));
+                    if (type != null && type != ElasticsearchQueryPlanAdapter.ScalarType.STRING) {
+                        return Queries.matchNone();
+                    }
+                }
+            }
+        }
         if (!polarity.holds()) {
             throw negatedHierarchy(operator);
         }

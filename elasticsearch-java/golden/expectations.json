@@ -117,6 +117,50 @@
         }
       }
     },
+    "hasint-map-vf": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "terms": {
+                    "tags.name": [
+                      "public",
+                      "other"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "nested": {
+                      "path": "tags",
+                      "query": {
+                        "bool": {
+                          "must_not": [
+                            {
+                              "exists": {
+                                "field": "tags.name"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
     "hier-ancestor-cf": {
       "kind": "CONDITIONAL",
       "query": {
@@ -340,6 +384,18 @@
       "query": {
         "exists": {
           "field": "owner"
+        }
+      }
+    },
+    "in-numbers": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aNumber": [
+            2,
+            3,
+            5
+          ]
         }
       }
     },
@@ -1143,6 +1199,18 @@
         }
       }
     },
+    "pv-empty-all": {
+      "kind": "ALWAYS_ALLOWED"
+    },
+    "pv-empty-exists": {
+      "kind": "ALWAYS_DENIED"
+    },
+    "pv-empty-not-all": {
+      "kind": "ALWAYS_DENIED"
+    },
+    "pv-empty-not-exists": {
+      "kind": "ALWAYS_ALLOWED"
+    },
     "pv-exists": {
       "kind": "CONDITIONAL",
       "query": {
@@ -1265,6 +1333,731 @@
               }
             }
           ]
+        }
+      }
+    },
+    "pv-not-all": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "set"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "same"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": ""
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "%_o"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "X"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "Y"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "MIRROR"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-1"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-2"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-3"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-4"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-not-exists": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "set"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "same"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": ""
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "%_o"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "X"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "Y"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "MIRROR"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-1"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-2"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-3"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aOptionalString"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aOptionalString": {
+                              "value": "filler-4"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-shadow": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "term": {
+                    "tags.name": {
+                      "value": "public"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pv-structs-missing": {
+      "kind": "ALWAYS_DENIED"
+    },
+    "regex-grouped": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "regexp": {
+          "aString": {
+            "flags": "NONE",
+            "value": "(ab|b)"
+          }
+        }
+      }
+    },
+    "regex-optional-operators": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "regexp": {
+          "aString": {
+            "flags": "NONE",
+            "value": "[ab@#&~<>]+"
+          }
+        }
+      }
+    },
+    "regex-repetition": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "regexp": {
+          "aString": {
+            "flags": "NONE",
+            "value": "(ab){1,2}"
+          }
         }
       }
     },
@@ -1471,6 +2264,16 @@
         }
       }
     },
+    "root-not-bool": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "term": {
+          "aBool": {
+            "value": false
+          }
+        }
+      }
+    },
     "root-or": {
       "kind": "CONDITIONAL",
       "query": {
@@ -1492,6 +2295,17 @@
               }
             }
           ]
+        }
+      }
+    },
+    "size-ge-one": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "nested": {
+          "path": "tags",
+          "query": {
+            "match_all": { }
+          }
         }
       }
     },
@@ -1550,6 +2364,42 @@
             }
           ]
         }
+      }
+    },
+    "type-hierarchy-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
+      }
+    },
+    "type-number-contains": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
+      }
+    },
+    "type-number-endswith": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
+      }
+    },
+    "type-number-startswith": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
+      }
+    },
+    "type-number-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
+      }
+    },
+    "type-string-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "match_none": { }
       }
     },
     "unicode-eq": {
@@ -1681,6 +2531,26 @@
           "path": "mainCategory.subCategories",
           "query": {
             "match_all": { }
+          }
+        }
+      }
+    },
+    "wildcard-contains": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*\\*\\?b*"
+          }
+        }
+      }
+    },
+    "wildcard-endswith": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "wildcard": {
+          "aString": {
+            "value": "*\\*\\?b"
           }
         }
       }

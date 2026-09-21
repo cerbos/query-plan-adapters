@@ -136,14 +136,20 @@ adapter's own, and three things about the choice made here are worth knowing:
   run under the other major rather than rewriting the file with a compiler swap dressed up as a
   translation change.
 
+**Behavior changes (#414).** Numeric `size()` and string operations now preserve CEL type errors
+instead of allowing SQL coercion. NaN ordering remains an error under negation. Membership also
+preserves the declared NULL convention inside lambda bodies and against stored collections.
+Bare comparisons of temporal attributes now raise: database timestamps discard the RFC 3339
+spelling that CEL compares as a string. Use `timestamp()` on both operands to compare instants.
+
 ## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 22 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 182 reference conformance actions |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, `string()` over a boolean column (SQLite and MySQL store 1/0 and render `'1'` where CEL and PostgreSQL render `'true'`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself) (21 actions) |
+| Oracle-tested | 220 reference conformance actions |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, `string()` over a boolean column (SQLite and MySQL store 1/0 and render `'1'` where CEL and PostgreSQL render `'true'`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself), two-list `except`, constructor expressions and structured membership needles, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (50 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
