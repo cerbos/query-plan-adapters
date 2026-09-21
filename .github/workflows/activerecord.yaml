@@ -64,7 +64,10 @@ jobs:
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
-        run: ./scripts/test.sh spec/adversarial_conformance_spec.rb
+        run: |
+          for strict in false true; do
+            ADAPTER_TEST_STRICT_EVALUATION="$strict" ./scripts/test.sh spec/adversarial_conformance_spec.rb
+          done
 
       - name: Lint
         if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'

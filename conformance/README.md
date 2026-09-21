@@ -46,6 +46,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
   - [Vendored code stays byte-identical](#vendored-code-stays-byte-identical)
   - [Mapping hazards: the rows the subquery sees](#mapping-hazards-the-rows-the-subquery-sees)
   - [Gotchas worth knowing up front](#gotchas-worth-knowing-up-front)
+- [Evaluation modes and the 0.55 baseline](#evaluation-modes-and-the-055-baseline)
 - [Regenerating wire fixtures after a Cerbos version bump](#regenerating-wire-fixtures-after-a-cerbos-version-bump)
 
 ## Why this exists
@@ -94,6 +95,9 @@ rows, and one oracle recipe that every adapter's harness implements against its 
   adapter or database — a `diff` against a freshly-regenerated fixture after bumping
   `CERBOS_VERSION` shows exactly what the planner's output changed for a given hostile shape,
   which is a much smaller signal than "an adapter test failed."
+- `wire-fixtures-strict/*.json` — the same actions captured by real `PlanResources` requests
+  against a separately started PDP with `engine.strictEvaluation=true`. These are generated
+  independently, never copied from the default capture, even when their contents agree.
 - `CERBOS_VERSION` — the exact Cerbos PDP version the wire fixtures were captured against.
   Deliberately pinned rather than `latest`: a fixture diff should come from a deliberate version
   bump, not silently from whatever `latest` resolved to on a given day.
@@ -468,10 +472,12 @@ purpose is to catch a datastore matching values CEL cannot compare or operate on
 identities and non-scalar literal probes also need explicit empty/total-oracle assertions rather
 than inclusion in the non-degeneracy lists.
 
-`not-nan-ord-le` settles the NaN question by distinguishing the ternary arms. The boolean-true
-arm compares `1 <= 0.5`, so negation allows it. The boolean-false arm compares `0.5 <= NaN`, and
-**remains denied under negation**. Thus folding that unordered comparison to false is wrong:
-CEL raises an error on this arm, and negation does not turn the error into an allow.
+`not-nan-ord-le` distinguishes the ternary arms under the Cerbos 0.55 / CEL 0.30 semantics.
+The boolean-true arm compares `1 <= 2`, so negation denies it. The boolean-false arm compares
+`0.5 <= NaN`, which is false, so **negation allows it**. This changed from 0.54, where that
+unordered comparison raised an error and remained denied under negation. The finite arm was
+changed deliberately during the upgrade: retaining `1 <= 0.5` made the new oracle total and
+tripped every harness's degeneracy guard. See "Evaluation modes and the 0.55 baseline" below.
 
 One requested spelling cannot produce a JSON fixture with the pinned PDP:
 `R.attr.aNumber / (0.0 / 0.0) > 0` compiles, but `PlanResources` returns HTTP 500 with
@@ -492,9 +498,11 @@ engine that also matches before a final newline. The same new seed carries the d
 `p-timestamp` and the new `cast-not-timestamp` negation. The derivation checker records
 that exception independently; harnesses continue to read the materialised value.
 
-The pinned PDP **accepts and plans** `a(?=b)`, even though its RE2 checker raises on the
-lookahead. `regex-lookahead` therefore belongs in the corpus, rather than in the registry
-of shapes rejected before planning. A PCRE engine accepting the expression would allow
+Cerbos 0.55 rejects a **literal** `a(?=b)` at compile time. `regex-lookahead` selects the
+same string through the known principal's `context` attribute, deferring validation until
+evaluation and preserving the original `matches` wire node. This runtime spelling still
+belongs in the corpus; `scripts/check-evaluation-modes.sh` separately asserts the literal's
+compile rejection in both modes. A PCRE engine accepting the expression would allow
 `h3` and `h5`, which the checker denies. `regex-eq-true` separately pins the retained
 `eq(matches(...), true)` expression instead of assuming the planner folds its wrapper.
 
@@ -1517,6 +1525,68 @@ the policy suite and classify it like anything else.
   Each adapter's README names the stores its contract is actually proved on, and how much of the
   corpus each one actually executes.
 
+## Evaluation modes and the 0.55 baseline
+
+The current baseline is Cerbos **0.55.0**, with both `engine.strictEvaluation=false` (the PDP
+default) and `true`. Every live adapter suite accepts `ADAPTER_TEST_STRICT_EVALUATION=false|true`,
+defaults to `false`, rejects other values, and sets the engine flag explicitly. CI executes both
+modes inside the existing adversarial jobs, retaining the database/ORM dimensions and baseline
+Node gate. Each run compares its translated filter with `check()` from the **same PDP mode**.
+A strict-mode result is never compared with a default-mode oracle.
+
+`scripts/regenerate-wire-fixtures.sh` captures both modes independently: `wire-fixtures/` holds
+default-mode plans and `wire-fixtures-strict/` holds strict-mode plans. It publishes neither
+capture until both succeed. `validate-corpus.sh` checks complete action coverage, response identity,
+plan kinds and timestamp normalization in each directory. Offline translator tests continue to
+consume the default fixtures; the live suites execute plans from both modes. The two fixture sets
+currently match. This is an observed property, not a reason to copy one over the other or assume
+that their check decisions must agree. The classification ledger is shared because current
+adapter support/refusal classifications agree in both modes; any future difference must be
+measured and represented explicitly rather than skipped.
+
+Strict evaluation denies an affected action when a rule condition errors; variable errors affect
+referencing actions, and derived-role errors affect rules using that role. The existing adapter
+corpus predominantly exercises individual conditions. `evaluation-modes/` therefore defines
+**engine contract probes** against dedicated resource kinds in the same `policies/` tree,
+run by `scripts/check-evaluation-modes.sh`: a matching ALLOW alongside
+an erroring DENY, missing attributes, type errors, a referenced variable, a derived role, and an
+unrelated action that must remain allowed. Known principal inputs make these plans unconditional,
+so the probes assert exact Check decisions and Plan kinds in both modes without implementing an
+adapter or weakening the corpus's non-degeneracy guards. They also assert a valid-input control.
+
+The 0.55 upgrade exposed three distinct changes:
+
+- **Invalid literal regexes fail compilation.** The live `regex-lookahead` action uses a
+  principal-selected pattern to retain the hostile plan; the engine probes pin the literal
+  compile failure separately.
+- **Compile-time non-finite arithmetic cannot be serialized in a plan.** The five NaN/infinity
+  actions include `now() == now()`: Cerbos captures one timestamp per evaluation, so it is true,
+  and expressions containing `now()` bypass compile-time constant folding. This preserves the
+  original division subtrees and their adapter coverage. Engine probes separately require the
+  unguarded NaN and infinity plans to fail with their actual HTTP 500 serialization diagnostics,
+  while checking their per-resource decisions. If upstream fixes serialization, those probes
+  fail and prompt removal of the workaround rather than silently losing coverage.
+- **NaN ordering now yields false, including beneath negation.** The original wire plan stayed
+  unchanged while Check decisions changed. Adapters that fold these comparisons must preserve
+  false under negation, rather than treating NaN as an evaluation error. Missing attributes and
+  SQL NULL still retain their own error/unknown semantics. This is a consumer-visible semantic
+  change: the updated adapters target the 0.55 baseline and must not claim unchanged 0.54
+  compatibility for these expressions.
+
+Two additional corpus actions protect the migration fixes. `not-ternary-parent` distinguishes
+an unselected missing relation from a selected missing/null attribute under ternary negation;
+negating the whole translated relation predicate can either deny the former or allow the latter.
+`not-nan-order-string` distinguishes a finite-number/string type error from NaN/string ordering,
+which CEL 0.30 treats as false. Each action is classified from live adapter runs, with its actual
+refusal message where required, and participates in the corresponding non-degeneracy guard.
+The latter also catches SQL dialects inferring an all-NULL conditional expression as text where
+a boolean UNKNOWN is required.
+
+The existing `p-has` planner divergence remains pinned in both modes; strict evaluation does not
+remove that limitation. New SDK/renderer goldens are reviewed only after same-mode live oracle
+checks pass. A future PDP upgrade must review both plan diffs **and** decision changes: identical
+wire output alone does not establish semantic compatibility.
+
 ## Regenerating wire fixtures after a Cerbos version bump
 
 ```bash
@@ -1524,8 +1594,9 @@ the policy suite and classify it like anything else.
 #   docker buildx imagetools inspect ghcr.io/cerbos/cerbos:$(cat CERBOS_VERSION) \
 #     --format '{{.Manifest.Digest}}' > CERBOS_IMAGE_DIGEST
 ./scripts/regenerate-wire-fixtures.sh
-git diff conformance/wire-fixtures   # review exactly what the planner's wire output changed
-./scripts/validate-corpus.sh         # fails if any restatement still names the old tag or digest
+git diff -- wire-fixtures wire-fixtures-strict  # from conformance/: review both modes
+./scripts/check-evaluation-modes.sh # Check/Plan error scoping and planner limitations
+./scripts/validate-corpus.sh        # both fixture sets and every pin restatement
 ```
 
 Requires `docker`, `curl`, and `jq`.

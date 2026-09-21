@@ -1432,8 +1432,8 @@ const buildValueExpression = (
     if (operator === "div") {
       // CEL attribute arithmetic is double-typed: force REAL division so an
       // INTEGER/INTEGER pair does not silently truncate (3 / 2 must be 1.5, not 1).
-      // SQLite yields NULL for division by zero — UNKNOWN, excluded under both
-      // polarities — matching CEL's NaN comparisons (always false → deny).
+      // buildComparisonFilter handles non-finite results in separate IEEE arms;
+      // this expression supplies its finite branch.
       return sql`(cast(${left} as float(53)) / ${right})`;
     }
     if (operator === "add" && isStringConcatenation(operands, mapper)) {
@@ -2685,13 +2685,13 @@ const evaluateConstantNumberComparison = (
   operator: LeafComparisonOperator,
   left: number,
   right: number,
-): boolean | null => {
+): boolean => {
   if (
     operator !== "eq" &&
     operator !== "ne" &&
     (Number.isNaN(left) || Number.isNaN(right))
   )
-    return null;
+    return false;
   switch (operator) {
     case "eq":
       return left === right;
@@ -2905,11 +2905,7 @@ const buildComparisonFilter = (
       const result = divisionIsLeft
         ? evaluateConstantNumberComparison(operator, folded, 0)
         : evaluateConstantNumberComparison(operator, 0, folded);
-      return result === null
-        ? sql`null`
-        : result !== negated
-          ? sql`true`
-          : sql`false`;
+      return result !== negated ? sql`true` : sql`false`;
     };
 
     const enclosingExpr = buildValueExpression(enclosing, mapper, options);
@@ -2973,11 +2969,7 @@ const buildComparisonFilter = (
       leftConstant.value,
       rightConstant.value,
     );
-    return result === null
-      ? sql`null`
-      : result !== negated
-        ? TRUE_CONDITION
-        : FALSE_CONDITION;
+    return result !== negated ? TRUE_CONDITION : FALSE_CONDITION;
   }
 
   const buildDynamicNaNComparison = (
@@ -2991,12 +2983,7 @@ const buildComparisonFilter = (
     const presentResult = nanIsLeft
       ? evaluateConstantNumberComparison(operator, Number.NaN, 0)
       : evaluateConstantNumberComparison(operator, 0, Number.NaN);
-    const presentCondition =
-      presentResult === null
-        ? sql`null`
-        : presentResult
-          ? sql`true`
-          : sql`false`;
+    const presentCondition = presentResult ? sql`true` : sql`false`;
     let filter = sql`(case when ${dynamic.expr} is null then null else ${presentCondition} end)`;
     if (dynamic.relations.length) {
       const reference = isNameOperand(dynamicOperand)
@@ -3035,11 +3022,7 @@ const buildComparisonFilter = (
         `'${operator}' cannot compare the provided constant value types`,
       );
     }
-    return result === null
-      ? sql`null`
-      : result !== negated
-        ? TRUE_CONDITION
-        : FALSE_CONDITION;
+    return result !== negated ? TRUE_CONDITION : FALSE_CONDITION;
   }
 
   if (
@@ -3101,7 +3084,9 @@ const buildComparisonFilter = (
           ? bothExplicitNull
             ? not(equality)
             : sql`true`
-          : sql`null`;
+          // A boolean UNKNOWN on every dialect; bare NULL is inferred as text by
+          // PostgreSQL when both CASE arms are NULL, and NOT then rejects it.
+          : sql`(null = true)`;
     const comparison = nullGuard
       ? sql`(case when ${nullGuard} then null else ${present} end)`
       : present;

@@ -1,0 +1,20 @@
+{
+  "action": "vf-lt",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "value": 1
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ]
+      }
+    }
+  }
+}

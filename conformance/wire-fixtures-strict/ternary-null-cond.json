@@ -1,0 +1,43 @@
+{
+  "action": "ternary-null-cond",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "ne",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      },
+                      {
+                        "value": "x"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          },
+          {
+            "value": 1
+          }
+        ]
+      }
+    }
+  }
+}

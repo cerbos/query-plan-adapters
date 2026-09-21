@@ -1,11 +1,11 @@
 module github.com/cerbos/query-plan-adapters/ent/example
 
-go 1.25.11
+go 1.26.4
 
 require (
 	entgo.io/ent v0.14.6
 	github.com/cerbos/cerbos-sdk-go v0.4.2
-	github.com/cerbos/cerbos/api/genpb v0.54.0
+	github.com/cerbos/cerbos/api/genpb v0.55.0
 	github.com/cerbos/query-plan-adapters/ent v0.0.0
 	modernc.org/sqlite v1.56.0
 )
@@ -67,7 +67,7 @@ require (
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.1.4-0.20260115111900-9e59c2286df0 // indirect
 	github.com/olekukonko/tablewriter v1.1.3 // indirect
-	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25 // indirect
+	github.com/planetscale/vtprotobuf v0.6.1-0.20260702190614-8ae5a48058df // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect

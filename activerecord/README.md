@@ -53,6 +53,19 @@ to coerce a string such as `"0"` into a number; two declared explicit nulls stil
 
 ### Conformance contract
 
+**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
+false, so its negation is true. This differs from Cerbos 0.54, where the comparison was
+an evaluation error and remained denied under negation. Missing attributes and other
+evaluation errors retain their existing behavior.
+
+
+The corpus is verified against Cerbos 0.55.0 with strict evaluation both disabled and enabled.
+
+The live conformance harness accepts `ADAPTER_TEST_STRICT_EVALUATION=false` (the default)
+or `true`, and rejects other values. CI runs both modes against the same corpus, comparing
+each plan with `check()` decisions from a PDP configured with that same mode.
+
+
 The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
 `../conformance/CERBOS_IMAGE_DIGEST`. For each action, the test makes a
 plan with a real PDP, translates the plan, runs the query against 27 difficult rows, and
@@ -67,7 +80,7 @@ server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 223 corpus actions |
+| Tested against the oracle | 226 corpus actions |
 | Fail-closed | 67 actions: 56 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |

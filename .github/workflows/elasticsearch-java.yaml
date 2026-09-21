@@ -79,7 +79,9 @@ jobs:
       # as a task input — so the two legs run the same build against different pinned servers, and
       # neither can be reported UP-TO-DATE on the other's result.
       - name: Build and test (${{ matrix.elasticsearch-image-file }})
-        run: gradle build --no-daemon
+        run: |
+          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*ElasticsearchAdversarialConformanceTest' --no-daemon
         env:
           ELASTICSEARCH_IMAGE_FILE: ${{ matrix.elasticsearch-image-file }}
 

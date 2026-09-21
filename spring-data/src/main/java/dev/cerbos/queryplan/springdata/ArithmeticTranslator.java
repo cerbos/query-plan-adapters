@@ -226,7 +226,9 @@ final class ArithmeticTranslator {
                 && right instanceof NumericOperand.Constant rc) {
             return comparisons.constantComparison(op, lc.value(), rc.value());
         }
+        Operand fieldOperand = operands.get(0);
         if (left instanceof NumericOperand.Constant) {
+            fieldOperand = operands.get(1);
             NumericOperand tmp = left;
             left = right;
             right = tmp;
@@ -239,6 +241,16 @@ final class ArithmeticTranslator {
             // literal on H2/Postgres and pull the comparison out of IEEE space.
             String cmpOp = op;
             double v = rc.value();
+            if (Double.isNaN(v) && !"eq".equals(cmpOp) && !"ne".equals(cmpOp)) {
+                // Cerbos 0.55 compares NaN as unordered even against a present non-number.
+                // Inspect the original column for presence: casting a string to double would
+                // fail in SQL before the constant false result can be negated.
+                jakarta.persistence.criteria.Expression<?> presence =
+                        fieldOperand.getNodeCase() == Operand.NodeCase.VARIABLE
+                                ? scope.path(fieldOperand.getVariable()) : lhs;
+                return leaf.withOverride(cmpOp, lhs, v, () -> tri.baseUnlessUnknown(
+                        cb.disjunction(), () -> cb.isNull(presence)));
+            }
             return leaf.withOverride(cmpOp, lhs, rc.value(), () -> switch (cmpOp) {
                 case "eq" -> cb.equal(lhs, v);
                 case "ne" -> cb.notEqual(lhs, v);

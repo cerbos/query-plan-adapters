@@ -116,7 +116,14 @@ jobs:
       - name: Run adversarial conformance tests
         env:
           CONVEX_URL: http://127.0.0.1:3210
-        run: npm run test:adversarial
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       - name: Stop Convex backend
         if: always()

@@ -1,0 +1,27 @@
+{
+  "action": "vf-size",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "value": 0
+          },
+          {
+            "expression": {
+              "operator": "size",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

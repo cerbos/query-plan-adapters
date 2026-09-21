@@ -1,0 +1,10 @@
+{
+  "action": "root-bare-bool",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "variable": "request.resource.attr.aBool"
+    }
+  }
+}

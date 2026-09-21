@@ -1,0 +1,37 @@
+{
+  "action": "arith-mod",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "mod",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "int",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 2
+                }
+              ]
+            }
+          },
+          {
+            "value": 1
+          }
+        ]
+      }
+    }
+  }
+}

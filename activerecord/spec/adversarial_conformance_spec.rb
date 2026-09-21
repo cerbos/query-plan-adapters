@@ -169,7 +169,7 @@ RSpec.describe "adversarial conformance" do
       lambda-in-literal lambda-in-literal-neg lambda-ternary
       in-var-var-omitted in-var-var-omitted-neg not-concat-unsolvable
       not-concat-unsolvable-ne hier-overlaps-list-prefix not-hasint-empty-chain
-      not-nan-ord-le hasint-null-vf hasint-map-vf
+      not-nan-ord-le not-ternary-parent not-nan-order-string hasint-null-vf hasint-map-vf
       hasint-map-null hasint-map-null-vf
     ]).freeze
 
@@ -209,14 +209,14 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(280)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(282)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(293)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(295)
       # Refusals must retain their pinned messages.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(67)
       # Each new hostile group needs a non-degenerate representative.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(97)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(99)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the

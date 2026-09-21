@@ -376,6 +376,7 @@ const MANIFEST_ACTIONS = new Set([
 // anti-vacuity test instead — see "dropping the untranslatable half over-grants" below.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "not-ternary-parent",
   "pv-in",
   "pv-in-unrolled",
   "vf-le",
@@ -475,6 +476,7 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  "not-nan-order-string",
   // size() is lowered only over a named relation, so the string emptiness check throws; an
   // empty hierarchy delimiter is refused before the prefix filter is built; and a regex with a
   // top-level alternation is a matches(), which this adapter never translates.
@@ -1054,7 +1056,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 293 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 295 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1070,10 +1072,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(293);
+    expect(MANIFEST_ACTIONS.size).toBe(295);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(120);
+    expect(THROWING_ACTIONS).toHaveLength(121);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

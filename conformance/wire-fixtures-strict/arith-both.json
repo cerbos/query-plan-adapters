@@ -1,0 +1,40 @@
+{
+  "action": "arith-both",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 1
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "mult",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

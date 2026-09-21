@@ -1,0 +1,20 @@
+{
+  "action": "optional-ne",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "value": "x"
+          }
+        ]
+      }
+    }
+  }
+}

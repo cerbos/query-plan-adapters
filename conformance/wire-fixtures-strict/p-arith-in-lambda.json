@@ -1,0 +1,70 @@
+{
+  "action": "p-arith-in-lambda",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "exists",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "and",
+                    "operands": [
+                      {
+                        "expression": {
+                          "operator": "eq",
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operator": "gt",
+                          "operands": [
+                            {
+                              "expression": {
+                                "operator": "add",
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aNumber"
+                                  },
+                                  {
+                                    "value": 1
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "value": 2
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

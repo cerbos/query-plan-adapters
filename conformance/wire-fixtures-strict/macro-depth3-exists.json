@@ -1,0 +1,80 @@
+{
+  "action": "macro-depth3-exists",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "exists",
+        "operands": [
+          {
+            "variable": "request.resource.attr.categories"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "exists",
+                    "operands": [
+                      {
+                        "variable": "c.subCategories"
+                      },
+                      {
+                        "expression": {
+                          "operator": "lambda",
+                          "operands": [
+                            {
+                              "expression": {
+                                "operator": "exists",
+                                "operands": [
+                                  {
+                                    "variable": "s.labels"
+                                  },
+                                  {
+                                    "expression": {
+                                      "operator": "lambda",
+                                      "operands": [
+                                        {
+                                          "expression": {
+                                            "operator": "eq",
+                                            "operands": [
+                                              {
+                                                "variable": "l.name"
+                                              },
+                                              {
+                                                "value": "gold"
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "variable": "l"
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "c"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

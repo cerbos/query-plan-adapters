@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: nonfinite_plan_probe
+  version: default
+  rules:
+    # Keep all five original corpus expressions unmodified. 0.55 optimization folds their
+    # arithmetic into non-finite values that Plan's JSON serializer cannot encode.
+    # The separate Check probes pin their actual decisions, including the changed negation.
+    - name: original_nan_ternary
+      actions: [nan-ord-ternary]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5'
+    - name: original_nan_value_first
+      actions: [nan-ord-ternary-vf]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: '0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)'
+    - name: original_nan_less_equal
+      actions: [nan-ord-le]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)'
+    - name: original_infinity_order
+      actions: [nan-ord-inf]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
+    - name: original_negated_nan_less_equal
+      actions: [not-nan-ord-le]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0))'

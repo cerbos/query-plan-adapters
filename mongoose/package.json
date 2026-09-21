@@ -43,7 +43,7 @@
     "postversion": "git push && git push --tags",
     "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db \"$(cat MONGO_IMAGE)\"",
     "test": "jest",
-    "test:adversarial": "cerbos run --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js"
+    "test:adversarial": "sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js"
   },
   "engines": {
     "node": ">=22.0.0"

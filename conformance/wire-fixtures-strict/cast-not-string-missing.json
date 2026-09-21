@@ -1,0 +1,34 @@
+{
+  "action": "cast-not-string-missing",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "string",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": "set"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

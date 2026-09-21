@@ -233,7 +233,8 @@ class ElasticsearchAdversarialConformanceTest {
 
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
-                .withCommand("server", "--set=storage.disk.directory=/policies")
+                .withCommand("server", "--set=storage.disk.directory=/policies",
+                        "--set=engine.strictEvaluation=" + CerbosTestImage.strictEvaluation())
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
         // The WHOLE policy directory, not the one file the corpus carries today. A second policy
@@ -303,7 +304,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(162, unsupported.size(),
+        assertEquals(164, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -348,9 +349,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(120, oracleActions.size());
-        assertEquals(171, throwingActions.size());
+        assertEquals(173, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(293, classified.size());
+        assertEquals(295, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -861,7 +862,7 @@ class ElasticsearchAdversarialConformanceTest {
             "cast-not-string-null", "index-fractional", "index-negative",
             "index-not-oob", "regex-eq-true", "regex-lookahead",
             "projection-exists-not-eq",
-            "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-brace", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "pv-except", "lambda-in-literal", "lambda-in-literal-neg", "lambda-ternary", "in-var-var-omitted", "in-var-var-omitted-neg", "not-concat-unsolvable", "not-concat-unsolvable-ne", "hier-overlaps-list-prefix", "not-hasint-empty-chain", "div-by-division", "temporal-raw-eq", "not-nan-ord-le", "hasint-null-vf", "hasint-map-null", "hasint-map-null-vf", "eq-list", "ne-list",
+            "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-brace", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "pv-except", "lambda-in-literal", "lambda-in-literal-neg", "lambda-ternary", "in-var-var-omitted", "in-var-var-omitted-neg", "not-concat-unsolvable", "not-concat-unsolvable-ne", "hier-overlaps-list-prefix", "not-hasint-empty-chain", "div-by-division", "temporal-raw-eq", "not-nan-ord-le", "not-ternary-parent", "not-nan-order-string", "hasint-null-vf", "hasint-map-null", "hasint-map-null-vf", "eq-list", "ne-list",
             // Three shapes the audit added the corpus for, each refused by name here and compared
             // on the adapters that can express it: size() over a string, a top-level regex
             // alternation, and an empty hierarchy delimiter.

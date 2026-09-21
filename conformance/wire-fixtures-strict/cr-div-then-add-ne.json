@@ -1,0 +1,40 @@
+{
+  "action": "cr-div-then-add-ne",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "div",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ]
+            }
+          },
+          {
+            "value": 2
+          }
+        ]
+      }
+    }
+  }
+}

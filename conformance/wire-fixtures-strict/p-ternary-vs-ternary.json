@@ -1,0 +1,56 @@
+{
+  "action": "p-ternary-vs-ternary",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "eq",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": ""
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 1
+                },
+                {
+                  "value": 2
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -98,6 +98,8 @@ const MANIFEST_ACTIONS = new Set([
 // int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "not-nan-order-string",
+  "not-ternary-parent",
   // #430: projection macros and negated leaves through a to-one hop.
   "projection-exists-eq",
   "projection-exists-not-eq",
@@ -708,10 +710,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(293);
+    expect(allActions.size).toBe(295);
     expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(261);
+    expect(ORACLE_ACTIONS).toHaveLength(263);
     expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
@@ -837,17 +839,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 261,
+      total: 263,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 225,
+      defaultPostCount: 227,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 214,
+      pushdownPostCount: 216,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

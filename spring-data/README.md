@@ -418,11 +418,22 @@ picking a direction: the two declarations conflict, and one of them is what chan
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 27 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
+false, so its negation is true. This differs from Cerbos 0.54, where the comparison was
+an evaluation error and remained denied under negation. Missing attributes and other
+evaluation errors retain their existing behavior.
+
+
+The live conformance harness accepts `ADAPTER_TEST_STRICT_EVALUATION=false` (the default)
+or `true`, and rejects other values. CI runs both modes against the same corpus, comparing
+each plan with `check()` decisions from a PDP configured with that same mode.
+
+
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 27 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 230 of the 280 reference conformance actions |
+| Oracle-tested | 232 of the 282 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a scalar list, list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (61 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |

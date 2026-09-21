@@ -404,8 +404,7 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
         left_is_nan = left_is_ieee and math.isnan(left_value)
         right_is_nan = right_is_ieee and math.isnan(right_value)
         if left_is_nan or right_is_nan:
-            if operator not in ("eq", "ne"):
-                return null()
+            # Cerbos 0.55 uses IEEE false for unordered comparisons, including under NOT.
             other = right_value if left_is_nan else left_value
             if isinstance(other, (int, float)):
                 # CEL follows IEEE: NaN is unequal to everything and unordered.

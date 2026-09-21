@@ -1,0 +1,27 @@
+{
+  "action": "cast-int-double",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "int",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

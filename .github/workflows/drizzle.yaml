@@ -59,11 +59,18 @@ jobs:
       - run: npm run test
 
       # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs on the baseline leg only — the same single execution the standalone `adversarial`
-      # job used to perform, minus the duplicated checkout, Cerbos install and `npm install`.
+      # runs in both evaluation modes on the baseline leg only. Each mode starts its own PDP so
+      # planning and the Check oracle share the engine configuration.
       - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       # The store IS a translator property, unlike the Node runtime: `float(53)` casts, boolean
       # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL,
@@ -73,7 +80,14 @@ jobs:
       # block on ubuntu-latest.
       - name: Run adversarial differential suite (PostgreSQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:postgres
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:postgres || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       # The third store, and the one that disagrees with the other two on the most
       # (cerbos/query-plan-adapters#340): its default collation makes `=` case- AND
@@ -83,7 +97,14 @@ jobs:
       # store is a translator property, the Node runtime is not.
       - name: Run adversarial differential suite (MySQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:mysql
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:mysql || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the

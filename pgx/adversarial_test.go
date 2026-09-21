@@ -273,6 +273,12 @@ func setup(t *testing.T) *harness {
 	t.Helper()
 
 	corpus := loadCorpus(t, adapterName)
+	strictEvaluation, modeSet := os.LookupEnv("ADAPTER_TEST_STRICT_EVALUATION")
+	if !modeSet {
+		strictEvaluation = "false"
+	}
+	require.Contains(t, []string{"false", "true"}, strictEvaluation,
+		"ADAPTER_TEST_STRICT_EVALUATION must be false or true")
 	ctx := t.Context()
 
 	pgContainer, err := postgres.Run(ctx,
@@ -303,7 +309,10 @@ func setup(t *testing.T) *harness {
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        corpus.CerbosImage,
 			ExposedPorts: []string{"3593/tcp"},
-			Cmd:          []string{"server", "--set=storage.disk.directory=/policies"},
+			Cmd: []string{
+				"server", "--set=storage.disk.directory=/policies",
+				"--set=engine.strictEvaluation=" + strictEvaluation,
+			},
 			Files: []testcontainers.ContainerFile{{
 				HostFilePath:      corpus.Dir + "/policies",
 				ContainerFilePath: "/policies",
@@ -607,7 +616,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 293, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 295, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
@@ -889,6 +898,8 @@ func TestAdversarialConformance(t *testing.T) {
 			"not-concat-unsolvable-ne",
 			"not-hasint-empty-chain",
 			"not-nan-ord-le",
+			"not-ternary-parent",
+			"not-nan-order-string",
 			"hasint-null-vf",
 			"hasint-map-vf",
 			"hasint-map-null",

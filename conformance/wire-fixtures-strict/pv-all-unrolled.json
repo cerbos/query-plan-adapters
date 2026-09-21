@@ -1,0 +1,60 @@
+{
+  "action": "pv-all-unrolled",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "expression": {
+              "operator": "ne",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                },
+                {
+                  "value": "set"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "and",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "ne",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      },
+                      {
+                        "value": ""
+                      }
+                    ]
+                  }
+                },
+                {
+                  "expression": {
+                    "operator": "ne",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      },
+                      {
+                        "value": "%_o"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

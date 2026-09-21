@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: invalid_regex_probe
+  version: default
+  rules:
+    # Literal lookahead must fail compilation in both modes, before any API can plan it.
+    - name: reject_literal_lookahead
+      actions: [view]
+      roles: [USER]
+      effect: EFFECT_ALLOW
+      condition:
+        match:
+          expr: P.attr.text.matches("a(?=b)")

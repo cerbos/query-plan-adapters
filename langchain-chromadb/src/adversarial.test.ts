@@ -481,6 +481,8 @@ const DEGENERACY_GUARD_ACTIONS = [
  * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  "not-nan-order-string",
+  "not-ternary-parent",
   "projection-exists-eq",
   "projection-exists-not-eq",
   "rel-not-eq-hop",
@@ -900,12 +902,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(293);
+    expect(MANIFEST_ACTIONS.size).toBe(295);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(232);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(234);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(243);
+    expect(THROWING_ACTIONS).toHaveLength(245);
     expect(misclassified).toEqual([]);
   });
 

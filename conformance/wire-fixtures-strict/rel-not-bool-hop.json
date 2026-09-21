@@ -1,0 +1,17 @@
+{
+  "action": "rel-not-bool-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aBool"
+          }
+        ]
+      }
+    }
+  }
+}

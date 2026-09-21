@@ -8,8 +8,8 @@ module Cerbos
       # A CEL double that is not finite: NaN, +Infinity or -Infinity.
       #
       # These values must not go into the database. PostgreSQL puts NaN above all the other
-      # doubles in an ordered comparison. CEL raises an error for an unordered comparison.
-      # The adapter keeps these as Ruby values so comparisons can preserve that error under
+      # doubles in an ordered comparison. Cerbos 0.55 uses IEEE false for unordered comparisons.
+      # The adapter keeps these as Ruby values so comparisons preserve that result under
       # negation without depending on the database's non-finite number semantics.
       IEEEConstant = Struct.new(:value)
 

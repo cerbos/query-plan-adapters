@@ -71,12 +71,18 @@ to-one relations are supported, including negation, with missing-parent guards.
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 27 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
+(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
+For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
+corpus with strict evaluation enabled for both planning and the `check()` oracle.
+CI runs both modes for each existing adversarial store and client-version combination.
+
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 27 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 192 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (196 actions) |
-| Fail-closed | 88 reference actions plus the 7 reference-unsupported shapes (95 actions total) |
+| Fail-closed | 90 reference actions plus the 7 reference-unsupported shapes (97 actions total) |
 | Operand types the plan does not carry | CEL overloads `+` on strings and a query plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** neither does, and MongoDB spells the two differently — `$add` takes numeric and date types only — so the shape is refused at translation. It previously reached the server as `$add`, which aborts the whole query (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
 | Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does. The four `null-value-*` corpus probes for the explicit convention (cerbos/query-plan-adapters#308) were aligned before that option existed; the fifth is refused by the pre-existing negated-collection-macro limitation, not by the null convention |

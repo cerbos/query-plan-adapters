@@ -85,19 +85,20 @@
     },
     "arith-div-frac": {
       "where": {
-        "sqlite": "CASE WHEN ? THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN ? = 0 THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(?, ?) + 0.0) >= ? END = 1",
-        "postgresql": "CASE WHEN %(param_1)s THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_3)s) THEN %(param_4)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_3)s) THEN %(param_5)s END END WHEN NOT %(param_6)s THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(%(nullif_1)s, %(nullif_2)s) AS NUMERIC) >= %(param_7)s END"
+        "sqlite": "CASE WHEN ? THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN ? = 0 THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(?, ?) + 0.0) >= ? END = 1",
+        "postgresql": "CASE WHEN %(param_1)s THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN NOT %(param_7)s THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(%(nullif_1)s, %(nullif_2)s) AS NUMERIC) >= %(param_8)s END"
       },
       "params": {
         "param_1": false,
         "param_2": 0.0,
-        "param_3": 0.0,
-        "param_4": true,
-        "param_5": false,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
         "param_6": false,
+        "param_7": false,
         "nullif_1": 2.0,
         "nullif_2": 0.0,
-        "param_7": 1.5
+        "param_8": 1.5
       }
     },
     "arith-mult-neg": {
@@ -188,33 +189,35 @@
     },
     "cr-div-other-column": {
       "where": {
-        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_double AS FLOAT), ?) + 0.0) > ? END = 1",
-        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_3)s) THEN %(param_4)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_3)s) THEN %(param_5)s END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_double AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_6)s END"
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_double AS FLOAT), ?) + 0.0) > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_double AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_double AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_double AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_7)s END"
       },
       "params": {
         "param_1": 0.0,
         "param_2": 0.0,
-        "param_3": 0.0,
-        "param_4": true,
-        "param_5": false,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
         "nullif_1": 0.0,
-        "param_6": 0
+        "param_7": 0
       }
     },
     "cr-div-then-add": {
       "where": {
-        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) + ? > ? END = 1",
-        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_3)s) THEN %(param_4)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_3)s) THEN %(param_5)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) + %(param_6)s > %(param_7)s END"
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) + ? > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) + %(param_7)s > %(param_8)s END"
       },
       "params": {
         "param_1": 0.0,
         "param_2": 0.0,
-        "param_3": 0.0,
-        "param_4": true,
-        "param_5": false,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
         "nullif_1": 0.0,
-        "param_6": 1,
-        "param_7": 1
+        "param_7": 1,
+        "param_8": 1
       }
     },
     "cr-div-then-add-ne": {
@@ -237,17 +240,18 @@
     "cr-div-zero": {
       "note": "A division whose denominator may be zero, kept symbolic rather than lowered to NULL (#312). CEL's `x/0` is a signed infinity and `0/0` is NaN, and `NaN != 1.0` is TRUE where `NULL != 1.0` is UNKNOWN \u2014 so each IEEE arm is FOLDED into the enclosing comparison at translation time. That is why no parameter here is non-finite. Its sibling `cr-div-neg-zero` carries no entry at all: a CONSTANT `-0` arrives over HTTP as the integer 0 with the sign gone, so the adapter refuses it rather than guess.",
       "where": {
-        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) > ? END = 1",
-        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN NULL WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_3)s) THEN %(param_4)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_3)s) THEN %(param_5)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_6)s END"
+        "sqlite": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > ?) THEN ? WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= ?) THEN ? END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != ?) THEN CAST(adversarial_resource.a_number AS FLOAT) / (nullif(CAST(adversarial_resource.a_number AS FLOAT), ?) + 0.0) > ? END = 1",
+        "postgresql": "CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_1)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) = %(param_2)s) THEN %(param_3)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_2)s) THEN CASE WHEN (CAST(adversarial_resource.a_number AS FLOAT) > %(param_4)s) THEN %(param_5)s WHEN (CAST(adversarial_resource.a_number AS FLOAT) <= %(param_4)s) THEN %(param_6)s END END WHEN (CAST(adversarial_resource.a_number AS FLOAT) != %(param_1)s) THEN CAST(adversarial_resource.a_number AS FLOAT) / CAST(nullif(CAST(adversarial_resource.a_number AS FLOAT), %(nullif_1)s) AS NUMERIC) > %(param_7)s END"
       },
       "params": {
         "param_1": 0.0,
         "param_2": 0.0,
-        "param_3": 0.0,
-        "param_4": true,
-        "param_5": false,
+        "param_3": false,
+        "param_4": 0.0,
+        "param_5": true,
+        "param_6": false,
         "nullif_1": 0.0,
-        "param_6": 0.5
+        "param_7": 0.5
       }
     },
     "cr-div-zero-eq-neg": {
@@ -1030,31 +1034,34 @@
     },
     "nan-ord-le": {
       "where": {
-        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END <= ? WHEN adversarial_resource.a_bool = 0 THEN NULL END",
-        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END <= %(param_3)s WHEN NOT adversarial_resource.a_bool THEN NULL END"
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END <= ? WHEN adversarial_resource.a_bool = 0 THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END IS NULL) THEN NULL ELSE ? END END",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END <= %(param_3)s WHEN NOT adversarial_resource.a_bool THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END IS NULL) THEN NULL ELSE %(param_4)s END END"
       },
       "params": {
         "param_1": 1.0,
         "param_2": 0.5,
-        "param_3": 0.5
+        "param_3": 0.5,
+        "param_4": false
       }
     },
     "nan-ord-ternary": {
       "where": {
-        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN NULL END",
-        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN NULL END"
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END = 1",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END"
       },
       "params": {
-        "param_1": true
+        "param_1": true,
+        "param_2": false
       }
     },
     "nan-ord-ternary-vf": {
       "where": {
-        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN NULL END",
-        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN NULL END"
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END = 1",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END"
       },
       "params": {
-        "param_1": true
+        "param_1": true,
+        "param_2": false
       }
     },
     "nary-and": {
@@ -1172,13 +1179,23 @@
     },
     "not-nan-ord-le": {
       "where": {
-        "sqlite": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END <= ? WHEN adversarial_resource.a_bool = 0 THEN NULL END",
-        "postgresql": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END <= %(param_3)s WHEN NOT adversarial_resource.a_bool THEN NULL END"
+        "sqlite": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END <= ? WHEN adversarial_resource.a_bool = 0 THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN ? END IS NULL) THEN NULL ELSE ? END END",
+        "postgresql": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END <= %(param_3)s WHEN NOT adversarial_resource.a_bool THEN CASE WHEN (CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN %(param_2)s END IS NULL) THEN NULL ELSE %(param_4)s END END"
       },
       "params": {
         "param_1": 1.0,
         "param_2": 0.5,
-        "param_3": 0.5
+        "param_3": 2,
+        "param_4": false
+      }
+    },
+    "not-nan-order-string": {
+      "where": {
+        "sqlite": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string IS NOT NULL) THEN NULL END WHEN adversarial_resource.a_bool = 0 THEN CASE WHEN (adversarial_resource.a_string IS NULL) THEN NULL ELSE ? END END",
+        "postgresql": "NOT CASE WHEN adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string IS NOT NULL) THEN NULL END WHEN NOT adversarial_resource.a_bool THEN CASE WHEN (adversarial_resource.a_string IS NULL) THEN NULL ELSE %(param_1)s END END"
+      },
+      "params": {
+        "param_1": false
       }
     },
     "not-startswith": {
@@ -1196,6 +1213,16 @@
         "replace_7": "[",
         "replace_8": "\\[",
         "param_1": "%"
+      }
+    },
+    "not-ternary-parent": {
+      "where": {
+        "sqlite": "CASE WHEN adversarial_resource.a_bool THEN ? WHEN adversarial_resource.a_bool = 0 THEN (SELECT adversarial_parent.a_optional_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) END != ?",
+        "postgresql": "CASE WHEN adversarial_resource.a_bool THEN %(param_1)s WHEN NOT adversarial_resource.a_bool THEN (SELECT adversarial_parent.a_optional_string FROM adversarial_parent WHERE adversarial_parent.resource_id = adversarial_resource.id) END != %(param_2)s"
+      },
+      "params": {
+        "param_1": "one",
+        "param_2": "set"
       }
     },
     "null-eq": {

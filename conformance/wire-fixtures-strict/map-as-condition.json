@@ -1,0 +1,30 @@
+{
+  "action": "map-as-condition",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "map",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "variable": "t.name"
+                },
+                {
+                  "variable": "t"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -400,6 +400,8 @@ DEGENERACY_GUARD_ACTIONS += (
     "not-concat-unsolvable-ne",
     "not-hasint-empty-chain",
     "not-nan-ord-le",
+    "not-ternary-parent",
+    "not-nan-order-string",
     "hasint-null-vf",
     "hasint-map-vf",
     "hasint-map-null",
@@ -647,12 +649,15 @@ def adv_conn(adv_engine):
 
 @pytest.fixture(scope="module")
 def adv_cerbos_client():
+    strict = os.environ.get("ADAPTER_TEST_STRICT_EVALUATION", "false")
+    if strict not in ("false", "true"):
+        raise ValueError("ADAPTER_TEST_STRICT_EVALUATION must be false or true")
     container = CerbosContainer(image=CERBOS_IMAGE)
     container.with_volume_mapping(
         os.path.join(CONFORMANCE_DIR, "policies"), "/policies"
     )
     container.with_env("CERBOS_NO_TELEMETRY", "1")
-    container.with_command("server")
+    container.with_command(f"server --set=engine.strictEvaluation={strict}")
     container.start()
     container.wait_until_ready()
     try:
@@ -823,7 +828,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 293
+        assert len(MANIFEST_ACTIONS) == 295
         assert len(SEEDS) == 27
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.

@@ -782,6 +782,7 @@ const compareValues = (
     const equal = valuesEqual(left, right);
     return operator === "eq" ? equal : !equal;
   }
+  if (Number.isNaN(left) || Number.isNaN(right)) return false;
   if (
     (typeof left !== "number" || typeof right !== "number") &&
     (typeof left !== "string" || typeof right !== "string") &&
@@ -789,7 +790,6 @@ const compareValues = (
   ) {
     return EVALUATION_ERROR;
   }
-  if (Number.isNaN(left) || Number.isNaN(right)) return EVALUATION_ERROR;
   switch (operator) {
     case "lt":
       return left < right;

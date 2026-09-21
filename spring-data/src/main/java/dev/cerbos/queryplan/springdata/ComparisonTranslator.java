@@ -709,8 +709,8 @@ final class ComparisonTranslator {
      * {@code 0.0}), so {@code Double.compare} would collapse {@code gt}/{@code ge}
      * against a NaN constant — reachable via an unfolded {@code div(0,0)}, e.g. the
      * else arm of {@code (aBool ? 1.0 : 0.0/0.0) > 0.5} — to always-true, returning
-     * rows the PDP denies. CEL raises for an unordered NaN pair, so the result must remain SQL UNKNOWN
-     * under negation as well as positively.
+     * rows the PDP denies. Cerbos 0.55 uses IEEE false for an unordered NaN pair, so the primitive
+     * comparison also preserves its result under negation.
      */
     Predicate constantComparison(String op, Object left, Object right) {
         boolean result;
@@ -722,7 +722,6 @@ final class ComparisonTranslator {
         } else if (left instanceof Number ln && right instanceof Number rn) {
             double l = ln.doubleValue();
             double r = rn.doubleValue();
-            if (Double.isNaN(l) || Double.isNaN(r)) return tri.unknown();
             result = switch (op) {
                 case "lt" -> l < r;
                 case "gt" -> l > r;

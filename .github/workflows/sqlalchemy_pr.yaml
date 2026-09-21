@@ -84,6 +84,13 @@ jobs:
         run: npx -y pyright@1.1.411
 
       - run: pdm run test
+        env:
+          ADAPTER_TEST_STRICT_EVALUATION: "false"
+
+      - name: Run strict evaluation conformance
+        run: pdm run pytest tests/test_adversarial_conformance.py
+        env:
+          ADAPTER_TEST_STRICT_EVALUATION: "true"
 
   # The example application: the published distribution, installed from the wheel `pdm build`
   # produced and used the way a consumer uses it, against the shared demo domain. It covers the

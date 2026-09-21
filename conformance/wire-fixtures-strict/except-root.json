@@ -1,0 +1,22 @@
+{
+  "action": "except-root",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "except",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

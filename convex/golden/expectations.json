@@ -838,7 +838,15 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "not-nan-order-string": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "not-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "not-ternary-parent": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },

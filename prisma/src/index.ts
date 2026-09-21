@@ -1817,28 +1817,16 @@ function buildNegatedFilter(
     if (operand.operator === "not") {
       return buildPrismaFilterFromCerbosExpression(
         assertDefined(operand.operands[0], "not requires an operand"),
-      context,
+        context,
       );
     }
-    const complement: Record<string, string> = {
-      eq: "ne",
-      ne: "eq",
-      lt: "ge",
-      le: "gt",
-      gt: "le",
-      ge: "lt",
-    };
-    const opposite = complement[operand.operator];
-    if (
-      opposite &&
-      operand.operands.some(
-        (part) => isOperatorOperand(part) && part.operator === "if",
-      )
-    ) {
-      // Negate the comparison in each ternary arm. Unordered NaN stays denied instead
-      // of turning a discarded error arm into true through an outer NOT.
-      return handleRelationalOperator(opposite, operand.operands, context);
-    }
+    const ternary = tryHandleTernaryComparison(
+      operand.operator,
+      operand.operands,
+      context,
+      true
+    );
+    if (ternary !== null) return ternary;
   }
   if (isNamedOperand(operand)) {
     const { relations, ...fieldRef } = resolveFieldReference(
@@ -2067,12 +2055,14 @@ function buildTernaryComparisonBranch({
   ternaryIndex,
   branch,
   context,
+  negated,
 }: {
   operator: string;
   operands: PlanExpressionOperand[];
   ternaryIndex: number;
   branch: PlanExpressionOperand;
   context: TranslationContext;
+  negated: boolean;
 }): TernaryBranchPredicate {
   const substitutedOperands = operands.map((operand, index) =>
     index === ternaryIndex ? branch : operand
@@ -2097,10 +2087,40 @@ function buildTernaryComparisonBranch({
         normalized.operator,
         normalizedFirst.value,
         normalizedSecond.value
-      ),
+      ) !== negated,
     };
   }
 
+  if (negated) {
+    const nested = tryHandleTernaryComparison(
+      normalized.operator,
+      normalized.operands,
+      context,
+      true
+    );
+    if (nested !== null) return { kind: "filter", filter: nested };
+    // Keep missing-value and relation guards inside the selected branch. Constants
+    // are negated above, since !(NaN <= n) is true but NaN > n is false in CEL 0.30.
+    const complement: Record<string, string> = {
+      eq: "ne",
+      ne: "eq",
+      lt: "ge",
+      le: "gt",
+      gt: "le",
+      ge: "lt",
+    };
+    return {
+      kind: "filter",
+      filter: handleRelationalOperator(
+        assertDefined(
+          complement[normalized.operator],
+          "Unsupported negated comparison"
+        ),
+        normalized.operands,
+        context
+      ),
+    };
+  }
   return {
     kind: "filter",
     filter: buildPrismaFilterFromCerbosExpression(normalized, context),
@@ -2110,7 +2130,8 @@ function buildTernaryComparisonBranch({
 function tryHandleTernaryComparison(
   operator: string,
   operands: PlanExpressionOperand[],
-  context: TranslationContext
+  context: TranslationContext,
+  negated = false
 ): PrismaFilter | null {
   if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined) {
     return null;
@@ -2147,7 +2168,8 @@ function tryHandleTernaryComparison(
         operands,
         ternaryIndex,
         branch: constantCondition ? thenBranch : elseBranch,
-      context,
+        context,
+        negated,
       })
     );
   }
@@ -2159,16 +2181,18 @@ function tryHandleTernaryComparison(
       operands,
       ternaryIndex,
       branch: thenBranch,
-    context,
+      context,
+      negated,
     }),
     elseFilter: buildTernaryComparisonBranch({
       operator,
       operands,
       ternaryIndex,
       branch: elseBranch,
-    context,
+      context,
+      negated,
     }),
-  context,
+    context,
   });
 }
 

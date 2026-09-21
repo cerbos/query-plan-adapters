@@ -1,0 +1,20 @@
+{
+  "action": "in-single",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "one"
+          }
+        ]
+      }
+    }
+  }
+}

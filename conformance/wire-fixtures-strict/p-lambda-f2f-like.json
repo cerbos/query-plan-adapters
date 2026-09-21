@@ -1,0 +1,40 @@
+{
+  "action": "p-lambda-f2f-like",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "exists",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "contains",
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "action": "null-value-ne-const",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "value": "x"
+          }
+        ]
+      }
+    }
+  }
+}

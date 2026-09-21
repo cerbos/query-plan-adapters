@@ -73,7 +73,9 @@ jobs:
       # the same build against different renderers, and neither can be reported UP-TO-DATE on the
       # other's result.
       - name: Build and test (${{ matrix.orm }})
-        run: gradle build --no-daemon
+        run: |
+          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_ORM: ${{ matrix.orm }}
 
@@ -127,7 +129,9 @@ jobs:
           gradle-version: "8.12"
 
       - name: Build and test (${{ matrix.database }})
-        run: gradle build --no-daemon
+        run: |
+          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
           ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
