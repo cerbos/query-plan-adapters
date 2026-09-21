@@ -499,9 +499,8 @@ func TestNumericCastsAreRejected(t *testing.T) {
 // words against the oracle.
 //
 // Corpus gap. The IS NULL arm ahead of the column's own test is policy-reachable, and no corpus
-// action reaches it because the corpus's aBool is never null, so this test is a bridge rather than
-// its home; conformance/README.md records the gap under "Casts and concatenation are
-// store-dependent in opposite directions". Without the arm a NULL column falls through to 'false', and
+// action reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
+// #469 rather than its home. Without the arm a NULL column falls through to 'false', and
 // `string(x) != "true"` returns a row the PDP denies.
 func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
 	t.Parallel()

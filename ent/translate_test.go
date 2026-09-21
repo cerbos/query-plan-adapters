@@ -620,8 +620,7 @@ func TestNumericCastsAreRejected(t *testing.T) {
 // corpus's cast-string-bool proves the two words against the oracle on all three engines.
 //
 // Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus action reaches
-// either, so this test is a bridge rather than their home; conformance/README.md records the gap
-// under "Casts and concatenation are store-dependent in opposite directions". The first is the IS NULL
+// either, so this test is a bridge tracked by #469 rather than their home. The first is the IS NULL
 // arm ahead of the column's own test: the corpus's aBool is never null, and without the arm a NULL
 // column falls through to 'false', so `string(x) != "true"` returns a row the PDP denies. The
 // second is the text cast around the whole CASE on MySQL, which gives the two words a byte-exact

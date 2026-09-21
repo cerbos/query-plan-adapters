@@ -695,7 +695,8 @@ binary-collation `CAST` around the `CASE`, so both are byte-exact on their MySQL
 and sqlalchemy run no MySQL leg and state the requirement in their READMEs; spring-data never
 compares text. The action only ever compares with `"true"`, and `aBool` is never NULL on any seed,
 so neither the collation nor the `IS NULL` arm is proved against the oracle yet — both are pinned
-in unit tests and golden expectations until the corpus carries a probe for each.
+in unit tests and golden expectations until the corpus carries a probe for each
+([#469](https://github.com/cerbos/query-plan-adapters/issues/469)).
 
 `id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
 string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
