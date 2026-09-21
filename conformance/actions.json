@@ -151,7 +151,9 @@
     "index-scalar-list", "index-scalar-list-not-eq", "index-scalar-list-null", "map-eq-list",
     "vf-lt", "vf-size", "vf-hasint",
     "pv-exists-unrolled", "pv-all-unrolled",
-    "string-size-gt0", "in-map-keys", "double-huge-lt", "double-huge-gt", "hier-empty-delim"
+    "string-size-gt0", "in-map-keys", "double-huge-lt", "double-huge-gt", "hier-empty-delim",
+    "index-number-list", "index-number-list-not-eq", "index-bool-list", "index-bool-list-not-eq",
+    "index-bool-list-vs-number", "index-number-list-vs-bool"
   ],
   "adapterUnsupported": {
     "ent": [
