@@ -1010,22 +1010,40 @@ module Cerbos
 
       # `CAST(x AS TEXT)` gives what CEL gives for a number and for a string. It does not for a
       # boolean. SQLite and MySQL have no boolean type and keep 1 and 0, so the CAST makes "1"
-      # where CEL makes "true". The filter would then find no row at all, and the PDP permits
-      # 14 of the 21 rows in the corpus.
-      #
-      # One adapter serves all three dialects. PostgreSQL alone gives "true" and would agree,
-      # but a translation that is correct on one dialect and incorrect on two is not a
-      # translation this adapter can choose.
+      # where CEL makes "true", and only PostgreSQL agrees. Thus a boolean column does not go
+      # through the CAST. See {#boolean_to_string}.
       def cast_to_string(value)
-        if column_type(value) == :boolean
-          raise UnsupportedOperatorError,
-            "string() over a boolean column is not supported: SQLite and MySQL keep a boolean " \
-            "as 1 or 0, so CAST gives \"1\" where CEL gives \"true\", and the filter would " \
-            "then remove every row that the PDP permits. Compare the boolean column directly, " \
-            "or give an operator override that spells the two words your database uses."
-        end
+        return boolean_to_string(value) if column_type(value) == :boolean
 
         cast(value, "TEXT", "VARCHAR")
+      end
+
+      # +string()+ over a boolean column, as a CASE that spells the two words of CEL itself:
+      #
+      #   CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+      #
+      # CASE WHEN is standard SQL, and SQLite, MySQL and PostgreSQL each read a boolean column
+      # as a condition. Thus one translation is correct on all three dialects, where a CAST is
+      # correct on one of them (cerbos/query-plan-adapters#418).
+      #
+      # The IS NULL arm is necessary. A NULL boolean is a missing attribute, or a null value,
+      # and CEL has no +string()+ for either: it makes an error and Cerbos denies the row. A
+      # NULL column makes `WHEN col` UNKNOWN, so without that arm the CASE would go to its ELSE
+      # and give "false". Then `string(x) != "true"` would give a row that the PDP denies. With
+      # the arm the result is NULL, and the row stays out under both polarities.
+      #
+      # The result is text, and the translator records it as a string. Thus the operators that
+      # examine the kind of an operand (a comparison, `+`, a string match, `size()`) treat it as
+      # they treat any other string. The two words are literals and not a column, so MySQL
+      # compares them in the collation of the connection (see "The collation is part of the
+      # contract" in the README).
+      def boolean_to_string(column)
+        text = ArelSupport.case_node(
+          [[ArelSupport.comparison("eq", column, nil), nil], [column, "true"]],
+          else_value: "false"
+        )
+        @column_types[text] = :string
+        text
       end
 
       # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the

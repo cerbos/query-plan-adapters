@@ -63,7 +63,7 @@ RSpec.describe "adversarial conformance" do
   # into adapterUnsupported fails this list instead of emptying it without a word.
   #
   # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
-  # 178 of the 187 conformance actions, and a list built for an adapter that compares fewer would
+  # 227 of the 282 conformance actions, and a list built for an adapter that compares fewer would
   # leave most of the groups here with no guard at all (cerbos/query-plan-adapters#324).
   #
   # Each entry has an oracle that is not empty and not every seed. Some actions cannot join
@@ -157,6 +157,10 @@ RSpec.describe "adversarial conformance" do
     # both, which is why the entry is here rather than among the probes below: ent, pgx and
     # spring-data all refuse the shape at the cast.
     %w[arith-mod] +
+    # string() over a boolean column, the half of the cast pair where a CAST disagrees with CEL
+    # (#418). It goes through a CASE and not through the CAST that cast-string-double proves,
+    # so that sibling cannot speak for it.
+    %w[cast-string-bool] +
     # The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
     # membership in a map literal (the planner folds it to its key list), and a double literal
     # beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and
@@ -214,9 +218,9 @@ RSpec.describe "adversarial conformance" do
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
       expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(295)
       # Refusals must retain their pinned messages.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(67)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(66)
       # Each new hostile group needs a non-degenerate representative.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(99)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(100)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
