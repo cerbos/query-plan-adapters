@@ -461,6 +461,8 @@ export interface AdversarialSchema {
     createdAt: AnyColumn;
     updatedAt: AnyColumn;
     tagNamesJson: AnyColumn;
+    aNumberListJson: AnyColumn;
+    aBoolListJson: AnyColumn;
   };
   parents: Table & {
     id: AnyColumn;
@@ -511,6 +513,8 @@ export function sqliteSchema() {
       createdAt: text("created_at"),
       updatedAt: text("updated_at"),
       tagNamesJson: text("tag_names_json", { mode: "json" }).$type<(string | null)[]>(),
+      aNumberListJson: text("a_number_list_json", { mode: "json" }).$type<(number | null)[]>(),
+      aBoolListJson: text("a_bool_list_json", { mode: "json" }).$type<(boolean | null)[]>(),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -587,6 +591,12 @@ export function postgresSchema() {
       tagNamesJson: jsonb("tag_names_json").$type<(string | null)[]>(),
       tagNamesPlainJson: pgJson("tag_names_plain_json").$type<(string | null)[]>(),
       tagNamesArray: pgText("tag_names_array").array(),
+      aNumberListJson: jsonb("a_number_list_json").$type<(number | null)[]>(),
+      aNumberListPlainJson: pgJson("a_number_list_plain_json").$type<(number | null)[]>(),
+      aNumberListArray: pgInteger("a_number_list_array").array(),
+      aBoolListJson: jsonb("a_bool_list_json").$type<(boolean | null)[]>(),
+      aBoolListPlainJson: pgJson("a_bool_list_plain_json").$type<(boolean | null)[]>(),
+      aBoolListArray: boolean("a_bool_list_array").array(),
       updatedAt: timestamp("updated_at", {
         withTimezone: true,
         mode: "string",
@@ -678,6 +688,8 @@ export function mysqlSchema() {
       createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
       updatedAt: datetime("updated_at", { mode: "string", fsp: 6 }),
       tagNamesJson: mysqlJson("tag_names_json").$type<(string | null)[]>(),
+      aNumberListJson: mysqlJson("a_number_list_json").$type<(number | null)[]>(),
+      aBoolListJson: mysqlJson("a_bool_list_json").$type<(boolean | null)[]>(),
     }),
 
     // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -846,6 +858,20 @@ export function buildMapper(
         targetColumn: schema.tags.resourceId,
         field: schema.tags.name,
       },
+    },
+    // Homogeneous number and boolean lists, read only by position (`index-number-list`,
+    // `index-bool-list` and their negated and cross-type siblings). No relation: nothing in the
+    // corpus asks a collection predicate of them, so the ordered column is the whole mapping. The
+    // cross-type probes are why these exist — SQLite's `json_extract` reads a JSON `true` back as
+    // 1 and MySQL's `TRUE` is the integer 1, so a comparison that drops the element's JSON type
+    // matches `[true][0] == 1` or `[1][0] == true`, both false in CEL.
+    "request.resource.attr.aNumberList": {
+      column: schema.resources.aNumberListJson,
+      indexable: "json",
+    },
+    "request.resource.attr.aBoolList": {
+      column: schema.resources.aBoolListJson,
+      indexable: "json",
     },
     "request.resource.attr.categories": {
       relation: {
