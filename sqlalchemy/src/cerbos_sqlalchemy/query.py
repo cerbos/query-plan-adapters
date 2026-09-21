@@ -26,7 +26,16 @@ from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
 
+from cerbos_sqlalchemy.collection_storage import (
+    INDEXED_VALUE_REFUSAL,
+    CollectionColumn,
+    collection_size,
+    indexed_equality,
+    require_index_position,
+)
 from sqlalchemy import (
+    ARRAY,
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -35,6 +44,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    TypeDecorator,
     and_,
     case,
     cast,
@@ -157,7 +167,23 @@ def _scalar_kind(value: Any) -> str:
     return ""
 
 
+def _base_type(type_: Any) -> Any:
+    """``type_`` with decorators unwrapped -- including SQLAlchemy 1.4's ``with_variant()``,
+    which returns a ``Variant`` decorator where 2.x returns a copy of the base type."""
+    while isinstance(type_, TypeDecorator):
+        type_ = type_.impl
+    return type_
+
+
 def _string_size(value: Any, _: Any) -> Any:
+    if isinstance(_base_type(getattr(value, "type", None)), (JSON, ARRAY)):
+        # A JSON or array column holds a collection, and LENGTH() of it is a number that
+        # answers a different question -- the length of its text, or nothing CEL means. Which
+        # SQL counts its elements depends on how it is stored, so the caller has to say.
+        raise ValueError(
+            "size() over a collection-typed column needs its storage declared: map the "
+            'attribute in collection_columns with storage "json" or "pgArray"'
+        )
     kind = _scalar_kind(value)
     return null() if kind and kind != "string" else func.length(value)
 
@@ -602,7 +628,8 @@ __operator_fns: OperatorFnMap = {
     "string": lambda c, _: _string_cast(c),
     "double": lambda *_: _reject_numeric_cast("double"),
     "int": lambda *_: _reject_numeric_cast("int"),
-    # size() over a string column — collection-typed columns require an override.
+    # size() over a string column. A collection is declared in `collection_columns` and never
+    # reaches this handler; an undeclared JSON or array column is refused here.
     "size": _string_size,
     "timestamp": _timestamp,
     "hierarchy": _hierarchy,
@@ -929,8 +956,28 @@ def _get_table_name(t: GenericTable) -> str:
         return t.name
 
 
+#: The operators whose collection operand is read from its declared storage rather than from
+#: ``attr_map``: the only two a collection's storage decides.
+_COLLECTION_STORAGE_OPERATORS = frozenset({"size", "index"})
+
+
+def _declared_collection_name(
+    expression: _Expr, declared: frozenset
+) -> Union[str, None]:
+    """The attribute ``expression`` reads through its declared storage, if it reads one."""
+    if expression.operator not in _COLLECTION_STORAGE_OPERATORS:
+        return None
+    collection = expression.operands[0] if expression.operands else None
+    if isinstance(collection, _Variable) and collection.name in declared:
+        return collection.name
+    return None
+
+
 def _variables_outside_overrides(
-    operand: _Operand, override_operators: frozenset, override_owned: bool = False
+    operand: _Operand,
+    override_operators: frozenset,
+    override_owned: bool = False,
+    declared: frozenset = frozenset(),
 ) -> frozenset:
     """Find variables that still require an ordinary table mapping.
 
@@ -939,6 +986,10 @@ def _variables_outside_overrides(
     Variables outside such a subtree retain the normal fail-closed
     ``table_mapping`` requirement. Boolean/ternary traversal is built in and
     cannot itself be overridden, so merely declaring those keys owns nothing.
+
+    A collection read through its ``collection_columns`` declaration needs no
+    ``attr_map`` entry at all -- the declared column is validated on its own --
+    so that operand is skipped whoever owns the subtree.
     """
     if isinstance(operand, _Value):
         return frozenset()
@@ -949,10 +1000,13 @@ def _variables_outside_overrides(
     operator_owns_children = override_owned or (
         operator in override_operators and operator not in {"and", "or", "not", "if"}
     )
+    children = operand.operands
+    if _declared_collection_name(operand, declared) is not None:
+        children = children[1:]
     variables = frozenset()
-    for child in operand.operands:
+    for child in children:
         variables |= _variables_outside_overrides(
-            child, override_operators, operator_owns_children
+            child, override_operators, operator_owns_children, declared
         )
     return variables
 
@@ -970,6 +1024,7 @@ def get_query(
     attribute_null_representation: Union[
         Dict[str, NullAttributeRepresentation], None
     ] = ...,
+    collection_columns: Union[Dict[str, CollectionColumn], None] = ...,
 ) -> Select[Tuple[_ORMModel]]:
     ...
 
@@ -989,6 +1044,7 @@ def get_query(
     attribute_null_representation: Union[
         Dict[str, NullAttributeRepresentation], None
     ] = ...,
+    collection_columns: Union[Dict[str, CollectionColumn], None] = ...,
 ) -> Select[Any]:
     ...
 
@@ -1003,6 +1059,7 @@ def get_query(
     attribute_null_representation: Union[
         Dict[str, NullAttributeRepresentation], None
     ] = None,
+    collection_columns: Union[Dict[str, CollectionColumn], None] = None,
 ) -> Select[Any]:
     """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
 
@@ -1038,6 +1095,19 @@ def get_query(
 
     See https://github.com/cerbos/query-plan-adapters/issues/302 and
     https://github.com/cerbos/query-plan-adapters/issues/308.
+
+    ``collection_columns`` declares how a collection attribute is STORED, keyed
+    by the same references: a ``CollectionColumn`` naming the column and its
+    storage, ``"json"`` or ``"pgArray"``. It is read in exactly two places --
+    the operand of ``size()`` and the collection an ``index`` reads -- and in
+    both it takes precedence over ``attr_map`` and over any operator override,
+    because it is the more specific declaration. Everywhere else the attribute
+    still resolves through ``attr_map``, so a relation marker there keeps
+    serving the collection macros. An index is translated only as a direct
+    ``==``/``!=`` against a string or null literal at a constant non-negative
+    position; anything else over a declared collection is refused. The SQL renders on
+    SQLite and PostgreSQL. See ``cerbos_sqlalchemy.collection_storage`` and
+    https://github.com/cerbos/query-plan-adapters/issues/227.
     """
     # A None entry means no override on every traversal path. Keep None and an
     # explicitly supplied empty mapping distinct for attribute validation below.
@@ -1067,6 +1137,14 @@ def get_query(
                 f"attribute_null_representation names {attribute!r}, which is not "
                 "in the attribute column map"
             )
+    declared_collections: Dict[str, CollectionColumn] = dict(collection_columns or {})
+    for attribute, declared in declared_collections.items():
+        if not isinstance(declared, CollectionColumn):
+            raise TypeError(
+                "collection_columns values must be CollectionColumn, got "
+                f"{type(declared).__name__} for {attribute!r}"
+            )
+    declared_names = frozenset(declared_collections)
 
     if query_plan.filter is None or query_plan.filter.kind in _deny_types:
         return select(table).where(False)
@@ -1091,15 +1169,23 @@ def get_query(
     # correlated subqueries, but an unrelated override must never disable the
     # ordinary cross-table mapping requirement.
     if operator_override_fns is None:
-        attributes_to_validate = attr_map.items()
+        attributes_to_validate = list(attr_map.items())
     else:
         active_override_operators = frozenset(operator_override_fns)
-        variables = _variables_outside_overrides(cond, active_override_operators)
-        attributes_to_validate = (
+        variables = _variables_outside_overrides(
+            cond, active_override_operators, declared=declared_names
+        )
+        attributes_to_validate = [
             (variable, attr_map[variable])
             for variable in variables
             if variable in attr_map
-        )
+        ]
+    # A declared collection column has to be addressable exactly as a mapped one does: on the
+    # queried table, or on one `table_mapping` joins.
+    attributes_to_validate += [
+        (attribute, declared.column)
+        for attribute, declared in declared_collections.items()
+    ]
 
     required_tables = set()
     for variable, column in attributes_to_validate:
@@ -1329,6 +1415,61 @@ def get_query(
             return None
         return fold_value_list_macro(operator, collection.value, lambda_operand)
 
+    def declared_collection(expression: _Expr) -> Union[CollectionColumn, None]:
+        """The declared storage ``expression`` reads, when it is ``size``/``index`` of one."""
+        name = _declared_collection_name(expression, declared_names)
+        return None if name is None else declared_collections[name]
+
+    def declared_index(operand: _Operand):
+        """``(storage, position)`` when ``operand`` indexes a declared collection, else None."""
+        if not isinstance(operand, _Expr) or operand.operator != "index":
+            return None
+        declared = declared_collection(operand)
+        if declared is None:
+            return None
+        if len(operand.operands) != 2 or not isinstance(operand.operands[1], _Value):
+            # A dynamic index is not a position the translator can check, and CEL raises for
+            # every position it would reject.
+            require_index_position(None)
+        return declared, require_index_position(operand.operands[1].value)
+
+    def indexed_comparison(operator: str, child_operands: Tuple[_Operand, ...]) -> Any:
+        """``collection[i] == literal`` or ``!=``: the only comparisons an element supports.
+
+        Anything else over an element is refused. An ordering, a membership or a nested value
+        expression would need the element's JSON type and its index error carried through
+        SQL that has neither, and only the literal equality below keeps both.
+        """
+        indexed = [declared_index(child) for child in child_operands]
+        position = next(i for i, found in enumerate(indexed) if found is not None)
+        declared, index = indexed[position]
+        others = [child for i, child in enumerate(child_operands) if i != position]
+        if (
+            operator not in ("eq", "ne")
+            or len(others) != 1
+            or not isinstance(others[0], _Value)
+        ):
+            raise ValueError(INDEXED_VALUE_REFUSAL)
+        equality = indexed_equality(declared, index, others[0].value)
+        # NOT keeps the CASE's UNKNOWN for an absent element, so a negated comparison still
+        # denies the row CEL's index error denies.
+        return not_(equality) if operator == "ne" else equality
+
+    def refuse_undeclared_index(collection: Union[_Operand, None]) -> NoReturn:
+        if isinstance(collection, _Variable):
+            raise ValueError(
+                f"Index storage shape is undeclared for '{collection.name}': declare it "
+                'in collection_columns with storage "json" or "pgArray"; a relation has '
+                "no positional order"
+            )
+        raise ValueError(
+            "Index access requires a collection attribute declared in "
+            "collection_columns; a computed collection has no storage to read"
+        )
+
+    def index_is_overridden() -> bool:
+        return bool(operator_override_fns) and "index" in operator_override_fns
+
     def resolve_operand(operand: _Operand) -> Any:
         """Resolve a literal, mapped variable, or nested value expression."""
         if isinstance(operand, _Value):
@@ -1363,6 +1504,27 @@ def get_query(
             ):
                 return _ConditionalValue(cond, then_value, else_value)
             return case((cond, then_value), (not_(cond), else_value))
+
+        # A declared collection is read from its storage before an override or attr_map is
+        # consulted: the declaration names this attribute, an override only its operator.
+        if any(declared_index(child) is not None for child in child_operands):
+            return indexed_comparison(operator, child_operands)
+        declared = declared_collection(expression)
+        if declared is not None:
+            if operator == "index":
+                # Reached only where an element is a VALUE -- not a direct comparison, which
+                # the check above took -- so declared_index has checked the position and
+                # there is nothing left to translate.
+                declared_index(expression)
+                raise ValueError(
+                    f"{INDEXED_VALUE_REFUSAL}; nested value expressions cannot preserve "
+                    "element types and index errors"
+                )
+            if len(child_operands) != 1:
+                raise ValueError(f"size takes 1 operand, got {len(child_operands)}")
+            return collection_size(declared)
+        if operator == "index" and not index_is_overridden():
+            refuse_undeclared_index(child_operands[0] if child_operands else None)
 
         if (
             operator in ("eq", "ne", "in")
@@ -1466,6 +1628,10 @@ def get_query(
         if operator == "if":
             # A bare boolean-result ternary used directly as a predicate.
             return evaluate_expression(operand)
+        if operator == "index" or declared_collection(operand) is not None:
+            # An element or a size in a boolean position is a value, and refused or
+            # translated as one.
+            return evaluate_expression(operand)
 
         # A literal value list arrives when the planner could not unroll a
         # macro over a known collection (more than 10 elements). Fold it before
@@ -1474,6 +1640,9 @@ def get_query(
         folded = try_fold_value_list_macro(operator, child_operands)
         if folded is not None:
             return folded
+
+        if any(declared_index(child) is not None for child in child_operands):
+            return indexed_comparison(operator, child_operands)
 
         has_nested_expression = any(isinstance(o, _Expr) for o in child_operands)
 
