@@ -1023,6 +1023,15 @@ def get_query(
     See https://github.com/cerbos/query-plan-adapters/issues/302 and
     https://github.com/cerbos/query-plan-adapters/issues/308.
     """
+    # A None entry means no override on every traversal path. Keep None and an
+    # explicitly supplied empty mapping distinct for attribute validation below.
+    if operator_override_fns is not None:
+        operator_override_fns = {
+            operator: override
+            for operator, override in operator_override_fns.items()
+            if override is not None
+        }
+
     if null_attribute_representation not in ("explicit", "omitted"):
         raise ValueError(
             "null_attribute_representation must be 'explicit' or 'omitted', got "
@@ -1068,11 +1077,7 @@ def get_query(
     if operator_override_fns is None:
         attributes_to_validate = attr_map.items()
     else:
-        active_override_operators = frozenset(
-            operator
-            for operator, override in operator_override_fns.items()
-            if override is not None
-        )
+        active_override_operators = frozenset(operator_override_fns)
         variables = _variables_outside_overrides(cond, active_override_operators)
         attributes_to_validate = (
             (variable, attr_map[variable])

@@ -1,23 +1,9 @@
-"""``get_query``'s contract for plans the planner cannot produce, and for options no
-policy can reach.
+"""Caller-option and malformed-plan contracts for ``get_query``.
 
-Every plan here is built by hand, and that is deliberate rather than an oversight: each
-one is either malformed by construction — an operand shape the planner never emits, a
-lambda reading a path no element carries — or a call-level argument the corpus has no
-action for, such as an unknown ``null_attribute_representation`` or a model built with
-the SQLAlchemy 2.0 declarative style. Neither can come from a wire fixture, because
-neither corresponds to a policy.
-
-What used to sit above all of this was 48 tests that planned corpus-adjacent shapes
-against a live PDP loaded with the shared policy suite, executed the query against three
-seeded rows and compared the result with a hardcoded count. Those are retired: the shapes are
-all corpus actions now, ``test_translator.py`` pins the SQL each one emits and
-``test_adversarial_conformance.py`` proves the rows against ``check()`` over 22 hostile
-seeds instead of 3 friendly ones. A shape CEL *can* express belongs there, not here,
-whatever its plan looks like — see
-`ADR 0006 <../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md>`_.
-
-Nothing in this file starts a PDP or a container.
+Hand-built plans here isolate inputs a policy cannot vary, such as operator overrides
+and model declarations. Policy-reachable translation shapes belong in the shared
+corpus; ``test_translator.py`` pins their emitted SQL and the adversarial suite
+compares executed queries with the PDP. These tests need no PDP or container.
 """
 
 import math
@@ -710,6 +696,41 @@ class TestSemanticEdgeTranslations:
 
 
 class TestGetQueryOverrides:
+    @pytest.mark.parametrize("overrides", [{}, {"eq": None, "add": None}])
+    def test_none_override_uses_default_for_nested_expression(
+        self, resource_table, conn, overrides
+    ):
+        plan = _conditional_plan(
+            {
+                "operator": "eq",
+                "operands": [
+                    {
+                        "expression": {
+                            "operator": "add",
+                            "operands": [
+                                {"variable": "request.resource.attr.aNumber"},
+                                {"value": 0},
+                            ],
+                        }
+                    },
+                    {"value": 1},
+                ],
+            }
+        )
+        query = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aNumber": resource_table.aNumber},
+            operator_override_fns=overrides,
+        )
+        expected = get_query(
+            plan,
+            resource_table,
+            {"request.resource.attr.aNumber": resource_table.aNumber},
+        )
+        assert conn.execute(query).fetchall() == conn.execute(expected).fetchall()
+        assert str(query) == str(expected)
+
     def test_unrelated_override_does_not_bypass_table_mapping_validation(
         self, resource_table, user_table
     ):
