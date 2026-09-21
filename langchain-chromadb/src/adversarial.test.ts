@@ -1094,8 +1094,8 @@ describe("adversarial conformance corpus", () => {
   test("oracle is not degenerate", async () => {
     // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
-    // membership assertion is what keeps the list honest — Chroma compares 34 of the corpus's
-    // 187 conformance actions, so a guard list shared with a relational harness would name
+    // membership assertion is what keeps the list honest — Chroma compares 48 of the corpus's
+    // 288 conformance actions, so a guard list shared with a relational harness would name
     // shapes it never compares (cerbos/query-plan-adapters#324).
     for (const action of DEGENERACY_GUARD_ACTIONS) {
       expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);
