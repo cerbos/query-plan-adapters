@@ -842,11 +842,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 292, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 293, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 57, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 58, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -1169,6 +1169,7 @@ func runConformance(t *testing.T, h *harness) {
 			"regex-brace",
 			"regex-repetition",
 			"regex-optional-operators",
+			"pv-except",
 			"except-size",
 			"except-eq",
 			"pv-structs",

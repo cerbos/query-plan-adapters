@@ -416,6 +416,7 @@ DEGENERACY_LIVENESS_PROBES += (
     "regex-brace",
     "regex-repetition",
     "regex-optional-operators",
+    "pv-except",
     "except-size",
     "except-eq",
     "pv-structs",
@@ -822,11 +823,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 292
+        assert len(MANIFEST_ACTIONS) == 293
         assert len(SEEDS) == 27
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 61
+        assert len(THROWING_ACTIONS) == 62
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported

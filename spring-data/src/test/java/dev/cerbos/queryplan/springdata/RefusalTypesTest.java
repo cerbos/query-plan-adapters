@@ -112,6 +112,7 @@ class RefusalTypesTest {
                     Map.entry("pv-exists-one", UnsupportedPlanShapeException.class),
                     Map.entry("pv-filter", UnsupportedPlanShapeException.class),
                     Map.entry("pv-map", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-except", UnsupportedPlanShapeException.class),
                     Map.entry("temporal-raw-eq", UnsupportedPlanShapeException.class),
                     Map.entry("eq-list", UnsupportedPlanShapeException.class),
                     Map.entry("ne-list", UnsupportedPlanShapeException.class),
@@ -178,7 +179,7 @@ class RefusalTypesTest {
             counts.merge(ex.getClass().getSimpleName(), 1, Integer::sum);
         }
         assertEquals(new TreeMap<>(Map.of(
-                        "UnsupportedPlanShapeException", 57,
+                        "UnsupportedPlanShapeException", 58,
                         "UnmappedAttributeException", 3)),
                 counts);
         assertEquals(THROWING.size(), counts.values().stream().mapToInt(Integer::intValue).sum());

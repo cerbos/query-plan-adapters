@@ -201,7 +201,7 @@ RSpec.describe "adversarial conformance" do
     regex-unanchored regex-dot regex-alternation
     regex-grouped regex-brace regex-repetition
     regex-optional-operators except-size except-eq
-    pv-structs pv-filter pv-map
+    pv-structs pv-filter pv-map pv-except
     div-by-division temporal-raw-eq eq-list
     ne-list
   ].freeze
@@ -209,12 +209,12 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(279)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(280)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(292)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(293)
       # Refusals must retain their pinned messages.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(66)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(67)
       # Each new hostile group needs a non-degenerate representative.
       expect(DEGENERACY_GUARD_ACTIONS.size).to eq(97)
     end

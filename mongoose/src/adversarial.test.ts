@@ -535,6 +535,7 @@ const DEGENERACY_LIVENESS_PROBES = [
   "pv-exists-one",
   "pv-filter",
   "pv-map",
+  "pv-except",
   "pv-not-all",
   "pv-not-exists",
   "pv-structs",
@@ -975,11 +976,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(292);
-    expect(unsupportedCount).toBe(87);
+    expect(MANIFEST_ACTIONS.size).toBe(293);
+    expect(unsupportedCount).toBe(88);
     expect(supportedExpectedCount).toBe(4);
     expect(ORACLE_ACTIONS).toHaveLength(196);
-    expect(THROWING_ACTIONS).toHaveLength(94);
+    expect(THROWING_ACTIONS).toHaveLength(95);
     expect(misclassified).toEqual([]);
   });
 
