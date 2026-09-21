@@ -539,6 +539,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "not-contains",
   "arith-mod",
   "index-scalar-list",
+  "index-scalar-list-not-eq",
+  "index-scalar-list-null",
   "map-eq-list",
   "vf-hasint",
   "pv-all-unrolled",
@@ -885,12 +887,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(279);
+    expect(MANIFEST_ACTIONS.size).toBe(281);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(218);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(220);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(229);
+    expect(THROWING_ACTIONS).toHaveLength(231);
     expect(misclassified).toEqual([]);
   });
 

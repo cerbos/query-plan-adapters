@@ -710,6 +710,9 @@ bug to several adapters, and no existing action reaches it:
   `== 1` makes the `-5` seed the witness, and the failure direction is an over-grant.
 - **`index-scalar-list`** indexes a scalar list directly, a bare `index(V,K)` in an operand
   position; `p-index` reaches its rejection through the `get-field` projection wrapping it.
+  Its `index-scalar-list-not-eq` and `index-scalar-list-null` companions distinguish an invalid
+  position from an explicit null element: empty lists stay denied under negation, while the
+  valid null first elements in `b5`, `b6`, and `e1` satisfy the null comparison.
 - **`map-eq-list`** compares a projection to a literal list. The corpus only ever fed `map` into
   `hasIntersection` or left it bare.
 - **`vf-lt` / `vf-size` / `vf-hasint`** complete the value-first family, this repository's canonical

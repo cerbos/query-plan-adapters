@@ -180,6 +180,8 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-contains",
   "arith-mod",
   "index-scalar-list",
+  "index-scalar-list-not-eq",
+  "index-scalar-list-null",
   "map-eq-list",
   "vf-hasint",
   "pv-exists-unrolled",
@@ -692,10 +694,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(279);
+    expect(allActions.size).toBe(281);
     expect(CONVEX_UNSUPPORTED).toHaveLength(24);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(249);
+    expect(ORACLE_ACTIONS).toHaveLength(251);
     expect(THROWING_ACTIONS).toHaveLength(28);
     expect(misclassified).toEqual([]);
   });
@@ -821,17 +823,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 249,
+      total: 251,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 213,
+      defaultPostCount: 215,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 202,
+      pushdownPostCount: 204,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

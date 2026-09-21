@@ -2260,6 +2260,22 @@ resourcePolicy:
         match:
           expr: 'R.attr.tagNames[0] == "public"'
 
+    # Negation must preserve out-of-range indexing errors; a valid null element is a value.
+    - actions: ["index-scalar-list-not-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.tagNames[0] == "public")'
+
+    # Explicit null in the first position is distinct from an absent first position.
+    - actions: ["index-scalar-list-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames[0] == null'
+
     # List EQUALITY. The corpus feeds map() into hasIntersection or leaves it bare as a
     # non-boolean condition; it never compares the projection to anything. Equality over a list
     # is ordered and exact — a3's two tags project to ["t3a","t3b"] in that order and nothing

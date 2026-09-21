@@ -16,6 +16,10 @@ import {
 } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { Param } from "drizzle-orm/sql";
+import { indexedEquality } from "./indexed";
+import type { Indexable } from "./indexed";
+
+export type { Indexable } from "./indexed";
 
 const FALSE_CONDITION = sql`0 = 1`;
 const TRUE_CONDITION = sql`1 = 1`;
@@ -100,6 +104,8 @@ type MappingConfig = {
   relation?: RelationMapping;
   valueType?: "timestamp";
   collectionValueType?: "scalar";
+  /** Ordered column storage for constant positional access; never inferred from a relation. */
+  indexable?: Indexable;
   /**
    * Declares that this column can be SQL NULL **and** how the caller represents that NULL in
    * the attributes it sends to `check()`. Declaring it asserts both facts; leaving it undeclared
@@ -250,6 +256,7 @@ const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
     "transform" in entry ||
     "relation" in entry ||
     "valueType" in entry ||
+    "indexable" in entry ||
     "collectionValueType" in entry);
 
 const isRelationValue = (entry: BaseMapperEntry): entry is RelationValue =>
@@ -1319,6 +1326,55 @@ const isStringConcatenation = (
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
 
+/** Resolve the opt-in column separately from a relation used for collection predicates. */
+const resolveIndexedColumn = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): { column: AnyColumn; indexable: Indexable; index: number } => {
+  const [collection, position] = operands;
+  if (
+    operands.length !== 2 || !collection || !position || !isNameOperand(collection)
+  ) {
+    throw new Error(
+      "Index access requires a mapped collection and a constant position",
+    );
+  }
+  const direct = getMappingEntry(collection.name, mapper);
+  const resolved =
+    direct && isMappingConfig(direct) && direct.indexable
+      ? { mapping: direct, relations: [] }
+      : resolveFieldReference(collection.name, mapper);
+  const mapping = resolved.mapping;
+  if (!isMappingConfig(mapping) || !mapping.indexable || !mapping.column) {
+    throw new Error(
+      `Index storage shape is undeclared for '${collection.name}': declare a column with indexable: "json" or "pgArray"; a relation has no positional order`,
+    );
+  }
+  if (
+    mapping.transform ||
+    resolved.relations.some((relation) => !options.skipRelations?.has(relation))
+  ) {
+    throw new Error(
+      "Index access requires a directly addressable column without a transform",
+    );
+  }
+  if (
+    !isValueOperand(position) || typeof position.value !== "number" ||
+    !Number.isSafeInteger(position.value) || position.value < 0 ||
+    position.value > 2147483647
+  ) {
+    throw new Error(
+      "Index access requires a constant non-negative 32-bit integer position",
+    );
+  }
+  return {
+    column: mapping.column,
+    indexable: mapping.indexable,
+    index: position.value,
+  };
+};
+
 const buildValueExpression = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
@@ -1457,8 +1513,9 @@ const buildValueExpression = (
   }
 
   if (operator === "index") {
+    resolveIndexedColumn(operands, mapper, options);
     throw new Error(
-      "'index' operator (array indexing) is not supported by the Drizzle adapter",
+      "Indexed values support only direct eq/ne comparisons with scalar literals; nested value expressions cannot preserve element types and index errors",
     );
   }
 
@@ -2687,6 +2744,27 @@ const buildComparisonFilter = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
+  const indexed = [left, right].find(
+    (operand) => isExpressionOperand(operand) && operand.operator === "index",
+  );
+  if (indexed && isExpressionOperand(indexed)) {
+    const resolved = resolveIndexedColumn(indexed.operands, mapper, options);
+    const other = indexed === left ? right : left;
+    if (
+      (operator !== "eq" && operator !== "ne") || !isValueOperand(other) ||
+      (other.value !== null && typeof other.value !== "string" &&
+       typeof other.value !== "boolean" && typeof other.value !== "number")
+    ) {
+      throw new Error(
+        "Indexed values support only direct eq/ne comparisons with scalar literals",
+      );
+    }
+    if (typeof other.value === "number" && !Number.isFinite(other.value)) {
+      throw new Error("Indexed numeric comparisons require a finite literal");
+    }
+    const equality = indexedEquality({ ...resolved, value: other.value });
+    return (operator === "ne") !== negated ? not(equality) : equality;
+  }
   const buildTernary = (
     ternary: PlanExpressionOperand & {
       operator: string;
