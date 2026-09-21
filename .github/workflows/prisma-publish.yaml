@@ -10,14 +10,23 @@ defaults:
     working-directory: prisma
 
 permissions:
-  id-token: write # Required for OIDC
   contents: read
 
 jobs:
+  # A local call runs the full adapter matrix and example at this release's commit.
+  test:
+    uses: ./.github/workflows/prisma.yaml
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Required for npm trusted publishing
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -25,7 +34,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       # Without an explicit version this installs whatever `latest` resolves to on the day the
-      # tag was pushed. Nothing here reads the PDP — these workflows only build and publish — but
+      # tag was pushed. Nothing in this job reads the PDP — it only builds and publishes — but
       # an unpinned Cerbos install is still an unpinned dependency of a release artifact, and the
       # version the corpus pins is the one the package was proved against.
       - name: Read pinned Cerbos version

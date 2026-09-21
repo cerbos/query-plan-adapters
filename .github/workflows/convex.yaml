@@ -8,9 +8,11 @@ on:
       - "demo/**"
       - ".github/workflows/convex.yaml"
       - ".github/workflows/convex-publish.yaml"
-  push:
-    tags:
-      - convex/v*
+  # Release tags invoke these same checks through the publish workflow.
+  workflow_call:
+
+permissions:
+  contents: read
 
 defaults:
   run:
