@@ -612,7 +612,7 @@ The harness applies a 30-second deadline to each PDP call, so a stalled RPC fail
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 118 reference conformance actions plus regex and timestamp probes (120 actions) |
-| Fail-closed | 164 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (173 actions total) |
+| Fail-closed | 170 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (179 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -625,20 +625,22 @@ unexpressible categories above plus positive explicit-null comparisons,
 null-sensitive variable membership, positive `all`, negated `exists`, collection-emptiness
 predicates that require distinguishing an indexed empty array from a missing field, `size()` over a
 field not declared as a collection (a string's length would otherwise read as `exists`, which an
-indexed empty string satisfies), an empty hierarchy delimiter, and an anchored `matches()` pattern
-whose top-level alternation RE2 and Lucene parse differently.
+indexed empty string satisfies), an empty hierarchy delimiter, an anchored `matches()` pattern
+whose top-level alternation RE2 and Lucene parse differently, and a positional read of a scalar
+list whatever its element type — `R.attr.aNumberList[0] == 2` is refused like
+`R.attr.tagNames[0] == "public"`, because a term query matches the value at any position.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 172 of the corpus's 293 shapes are refused here — the 171 fail-closed actions
+that raise them**. 180 of the corpus's 301 shapes are refused here — the 179 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
-is 29 sites, with 74 actions reaching the computed-operand refusal:
+is 29 sites, with 82 actions reaching the computed-operand refusal:
 
 | Rejection site | Actions |
 | --- | --- |
-| computed leaf operand | 74 |
+| computed leaf operand | 82 |
 | field-to-field | 22 |
 | explicit null | 8 |
 | count over an undeclared collection | 6 |

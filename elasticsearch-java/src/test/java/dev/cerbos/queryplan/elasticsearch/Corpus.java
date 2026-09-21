@@ -315,6 +315,12 @@ final class Corpus {
             Map.entry("request.resource.attr.obj.inner", "obj.inner"),
             Map.entry("request.resource.attr.tags", "tags"),
             Map.entry("request.resource.attr.tagNames", "tagNames"),
+            // The homogeneous number and boolean lists, flat arrays like tagNames. Every action
+            // reading them indexes a position, which is refused before the field is looked up;
+            // they are mapped anyway, so a walk that looked the field up first would still refuse
+            // with the positional-read message rather than "Unknown attribute" (#326).
+            Map.entry("request.resource.attr.aNumberList", "aNumberList"),
+            Map.entry("request.resource.attr.aBoolList", "aBoolList"),
             Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
             Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
@@ -345,13 +351,14 @@ final class Corpus {
 
     /**
      * The field paths the corpus index maps as FLAT arrays of scalars — {@code tagNames} is a
-     * {@code keyword} array. The adapter cannot tell {@code size(aString)} from
+     * {@code keyword} array, {@code aNumberList} a {@code double} one and {@code aBoolList} a
+     * {@code boolean} one. The adapter cannot tell {@code size(aString)} from
      * {@code size(tagNames)} on its own, so a {@code size()} over a field declared in neither
      * this set nor {@link #NESTED_PATHS} is refused ({@code string-size}, {@code size-huge-*}).
      * No corpus action sizes a flat array today; the declaration is here so the harness states
      * the whole mapping rather than the part the corpus happens to reach.
      */
-    static final Set<String> COLLECTION_FIELDS = Set.of("tagNames");
+    static final Set<String> COLLECTION_FIELDS = Set.of("tagNames", "aNumberList", "aBoolList");
 
     /** The one set of declarations both corpus suites translate through. */
     static final ElasticsearchQueryPlanAdapter.Options OPTIONS =
