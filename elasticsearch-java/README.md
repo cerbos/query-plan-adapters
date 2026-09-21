@@ -596,7 +596,7 @@ The harness applies a 30-second deadline to each PDP call, so a stalled RPC fail
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 118 reference conformance actions plus regex and timestamp probes (120 actions) |
-| Fail-closed | 161 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (170 actions total) |
+| Fail-closed | 162 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (171 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -616,7 +616,7 @@ Every fail-closed shape's error message is pinned in the shared corpus (`conform
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 171 of the corpus's 292 shapes are refused here — the 170 fail-closed actions
+that raise them**. 172 of the corpus's 293 shapes are refused here — the 171 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
 is 29 sites, with 74 actions reaching the computed-operand refusal:
 
@@ -633,7 +633,7 @@ is 29 sites, with 74 actions reaching the computed-operand refusal:
 | positive all over a collection | 4 |
 | regex dialect syntax | 5 |
 | conditional value as a condition | 3 |
-| two-list difference | 3 |
+| two-list difference | 4 |
 | collection emptiness | 2 |
 | computed collection macro | 2 |
 | count over a computed collection | 2 |

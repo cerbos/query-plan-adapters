@@ -2713,6 +2713,16 @@ resourcePolicy:
         match:
           expr: 'size(P.attr.manyTeams.filter(t, t == R.attr.aOptionalString)) > 0'
 
+    # Two-list difference with a principal-list receiver retains the resource-dependent list.
+    # a1 ("set") and b2 ("%_o") shrink it; c1 ("Set") does not, and a2
+    # omits the attribute so evaluation denies rather than treating it as an empty list.
+    - actions: ["pv-except"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'size(P.attr.manyTeams.except([R.attr.aOptionalString])) < size(P.attr.manyTeams)'
+
     # Unfoldable principal-list macro must translate correctly or refuse its real wire shape.
     - actions: ["pv-map"]
       effect: EFFECT_ALLOW

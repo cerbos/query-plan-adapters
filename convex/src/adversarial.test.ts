@@ -257,6 +257,7 @@ const DEGENERACY_LIVENESS_PROBES = [
   "except-size",
   "hier-overlaps-list-prefix",
   "pv-structs",
+  "pv-except",
   "regex-alternation",
   "regex-brace",
   "regex-case",
@@ -707,11 +708,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(292);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(25);
+    expect(allActions.size).toBe(293);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
     expect(ORACLE_ACTIONS).toHaveLength(261);
-    expect(THROWING_ACTIONS).toHaveLength(29);
+    expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
 

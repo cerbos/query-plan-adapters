@@ -532,6 +532,7 @@ const DEGENERACY_LIVENESS_PROBES = [
   "pv-exists-one",
   "pv-filter",
   "pv-map",
+  "pv-except",
   "in-var-var-omitted",
   "in-var-var-omitted-neg",
   "div-by-division",
@@ -1053,7 +1054,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 292 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 293 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1069,10 +1070,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(292);
+    expect(MANIFEST_ACTIONS.size).toBe(293);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(119);
+    expect(THROWING_ACTIONS).toHaveLength(120);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

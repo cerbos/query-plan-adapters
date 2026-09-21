@@ -468,6 +468,7 @@ const DEGENERACY_LIVENESS_PROBES = [
   "pv-exists-one",
   "pv-filter",
   "pv-map",
+  "pv-except",
   "pv-structs",
   "regex-alternation",
   "regex-brace",
@@ -1602,11 +1603,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(292);
+    expect(MANIFEST_ACTIONS.size).toBe(293);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(63);
+    expect(THROWING_ACTIONS).toHaveLength(64);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
