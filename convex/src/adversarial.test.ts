@@ -173,11 +173,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   "not-lt",
   "root-bare-bool",
   "or-eq-exists",
-  // Hazard classes the corpus missed (#387). Convex translates every compared one,
-  // and for three of them it is the ONLY adapter that does — the post-filter reimplements CEL
-  // rather than lowering to a query language, so modulo, a positional read of a scalar list and
-  // list equality all have exact meanings here. Those three carry the whole corpus's oracle
-  // comparison for their groups; every other adapter probes them fail-closed.
+  // Hazard classes the corpus missed (#387). Convex translates every compared one: the
+  // post-filter reimplements CEL rather than lowering to a query language, so modulo, a
+  // positional read of a scalar list and list equality all have exact meanings here. It is no
+  // longer alone on the first two — activerecord compares `arith-mod`, and the adapters with a
+  // declared ordered column (drizzle, sqlalchemy) or native arrays (mongoose) compare the
+  // positional reads — but list equality still has no other oracle comparison.
   "not-and",
   "not-contains",
   "arith-mod",
