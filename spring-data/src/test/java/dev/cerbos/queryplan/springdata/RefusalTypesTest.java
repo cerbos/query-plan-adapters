@@ -125,7 +125,6 @@ class RefusalTypesTest {
                     Map.entry("cast-double-string", UnsupportedPlanShapeException.class),
                     Map.entry("cast-int-double", UnsupportedPlanShapeException.class),
                     Map.entry("cast-int-string", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-string-bool", UnsupportedPlanShapeException.class),
                     Map.entry("cast-string-double", UnsupportedPlanShapeException.class),
                     Map.entry("concat-f2f", UnsupportedPlanShapeException.class),
                     Map.entry("cr-div-then-add", UnsupportedPlanShapeException.class),
@@ -185,7 +184,7 @@ class RefusalTypesTest {
             counts.merge(ex.getClass().getSimpleName(), 1, Integer::sum);
         }
         assertEquals(new TreeMap<>(Map.of(
-                        "UnsupportedPlanShapeException", 64,
+                        "UnsupportedPlanShapeException", 63,
                         "UnmappedAttributeException", 3)),
                 counts);
         assertEquals(THROWING.size(), counts.values().stream().mapToInt(Integer::intValue).sum());

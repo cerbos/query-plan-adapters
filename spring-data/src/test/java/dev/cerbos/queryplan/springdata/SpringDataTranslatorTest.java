@@ -449,7 +449,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 231, "unconditional", 3, "throwing", 67),
+                Map.of("conditional", 232, "unconditional", 3, "throwing", 66),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -509,6 +509,7 @@ class SpringDataTranslatorTest {
      * growing one lands here rather than silently widening an exemption.
      */
     static final List<String> RENDERING_DIFFERS_ON_HIBERNATE_7 = List.of(
+            "cast-string-bool",
             "double-negation",
             "lambda-ternary",
             "nan-ord-inf",
@@ -793,7 +794,7 @@ class SpringDataTranslatorTest {
                             Map.entry("whole-list comparison", 2),
                             Map.entry("computed intersection", 1),
 
-                            Map.entry("computed leaf operand", 27),
+                            Map.entry("computed leaf operand", 26),
                             Map.entry("operator the reference never translates", 14),
                             Map.entry("filter() in boolean position", 2),
                             Map.entry("non-numeric arithmetic operand", 2),

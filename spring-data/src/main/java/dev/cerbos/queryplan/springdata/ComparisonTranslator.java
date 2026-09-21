@@ -237,6 +237,14 @@ final class ComparisonTranslator {
         }
 
         /**
+         * {@code string(variable)} — CEL's string conversion over a mapped column. Only a
+         * BOOLEAN column has a lowering ({@link #booleanStringComparison}); the column's type is
+         * read at the consuming dispatch site, and every other type is refused there with the
+         * leaf-operand message a {@code string()} operand has always raised.
+         */
+        record StringOfField(String variable) implements Resolved {}
+
+        /**
          * An operand no leaf comparison understands ({@code map()}, {@code lambda},
          * {@code timestamp()} over a nested expression, an unset node...). Dispatch
          * routes these to {@link #leafOperandError}, which reports from the RAW operands
@@ -270,6 +278,12 @@ final class ComparisonTranslator {
                         yield new Resolved.TimestampConstant(arg);
                     }
                     yield new Resolved.Opaque();
+                }
+                // string(variable). Anything else inside string() — a nested expression, a
+                // constant — stays Opaque → leafOperandError.
+                if ("string".equals(exprOp) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    yield new Resolved.StringOfField(e.getOperands(0).getVariable());
                 }
                 if (!ArithmeticTranslator.ARITHMETIC_OPS.contains(exprOp)) {
                     yield new Resolved.Opaque();
@@ -379,6 +393,16 @@ final class ComparisonTranslator {
             if (left instanceof Resolved.TimestampConstant lts
                     && right instanceof Resolved.TimestampConstant rts) {
                 return timestampConstantComparison(op, lts.instant(), rts.instant());
+            }
+            // string(column) eq/ne a string constant. NormalizedBinary puts the string()
+            // operand first (an EXPRESSION outranks a VALUE), so the value-first spelling
+            // arrives here too. Ordering operators and non-string constants fall through to
+            // leafOperandError, as does every column that is not a boolean.
+            if (("eq".equals(op) || "ne".equals(op))
+                    && left instanceof Resolved.StringOfField sf
+                    && right instanceof Resolved.Constant c
+                    && c.value() instanceof String text) {
+                return booleanStringComparison(op, sf, text, operands, scope);
             }
             // Fold: `field op add(value, value)` — the folded constant compares like any
             // plan constant (normalization guarantees the field arrives first). Strings
@@ -558,6 +582,52 @@ final class ComparisonTranslator {
                     "Unsupported constant timestamp comparison operator: " + op);
         };
         return result ? cb.conjunction() : cb.disjunction();
+    }
+
+    /**
+     * {@code string(boolColumn) eq/ne "text"}: CEL's string conversion of a boolean column,
+     * compared with a string constant.
+     *
+     * <p>CEL renders a bool as exactly {@code "true"} or {@code "false"}, so the comparison is
+     * decided HERE, byte for byte, and the store is only ever asked about the boolean column:
+     * {@code string(x) == "true"} is {@code x == true}, {@code string(x) == "false"} is
+     * {@code x == false}, and any other constant matches no value at all. Both SQL spellings of
+     * the conversion are wrong somewhere. A {@code CAST} renders {@code 'true'} on H2 and
+     * PostgreSQL and {@code '1'} on MySQL, which stores a boolean as a number. And
+     * {@code CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END} compared
+     * with the constant puts two LITERALS on the comparison, which a store compares in its
+     * CONNECTION collation rather than a column's: MySQL Connector/J leaves that at
+     * {@code utf8mb4_0900_ai_ci} even on a server whose columns are case-sensitive, and there
+     * the CASE form returned every true row for {@code string(x) == "TRUE"}, all of which CEL
+     * denies (measured on this repository's MySQL leg; cerbos/query-plan-adapters#418 proposed
+     * the CASE).
+     *
+     * <p>A NULL column is a missing attribute, or an explicit null, on the check side, and CEL
+     * has no {@code string()} for either: it raises, and the PDP denies the row under both
+     * polarities. The two word arms keep that by construction ({@code NULL = true} is UNKNOWN);
+     * the no-match arm states it, as {@link #solveAddComparison} does for an unsolvable
+     * concatenation. That is also why an explicit-null declaration does not make this equality
+     * definite the way it does a plain column's.
+     *
+     * <p>The two word arms go through {@link LeafTranslator#applyLeaf} with the boolean the
+     * constant names, as the bare boolean attribute does, so an {@code eq}/{@code ne} override
+     * sees them. Every other column type keeps the refusal a {@code string()} operand has always
+     * raised: a number's or an instant's text form is what the dialects render on their own
+     * terms, and nothing here reproduces CEL's. {@link Boolean} only, not the primitive: the
+     * leaf's type check would read a {@code boolean} path as incompatible with a
+     * {@link Boolean} value and fold the comparison to a constant.
+     */
+    private Predicate booleanStringComparison(String op, Resolved.StringOfField field,
+                                              String value, List<Operand> operands, Scope scope) {
+        Path<?> path = scope.path(field.variable());
+        if (!Boolean.class.equals(path.getJavaType())) {
+            throw leafOperandError(op, operands);
+        }
+        if ("true".equals(value) || "false".equals(value)) {
+            return leaf.applyLeaf(op, path, Boolean.valueOf(value));
+        }
+        return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
+                () -> cb.isNull(path));
     }
 
     /**

@@ -1335,7 +1335,7 @@ class AdversarialConformanceTest {
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(67, throwing.size(), "throwing action count changed");
+        assertEquals(66, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1459,9 +1459,11 @@ class AdversarialConformanceTest {
             // int() over a numeric column: truncation-versus-rounding, unsupported for every
             // adapter but convex, which promotes it in adapterSupportedExpected.
             "cast-int-double",
-            // string() has no Criteria API form (#376); the boolean half additionally has no
-            // dialect-independent rendering. Neither has a compared member here.
-            "cast-string-bool",
+            // string() over a double: the Criteria API has no cast, and the only string() form
+            // the reference has is over a BOOLEAN column, whose two words it compares in Java —
+            // which is why the other half of the pair, cast-string-bool, is compared by the
+            // sweep above.
+            "cast-string-double",
             // Concatenation against the key where the reference lowers `+` as arithmetic.
             "id-concat",
             // The same arithmetic-only lowering of `+` with both operands columns (#391).

@@ -209,6 +209,14 @@ notice. The same divergence applies to accent folding (`'résumé'` vs `'resume'
 - `hasIntersection` (both the direct-collection and `map(...)`-projection translations)
 - `hierarchy(...)` ancestor/descendant checks (prefix `LIKE` and ancestor-prefix `IN` lists)
 
+`string()` over a boolean column is the one conversion that emits no string predicate at all:
+its constant is compared in Java against the two words CEL renders, and only the boolean column
+reaches SQL. That matters beyond the column collation, because a comparison between two
+literals — which is what a `CASE` spelling `'true'`/`'false'` compared with the constant would
+be — takes the **connection** collation. MySQL Connector/J sets that to `utf8mb4_0900_ai_ci`
+unless told otherwise, even against a server whose columns are `utf8mb4_0900_as_cs`; this
+repository's MySQL leg measured it.
+
 **`OperatorFunction` overrides are not a workaround for all of these.** In particular, the
 `hasIntersection` translation over a plain field (`path.in(values)`) is built before any
 override consultation, so a user-supplied `OperatorFunction` cannot intercept it. Fix the
@@ -290,6 +298,7 @@ refused with `UnmappedAttributeException` rather than resolved to a guessed colu
 | `eq(value, add(const, field))`   | Solve for `field` (string prefix/suffix strip; numeric subtract); unsolvable cases become `1=0` / `1=1` |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
 | Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
+| `string()` over a **boolean** column (`string(R.attr.flag) == "true"`, `eq`/`ne` against a string constant) | Decided in Java, byte for byte, against the two words CEL renders: `"true"` becomes `col = true`, `"false"` becomes `col = false`, and any other constant matches no row (`ne`: every non-`NULL` row). No text comparison reaches the database, so neither a dialect's `CAST` (`'1'` on MySQL) nor a connection collation can change the answer. A `NULL` column stays UNKNOWN under both polarities, matching `check()` denying the row. `string()` over any other column type is refused |
 
 Unsupported constructs raise `UnsupportedPlanShapeException` (an `IllegalArgumentException` —
 see [Handling refusals](#handling-refusals)). Some — but not all — can be overridden with an
@@ -308,20 +317,21 @@ Specification<Contact> allowed =
 An override is consulted only where the adapter has already resolved a `(field, value)`
 pair for a top-level operator — the plain comparisons (`eq`/`ne`/`lt`/`gt`/`le`/`ge`,
 consulted under the mirrored name for value-first forms, and including the `add`-folded and
-null-RHS forms and an arithmetic expression compared against a constant), the LIKE family with
-a **column** receiver, the scalar `in`, the bare boolean attribute (as `eq`), unknown
-top-level leaf operators such as `matches`, and timestamp comparisons (the override
-receives the parsed `java.time.Instant` as the value, including for column types the
-default translation rejects). Negation does not change this: `not` is applied around the
-built predicate, so an override reaches its operator under both polarities. Constructs
-rejected **while resolving an operand** — `mod`, `int()`/type casts, list indexing — throw
-before any override lookup and **cannot be intercepted**; the "Not yet supported" table below
-marks each row. Nor is an override consulted where there is no `(field, value)` pair: every
-correlated-subquery shape (the collection macros, `size(...)`, `hasIntersection` and `in` over
-a `Relation`, and the attribute-in-attribute `in(R.attr.x, R.attr.coll)`), field-to-field
-comparisons, the constant-receiver string matches (`"a,b".contains(R.attr.x)`), and
-`hasIntersection` over a plain `Field`, which is built as `path IN (values)` directly rather
-than through the `in` hook (see
+null-RHS forms, an arithmetic expression compared against a constant, and `string()` over a
+boolean column compared against `"true"` or `"false"`, where the override receives the column
+and that `Boolean`), the LIKE family with a **column** receiver, the scalar `in`, the
+bare boolean attribute (as `eq`), unknown top-level leaf operators such as `matches`, and
+timestamp comparisons (the override receives the parsed `java.time.Instant` as the value,
+including for column types the default translation rejects). Negation does not change
+this: `not` is applied around the built predicate, so an override reaches its operator under
+both polarities. Constructs rejected **while resolving an operand** — `mod`, `int()`/type
+casts, list indexing — throw before any override lookup and **cannot be intercepted**; the
+"Not yet supported" table below marks each row. Nor is an override consulted where there is
+no `(field, value)` pair: every correlated-subquery shape (the collection macros,
+`size(...)`, `hasIntersection` and `in` over a `Relation`, and the attribute-in-attribute
+`in(R.attr.x, R.attr.coll)`), field-to-field comparisons, the constant-receiver string matches
+(`"a,b".contains(R.attr.x)`), and `hasIntersection` over a plain `Field`, which is built as
+`path IN (values)` directly rather than through the `in` hook (see
 [Database collation requirements](#database-collation-requirements)). The Javadoc on
 `OperatorFunction` is the authoritative list.
 
@@ -341,7 +351,7 @@ the construct: rows marked **no** are rejected while resolving an operand,
 | Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | no          | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
 | Regex match                                     | `R.attr.aString.matches("^foo.*")`                | yes (`matches`) | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
 | List indexing                                   | `R.attr.tags[0] == "x"`                           | no          | JPA collections are unordered sets — no positional access. |
-| Type casts (`int(...)` / `double(...)` / `string(...)`) | `int(R.attr.aString) > 0`                 | no          | No portable `CAST` in Criteria. |
+| Type casts (`int(...)` / `double(...)`, and `string(...)` over anything but a boolean column) | `int(R.attr.aString) > 0`                 | no          | No portable `CAST` in Criteria. `string()` over a boolean column is the one conversion translated, and it never reaches SQL as text (see the table above). |
 | `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | no          | Use `hasIntersection(map(...), [...])` instead. |
 | Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
 | Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
@@ -433,8 +443,8 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 232 of the 288 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a list — of strings, numbers or booleans alike, since the refusal is raised before the element's type is examined — list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (67 actions) |
+| Oracle-tested | 233 of the 288 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (the Criteria API has no cast expression; a boolean's text is the one CEL spells in exactly two words, so that comparison is decided in Java instead), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a list — of strings, numbers or booleans alike, since the refusal is raised before the element's type is examined — list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (66 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
@@ -443,7 +453,7 @@ Bare comparisons between temporal columns are rejected because the database comp
 
 The translator preserves CEL type errors and missing-attribute errors through negation. Numeric fields are not coerced into strings for string operations, and ordering against NaN remains unknown rather than becoming a false predicate that negation could turn into an allow.
 
-Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 234 recorded statements and 67 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 27 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 235 recorded statements and 66 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 27 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
 
 The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
 
@@ -452,6 +462,8 @@ The oracle coverage includes value-first and field-to-field comparisons, literal
 **Behaviour change.** A negated string match against a **column** needle — `!R.attr.a.contains(R.attr.b)` — used to return the rows whose needle is NULL. The null guard was spelled `needle IS NOT NULL AND haystack LIKE pattern`, which is definite FALSE for a NULL needle, and `NOT FALSE` is TRUE; CEL raises a missing-attribute error there, which denies. Those rows are now excluded under both polarities, because the guard is nested so the LIKE sees a NULL PATTERN and stays UNKNOWN. This **removes rows from results** that the PDP denies — an over-grant fix, so upgrade rather than pin ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). The positive form is unaffected: it excluded those rows already.
 
 **Behaviour change.** A hierarchy with an **empty** delimiter — `hierarchy(R.attr.scope, "")` — now throws. Cerbos splits the path on an empty delimiter into one segment per character, so `descendentOf` is a strict string-prefix test; the adapter lowered it as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matched the path **itself** (never its own descendant): the corpus's `hier-empty-delim` returned `a2` (`dept.eng`) against the constant `dept.eng`, a row the PDP denies. A shape that returned a filter now raises, which is a consumer-visible break, but the filter over-granted.
+
+**Behaviour change.** `string()` over a **boolean** column compared with a string constant — `string(R.attr.flag) == "true"` — now translates instead of throwing. CEL renders a bool as exactly `"true"` or `"false"`, so the adapter compares the constant in Java and emits `col = true`, `col = false`, or, for any other constant, a predicate no present value satisfies; a `NULL` column is excluded under both polarities, as `check()` denies it. The corpus's `cast-string-bool` compares clean against the oracle on H2, PostgreSQL and MySQL, in both strict evaluation modes and on Hibernate 7. A policy that used to raise `UnsupportedPlanShapeException` here now returns a filter; `string()` over every other column type still raises. The SQL `CASE` that spells the two words was measured and not used: its literals compare in the connection collation, which on the MySQL leg is `utf8mb4_0900_ai_ci` even though the columns are case-sensitive, so `string(R.attr.flag) == "TRUE"` returned every true row, which the PDP denies.
 
 The `mod` rejection message no longer claims the condition "can never be satisfied by the PDP". That holds for a bare `attr % n`, which is a CEL no-overload error, but not for `int(attr) % n` — the rejection stands because the cast is itself unlowerable, which is what the message now says.
 
