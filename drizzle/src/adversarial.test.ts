@@ -81,6 +81,9 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** Read only by position; a null element is a VALUE, not a missing attribute. */
+  aNumberList: (number | null)[];
+  aBoolList: (boolean | null)[];
 }
 
 interface SeedsFile {
@@ -106,6 +109,8 @@ const SEED_KEYS = [
   "tags",
   "subCategoryNames",
   "parentSeedId",
+  "aNumberList",
+  "aBoolList",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -438,6 +443,22 @@ const DEGENERACY_GUARD_ACTIONS = [
   "size-ge-one",
   "wildcard-contains",
   "wildcard-endswith",
+  // Number and boolean list elements, read through declared indexed storage (#464). The two
+  // cross-type probes are the ones that matter: CEL's heterogeneous equality makes
+  // `[true][0] == 1` and `[1][0] == true` false. Measured by mutating `indexed.ts`, not inferred:
+  // on SQLite a type-blind `json_extract(...) = ?` returns b4 and c1, and b4; on MySQL the same
+  // comparison agrees (its JSON comparator keeps the type) but `json_unquote(...) = ?` returns b4.
+  // Their oracle is `a1` alone, through the `aNumber == 5` branch each carries so it is not empty.
+  "index-number-list",
+  "index-number-list-not-eq",
+  "index-bool-list",
+  "index-bool-list-not-eq",
+  "index-bool-list-vs-number",
+  "index-number-list-vs-bool",
+  // string() over a boolean column, lowered through a CASE rather than a CAST (#418). Its oracle is
+  // every row whose aBool is true, which is what makes a CAST rendering "1" on SQLite and MySQL an
+  // under-grant of all of them rather than a near miss.
+  "cast-string-bool",
 ] as const;
 
 /**
@@ -448,8 +469,8 @@ const DEGENERACY_GUARD_ACTIONS = [
  * The list exists as of #340. Before the MySQL leg executed, this adapter translated every shape
  * in the sample and the guard was one-sided; `cast-string-double` was in the COMPARED list, on the
  * belief that `CAST(... AS TEXT)` rendered a double identically on every store. It is a syntax
- * error on MySQL. `cast-string-double` rather than its boolean sibling because its oracle is a
- * single row out of 22 — a non-empty, non-total set, which is what the guard asserts.
+ * error on MySQL. Its boolean sibling `cast-string-bool` sits in the compared list above: a boolean
+ * needs no cast target, only a CASE (#418).
  */
 const DEGENERACY_LIVENESS_PROBES = [
   "cast-string-double",
@@ -587,6 +608,8 @@ interface ResourceRow {
   createdAt: string | null;
   updatedAt: string | null;
   tagNamesJson: (string | null)[];
+  aNumberListJson: (number | null)[];
+  aBoolListJson: (boolean | null)[];
 }
 
 interface TagRow {
@@ -667,6 +690,8 @@ function seedRows(): SeedRows {
       createdAt: timestampFor(seed),
       updatedAt: derivedFor(seed).updatedAt,
       tagNamesJson: seed.tags.map((tag) => tag.name),
+      aNumberListJson: seed.aNumberList,
+      aBoolListJson: seed.aBoolList,
     });
     const parentSeed = parentSeedOf(seed);
     if (parentSeed !== undefined) {
@@ -807,7 +832,9 @@ function sqliteStore(): AdversarialStore {
           scope TEXT,
           created_at TEXT,
           updated_at TEXT,
-          tag_names_json TEXT
+          tag_names_json TEXT,
+          a_number_list_json TEXT,
+          a_bool_list_json TEXT
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
@@ -947,8 +974,18 @@ function postgresStore(): AdversarialStore {
     name: "postgres",
     mapper: buildMapper(schema),
     indexMappers: [
-      { ...buildMapper(schema), "request.resource.attr.tagNames": { column: resources.tagNamesArray, indexable: "pgArray" } },
-      { ...buildMapper(schema), "request.resource.attr.tagNames": { column: resources.tagNamesPlainJson, indexable: "json" } },
+      {
+        ...buildMapper(schema),
+        "request.resource.attr.tagNames": { column: resources.tagNamesArray, indexable: "pgArray" },
+        "request.resource.attr.aNumberList": { column: resources.aNumberListArray, indexable: "pgArray" },
+        "request.resource.attr.aBoolList": { column: resources.aBoolListArray, indexable: "pgArray" },
+      },
+      {
+        ...buildMapper(schema),
+        "request.resource.attr.tagNames": { column: resources.tagNamesPlainJson, indexable: "json" },
+        "request.resource.attr.aNumberList": { column: resources.aNumberListPlainJson, indexable: "json" },
+        "request.resource.attr.aBoolList": { column: resources.aBoolListPlainJson, indexable: "json" },
+      },
     ],
 
     async start(): Promise<void> {
@@ -970,7 +1007,13 @@ function postgresStore(): AdversarialStore {
           updated_at         timestamptz,
           tag_names_json     jsonb,
           tag_names_plain_json json,
-          tag_names_array    text[]
+          tag_names_array    text[],
+          a_number_list_json jsonb,
+          a_number_list_plain_json json,
+          a_number_list_array integer[],
+          a_bool_list_json   jsonb,
+          a_bool_list_plain_json json,
+          a_bool_list_array  boolean[]
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
@@ -1012,12 +1055,26 @@ function postgresStore(): AdversarialStore {
 
       const rows = seedRows();
       await db.insert(resources).values(rows.resources);
+      // The same list three ways: jsonb (the shared mapper), plain json, and a native array
+      // rebased to a ZERO lower bound, so a raw `[index + 1]` would read the wrong element and
+      // only the positional JSON conversion the adapter emits reads the right one. A JSON null
+      // element becomes a SQL NULL element, which `to_jsonb` turns back into a JSON null.
       await db.execute(sql`update adversarial_resources set
         tag_names_plain_json = tag_names_json::json,
         tag_names_array = case when jsonb_array_length(tag_names_json) > 0 then
           ('[0:' || (jsonb_array_length(tag_names_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(tag_names_json))::text)::text[]
-          else array[]::text[] end`);
+          else array[]::text[] end,
+        a_number_list_plain_json = a_number_list_json::json,
+        a_number_list_array = case when jsonb_array_length(a_number_list_json) > 0 then
+          ('[0:' || (jsonb_array_length(a_number_list_json) - 1) || ']=' ||
+            array(select jsonb_array_elements_text(a_number_list_json))::text)::integer[]
+          else array[]::integer[] end,
+        a_bool_list_plain_json = a_bool_list_json::json,
+        a_bool_list_array = case when jsonb_array_length(a_bool_list_json) > 0 then
+          ('[0:' || (jsonb_array_length(a_bool_list_json) - 1) || ']=' ||
+            array(select jsonb_array_elements_text(a_bool_list_json))::text)::boolean[]
+          else array[]::boolean[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
       await db.insert(tags).values(rows.tags);
@@ -1124,8 +1181,11 @@ const MYSQL_COLLATION =
  *   adapter emits is portable by construction; this one is the single version-gated construct in
  *   it, and nothing but executing it says whether the server accepts it.
  * - **`CAST(… AS TEXT)`.** Which is not a MySQL cast target at all — the divergence this leg
- *   actually found, and the reason `string()` is now refused (`UNSUPPORTED_CONVERSIONS` in
- *   `index.ts`). Both other stores accept it.
+ *   actually found, and the reason `string()` is refused over every column but a boolean
+ *   (`UNSUPPORTED_CONVERSIONS` in `index.ts`). Both other stores accept it. A boolean is lowered
+ *   through a CASE instead, and its two literals are the one place the adapter names a MySQL
+ *   collation: a literal compares in the CONNECTION's, which is mysql2's `utf8mb4_unicode_ci`
+ *   here, not the server's `MYSQL_COLLATION` (`buildBooleanString` in `index.ts`).
  *
  * The DDL is written here rather than derived from the drizzle schema because a store owns its own
  * schema in this harness — but it deliberately names NO collation per column, unlike `ent`'s. The
@@ -1172,7 +1232,9 @@ function mysqlStore(): AdversarialStore {
        scope              varchar(255),
        created_at         datetime(6),
        updated_at         datetime(6),
-       tag_names_json     json
+       tag_names_json     json,
+       a_number_list_json json,
+       a_bool_list_json   json
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
@@ -1417,6 +1479,9 @@ function asCheckResource(seed: Seed): Resource {
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     tagNames: seed.tags.map((tag) => tag.name),
+    // Verbatim: the stored JSON column holds the same list, null elements included.
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     categories: seed.subCategoryNames.map((subName) => ({
       name: "business",
       subCategories: [
@@ -1605,11 +1670,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(295);
+    expect(MANIFEST_ACTIONS.size).toBe(301);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(64);
+    expect(THROWING_ACTIONS).toHaveLength(63);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1631,6 +1696,16 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     "index-scalar-list-not-eq",
     "index-scalar-list-null",
     "index-not-oob",
+    // Number and boolean elements (conformance/README.md, "Number and boolean list elements"),
+    // on every representation: jsonb, plain json and a zero-based integer[] / boolean[] on
+    // PostgreSQL. The two cross-type probes are the over-grant witnesses for a comparison that
+    // drops an element's JSON type.
+    "index-number-list",
+    "index-number-list-not-eq",
+    "index-bool-list",
+    "index-bool-list-not-eq",
+    "index-bool-list-vs-number",
+    "index-number-list-vs-bool",
   ])("declared indexed storage: %s matches the oracle for every representation", async (action) => {
     const oracle = await oracleAllowedIds(action);
     await expectNonDegenerateOracle(action);

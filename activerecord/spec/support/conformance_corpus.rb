@@ -32,7 +32,8 @@ module ConformanceCorpus
   # --- corpus coverage guards ---------------------------------------------------------------
 
   SEED_KEYS = %w[
-    id aBool aString aNumber aOptionalString tags subCategoryNames parentSeedId
+    id aBool aString aNumber aOptionalString aNumberList aBoolList tags subCategoryNames
+    parentSeedId
   ].freeze
   # Corpus prose that no harness reads: the one documented exclusion from SEED_KEYS.
   SEED_NOTE_KEY = "note"
@@ -71,6 +72,21 @@ module ConformanceCorpus
     assert_keys!("seeds.json seeds[#{index}]", seed.keys, SEED_KEYS, [SEED_NOTE_KEY])
     seed.fetch("tags").each_with_index do |tag, tag_index|
       assert_keys!("seeds.json seeds[#{index}].tags[#{tag_index}]", tag.keys, TAG_KEYS)
+    end
+
+    # The two homogeneous scalar lists. Each element is stored in a typed column, so an element
+    # of another type would be coerced on the way into SQLite while check() still saw the
+    # original, and the two sides would then disagree about a value nobody wrote. A null
+    # element is a value in both lists and is stored as one.
+    {"aNumberList" => [Numeric], "aBoolList" => [TrueClass, FalseClass]}.each do |key, types|
+      list = seed.fetch(key)
+      raise "seeds.json seeds[#{index}].#{key} must be a list" unless list.is_a?(Array)
+
+      stray = list.reject { |element| element.nil? || types.any? { |type| element.is_a?(type) } }
+      next if stray.empty?
+
+      raise "seeds.json seeds[#{index}].#{key} carries #{stray.inspect}, which its typed " \
+            "element column cannot hold"
     end
   end
 

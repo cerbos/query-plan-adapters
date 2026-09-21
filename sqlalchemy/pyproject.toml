@@ -42,6 +42,9 @@ source = "scm"
 [tool.pdm.dev-dependencies]
 test = [
     "pytest>=7.1.2",
+    # The PostgreSQL driver for the harness's declared-collection-storage leg. psycopg2 rather
+    # than psycopg 3, whose dialect SQLAlchemy 1.4 does not have.
+    "psycopg2-binary>=2.9.10",
 ]
 lint = [
     "black>=22.6.0",

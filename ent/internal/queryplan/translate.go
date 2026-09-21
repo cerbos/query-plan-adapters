@@ -1195,23 +1195,50 @@ func addValue(lv, rv value) (value, error) {
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
 //
-// It survives only over operands whose text rendering is the same in CEL and in every engine this
-// module targets. Numeric and text columns qualify: all of them format the shortest decimal that
-// round-trips. A BOOLEAN column does not — SQLite and MySQL have no boolean type and store 1/0, so
-// `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say 'true'. Nothing in the plan names the
-// operand's type, so a caller declares it with ValueBool and the cast fails closed rather than
-// returning every matching row on one engine and none on another (#376).
+// A numeric or text operand is cast as it stands: every engine this module targets formats the
+// shortest decimal that round-trips, as CEL does. A BOOLEAN column cannot be — SQLite and MySQL
+// have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say
+// 'true' (#376). Nothing in the plan names the operand's type, so the caller declares it with
+// ValueBool, and the column is spelled through boolText before it is cast.
 func castValue(v value) (value, error) {
-	if c, ok := v.(Column); ok && c.Type == ValueBool {
-		return nil, fmt.Errorf(
-			"string() over a boolean column is not supported: SQLite and MySQL store a boolean as 1/0 and render \"1\", while CEL and PostgreSQL render \"true\", so no single CAST is correct on every engine",
-		)
-	}
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
 	}
+	if c, ok := v.(Column); ok && c.Type == ValueBool {
+		e = boolText(c)
+	}
 	return Cast{X: e, To: CastText}, nil
+}
+
+// boolText spells a boolean column the way CEL's string() does:
+//
+//	CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+//
+// A bare boolean column is read as a condition by SQLite, MySQL and PostgreSQL alike — it is how a
+// bare boolean conjunct already renders — so this one tree gives CEL's two words on every engine,
+// where a CAST gives them on one (cerbos/query-plan-adapters#418).
+//
+// The IS NULL arm is load-bearing. A NULL boolean is a missing attribute or a null value, and CEL
+// has no string() for either: it raises, and the PDP denies. `WHEN col` is UNKNOWN for a NULL
+// column, so without the arm the CASE would fall through to its ELSE and say 'false', and
+// `string(x) != "true"` would return a row the PDP denies. With it the result is NULL, and the row
+// stays out under both polarities.
+//
+// castValue still casts the result to text, so the renderer treats it exactly as it treats any
+// other string(). On MySQL that cast is what gives the two words a byte-exact collation. A bare
+// CASE compares in the connection's collation once the driver interpolates its parameters into the
+// statement, and that collation ignores case and trailing spaces by default: `string(x) == "TRUE"`
+// and `== "true "` would both match a true row CEL rejects. Server-side prepared parameters happen
+// to compare as bytes, so a harness that never interpolates cannot see the difference.
+func boolText(c Column) Expr {
+	return Case{
+		Whens: []When{
+			{Cond: IsNull{X: c}, Then: Lit{V: nil}},
+			{Cond: c, Then: Lit{V: "true"}},
+		},
+		Else: Lit{V: "false"},
+	}
 }
 
 // resolveVariable maps a plan reference onto storage. A relation reached in a value position has

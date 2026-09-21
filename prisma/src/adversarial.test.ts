@@ -138,6 +138,10 @@ interface Seed {
   aString: string;
   aNumber: number;
   aOptionalString: string | null;
+  /** Sent to check() only; see `asCheckResource` for why no column holds it. */
+  aNumberList: (number | null)[];
+  /** Sent to check() only; see `asCheckResource` for why no column holds it. */
+  aBoolList: (boolean | null)[];
   tags: Tag[];
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
@@ -164,9 +168,20 @@ const SEED_KEYS = [
   "aString",
   "aNumber",
   "aOptionalString",
+  "aNumberList",
+  "aBoolList",
   "tags",
   "subCategoryNames",
   "parentSeedId",
+] as const;
+
+/**
+ * The seed fields that reach check() and no column. Each is sound to leave unstored only while
+ * every action reading it is refused before a filter exists, which a test below asserts.
+ */
+const UNSTORED_SEED_ATTRIBUTES = [
+  "request.resource.attr.aNumberList",
+  "request.resource.attr.aBoolList",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -553,6 +568,14 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-eq-true",
   "regex-final-newline",
   "regex-lookahead",
+  // A positional read of a number or boolean list: refused at the same `index` node as
+  // index-scalar-list, before the element type or the literal's type is ever looked at.
+  "index-number-list",
+  "index-number-list-not-eq",
+  "index-bool-list",
+  "index-bool-list-not-eq",
+  "index-bool-list-vs-number",
+  "index-number-list-vs-bool",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -701,6 +724,7 @@ beforeAll(async () => {
         scope: scopeFor(seed),
         createdAt: timestampFor(seed),
         updatedAt: derivedFor(seed).updatedAt,
+        // aNumberList and aBoolList have no column: see asCheckResource.
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
@@ -769,6 +793,15 @@ function asCheckResource(seed: Seed): Resource {
     // both conventions and the field-to-field probe has two explicit nulls to compare.
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
+    // Verbatim, null elements included: a null element is a VALUE in CEL, not a missing attribute,
+    // which is what index-number-list-not-eq's a6 and index-bool-list-not-eq's a4 witness. These
+    // two are consumed here and nowhere else. Every shape over them is refused — `index` has no
+    // Prisma filter form, so the translator throws before it resolves the list — and holding them
+    // would cost a Json column or a new model on every schema (SQLite and MySQL have no scalar
+    // lists) for data no filter reads. The test "the list fields the store does not hold are read
+    // only by refused actions" is what keeps that true as the corpus grows.
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     categories: seed.subCategoryNames.map((subName) => ({
@@ -896,6 +929,19 @@ function planCarriesNullLiteral(operand: unknown): boolean {
   }
   const operands = node["operands"];
   return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
+}
+
+/** Whether any variable anywhere in the plan is one of `names`. */
+function planReadsVariable(operand: unknown, names: readonly string[]): boolean {
+  if (typeof operand !== "object" || operand === null) return false;
+  const node = operand as Record<string, unknown>;
+  const name = node["name"];
+  if (typeof name === "string") return names.includes(name);
+  const operands = node["operands"];
+  return (
+    Array.isArray(operands) &&
+    operands.some((child) => planReadsVariable(child, names))
+  );
 }
 
 describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
@@ -1056,7 +1102,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 295 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 301 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1072,10 +1118,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(295);
+    expect(MANIFEST_ACTIONS.size).toBe(301);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(121);
+    expect(THROWING_ACTIONS).toHaveLength(127);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1239,6 +1285,34 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       }
     }
     expect(notRejected).toEqual([]);
+  });
+
+  // aNumberList and aBoolList reach check() and no column (asCheckResource says why). A translated
+  // action reading either would run against a row that does not hold the list, so leaving them
+  // unstored is sound only while every such action throws. Planned live over the whole manifest,
+  // like the null guard above, so an action added later that reads either field is held to it.
+  test("the list fields the store does not hold are read only by refused actions", async () => {
+    const readers: string[] = [];
+    for (const action of [...MANIFEST_ACTIONS].sort()) {
+      const queryPlan = await cerbos.planResources({
+        principal: principal(),
+        resource: { kind: seedsFile.resourceKind },
+        action,
+      });
+      if (
+        queryPlan.kind === PlanKind.CONDITIONAL &&
+        planReadsVariable(queryPlan.condition, UNSTORED_SEED_ATTRIBUTES)
+      ) {
+        readers.push(action);
+      }
+    }
+
+    // Guard the guard: a walk that stopped finding the variables would make the check vacuous.
+    expect(readers).toEqual(
+      expect.arrayContaining(["index-number-list", "index-bool-list"])
+    );
+    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
+    expect(readers.filter((action) => !throwing.has(action))).toEqual([]);
   });
 
   test("pins the upstream has() planner over-grant", async () => {

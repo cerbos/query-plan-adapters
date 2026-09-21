@@ -119,4 +119,5 @@ Specifics:
   alone. Elasticsearch has no "null means unfiltered" convention, so its three kinds may genuinely
   differ and forcing the caller to handle each may be defensible depth. Tracked separately rather
   than assumed to be the same defect — forcing symmetry between the two Java adapters is arguably
-  what produced the spring-data wrapper in the first place.
+  what produced the spring-data wrapper in the first place. Decided in
+  [ADR 0009](0009-elasticsearch-java-keeps-its-result-tagged-union.md): it stays.

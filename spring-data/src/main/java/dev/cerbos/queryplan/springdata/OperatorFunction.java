@@ -25,6 +25,11 @@ import jakarta.persistence.criteria.Predicate;
  * other side of the comparison is a plan constant: the {@code field} argument is the composed
  * arithmetic SQL expression (not a bare path) and {@code value} is the constant — always a
  * {@link Double}, because the arithmetic path evaluates in IEEE double space end to end.
+ * {@code string()} over a boolean column compared with {@code "true"} or {@code "false"}
+ * ({@code string(R.attr.flag) == "true"}) consults the {@code eq}/{@code ne} override as the
+ * bare boolean attribute does: {@code field} is the column and {@code value} the
+ * {@link Boolean} the constant names. Any other string constant matches no boolean's text,
+ * so that comparison is decided without an override.
  *
  * <p>Overrides are <em>not</em> consulted for operators that translate to correlated {@code EXISTS}
  * subqueries against a {@code Relation} mapping — {@code exists}/{@code exists_one}/{@code all}/

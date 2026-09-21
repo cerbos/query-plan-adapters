@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -72,9 +73,20 @@ class ElasticsearchAdversarialConformanceTest {
     /**
      * One hostile row. {@code note} is corpus documentation this harness never reads; it is named
      * so that strict decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
+     *
+     * <p>{@code aNumberList} and {@code aBoolList} are the corpus's homogeneous scalar lists
+     * (conformance/README.md, "Number and boolean list elements"). Their elements are boxed so a
+     * null ELEMENT survives decoding: CEL compares it as a value ({@code null == 2} is false), so
+     * {@code [null, 2]} is not the list {@code [2]}. They are consumed in two places —
+     * {@link #checkResource} sends them to {@code check()} verbatim, null elements included, and
+     * {@link #seedIndex} stores them as flat arrays the way {@code tagNames} is stored. Nothing
+     * searches them: every action reading them is a positional read, which this adapter refuses
+     * before any query exists, so the indexed copy is there to keep {@link Corpus#FIELD_MAP} naming
+     * only fields the index really holds.
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
-                        String aOptionalString, List<Tag> tags, List<String> subCategoryNames,
+                        String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
+                        List<Tag> tags, List<String> subCategoryNames,
                         String parentSeedId, String note) {}
 
     /**
@@ -140,8 +152,8 @@ class ElasticsearchAdversarialConformanceTest {
     // here reads, and a key this harness reads that the corpus no longer carries.
 
     private static final List<String> SEED_KEYS = List.of(
-            "id", "aBool", "aString", "aNumber", "aOptionalString", "tags", "subCategoryNames",
-            "parentSeedId");
+            "id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList",
+            "tags", "subCategoryNames", "parentSeedId");
 
     /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
     private static final String SEED_NOTE_KEY = "note";
@@ -304,7 +316,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(164, unsupported.size(),
+        assertEquals(170, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -349,9 +361,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(120, oracleActions.size());
-        assertEquals(173, throwingActions.size());
+        assertEquals(179, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(295, classified.size());
+        assertEquals(301, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -393,6 +405,11 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("owner", Map.of("type", "keyword"));
         properties.put("coOwner", Map.of("type", "keyword"));
         properties.put("tagNames", Map.of("type", "keyword"));
+        // The two homogeneous scalar lists, flat arrays like tagNames. `double` rather than
+        // aNumber's `integer`: the elements reach check() as CEL doubles, and an integer mapping
+        // would coerce a fractional element a future seed adds rather than keep it.
+        properties.put("aNumberList", Map.of("type", "double"));
+        properties.put("aBoolList", Map.of("type", "boolean"));
         // Preserve malformed strings in _source while leaving them unindexed. CEL timestamp()
         // errors on those rows; range predicates and their guarded negations must both deny them.
         properties.put("createdBy", Map.of("type", "date", "format", "strict_date_optional_time_nanos",
@@ -434,6 +451,11 @@ class ElasticsearchAdversarialConformanceTest {
             }
             document.put("coOwner", scopeFor(seed));
             document.put("tagNames", seed.tags().stream().map(Tag::name).toList());
+            // Verbatim, null elements included, as tagNames carries a null tag name: the source
+            // keeps the list as the corpus wrote it, and Elasticsearch indexes the non-null values
+            // as an unordered bag — which is why no positional read of either list translates.
+            document.put("aNumberList", seed.aNumberList());
+            document.put("aBoolList", seed.aBoolList());
             document.put("createdBy", isoFor(seed));
             if (timestampFor(seed) != null) document.put("createdAt", derivedFor(seed).createdAt());
             if (derivedFor(seed).updatedAt() != null) document.put("updatedAt", derivedFor(seed).updatedAt());
@@ -605,6 +627,19 @@ class ElasticsearchAdversarialConformanceTest {
                 .map(tag -> tag.name() == null
                         ? nullAttributeValue() : AttributeValue.stringValue(tag.name()))
                 .toList()));
+        // The homogeneous scalar lists, verbatim. A null ELEMENT is sent as an explicit null
+        // rather than dropped: a6's aNumberList [null, 2] has a first element, and CEL answers
+        // `null == 2` false and its negation true, where a shortened [2] would answer the opposite.
+        resource = resource.withAttribute("aNumberList", AttributeValue.listValue(
+                seed.aNumberList().stream()
+                        .map(number -> number == null
+                                ? nullAttributeValue() : AttributeValue.doubleValue(number))
+                        .toList()));
+        resource = resource.withAttribute("aBoolList", AttributeValue.listValue(
+                seed.aBoolList().stream()
+                        .map(bool -> bool == null
+                                ? nullAttributeValue() : AttributeValue.boolValue(bool))
+                        .toList()));
         if (doubleFor(seed) != null) {
             resource = resource.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(seed)));
         }
@@ -908,6 +943,16 @@ class ElasticsearchAdversarialConformanceTest {
             "index-scalar-list-not-eq",
             "index-scalar-list-null",
             "map-eq-list",
+            // The same positional read over the number and boolean lists, refused at the same
+            // site: the element type those actions discriminate is never reached here, including
+            // by the two cross-type probes, whose `aNumber == 5` branch is refused with the whole
+            // disjunction.
+            "index-number-list",
+            "index-number-list-not-eq",
+            "index-bool-list",
+            "index-bool-list-not-eq",
+            "index-bool-list-vs-number",
+            "index-number-list-vs-bool",
             // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
             // its descendant path is CONSTRUCTED by list() from a constant segment and the primary
             // key, so there is no stored path for a prefix or terms query to run against. It sits
@@ -1022,6 +1067,10 @@ class ElasticsearchAdversarialConformanceTest {
         for (int i = 0; i < rawSeeds.size(); i++) {
             String label = "seeds.json seeds[" + i + "]";
             assertKeys(label, keysOf(rawSeeds.get(i)), SEED_KEYS, List.of(SEED_NOTE_KEY));
+            assertScalarList(label + ".aNumberList", rawSeeds.get(i).get("aNumberList"),
+                    JsonNode::isNumber);
+            assertScalarList(label + ".aBoolList", rawSeeds.get(i).get("aBoolList"),
+                    JsonNode::isBoolean);
             JsonNode rawTags = rawSeeds.get(i).get("tags");
             for (int j = 0; j < rawTags.size(); j++) {
                 assertKeys(label + ".tags[" + j + "]", keysOf(rawTags.get(j)), TAG_KEYS,
@@ -1079,6 +1128,22 @@ class ElasticsearchAdversarialConformanceTest {
                     for (JsonNode element : value) assertTrue(element.isTextual(), label);
                 }
             }
+        }
+    }
+
+    /**
+     * One homogeneous scalar list, checked against the RAW JSON. The {@link Seed} record's element
+     * type is not a check: Jackson's scalar coercion reads a quoted {@code "2"} into a number list,
+     * and the coerced value would then reach the index and {@code check()} alike, so the
+     * differential would agree about a list the corpus never wrote. A null element is allowed —
+     * the corpus carries them on purpose.
+     */
+    private static void assertScalarList(String label, JsonNode list,
+                                         Predicate<JsonNode> elementType) {
+        assertTrue(list.isArray(), () -> label + " is not an array: " + list);
+        for (JsonNode element : list) {
+            assertTrue(element.isNull() || elementType.test(element),
+                    () -> label + " holds " + element + ", which is not its declared element type");
         }
     }
 

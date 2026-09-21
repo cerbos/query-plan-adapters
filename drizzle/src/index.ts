@@ -9,12 +9,14 @@ import {
   or,
   not,
   eq,
+  is,
   isNull,
   sql,
   exists,
   getTableName,
 } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { Param } from "drizzle-orm/sql";
 import { indexedEquality } from "./indexed";
 import type { Indexable } from "./indexed";
@@ -1031,10 +1033,11 @@ const buildHierarchyFilter = (
 };
 
 /**
- * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. Nothing is lowered: the
- * adapter renders through whichever Drizzle dialect the CALLER hands its query to, which is what
- * lets one translation serve SQLite, PostgreSQL and MySQL — and a conversion is exactly the place
- * where those three disagree.
+ * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. Only one is lowered — `string()`
+ * over a boolean column, which needs no cast at all (see `buildBooleanString`). The adapter renders
+ * through whichever Drizzle dialect the CALLER hands its query to, which is what lets one
+ * translation serve SQLite, PostgreSQL and MySQL — and a cast is exactly the place where those
+ * three disagree.
  *
  * `int()` / `double()` (cerbos/query-plan-adapters#311): CEL reads a WHOLE string or raises an
  * error, and an error denies the row. SQL reads whatever prefix parses — `CAST('100%_done' AS
@@ -1050,9 +1053,9 @@ const buildHierarchyFilter = (
  * two of them. `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on
  * MySQL 8.4, which spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR`
  * is `character(1)` on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'` — a filter that silently
- * matches nothing rather than failing. The BOOLEAN case was already refused, for the separate
- * reason that SQLite and MySQL hold a boolean as 1/0 and render `"1"` where CEL renders `"true"`;
- * that reason still holds and is now subsumed.
+ * matches nothing rather than failing. A BOOLEAN column is the exception, and it is not a cast:
+ * SQLite and MySQL hold a boolean as 1/0, so any CAST renders `"1"` where CEL renders `"true"`,
+ * but a CASE spells CEL's two words on every store (cerbos/query-plan-adapters#418).
  *
  * `ent` translates `string()` and is not a counter-example: its `render.go` branches on a dialect
  * the caller declares through `WithDialect`, so it emits `CHAR` on MySQL and `TEXT` elsewhere. The
@@ -1072,6 +1075,68 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
     "the cast would silently match nothing. The adapter does not know its dialect by design, so " +
     "it rejects the shape instead of emitting a filter that is correct on one store only",
 };
+
+/**
+ * CEL's `string()` over a boolean column, lowered through a CASE rather than a CAST
+ * (cerbos/query-plan-adapters#418):
+ *
+ *   CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+ *
+ * A CASE needs no cast target, so the reason every other `string()` is refused does not apply, and
+ * SQLite and MySQL (which store 1/0) read a boolean column as a condition exactly as PostgreSQL
+ * reads a real `boolean`. One rendering spells CEL's own two words on all three stores, where
+ * `CAST(col AS TEXT)` renders `"1"` on two of them.
+ *
+ * The IS NULL arm is load-bearing. A NULL boolean is a missing attribute — or, declared explicit,
+ * a null value — and CEL has no `string()` for either: it raises, and the PDP denies. Without the
+ * arm `WHEN col` is UNKNOWN for a NULL column, the CASE falls through to its ELSE and yields
+ * `'false'`, so `string(x) != "true"` would return a row the PDP denies. With it the result is
+ * NULL, and the row stays out under both polarities.
+ *
+ * On MySQL the two literals carry `COLLATE utf8mb4_0900_bin`, because a literal compares in the
+ * CONNECTION's collation rather than any column's or the server's. mysql2's default is
+ * `utf8mb4_unicode_ci`, under which `'true' = 'TRUE'` and `'true' = 'true '` are both TRUE even on
+ * a server started case-sensitive — measured against the MySQL 8.4 image the adversarial leg pins
+ * (`MYSQL_IMAGE` in `adversarial.test.ts`) through that leg's own client, not inferred.
+ * `utf8mb4_0900_bin` is the collation that is byte-exact AND NO PAD: `utf8mb4_bin` is PAD SPACE,
+ * and `utf8mb4_0900_as_cs` ignores a soft hyphen, so `'tr\u00ADue' = 'true'` is TRUE under it.
+ * The `_utf8mb4` introducer fixes the literals' character set, so the COLLATE is valid whatever
+ * the connection's is. It needs MySQL 8.0.17, the floor
+ * `CAST(… AS FLOAT(53))` already sets. SQLite compares the literals BINARY and PostgreSQL in its
+ * deterministic database collation, so neither needs one.
+ *
+ * The dialect is read off the column's own Drizzle class, as `indexed.ts` does; the caller still
+ * declares none.
+ */
+const buildBooleanString = (column: AnyColumn, expr: SQL): SQL => {
+  const [whenTrue, whenFalse] = is(column, MySqlColumn)
+    ? [
+        sql`_utf8mb4'true' collate utf8mb4_0900_bin`,
+        sql`_utf8mb4'false' collate utf8mb4_0900_bin`,
+      ]
+    : [sql`'true'`, sql`'false'`];
+  return sql`(case when ${expr} is null then null when ${expr} then ${whenTrue} else ${whenFalse} end)`;
+};
+
+/**
+ * The boolean column a `string()` operand converts, if it converts one; anything else stays
+ * refused with the `UNSUPPORTED_CONVERSIONS` message.
+ */
+const booleanStringColumn = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): AnyColumn | undefined => {
+  const [inner] = operands;
+  if (operands.length !== 1 || !inner) {
+    return undefined;
+  }
+  const column = columnForOperand(inner, mapper);
+  return column?.dataType === "boolean" ? column : undefined;
+};
+
+/** Whether an operand is a CEL `string()` conversion, whose result is a string whatever it reads. */
+const isStringConversion = (operand: PlanExpressionOperand): boolean =>
+  isExpressionOperand(operand) && operand.operator === "string";
 
 /** The widest exact integer every numeric SQL type a driver might infer can carry. */
 const INT32_MIN = -2147483648;
@@ -1323,6 +1388,11 @@ const isStringConcatenation = (
     if (isValueOperand(operand)) {
       return typeof operand.value === "string";
     }
+    // `string(flag) + string(flag)` is CEL's string `+`. Read as arithmetic it would coerce both
+    // CASE results to 0 on SQLite and MySQL and compare `0` with the other side.
+    if (isStringConversion(operand)) {
+      return true;
+    }
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
 
@@ -1453,6 +1523,16 @@ const buildValueExpression = (
     }
     const op = ARITHMETIC_OPERATORS[operator]!;
     return sql`(${left} ${sql.raw(op)} ${right})`;
+  }
+
+  if (operator === "string") {
+    const column = booleanStringColumn(operands, mapper);
+    if (column !== undefined) {
+      return buildBooleanString(
+        column,
+        buildValueExpression(operands[0]!, mapper, options),
+      );
+    }
   }
 
   const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];
@@ -3038,6 +3118,10 @@ const buildComparisonFilter = (
   const scalarType = (operand: PlanExpressionOperand): string | undefined => {
     if (isValueOperand(operand))
       return operand.value === null ? undefined : typeof operand.value;
+    // CEL's `string()` returns a string whatever it converts. Typing it here routes
+    // `string(flag) == R.attr.aNumber` to the heterogeneous-equality arm below, where MySQL would
+    // otherwise coerce `'true'` to 0 and match every row whose number is 0.
+    if (isStringConversion(operand)) return "string";
     if (isNameOperand(operand)) {
       const mapping = resolveFieldReference(operand.name, mapper).mapping;
       if (isMappingConfig(mapping) && mapping.transform) return undefined;
@@ -3052,19 +3136,22 @@ const buildComparisonFilter = (
     const nullGuard = buildNullGuard(
       {
         ...operandExpression(leftResolved.expr, left),
+        // A `string()` over a NULL boolean is NULL (`buildBooleanString`): CEL raises there.
         canBeNull:
-          isNameOperand(left) &&
-          mappingNullRepresentation(
-            resolveFieldReference(left.name, mapper).mapping,
-          ) !== "explicit",
+          isStringConversion(left) ||
+          (isNameOperand(left) &&
+            mappingNullRepresentation(
+              resolveFieldReference(left.name, mapper).mapping,
+            ) !== "explicit"),
       },
       {
         ...operandExpression(rightResolved.expr, right),
         canBeNull:
-          isNameOperand(right) &&
-          mappingNullRepresentation(
-            resolveFieldReference(right.name, mapper).mapping,
-          ) !== "explicit",
+          isStringConversion(right) ||
+          (isNameOperand(right) &&
+            mappingNullRepresentation(
+              resolveFieldReference(right.name, mapper).mapping,
+            ) !== "explicit"),
       },
     );
     const bothExplicitNull = [left, right].every(

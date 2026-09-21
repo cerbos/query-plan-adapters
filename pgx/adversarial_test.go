@@ -211,9 +211,9 @@ func buildMapper() cerbospgx.Mapper {
 		// `id-*` actions). An adapter that resolves references by stripping a
 		// `request.resource.attr.` prefix never sees this name.
 		"request.resource.id": {Column: "id"},
-		// Declared boolean so `string()` over it fails closed: SQLite and MySQL store a
-		// boolean as 1/0 and render "1" where CEL and PostgreSQL render "true", and nothing
-		// in the plan names a column's type.
+		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
+		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
+		// and PostgreSQL render "true", and nothing in the plan names a column's type.
 		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbospgx.ValueBool},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
@@ -470,6 +470,14 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"tags":       tags,
 		"tagNames":   tagNames,
 		"categories": categories,
+		// Sent verbatim, null elements included, and stored nowhere: the adapter refuses every
+		// shape over them. A positional read is `index`, which has no case in the vendored
+		// translator (a relation has no row order to read position 0 from), so the walk fails
+		// closed before any mapping is consulted and there is no column for a filter to read. The
+		// oracle still has to see them, because the degeneracy guard proves each refused action
+		// is a live, discriminating probe rather than one the PDP denies for every row.
+		"aNumberList": scalarList(seed.ANumberList),
+		"aBoolList":   scalarList(seed.ABoolList),
 	}
 
 	// Explicit null: `owner` aliases the same column but is sent as a real null attribute.
@@ -616,11 +624,11 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 295, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 301, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 58, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 63, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -854,10 +862,10 @@ func TestAdversarialConformance(t *testing.T) {
 			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
 			// operands to 0.
 			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
-			// string() over a NUMERIC column, the half that lowers to CAST on every engine. Its
-			// boolean sibling is refused instead, so this entry proves the supported half still
-			// compares.
-			"cast-string-double",
+			// string() over both kinds of column. A NUMERIC one lowers to a plain CAST on every
+			// engine; a BOOLEAN one is spelled through a CASE before the cast, because the CAST
+			// alone renders the stored 1 as "1" on SQLite and MySQL where CEL says "true" (#418).
+			"cast-string-double", "cast-string-bool",
 			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
 			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
 			// which is loud here but silent on the other two engines the shared translator serves.
@@ -909,9 +917,8 @@ func TestAdversarialConformance(t *testing.T) {
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
 		// Asserting the complement keeps the split honest — a shape this adapter gains support for
 		// must move up into the compared list.
-		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
-		// (#376), and the constructed hierarchy path because `list` has no translator case at
-		// all — so neither has a comparison behind it here.
+		// The constructed hierarchy path has no comparison behind it here either, because `list`
+		// has no translator case at all.
 		// #387 adds three more groups with no comparison behind them: modulo (reached through the
 		// int() cast that gives `%` an integer operand), the positional read of a scalar list, and
 		// list equality over a map() projection, which reaches a plain value position where a held
@@ -921,10 +928,16 @@ func TestAdversarialConformance(t *testing.T) {
 			"regex-final-newline", "regex-eq-true", "regex-lookahead",
 			"index-negative", "index-fractional", "index-not-oob",
 			"cast-not-int", "cast-not-double", "cast-not-timestamp",
-			"cast-int-double", "cast-string-bool", "hier-list-id",
+			"cast-int-double", "hier-list-id",
 			"arith-mod", "index-scalar-list", "map-eq-list",
 			// Index errors and explicit-null elements must stay distinguishable under negation.
 			"index-scalar-list-not-eq", "index-scalar-list-null",
+			// The same positional read over number and boolean elements, refused by the same
+			// missing `index` case: both polarities, and the two cross-type probes CEL answers
+			// false for every row where a JSON-as-SQL reading answers true for b4 or c1.
+			"index-number-list", "index-number-list-not-eq",
+			"index-bool-list", "index-bool-list-not-eq",
+			"index-bool-list-vs-number", "index-number-list-vs-bool",
 			// An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex
 			// with a top-level alternation is a matches(), never translated here.
 			"hier-empty-delim", "matches-alt",

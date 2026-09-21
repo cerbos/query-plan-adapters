@@ -47,6 +47,9 @@ export const MAPPER: Record<string, MapperConfig> = {
   // value under both conventions (cerbos/query-plan-adapters#308).
   "request.resource.attr.coOwner": { field: "coOwner", nullable: true },
   "request.resource.attr.tagNames": { field: "tagNames" },
+  // Every seed carries both lists, most of them empty, so neither path is ever absent.
+  "request.resource.attr.aNumberList": { field: "aNumberList" },
+  "request.resource.attr.aBoolList": { field: "aBoolList" },
   "request.resource.attr.obj.inner": { field: "obj.inner" },
   "request.resource.attr.tags": { field: "tags" },
   "request.resource.attr.categories": { field: "categories" },

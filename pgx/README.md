@@ -185,14 +185,14 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions using 21
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions using 27
 hostile seed rows and real PostgreSQL queries. The Spring Data adapter defines the reference
 semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 235 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (rejected in the shared vendored translator, which serves MySQL and SQLite too, even though PostgreSQL alone would render it correctly), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (58 actions) |
+| Oracle-tested | 236 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list, whether its elements are strings, numbers or booleans (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbospgx.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -215,6 +215,13 @@ Undeclared field types retain historical behavior; the plan carries no type info
 Bare comparisons between declared temporal columns now fail closed because timestamp storage
 loses the original RFC 3339 spelling. Use `timestamp()` on both policy operands to compare instants.
 Two-list `except`, structured list operands and constructor expressions are refused at translation.
+
+**Behavior change (#418).** `string()` over a column declared `ValueBool` now translates
+instead of failing closed. PostgreSQL's own `CAST(bool AS text)` already says `"true"`, but the
+vendored translator also serves SQLite and MySQL, where the same `CAST` says `"1"`. So the
+column is spelled through `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`
+and that is cast to text. A NULL column stays NULL rather than becoming `'false'`, so the row is
+excluded under both polarities, as CEL's error excludes it.
 
 **Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`; on PostgreSQL that is a hard `operator does not exist: text + text` for text columns, so the change turns a runtime failure into a translation-time one and refuses the shape the shared translator cannot type.
 

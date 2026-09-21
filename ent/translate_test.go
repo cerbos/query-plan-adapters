@@ -78,6 +78,7 @@ func testMapper() cerbosent.Mapper {
 		"request.resource.attr.count":     {Column: "count"},
 		"request.resource.attr.owner":     {Column: "owner"},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
+		"request.resource.attr.flag":      {Column: "flag", ValueType: cerbosent.ValueBool},
 		"request.resource.attr.tags":      {Relation: tagRelation()},
 	}
 }
@@ -609,6 +610,37 @@ func TestNumericCastsAreRejected(t *testing.T) {
 			_, err := translate(t, expr("eq", expr(operator, variable("request.resource.attr.count")), val(t, 2)))
 			require.ErrorIs(t, err, cerbosent.ErrUnsupported)
 			require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
+		})
+	}
+}
+
+// TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
+// (cerbos/query-plan-adapters#418). A CAST alone renders the stored 1/0 as "1" on SQLite and MySQL
+// where CEL says "true", so the column is spelled through a CASE first, on every dialect. The
+// corpus's cast-string-bool proves the two words against the oracle on all three engines.
+//
+// Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus action reaches
+// either, so this test is a bridge tracked by #469 rather than their home. The first is the IS NULL
+// arm ahead of the column's own test: the corpus's aBool is never null, and without the arm a NULL
+// column falls through to 'false', so `string(x) != "true"` returns a row the PDP denies. The
+// second is the text cast around the whole CASE on MySQL, which gives the two words a byte-exact
+// collation. Without it a driver that interpolates its parameters compares them in the connection's
+// collation, where "TRUE" and "true " both equal "true", and no leg of the harness interpolates.
+func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
+	t.Parallel()
+
+	cond := expr("eq", expr("string", variable("request.resource.attr.flag")), val(t, "true"))
+	for d, want := range map[string]string{
+		dialect.SQLite:   "CAST((CASE WHEN (`resource`.`flag` IS NULL) THEN NULL WHEN `resource`.`flag` THEN ? ELSE ? END) AS text) = ?",
+		dialect.Postgres: `CAST((CASE WHEN ("resource"."flag" IS NULL) THEN NULL WHEN "resource"."flag" THEN $1::text ELSE $2::text END) AS text) = $3::text`,
+		dialect.MySQL:    "CAST((CASE WHEN (`resource`.`flag` IS NULL) THEN NULL WHEN `resource`.`flag` THEN ? ELSE ? END) AS char character set utf8mb4) COLLATE utf8mb4_0900_bin = ?",
+	} {
+		t.Run(d, func(t *testing.T) {
+			t.Parallel()
+
+			query, args := whereFor(t, d, testMapper(), cond)
+			require.Contains(t, query, want)
+			require.Equal(t, []any{"true", "false", "true"}, args)
 		})
 	}
 }

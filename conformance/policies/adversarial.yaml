@@ -3205,3 +3205,67 @@ resourcePolicy:
       condition:
         match:
           expr: '!(double(R.attr.aString) > 50.0)'
+
+    # ==================== Indexed elements of number and boolean lists ====================
+    # `index-scalar-list` and its companions read a list of STRINGS, so they never ask whether an
+    # adapter keeps an element's JSON type when the literal is a number or a boolean. These read
+    # `aNumberList` and `aBoolList`, the two homogeneous scalar lists the seeds carry for exactly
+    # this. Every seed has both; most hold `[]`, where any position is an index error and the
+    # PDP denies under both polarities.
+    #
+    # a1 [2] and a3 [2, 3] are the rows whose first element is 2. a4 [3, 2] holds 2 at the wrong
+    # position, a5 [-2] the wrong sign, a7 [20] the value a text comparison would confuse with a
+    # prefix, c1 [0] the zero a NULL would be mistaken for, and a6 [null, 2] a null first element,
+    # which is a VALUE: `null == 2` is false and its negation true, while an absent element stays
+    # an error.
+    - actions: ["index-number-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumberList[0] == 2'
+
+    # Oracle a4/a5/a6/a7/b4/c1: every row with a first element other than 2, including the null
+    # one, and none of the empty lists.
+    - actions: ["index-number-list-not-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aNumberList[0] == 2)'
+
+    # a1 [true], b4 [true] and c1 [true, false] lead with true; a3 [false] and a5 [false, true]
+    # with false, a4 [null, true] with a null element.
+    - actions: ["index-bool-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBoolList[0] == true'
+
+    # Oracle a3/a4/a5: false, and the null element, which is not true.
+    - actions: ["index-bool-list-not-eq"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.aBoolList[0] == true)'
+
+    # A boolean element against a NUMBER. CEL's equality is heterogeneous and false here, but SQLite
+    # and MySQL store a JSON true as 1, so an element read back as SQL and compared to 1 returns
+    # b4 and c1 as well — an over-grant. The a1 branch keeps the oracle live: a1 is aNumber 5.
+    - actions: ["index-bool-list-vs-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5'
+
+    # The mirror: a number element against a boolean. b4 [1] is the row a 1-for-true reading
+    # would admit. Oracle a1, from the aNumber branch alone.
+    - actions: ["index-number-list-vs-bool"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumberList[0] == true || R.attr.aNumber == 5'

@@ -5,7 +5,9 @@ REAL Cerbos PDP (a dedicated testcontainer pinned to ``conformance/CERBOS_VERSIO
 loaded with ``conformance/policies/adversarial.yaml``), translated through this
 adapter's public ``get_query`` API, and executed against seeded SQLite rows — then
 the filtered id set is compared against an oracle computed by calling the check API
-for each seed row with attributes mirroring that row exactly.
+for each seed row with attributes mirroring that row exactly. The actions that read a
+collection declared in ``collection_columns`` run a second time on a pinned
+PostgreSQL, once per storage shape, because that is where those renderings exist.
 
 No hand-computed expectations: if the adapter's filter semantics diverge from
 Cerbos's own evaluation for any row, the mismatch surfaces mechanically. See
@@ -38,7 +40,9 @@ from corpus import (
     ADAPTER,
     ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
+    COLLECTION_COLUMNS,
     OPERATOR_OVERRIDES,
+    PG_ARRAY_COLLECTION_COLUMNS,
     AdvBase,
     AdvCategory,
     AdvInner,
@@ -51,11 +55,12 @@ from corpus import (
     null_representation_throws,
     parse_actions_file,
     read_corpus_json,
+    reads_declared_collection,
     require_message,
 )
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy import create_engine, event, insert, select, text
 from sqlalchemy.dialects import postgresql
 
 SEEDS_FILE = read_corpus_json("seeds.json")
@@ -79,6 +84,8 @@ SEED_KEYS = {
     "aString",
     "aNumber",
     "aOptionalString",
+    "aNumberList",
+    "aBoolList",
     "tags",
     "subCategoryNames",
     "parentSeedId",
@@ -209,6 +216,12 @@ SQLALCHEMY_SUPPORTED_EXPECTED = _CLASSIFICATION.supported_expected
 THROWING_ACTIONS = _CLASSIFICATION.throwing_actions
 THROWING_ACTION_NAMES = {action for action, _ in THROWING_ACTIONS}
 
+# The oracle actions whose plan reads a collection declared in `collection_columns` (#227),
+# which the PostgreSQL leg re-runs under both storage shapes.
+DECLARED_COLLECTION_ACTIONS = sorted(
+    action for action in ORACLE_ACTIONS if reads_declared_collection(action)
+)
+
 # Actions whose `== null` probe targets an attribute the oracle OMITS for NULL
 # columns. They carry no oracle comparison: under the omitted representation
 # check() denies every row, so the adapter must reject the shape rather than
@@ -293,10 +306,10 @@ DEGENERACY_GUARD_ACTIONS = (
     "id-f2f-ne",
     "id-concat",
     "id-concat-vf",
-    # string() over a NUMERIC column, the half this adapter lowers. Its boolean
-    # sibling is refused instead, so this entry proves the supported half still
-    # compares rather than joining the probes below.
+    # string() over a NUMERIC column, which lowers to a CAST, and over a BOOLEAN
+    # one, which lowers to a CASE because CAST renders 1/0 on SQLite (#418).
     "cast-string-double",
+    "cast-string-bool",
     # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
     # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
     # needing the plan to say which overload it is.
@@ -329,6 +342,23 @@ DEGENERACY_GUARD_ACTIONS = (
     "string-size-gt0",
     "in-map-keys",
     "double-huge-gt",
+    # A positional read of a scalar list through its declared JSON storage (#227): the
+    # element itself, the negation that must keep an absent element UNKNOWN, the null
+    # element that is a value rather than an index error, and the second position that
+    # most rows do not have at all.
+    "index-scalar-list",
+    "index-scalar-list-not-eq",
+    "index-scalar-list-null",
+    "index-not-oob",
+    # The same read over lists of numbers and booleans, where the element's JSON type
+    # decides: a true element is not 1 and a 1 is not true, though SQLite stores both
+    # as 1 (conformance/README.md, "Number and boolean list elements").
+    "index-number-list",
+    "index-number-list-not-eq",
+    "index-bool-list",
+    "index-bool-list-not-eq",
+    "index-bool-list-vs-number",
+    "index-number-list-vs-bool",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -341,7 +371,6 @@ DEGENERACY_LIVENESS_PROBES = (
     "regex-lookahead",
     "index-negative",
     "index-fractional",
-    "index-not-oob",
     "cast-not-int",
     "cast-not-timestamp",
     "cast-not-double",
@@ -356,19 +385,14 @@ DEGENERACY_LIVENESS_PROBES = (
     # int() over a numeric column: truncation-versus-rounding, unsupported for
     # every adapter but convex, which promotes it in adapterSupportedExpected.
     "cast-int-double",
-    # string() over a BOOLEAN column, where CAST is dialect-dependent (#376).
-    "cast-string-bool",
     # `list` has no operator-table entry, so the constructed hierarchy path is
     # refused before the hierarchy operators around it are reached.
     "hier-list-id",
     # #387, one probe per group this adapter cannot compare: modulo (reached
-    # through the int() cast that gives `%` an integer operand), the positional
-    # read of a scalar list, and list equality over a map() projection, whose
-    # deferred intermediate no enclosing override consumes.
+    # through the int() cast that gives `%` an integer operand), and list
+    # equality over a map() projection, whose deferred intermediate no enclosing
+    # override consumes.
     "arith-mod",
-    "index-scalar-list",
-    "index-scalar-list-not-eq",
-    "index-scalar-list-null",
     "map-eq-list",
 )
 
@@ -546,6 +570,12 @@ def adv_engine():
         # case-insensitive by default.
         dbapi_conn.execute("PRAGMA case_sensitive_like = ON")
 
+    _seed(engine)
+    yield engine
+
+
+def _seed(engine) -> None:
+    """Create the corpus schema on ``engine`` and store every seed row in it."""
     AdvBase.metadata.create_all(engine)
 
     resource_rows = []
@@ -568,6 +598,25 @@ def adv_engine():
                 "scope": _scope_for(seed),
                 "created_at": _timestamp_for(seed),
                 "updated_at": _timestamp_for(seed, "updatedAt"),
+                # The ordered copies `collection_columns` declares (#227): exactly the lists
+                # _check_resource() sends, so the oracle and the column read the same
+                # collection. A seed with no category sends no `mainCategory`, and stores NULL.
+                "tags_json": [_tag_attr(tag) for tag in seed["tags"]],
+                "tag_names_json": [tag["name"] for tag in seed["tags"]],
+                "main_sub_categories_json": [
+                    {"name": name} for name in seed["subCategoryNames"]
+                ]
+                or None,
+                # The PostgreSQL arrays hold scalars, so `tags` keeps its ids: size() counts
+                # elements, and the element is never read.
+                "tags_array": [tag["id"] for tag in seed["tags"]],
+                "tag_names_array": [tag["name"] for tag in seed["tags"]],
+                "main_sub_categories_array": list(seed["subCategoryNames"]) or None,
+                # The scalar lists, stored as the corpus spells them, null elements included.
+                "a_number_list_json": seed["aNumberList"],
+                "a_bool_list_json": seed["aBoolList"],
+                "a_number_list_array": seed["aNumberList"],
+                "a_bool_list_array": seed["aBoolList"],
             }
         )
         # The to-one chain, one owned row per level. A seed with no parent gets no
@@ -638,12 +687,65 @@ def adv_engine():
         if label_rows:
             conn.execute(insert(AdvLabel.__table__), label_rows)
 
-    yield engine
-
 
 @pytest.fixture
 def adv_conn(adv_engine):
     with adv_engine.connect() as conn:
+        yield conn
+
+
+# The PostgreSQL server the declared-storage leg runs on, pinned by tag AND digest in the file
+# Renovate bumps (conformance/README.md, "Pinning service images").
+with open(
+    os.path.join(os.path.dirname(__file__), "..", "POSTGRES_IMAGE"), encoding="utf-8"
+) as _f:
+    POSTGRES_IMAGE = _f.read().strip()
+
+# The array columns the PostgreSQL leg rebases, so that none of them starts at index 1, with
+# the array type each one is cast back to.
+_PG_ARRAY_COLUMNS = {
+    "tags_array": "TEXT[]",
+    "tag_names_array": "TEXT[]",
+    "main_sub_categories_array": "TEXT[]",
+    "a_number_list_array": "INTEGER[]",
+    "a_bool_list_array": "BOOLEAN[]",
+}
+
+
+@pytest.fixture(scope="module")
+def pg_engine():
+    """The same seed rows on a real PostgreSQL, for the declared collection storage.
+
+    SQLite executes every corpus action above; this runs only the actions that read a declared
+    collection, because PostgreSQL is where the JSONB and native-array renderings exist at all
+    and nothing else in this repository executes SQLAlchemy's PostgreSQL SQL (#227). A
+    rendering no store executes is a rendering the adapter does not cover.
+    """
+    from testcontainers.postgres import PostgresContainer
+
+    with PostgresContainer(POSTGRES_IMAGE) as container:
+        engine = create_engine(container.get_connection_url())
+        _seed(engine)
+        # PostgreSQL arrays are 1-based unless told otherwise, and an adapter that read
+        # `array[i + 1]` would pass against every one of them. Rebasing each non-empty array
+        # to start at 0 makes that adapter read the wrong element; `to_jsonb` reads positions.
+        with engine.begin() as conn:
+            for column, array_type in _PG_ARRAY_COLUMNS.items():
+                conn.execute(
+                    text(
+                        f"UPDATE adversarial_resource SET {column} = CAST("
+                        f"'[0:' || (cardinality({column}) - 1) || ']=' "
+                        f"|| CAST({column} AS TEXT) AS {array_type}) "
+                        f"WHERE cardinality({column}) > 0"
+                    )
+                )
+        yield engine
+        engine.dispose()
+
+
+@pytest.fixture
+def pg_conn(pg_engine):
+    with pg_engine.connect() as conn:
         yield conn
 
 
@@ -703,6 +805,9 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
         # field-to-field probe has two explicit nulls to compare.
         "coOwner": _scope_for(seed),
         "tagNames": [tag["name"] for tag in seed["tags"]],
+        # Verbatim, null elements included: a null element is a VALUE in CEL.
+        "aNumberList": seed["aNumberList"],
+        "aBoolList": seed["aBoolList"],
         "categories": [
             {
                 "name": "business",
@@ -784,6 +889,7 @@ def _adapter_filtered_ids(
     action: str,
     null_attribute_representation: str = "explicit",
     attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
+    collection_columns=COLLECTION_COLUMNS,
 ) -> Set[str]:
     plan = client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
     query = get_query(
@@ -793,6 +899,7 @@ def _adapter_filtered_ids(
         operator_override_fns=OPERATOR_OVERRIDES,
         null_attribute_representation=null_attribute_representation,
         attribute_null_representation=attribute_null_representation,
+        collection_columns=collection_columns,
     )
     return {row.id for row in conn.execute(query).fetchall()}
 
@@ -828,11 +935,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 295
+        assert len(MANIFEST_ACTIONS) == 301
         assert len(SEEDS) == 27
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 62
+        assert len(THROWING_ACTIONS) == 57
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported
@@ -843,6 +950,73 @@ class TestAdversarialConformance:
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
         filtered = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
         assert sorted(filtered) == sorted(oracle)
+
+    # #227. The declared collection storage, executed on the one store where both of its
+    # storage shapes exist. The same oracle, the same seeds, and every action that reads a
+    # declared collection -- derived from the fixtures, so a new one joins without an edit.
+    @pytest.mark.parametrize(
+        "storage,action",
+        [
+            (storage, action)
+            for storage in ("json", "pgArray")
+            for action in DECLARED_COLLECTION_ACTIONS
+        ],
+    )
+    def test_declared_collection_storage_matches_check_oracle_on_postgresql(
+        self, storage, action, adv_cerbos_client, pg_conn
+    ):
+        oracle = _oracle_allowed_ids(adv_cerbos_client, action)
+        filtered = _adapter_filtered_ids(
+            adv_cerbos_client,
+            pg_conn,
+            action,
+            collection_columns=(
+                COLLECTION_COLUMNS if storage == "json" else PG_ARRAY_COLLECTION_COLUMNS
+            ),
+        )
+        assert sorted(filtered) == sorted(oracle)
+
+    def test_the_postgresql_leg_reads_what_it_claims(self, pg_conn):
+        # Tripwire over the derived list: an action leaving it is a declared read nobody
+        # executes on PostgreSQL any more, and one joining it should be looked at.
+        assert DECLARED_COLLECTION_ACTIONS == [
+            "cr-size-frac-ge",
+            "index-bool-list",
+            "index-bool-list-not-eq",
+            "index-bool-list-vs-number",
+            "index-not-oob",
+            "index-number-list",
+            "index-number-list-not-eq",
+            "index-number-list-vs-bool",
+            "index-scalar-list",
+            "index-scalar-list-not-eq",
+            "index-scalar-list-null",
+            "not-empty",
+            "size-ge-one",
+            "size-threshold",
+            "vf-size",
+            "w1-not-size-chain",
+            "w1-size-chain",
+            "w1-size-frac-chain",
+            "w1-size-frac-le-chain",
+            "w1-size-nonneg-chain",
+            "w1-size-zero-chain",
+        ]
+        # Both storage shapes declare the same attributes, so neither leg skips one.
+        assert set(PG_ARRAY_COLLECTION_COLUMNS) == set(COLLECTION_COLUMNS)
+        # Anti-vacuity for the rebase: an array that still started at 1 would let an adapter
+        # reading `array[i + 1]` through.
+        for column in _PG_ARRAY_COLUMNS:
+            lower_bounds = {
+                row[0]
+                for row in pg_conn.execute(
+                    text(
+                        f"SELECT array_lower({column}, 1) FROM adversarial_resource "
+                        f"WHERE cardinality({column}) > 0"
+                    )
+                )
+            }
+            assert lower_bounds == {0}, column
 
     @pytest.mark.parametrize("action,message", THROWING_ACTIONS)
     def test_fails_loudly(self, action, message, adv_cerbos_client):
@@ -874,6 +1048,7 @@ class TestAdversarialConformance:
                 # refusal depends on them (null-value-f2f-mixed) would otherwise
                 # translate cleanly and read as a missing throw.
                 attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
+                collection_columns=COLLECTION_COLUMNS,
             )
 
     # #387. `filter-as-conjunct` puts a filter() one level below the root, where
@@ -1025,6 +1200,7 @@ class TestAdversarialConformance:
             AdvResource,
             ATTR_MAP,
             operator_override_fns=OPERATOR_OVERRIDES,
+            collection_columns=COLLECTION_COLUMNS,
         )
         compiled = query.compile(dialect=postgresql.dialect())
 

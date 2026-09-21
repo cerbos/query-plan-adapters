@@ -38,9 +38,10 @@ from cerbos.sdk.model import PlanResourcesResponse
 from cerbos_image import CONFORMANCE_DIR
 from google.protobuf.json_format import ParseDict
 
-from cerbos_sqlalchemy import require_hops
+from cerbos_sqlalchemy import CollectionColumn, require_hops
 from cerbos_sqlalchemy.query import OPERATOR_FNS
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -60,6 +61,7 @@ from sqlalchemy import (
     select,
     true,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base
 
 ADAPTER = "sqlalchemy"
@@ -425,6 +427,18 @@ def write_golden_expectations(expectations: Dict[str, Dict[str, Any]]) -> None:
 
 AdvBase = declarative_base()
 
+# The ordered copies of the resource's collections, for `collection_columns` (#227). JSON text on
+# SQLite and JSONB on PostgreSQL; `none_as_null` so an absent collection is SQL NULL rather than
+# the JSON document `null`.
+_COLLECTION_JSON = JSON(none_as_null=True).with_variant(
+    JSONB(none_as_null=True), "postgresql"
+)
+# The same collections as native PostgreSQL arrays. Only the PostgreSQL leg declares them; on
+# SQLite, which has no array type, the variant falls back to JSON text nothing reads.
+_COLLECTION_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(String), "postgresql")
+_NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql")
+_BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
+
 
 class AdvResource(AdvBase):
     __tablename__ = "adversarial_resource"
@@ -439,6 +453,19 @@ class AdvResource(AdvBase):
     scope = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=True)
+    tags_json = Column(_COLLECTION_JSON, nullable=True)
+    tag_names_json = Column(_COLLECTION_JSON, nullable=True)
+    main_sub_categories_json = Column(_COLLECTION_JSON, nullable=True)
+    tags_array = Column(_COLLECTION_ARRAY, nullable=True)
+    tag_names_array = Column(_COLLECTION_ARRAY, nullable=True)
+    main_sub_categories_array = Column(_COLLECTION_ARRAY, nullable=True)
+    # The corpus's two scalar lists of numbers and booleans, which exist to prove an element's
+    # JSON type survives the comparison (conformance/README.md, "Number and boolean list
+    # elements"). No relation backs them: the declared column is their only storage.
+    a_number_list_json = Column(_COLLECTION_JSON, nullable=True)
+    a_bool_list_json = Column(_COLLECTION_JSON, nullable=True)
+    a_number_list_array = Column(_NUMBER_ARRAY, nullable=True)
+    a_bool_list_array = Column(_BOOL_ARRAY, nullable=True)
 
 
 class AdvTag(AdvBase):
@@ -641,9 +668,11 @@ def _require_hops(rel: _Relation, expr: Any):
     is only the unpacking of the harness's ``_Relation`` marker into its arguments.
     The harness using the shipped helper rather than a private copy is what proves
     the helper: every chained corpus action — ``w1-all-chain``,
-    ``w1-not-exists-chain``, ``w1-size-zero-chain``, ``w1-not-in-chain``,
-    ``w1-not-hasint-chain`` and the rest — is an oracle comparison against a real
-    PDP that runs through this call.
+    ``w1-not-exists-chain``, ``w1-not-in-chain``, ``w1-not-hasint-chain`` and the
+    rest — is an oracle comparison against a real PDP that runs through this call.
+    The ``size()`` chains are the exception: ``mainCategory.subCategories`` is
+    declared in :data:`COLLECTION_COLUMNS`, and a NULL column is what makes an
+    absent parent UNKNOWN there.
     """
     return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
@@ -812,6 +841,78 @@ OPERATOR_OVERRIDES = {
     "in": _in_fn,
 }
 
+# How the collections are STORED, read by `size()` and `index` alone (#227). The three with a
+# relation keep their marker in ATTR_MAP too, because every collection macro still reads the
+# relation: a declaration answers only the questions a collection's own storage decides. The
+# harness stores exactly the list `check()` is sent, so the ordered copy and the relation cannot
+# disagree about a row.
+#
+# `mainCategory.subCategories` is the one that proves "absent is not empty": a resource with no
+# category sends no `mainCategory` at all, so its column is NULL and `size() >= 0` must still
+# exclude it (`w1-size-nonneg-chain`). `tags` proves the other half, since every seed carries the
+# attribute and 14 carry it empty.
+COLLECTION_COLUMNS = {
+    "request.resource.attr.tags": CollectionColumn(AdvResource.tags_json, "json"),
+    "request.resource.attr.tagNames": CollectionColumn(
+        AdvResource.tag_names_json, "json"
+    ),
+    "request.resource.attr.mainCategory.subCategories": CollectionColumn(
+        AdvResource.main_sub_categories_json, "json"
+    ),
+    "request.resource.attr.aNumberList": CollectionColumn(
+        AdvResource.a_number_list_json, "json"
+    ),
+    "request.resource.attr.aBoolList": CollectionColumn(
+        AdvResource.a_bool_list_json, "json"
+    ),
+}
+
+#: The same five, declared as PostgreSQL arrays. The corpus classifies each action against one
+#: mapping, so the translator unit test and the SQLite harness use :data:`COLLECTION_COLUMNS`;
+#: this one is executed by the PostgreSQL leg of the harness alone.
+PG_ARRAY_COLLECTION_COLUMNS = {
+    "request.resource.attr.tags": CollectionColumn(AdvResource.tags_array, "pgArray"),
+    "request.resource.attr.tagNames": CollectionColumn(
+        AdvResource.tag_names_array, "pgArray"
+    ),
+    "request.resource.attr.mainCategory.subCategories": CollectionColumn(
+        AdvResource.main_sub_categories_array, "pgArray"
+    ),
+    "request.resource.attr.aNumberList": CollectionColumn(
+        AdvResource.a_number_list_array, "pgArray"
+    ),
+    "request.resource.attr.aBoolList": CollectionColumn(
+        AdvResource.a_bool_list_array, "pgArray"
+    ),
+}
+
+
+def reads_declared_collection(action: str) -> bool:
+    """Whether ``action``'s plan reads a declared collection through ``size()`` or ``index``.
+
+    Read off the wire fixture rather than listed, so an action added to the corpus over one of
+    these attributes joins the PostgreSQL leg without anyone remembering to add it.
+    """
+
+    def walk(node: Any) -> bool:
+        if not isinstance(node, dict):
+            return False
+        expression = node.get("expression")
+        if expression is None:
+            return False
+        operands = expression["operands"]
+        if (
+            expression["operator"] in ("size", "index")
+            and operands
+            and operands[0].get("variable") in COLLECTION_COLUMNS
+        ):
+            return True
+        return any(walk(operand) for operand in operands)
+
+    fixture = _fixture_response_dict(action, PLANNED_AT)["filter"]
+    return walk(fixture.get("condition", {}))
+
+
 # `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
 # under the OTHER null convention: the oracle sends a real null attribute for them
 # rather than omitting it. Declaring that here is what makes the equality family
@@ -928,10 +1029,10 @@ ATTR_MAP = {
 #: The dialects the golden expectations pin, most-executed first.
 #:
 #: SQLite is the store ``test_adversarial_conformance.py`` actually runs the corpus against,
-#: so its rendering is the one an oracle comparison stands behind. PostgreSQL is executed by
-#: nothing in this repository and is the dialect the adapter's own source reasons about most
-#: — NaN ordering, ``CAST`` rounding, the ``string()`` cast over a boolean — so pinning its
-#: rendering is the only place that reasoning is visible at all. They are not close to
+#: so its rendering is the one an oracle comparison stands behind. PostgreSQL executes only
+#: the actions that read a declared collection, and is the dialect the adapter's own source
+#: reasons about most — NaN ordering, ``CAST`` rounding, the ``string()`` cast over a boolean
+#: — so pinning its rendering is the only place most of that reasoning is visible at all. They are not close to
 #: identical: SQLite has no boolean type, so a ``CASE`` in a WHERE clause needs ``= 1`` and a
 #: negation renders as ``= 0``, and the two dialects spell float division differently.
 GOLDEN_DIALECTS = ("sqlite", "postgresql")

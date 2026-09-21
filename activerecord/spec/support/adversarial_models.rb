@@ -66,6 +66,23 @@ module AdversarialModels
         t.string :resource_id, null: false
       end
 
+      # `aNumberList` and `aBoolList`, the homogeneous scalar lists, as child rows the way a
+      # relational schema holds a list: one row per element, a nullable value (a null element
+      # is a value, as it is in `tagNames`), and the element's position. The position is the
+      # one thing `aNumberList[0]` needs and the one thing a relation mapping cannot carry,
+      # which is why every corpus action that reads these lists is refused at `index`.
+      create_table :adversarial_number_list_elements, force: true do |t|
+        t.integer :position, null: false
+        t.float :value
+        t.string :resource_id, null: false
+      end
+
+      create_table :adversarial_bool_list_elements, force: true do |t|
+        t.integer :position, null: false
+        t.boolean :value
+        t.string :resource_id, null: false
+      end
+
       create_table :adversarial_categories, id: false, force: true do |t|
         t.string :id, null: false, primary_key: true
         t.string :name, null: false
@@ -138,6 +155,13 @@ module AdversarialModels
         AdvTag.create!(tag_id: tag.fetch("id"), name: tag.fetch("name"), resource_id: id)
       end
 
+      seed.fetch("aNumberList").each_with_index do |value, position|
+        AdvNumberListElement.create!(position: position, value: value, resource_id: id)
+      end
+      seed.fetch("aBoolList").each_with_index do |value, position|
+        AdvBoolListElement.create!(position: position, value: value, resource_id: id)
+      end
+
       seed.fetch("subCategoryNames").each_with_index do |sub_name, index|
         category = AdvCategory.create!(id: "#{id}-cat#{index}", name: "business", resource_id: id)
         sub_category = AdvSubCategory.create!(
@@ -173,6 +197,14 @@ class AdvTag < ActiveRecord::Base
   self.table_name = "adversarial_tags"
 end
 
+class AdvNumberListElement < ActiveRecord::Base
+  self.table_name = "adversarial_number_list_elements"
+end
+
+class AdvBoolListElement < ActiveRecord::Base
+  self.table_name = "adversarial_bool_list_elements"
+end
+
 class AdvInner < ActiveRecord::Base
   self.table_name = "adversarial_inners"
 end
@@ -190,6 +222,10 @@ class AdvResource < ActiveRecord::Base
   # need.
   self.record_timestamps = false
   has_many :tags, class_name: "AdvTag", foreign_key: :resource_id, primary_key: :id
+  has_many :number_list_elements,
+    class_name: "AdvNumberListElement", foreign_key: :resource_id, primary_key: :id
+  has_many :bool_list_elements,
+    class_name: "AdvBoolListElement", foreign_key: :resource_id, primary_key: :id
   has_many :categories, class_name: "AdvCategory", foreign_key: :resource_id, primary_key: :id
   # A to-ONE association, so the adapter maps `parent.<column>` as a path with dots and makes a
   # correlated scalar subquery. A `has_many` here would make the adapter refuse the mapping,

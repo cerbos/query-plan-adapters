@@ -81,6 +81,13 @@
         "mysql": "(cast(re1_0.a_number as double)+1.0)>2.0"
       }
     },
+    "cast-string-bool": {
+      "where": {
+        "h2": "re1_0.a_bool=true",
+        "postgresql": "re1_0.a_bool=true",
+        "mysql": "re1_0.a_bool=1"
+      }
+    },
     "cr-contains": {
       "where": {
         "h2": "'s100Xdone-tail\\one-end' like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",

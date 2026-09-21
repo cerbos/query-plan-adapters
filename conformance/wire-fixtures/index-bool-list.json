@@ -1,0 +1,30 @@
+{
+  "action": "index-bool-list",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "index",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBoolList"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          },
+          {
+            "value": true
+          }
+        ]
+      }
+    }
+  }
+}

@@ -76,6 +76,9 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** A null element is a VALUE to CEL (`null == 2` is false), not an absent one. */
+  aNumberList: (number | null)[];
+  aBoolList: (boolean | null)[];
 }
 
 interface SeedsFile {
@@ -128,6 +131,8 @@ const SEED_KEYS = [
   "tags",
   "subCategoryNames",
   "parentSeedId",
+  "aNumberList",
+  "aBoolList",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -319,6 +324,20 @@ function parseDerivedFile(value: unknown): DerivedFile {
   return { fields, derived };
 }
 
+/** A homogeneous scalar list whose elements may be null, validated element by element. */
+function parseNullableList<T extends number | boolean>(
+  value: unknown,
+  label: string,
+  elementType: "number" | "boolean",
+): (T | null)[] {
+  return requireArray(value, label).map((element, index) => {
+    if (element !== null && typeof element !== elementType) {
+      throw Error(`${label}[${index}] must be a ${elementType} or null`);
+    }
+    return element as T | null;
+  });
+}
+
 function parseSeed(value: unknown, index: number): Seed {
   const label = `seeds[${index}]`;
   const seed = requireRecord(value, label);
@@ -344,6 +363,16 @@ function parseSeed(value: unknown, index: number): Seed {
       `${label}.subCategoryNames`,
     ),
     parentSeedId,
+    aNumberList: parseNullableList<number>(
+      seed["aNumberList"],
+      `${label}.aNumberList`,
+      "number",
+    ),
+    aBoolList: parseNullableList<boolean>(
+      seed["aBoolList"],
+      `${label}.aBoolList`,
+      "boolean",
+    ),
   };
 }
 
@@ -600,6 +629,15 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-eq-true",
   "regex-final-newline",
   "regex-lookahead",
+  // Number and boolean list elements: positional access has no Where form, so all six are
+  // refused at the index() operand and the group has no compared member here. The two cross-type
+  // probes are live only through their aNumber == 5 branch, which is what keeps them off `[]`.
+  "index-number-list",
+  "index-number-list-not-eq",
+  "index-bool-list",
+  "index-bool-list-not-eq",
+  "index-bool-list-vs-number",
+  "index-number-list-vs-bool",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -692,6 +730,12 @@ function checkResource(seed: Seed): Resource {
     // both conventions and the field-to-field probe has two explicit nulls to compare.
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
+    // Verbatim, null elements included: this is the only place the two lists are consumed. As
+    // with `tags` and `tagNames`, no metadata key holds them (`metadataFor` writes none) — the
+    // adapter refuses every shape that reads a list-valued attribute, so every index-*-list action
+    // is a throw and a liveness probe, and these feed only the oracle that keeps each probe live.
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
     tags: seed.tags.map(tagAttribute),
     categories: seed.subCategoryNames.map((subCategoryName) => ({
@@ -772,6 +816,9 @@ function metadataFor(seed: Seed): Metadata {
     const value = derivedFor(seed)[key];
     if (value !== null) metadata[key] = value;
   }
+  // No key for `tags`, `aNumberList` or `aBoolList`: every shape that reads a list-valued attribute
+  // is refused during translation, so no filter could name one. `checkResource` carries them for
+  // the oracle alone.
   // The to-one chain, flattened onto dotted keys. A level that does not exist writes no key at
   // all, which is what the check side's missing `parent` / `parent.inner` path mirrors.
   const levels: [string, Seed | undefined][] = [
@@ -902,12 +949,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(295);
+    expect(MANIFEST_ACTIONS.size).toBe(301);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(234);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(240);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(245);
+    expect(THROWING_ACTIONS).toHaveLength(251);
     expect(misclassified).toEqual([]);
   });
 
@@ -1047,8 +1094,8 @@ describe("adversarial conformance corpus", () => {
   test("oracle is not degenerate", async () => {
     // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
     // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
-    // membership assertion is what keeps the list honest — Chroma compares 34 of the corpus's
-    // 187 conformance actions, so a guard list shared with a relational harness would name
+    // membership assertion is what keeps the list honest — Chroma compares 48 of the corpus's
+    // 288 conformance actions, so a guard list shared with a relational harness would name
     // shapes it never compares (cerbos/query-plan-adapters#324).
     for (const action of DEGENERACY_GUARD_ACTIONS) {
       expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);

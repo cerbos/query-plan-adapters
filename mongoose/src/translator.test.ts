@@ -2075,6 +2075,143 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       $eq: "one",
     },
   },
+  // Number and boolean list elements, read through the same guarded `$arrayElemAt` as
+  // `index-scalar-list`. `$eq` in an aggregation expression compares BSON type before value, so
+  // the cross-type probes' `true` and `1` never meet, and a null element compares as a null value
+  // (a4, a6): false, and true under the `$nor`. The literal reaches the server uncast — Mongoose's
+  // `$expr` caster casts against a path, and `$arrayElemAt`'s operand is an array, not a path —
+  // which the adversarial suite proves against a typed `[Boolean]` / `[Number]` schema.
+  "index-bool-list": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$aBoolList",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$aBoolList",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $expr: {
+          $eq: [
+            {
+              $arrayElemAt: ["$aBoolList", 0],
+            },
+            true,
+          ],
+        },
+      },
+    ],
+  },
+  "index-bool-list-not-eq": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$aBoolList",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$aBoolList",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $cond: {
+                    if: {
+                      $isArray: "$aBoolList",
+                    },
+                    then: {
+                      $gt: [
+                        {
+                          $size: "$aBoolList",
+                        },
+                        0,
+                      ],
+                    },
+                    else: false,
+                  },
+                },
+              },
+              {
+                $expr: {
+                  $eq: [
+                    {
+                      $arrayElemAt: ["$aBoolList", 0],
+                    },
+                    true,
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  "index-bool-list-vs-number": {
+    $or: [
+      {
+        $and: [
+          {
+            $expr: {
+              $cond: {
+                if: {
+                  $isArray: "$aBoolList",
+                },
+                then: {
+                  $gt: [
+                    {
+                      $size: "$aBoolList",
+                    },
+                    0,
+                  ],
+                },
+                else: false,
+              },
+            },
+          },
+          {
+            $expr: {
+              $eq: [
+                {
+                  $arrayElemAt: ["$aBoolList", 0],
+                },
+                1,
+              ],
+            },
+          },
+        ],
+      },
+      {
+        aNumber: {
+          $eq: 5,
+        },
+      },
+    ],
+  },
   // Positional read of a scalar list. Mongoose is the one SQL-shaped adapter that can express it
   // ($arrayElemAt), and the bounds guard is why: `$arrayElemAt` past the end yields MISSING, which
   // compares equal to nothing but also raises nothing, so the emptiness check in front of it is
@@ -2134,6 +2271,137 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
             ],
           },
         ],
+      },
+    ],
+  },
+  "index-number-list": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$aNumberList",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$aNumberList",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $expr: {
+          $eq: [
+            {
+              $arrayElemAt: ["$aNumberList", 0],
+            },
+            2,
+          ],
+        },
+      },
+    ],
+  },
+  "index-number-list-not-eq": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$aNumberList",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$aNumberList",
+                },
+                0,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $cond: {
+                    if: {
+                      $isArray: "$aNumberList",
+                    },
+                    then: {
+                      $gt: [
+                        {
+                          $size: "$aNumberList",
+                        },
+                        0,
+                      ],
+                    },
+                    else: false,
+                  },
+                },
+              },
+              {
+                $expr: {
+                  $eq: [
+                    {
+                      $arrayElemAt: ["$aNumberList", 0],
+                    },
+                    2,
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  "index-number-list-vs-bool": {
+    $or: [
+      {
+        $and: [
+          {
+            $expr: {
+              $cond: {
+                if: {
+                  $isArray: "$aNumberList",
+                },
+                then: {
+                  $gt: [
+                    {
+                      $size: "$aNumberList",
+                    },
+                    0,
+                  ],
+                },
+                else: false,
+              },
+            },
+          },
+          {
+            $expr: {
+              $eq: [
+                {
+                  $arrayElemAt: ["$aNumberList", 0],
+                },
+                true,
+              ],
+            },
+          },
+        ],
+      },
+      {
+        aNumber: {
+          $eq: 5,
+        },
       },
     ],
   },
@@ -6987,7 +7255,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 191, kinds: 7, throwing: 97 });
+    }).toEqual({ filters: 197, kinds: 7, throwing: 97 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

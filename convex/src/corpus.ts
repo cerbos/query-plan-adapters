@@ -332,6 +332,9 @@ export interface Seed {
   aString: string;
   aNumber: number;
   aOptionalString: string | null;
+  /** Homogeneous scalar lists for the positional-read actions; a null element is a null VALUE. */
+  aNumberList: (number | null)[];
+  aBoolList: (boolean | null)[];
   tags: Tag[];
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
@@ -365,6 +368,8 @@ const SEED_KEYS = [
   "aString",
   "aNumber",
   "aOptionalString",
+  "aNumberList",
+  "aBoolList",
   "tags",
   "subCategoryNames",
   "parentSeedId",
@@ -458,6 +463,14 @@ const isSeed = (value: unknown): value is Seed =>
   typeof value["aNumber"] === "number" &&
   (typeof value["aOptionalString"] === "string" ||
     value["aOptionalString"] === null) &&
+  Array.isArray(value["aNumberList"]) &&
+  value["aNumberList"].every(
+    (element) => element === null || typeof element === "number",
+  ) &&
+  Array.isArray(value["aBoolList"]) &&
+  value["aBoolList"].every(
+    (element) => element === null || typeof element === "boolean",
+  ) &&
   Array.isArray(value["tags"]) &&
   value["tags"].every(isTag) &&
   isStringArray(value["subCategoryNames"]) &&

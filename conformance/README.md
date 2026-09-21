@@ -21,6 +21,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
   - [Shapes that live only in a unit test](#shapes-that-live-only-in-a-unit-test)
   - [Issue #414 port and planner evidence](#issue-414-port-and-planner-evidence)
   - [Issue #396 regex, indexing and conversion probes](#issue-396-regex-indexing-and-conversion-probes)
+  - [Number and boolean list elements](#number-and-boolean-list-elements)
   - [The real to-one relation](#the-real-to-one-relation)
   - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
   - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
@@ -520,6 +521,38 @@ malformed numeric strings still deny under negation. `cast-not-string-missing` a
 All 11 actions have non-empty, non-total checker oracles and belong in each adapter's
 compared or refusal-liveness guard according to its observed classification (#401).
 
+### Number and boolean list elements
+
+`index-scalar-list` and its companions read `tagNames`, a list of strings, so they never ask
+whether an adapter keeps an element's JSON type when the literal is a number or a boolean. Two seed
+fields exist for that alone: `aNumberList` and `aBoolList`, homogeneous scalar lists on every seed.
+Most rows hold `[]`, where every position is an index error and the PDP denies under both
+polarities. Eight rows hold the values that discriminate:
+
+| seed | `aNumberList` | `aBoolList` | what it witnesses |
+| --- | --- | --- | --- |
+| `a1` | `[2]` | `[true]` | the match, and the `aNumber == 5` branch below |
+| `a3` | `[2, 3]` | `[false]` | a match with a longer list; false leading |
+| `a4` | `[3, 2]` | `[null, true]` | the value at the wrong position; a null element |
+| `a5` | `[-2]` | `[false, true]` | the wrong sign; false leading |
+| `a6` | `[null, 2]` | `[]` | a null element, which is a value: `null == 2` is false, its negation true |
+| `a7` | `[20]` | `[]` | the value a text comparison would take for a prefix |
+| `b4` | `[1]` | `[true]` | 1 and true, which SQLite and MySQL both store as 1 |
+| `c1` | `[0]` | `[true, false]` | a zero a NULL could be mistaken for |
+
+Six actions read them, each with a non-empty, non-total oracle in both evaluation modes:
+`index-number-list` (`[0] == 2`: `a1 a3`) and its negation (`a4 a5 a6 a7 b4 c1`),
+`index-bool-list` (`[0] == true`: `a1 b4 c1`) and its negation (`a3 a4 a5`), and the two
+cross-type probes. `index-bool-list-vs-number` (`aBoolList[0] == 1`) and
+`index-number-list-vs-bool` (`aNumberList[0] == true`) are false for every row in CEL, whose
+equality is heterogeneous. An adapter that reads a JSON element back as SQL and compares it with the
+literal returns `b4` and `c1`, or `b4`, anyway: SQLite and MySQL store a JSON true as 1. Each
+carries the `aNumber == 5` branch, as `index-negative` does, so the oracle is `a1` rather than
+empty.
+
+The two fields are new seed keys, so every harness declares and consumes them. An adapter with no
+positional read of a list refuses all six, exactly as it refuses `index-scalar-list`.
+
 ### The real to-one relation
 
 The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
@@ -642,8 +675,28 @@ shortest round-trip the default, so a port built on that divergence would pin no
 `cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
 no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
 `"true"`. One translator, one wire node, two answers decided only by the store — which is why an
-adapter spanning both cannot lower it store-blind. Every SQL adapter refuses it; mongoose and
-convex lower it correctly, because `$toString` and JavaScript render a bool exactly as CEL does.
+adapter spanning both cannot lower it through a `CAST`
+([#418](https://github.com/cerbos/query-plan-adapters/issues/418)):
+
+- **activerecord, sqlalchemy, ent, pgx and drizzle** lower it through
+  `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's two
+  words on every engine and keeps a NULL column UNKNOWN.
+- **spring-data** does not build a string at all. It compares the constant in Java: `"true"` and
+  `"false"` become `col = true` and `col = false`, and any other constant matches no row.
+- **mongoose and convex** lower it directly, because `$toString` and JavaScript render a bool
+  exactly as CEL does. **prisma, langchain-chromadb and elasticsearch-java** refuse it: none has a
+  computed string operand.
+
+The `CASE` carries a hazard the corpus action does not reach. Its two words are literals, so MySQL
+compares them in the *connection's* collation rather than a column's, and a driver's default
+connection collation is case-insensitive: on it, `string(flag) == "TRUE"` matches every true row,
+which CEL never does. drizzle renders the literals `COLLATE utf8mb4_0900_bin`, and ent keeps its
+binary-collation `CAST` around the `CASE`, so both are byte-exact on their MySQL legs; activerecord
+and sqlalchemy run no MySQL leg and state the requirement in their READMEs; spring-data never
+compares text. The action only ever compares with `"true"`, and `aBool` is never NULL on any seed,
+so neither the collation nor the `IS NULL` arm is proved against the oracle yet — both are pinned
+in unit tests and golden expectations until the corpus carries a probe for each
+([#469](https://github.com/cerbos/query-plan-adapters/issues/469)).
 
 `id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
 string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite

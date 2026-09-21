@@ -290,6 +290,29 @@
         }
       }
     },
+    "cast-string-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_bool\" is null then null when \"adversarial_resources\".\"a_bool\" then 'true' else 'false' end) = ?",
+          "params": [
+            "true"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_bool\" is null then null when \"adversarial_resources\".\"a_bool\" then 'true' else 'false' end) = $1",
+          "params": [
+            "true"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_bool` is null then null when `adversarial_resources`.`a_bool` then _utf8mb4'true' collate utf8mb4_0900_bin else _utf8mb4'false' collate utf8mb4_0900_bin end) = ?",
+          "params": [
+            "true"
+          ]
+        }
+      }
+    },
     "cr-contains": {
       "note": "A constant receiver with a column needle: `K.contains(aString)` cannot become a LIKE, so the adapter enumerates every substring of the constant and tests membership. Pinning the enumeration verbatim is the point — an off-by-one at either end of the window is invisible in a row comparison over 21 seeds and obvious in this list.",
       "kind": "KIND_CONDITIONAL",
@@ -1672,6 +1695,99 @@
         }
       }
     },
+    "index-bool-list": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when json_type(\"adversarial_resources\".\"a_bool_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) is not null then json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) = ? end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when jsonb_typeof(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($1 as integer)) is not null then (cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($2 as integer)) = cast($3 as jsonb) end)",
+          "params": [
+            0,
+            0,
+            "true"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_bool_list_json`, ?) is not null then json_extract(`adversarial_resources`.`a_bool_list_json`, ?) = cast(? as json) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true"
+          ]
+        }
+      }
+    },
+    "index-bool-list-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when json_type(\"adversarial_resources\".\"a_bool_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) is not null then json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) = ? end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true"
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when jsonb_typeof(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($1 as integer)) is not null then (cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($2 as integer)) = cast($3 as jsonb) end)",
+          "params": [
+            0,
+            0,
+            "true"
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_bool_list_json`, ?) is not null then json_extract(`adversarial_resources`.`a_bool_list_json`, ?) = cast(? as json) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true"
+          ]
+        }
+      }
+    },
+    "index-bool-list-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when json_type(\"adversarial_resources\".\"a_bool_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) is not null then (case when json_type(\"adversarial_resources\".\"a_bool_list_json\", ?) in ('integer', 'real') then cast(json_extract(\"adversarial_resources\".\"a_bool_list_json\", ?) as real) = cast(? as real) else false end) end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            1,
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when jsonb_typeof(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($1 as integer)) is not null then (case when jsonb_typeof((cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($2 as integer))) = 'number' then cast((cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb) -> cast($3 as integer)) #>> '{}' as float(53)) = cast($4 as float(53)) else false end) end) or \"adversarial_resources\".\"a_number\" = $5)",
+          "params": [
+            0,
+            0,
+            0,
+            1,
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_bool_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            1,
+            5
+          ]
+        }
+      }
+    },
     "index-not-oob": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1698,6 +1814,102 @@
             "$[1]",
             "$[1]",
             "\"public\""
+          ]
+        }
+      }
+    },
+    "index-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_number_list_json\", ?) is not null then (case when json_type(\"adversarial_resources\".\"a_number_list_json\", ?) in ('integer', 'real') then cast(json_extract(\"adversarial_resources\".\"a_number_list_json\", ?) as real) = cast(? as real) else false end) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            2
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($1 as integer)) is not null then (case when jsonb_typeof((cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($2 as integer))) = 'number' then cast((cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($3 as integer)) #>> '{}' as float(53)) = cast($4 as float(53)) else false end) end)",
+          "params": [
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "mysql": {
+          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            2
+          ]
+        }
+      }
+    },
+    "index-number-list-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_number_list_json\", ?) is not null then (case when json_type(\"adversarial_resources\".\"a_number_list_json\", ?) in ('integer', 'real') then cast(json_extract(\"adversarial_resources\".\"a_number_list_json\", ?) as real) = cast(? as real) else false end) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            2
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($1 as integer)) is not null then (case when jsonb_typeof((cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($2 as integer))) = 'number' then cast((cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($3 as integer)) #>> '{}' as float(53)) = cast($4 as float(53)) else false end) end)",
+          "params": [
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "$[0]",
+            2
+          ]
+        }
+      }
+    },
+    "index-number-list-vs-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' and json_type(\"adversarial_resources\".\"a_number_list_json\", ?) is not null then json_type(\"adversarial_resources\".\"a_number_list_json\", ?) = ? end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true",
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($1 as integer)) is not null then (cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb) -> cast($2 as integer)) = cast($3 as jsonb) end) or \"adversarial_resources\".\"a_number\" = $4)",
+          "params": [
+            0,
+            0,
+            "true",
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then json_extract(`adversarial_resources`.`a_number_list_json`, ?) = cast(? as json) end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            "$[0]",
+            "$[0]",
+            "true",
+            5
           ]
         }
       }

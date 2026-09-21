@@ -100,7 +100,9 @@ pdm run format         # isort + black
 `tests/test_query.py` / `tests/test_relations.py` are `get_query`'s contract for plans the planner
 cannot produce; none of the three starts anything, so `pdm run pytest tests/test_translator.py`
 needs no PDP and no database. Only `tests/test_adversarial_conformance.py` needs Docker, and it
-starts its own pinned PDP against `conformance/policies/`.
+starts its own pinned PDP against `conformance/policies/` — plus a PostgreSQL pinned in
+`sqlalchemy/POSTGRES_IMAGE`, on which the actions that read a `collection_columns` declaration run
+again under both storage shapes (`json` and `pgArray`), since nothing else executes that SQL.
 
 ### Ruby (ActiveRecord)
 ```bash

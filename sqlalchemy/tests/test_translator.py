@@ -40,8 +40,8 @@ expectations" section of ``conformance/README.md``.
 right rows *against the rows it seeds*. Two different queries can agree on all 22 of them and
 disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
 there and shows up here as a diff a reviewer reads. It is also the only place PostgreSQL —
-reasoned about all through ``query.py`` and executed by nothing in this repository — is
-rendered at all.
+reasoned about all through ``query.py``, and executed only by the harness's
+declared-collection-storage leg — is rendered for every action.
 
 **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
 exactly once — a golden expectation or a throw carrying the message ``actions.json`` pins —
@@ -60,12 +60,14 @@ from corpus import (
     ADAPTER,
     ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
+    COLLECTION_COLUMNS,
     GOLDEN_DIALECTS,
     GOLDEN_FILE,
     GOLDEN_REGENERATE_COMMAND,
     GOLDEN_SQLALCHEMY_MAJOR,
     INSTALLED_SQLALCHEMY_MAJOR,
     OPERATOR_OVERRIDES,
+    PG_ARRAY_COLLECTION_COLUMNS,
     AdvResource,
     AdvTag,
     classify_actions_for_adapter,
@@ -86,8 +88,9 @@ from corpus import (
     write_golden_expectations,
 )
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import CollectionColumn, get_query
 from sqlalchemy import any_, exists, literal, select
+from sqlalchemy.exc import CompileError
 
 ACTIONS_FILE = parse_actions_file(read_corpus_json("actions.json"))
 
@@ -118,6 +121,7 @@ def translate(
     operator_override_fns=OPERATOR_OVERRIDES,
     null_attribute_representation="explicit",
     attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
+    collection_columns=COLLECTION_COLUMNS,
     plan=None,
 ):
     """The ``Select`` this adapter emits for one corpus action."""
@@ -134,6 +138,7 @@ def translate(
         operator_override_fns=operator_override_fns,
         null_attribute_representation=null_attribute_representation,
         attribute_null_representation=attribute_null_representation,
+        collection_columns=collection_columns,
     )
 
 
@@ -333,7 +338,7 @@ class TestCorpusShapes:
             "conditional": len(CONDITIONAL_ACTIONS),
             "unconditional": len(UNCONDITIONAL_ACTIONS),
             "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 230, "unconditional": 3, "throwing": 62}
+        } == {"conditional": 241, "unconditional": 3, "throwing": 57}
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two
@@ -662,7 +667,7 @@ class TestOperatorOverrides:
     # refuses it with these overrides", not "no caller can translate it". Both shapes are
     # documented in the README as caller-supplied, so an assertion that the documented
     # override actually works is not a corpus question. Each asserts BOTH halves: the refusal
-    # the corpus pins, and the translation the declaration buys.
+    # without the override, and the translation the override buys.
 
     def test_a_matches_override_admits_the_regex_the_corpus_refuses(self):
         # `p-matches` is `expectedUnsupported` because SQL dialect regex engines do not
@@ -686,29 +691,149 @@ class TestOperatorOverrides:
         assert "adversarial_resource.a_string ~ %(a_string_1)s" in statement
         assert params["a_string_1"] == "^h"
 
-    def test_an_index_override_admits_the_positional_read_the_corpus_refuses(self):
-        # `index-scalar-list` is `adapterUnsupported` because row order in a SQL relation is
-        # not defined — but the refusal the corpus pins comes from the MAPPING, not the
-        # operator: `tagNames` is a relation marker, `index` is not in the corpus's override
-        # map, so the reference is not override-owned and `get_query`'s pre-validation refuses
-        # it before the walk. An application whose storage makes a positional read meaningful
-        # supplies both halves — here a scalar column standing for a single-element list,
-        # which is the shape the retired suite used — and the same plan translates.
+    def test_an_index_override_still_serves_storage_nothing_declares(self):
+        # The corpus translates `index-scalar-list` through its `collection_columns`
+        # declaration now (#227), which covers a JSON document and a PostgreSQL array. Storage
+        # of any other shape still has the override: here a scalar column standing for a
+        # single-element list, which is the shape the retired suite used. Without either, the
+        # undeclared storage is refused by name rather than read as though it were ordered.
         action = "index-scalar-list"
-        with pytest.raises(TypeError, match="must be handled by an operator override"):
-            translate(action)
+        undeclared = {
+            "attr_map": {"request.resource.attr.tagNames": AdvResource.a_string},
+            "attribute_null_representation": None,
+            "collection_columns": None,
+        }
+        with pytest.raises(
+            ValueError,
+            match="Index storage shape is undeclared for 'request.resource.attr.tagNames'",
+        ):
+            translate(action, operator_override_fns=None, **undeclared)
 
         statement, params = render(
             translate(
                 action,
-                attr_map={"request.resource.attr.tagNames": AdvResource.a_string},
                 operator_override_fns={"index": lambda column, _position: column},
-                attribute_null_representation=None,
+                **undeclared,
             ),
             "sqlite",
         )
         assert statement.endswith("WHERE adversarial_resource.a_string = ?")
         assert params == {"a_string_1": "public"}
+
+
+class TestDeclaredCollectionStorage:
+    """``collection_columns``, which the corpus structurally cannot vary (#227).
+
+    ``actions.json`` classifies each action against ONE mapping, and the corpus's declares its
+    three collections as JSON documents -- that is what the golden expectations and the SQLite
+    harness pin. A second storage shape, a missing declaration, a declaration the adapter must
+    refuse and the precedence the declaration takes are properties of the caller's argument, not
+    of a plan, so they are asserted here. The PostgreSQL leg of the harness is what executes the
+    ``pgArray`` renderings pinned below against the oracle.
+    """
+
+    def test_a_declaration_takes_precedence_over_the_size_override(self):
+        # The corpus's overrides include `size`, which counts a relation. The declaration names
+        # the attribute and the override only the operator, so the declaration wins -- and this
+        # is the assertion that says the harness's size shapes run through the declared storage
+        # at all, rather than through the relation count they used before it existed.
+        declared, _ = render(translate("size-threshold"), "sqlite")
+        overridden, _ = render(
+            translate("size-threshold", collection_columns=None), "sqlite"
+        )
+
+        assert "json_array_length(adversarial_resource.tags_json)" in declared
+        assert "count(*)" not in declared
+        assert "count(*)" in overridden
+
+    @pytest.mark.parametrize(
+        "action,rendered",
+        [
+            (
+                "size-threshold",
+                "jsonb_array_length(to_jsonb(adversarial_resource.tags_array))",
+            ),
+            (
+                "index-scalar-list",
+                "(to_jsonb(adversarial_resource.tag_names_array) -> 0) "
+                "= to_jsonb(CAST(%(param_1)s AS TEXT))",
+            ),
+            (
+                "index-scalar-list-null",
+                "jsonb_typeof((to_jsonb(adversarial_resource.tag_names_array) -> 0)) "
+                "= 'null'",
+            ),
+        ],
+    )
+    def test_a_pg_array_is_read_by_position_through_to_jsonb(self, action, rendered):
+        # `to_jsonb`, never `array[i + 1]`: the harness rebases every array to start at 0, so an
+        # adapter that assumed PostgreSQL's default lower bound would read the wrong element.
+        statement, _ = render(
+            translate(action, collection_columns=PG_ARRAY_COLLECTION_COLUMNS),
+            "postgresql",
+        )
+        assert rendered in statement
+        assert "[" not in where_clause(statement)
+
+    def test_two_positions_do_not_share_a_cached_statement(self):
+        # The position is inline SQL rather than a bind, so it has to reach the statement
+        # cache key -- or `tagNames[1]` would be served the SQL compiled for `tagNames[0]`.
+        first = translate("index-scalar-list").whereclause
+        second = translate("index-not-oob").whereclause
+        assert first._generate_cache_key() != second._generate_cache_key()
+
+    def test_a_pg_array_does_not_render_on_sqlite(self):
+        with pytest.raises(CompileError, match='"pgArray" requires a PostgreSQL array'):
+            render(
+                translate(
+                    "size-threshold", collection_columns=PG_ARRAY_COLLECTION_COLUMNS
+                ),
+                "sqlite",
+            )
+
+    def test_a_dialect_it_was_not_written_for_is_refused_at_compile_time(self):
+        # The SQL is chosen per dialect at compile time, because `get_query` is never told the
+        # dialect. One it has no rendering for fails there, rather than getting another's SQL.
+        from sqlalchemy.dialects import mysql
+
+        with pytest.raises(CompileError, match="renders only on SQLite and PostgreSQL"):
+            translate("index-scalar-list").compile(dialect=mysql.dialect())
+
+    def test_str_of_a_query_still_renders_for_debugging(self):
+        assert "cerbos_collection_size(" in str(translate("size-threshold"))
+
+    def test_an_undeclared_collection_column_is_refused_rather_than_measured(self):
+        # LENGTH() of a JSON column is the length of its text: a number, and the wrong one.
+        with pytest.raises(ValueError, match="needs its storage declared"):
+            translate(
+                "size-threshold",
+                attr_map={"request.resource.attr.tags": AdvResource.tags_json},
+                operator_override_fns=None,
+                attribute_null_representation=None,
+                collection_columns=None,
+            )
+
+    def test_a_declared_column_must_be_addressable_like_a_mapped_one(self):
+        # A column on another table needs a `table_mapping` join, exactly as an `attr_map`
+        # entry does; the declaration is not a way around that validation.
+        with pytest.raises(TypeError, match="table_mapping"):
+            translate(
+                "size-threshold",
+                collection_columns={
+                    "request.resource.attr.tags": CollectionColumn(AdvTag.name, "json")
+                },
+            )
+
+    def test_the_declaration_is_validated(self):
+        with pytest.raises(ValueError, match="storage must be 'json' or 'pgArray'"):
+            CollectionColumn(AdvResource.tags_json, "jsonb")
+        with pytest.raises(TypeError, match="must be CollectionColumn"):
+            translate(
+                "size-threshold",
+                collection_columns={
+                    "request.resource.attr.tags": (AdvResource.tags_json, "json")
+                },
+            )
 
 
 class TestTimestampLiterals:

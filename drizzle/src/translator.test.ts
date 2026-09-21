@@ -264,7 +264,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 224, unconditional: 7, throwing: 64 });
+    }).toEqual({ conditional: 231, unconditional: 7, throwing: 63 });
   });
 
   /**
@@ -290,6 +290,12 @@ describe("corpus shapes", () => {
         "index-scalar-list",
         "index-scalar-list-not-eq",
         "index-scalar-list-null",
+        "index-number-list",
+        "index-number-list-not-eq",
+        "index-bool-list",
+        "index-bool-list-not-eq",
+        "index-bool-list-vs-number",
+        "index-number-list-vs-bool",
       ].includes(action)) continue;
       const expectation = RECORDED.get(action)!.expectation;
       if (expectation.kind !== PlanKind.CONDITIONAL) continue;

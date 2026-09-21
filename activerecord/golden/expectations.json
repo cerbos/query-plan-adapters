@@ -59,6 +59,10 @@
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((CAST(\"adversarial_resources\".\"a_optional_string\" AS TEXT) = 'set'))"
     },
+    "cast-string-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" IS NULL THEN NULL WHEN \"adversarial_resources\".\"a_bool\" THEN 'true' ELSE 'false' END) = 'true'"
+    },
     "cast-string-double": {
       "kind": "KIND_CONDITIONAL",
       "where": "CAST(\"adversarial_resources\".\"a_double\" AS TEXT) = '-0.6'"

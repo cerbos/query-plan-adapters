@@ -41,7 +41,8 @@ ChromaDB stores flat scalar metadata, so the following Cerbos operators cannot b
   comparison against null cannot be represented)
 - Array/collection: `hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`, `size`
 
-Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an error.
+Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an
+`UnsupportedOperatorError` — see [Error handling](#error-handling).
 
 ### Write membership as `in`, not as a collection macro
 
@@ -115,7 +116,7 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 48 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms — bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, and a disjunction of two scalar predicates; plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, which folds to a plain disjunction of equalities, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field — the first corpus shapes to compare `aDouble` here, every other one being a nested expression |
-| Fail-closed | 234 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (245 actions total) |
+| Fail-closed | 240 reference conformance actions — among them positional access into the number and boolean lists, which has no `Where` form — plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (251 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent, and for the same reason: Chroma metadata has no null value, so a NULL column is stored as an ABSENT key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused rather than answered narrowly |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -124,7 +125,7 @@ Chroma metadata filters are limited to flat scalar comparisons and membership. N
 
 The `Where` document each translated action produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, the `required` and `numericType` declarations, the fallback for an unmapped reference, and malformed input.
 
-That test also pins **where** each refusal happens — all 246 of them, which is the `Fail-closed` row's 245 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 146 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
+That test also pins **where** each refusal happens — all 252 of them, which is the `Fail-closed` row's 251 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 152 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
 
 ## Mapping hazards
 
@@ -284,16 +285,52 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 
 ## Error handling
 
-`queryPlanToChromaDB` throws descriptive errors when:
+`queryPlanToChromaDB` fails closed: a plan it cannot express faithfully as a Chroma `Where` clause
+throws rather than returning an approximate filter. When the plan is well-formed and the refusal is
+Chroma's, the error is an `UnsupportedOperatorError`, so a caller can tell "this policy shape cannot
+be pushed to a Chroma metadata filter" apart from any other failure without matching on message text:
 
-- The plan kind is not a valid `PlanKind` value.
-- A conditional plan contains an operand that is not a `PlanExpression`.
+```ts
+import { queryPlanToChromaDB, UnsupportedOperatorError } from "@cerbos/langchain-chromadb";
+
+try {
+  const result = queryPlanToChromaDB({ queryPlan, fieldNameMapper });
+  // ...
+} catch (error) {
+  if (error instanceof UnsupportedOperatorError) {
+    // error.operator names the plan operator the refusal is about, e.g. "contains", "size" or "ne".
+    // Deny, fall back to a broader search, or surface a clearer message.
+  }
+  throw error;
+}
+```
+
+An `UnsupportedOperatorError` is thrown when:
+
 - An operator in the plan is not supported by ChromaDB's filter syntax.
-- A comparison operator is missing a variable or field name.
+- A comparison operand is a computed expression rather than a bare metadata key or a literal. Here
+  `operator` is that expression's operator (`add`, `size`); for a collection macro such as `exists`
+  it is the macro itself.
+- A comparison is between two metadata keys or two literals, or tests whether a literal is contained
+  in a metadata field.
 - A `not` expression wraps an operator that cannot be negated.
 - A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
 - `$ne` or `$nin` targets a field that is not declared `required: true`.
 - A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.
+
+A malformed plan or a mapper misconfiguration is still a plain `Error`, so a fallback keyed on
+`UnsupportedOperatorError` does not swallow it:
+
+- The plan kind is not a valid `PlanKind` value.
+- A conditional plan contains an operand that is not a `PlanExpression`.
+- `and`/`or` has fewer than two operands, `not` does not have exactly one, or a comparison does not
+  have exactly two.
+- The field name mapper resolves a field to an empty name.
+
+`error.message` is unchanged from earlier releases: every refused corpus shape's message is still the
+one `conformance/actions.json` pins. The type, its `operator` field and its `name` — which
+`String(error)` and a stack trace now print as `UnsupportedOperatorError` rather than `Error` — are
+the addition ([#228](https://github.com/cerbos/query-plan-adapters/issues/228)).
 
 ## Example application
 
