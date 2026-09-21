@@ -68,6 +68,14 @@ module CorpusAttributes
     # The scalar values of tags[].name. A NULL name stays in the list as a null element.
     "request.resource.attr.tagNames" => relation(:tags, member_field: "name"),
 
+    # The number and boolean scalar lists, mapped the same way as `tagNames`. Every corpus
+    # action that reads them indexes them, and a relation mapping has no element order, so the
+    # translator refuses each one at `index`. They are mapped anyway: an unmapped attribute is
+    # refused one step earlier, with a message about the attribute map, and the classification
+    # would then rest on the harness and not on the mechanism its reason names.
+    "request.resource.attr.aNumberList" => relation(:number_list_elements, member_field: "value"),
+    "request.resource.attr.aBoolList" => relation(:bool_list_elements, member_field: "value"),
+
     "request.resource.attr.categories" => relation(:categories, fields: {
       # The category itself carries a name, and a lambda body can read it
       # (`rel-hop2-or-exists`). Only the sub-category name was mapped before that action

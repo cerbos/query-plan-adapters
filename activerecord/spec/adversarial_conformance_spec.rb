@@ -63,7 +63,7 @@ RSpec.describe "adversarial conformance" do
   # into adapterUnsupported fails this list instead of emptying it without a word.
   #
   # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
-  # 227 of the 282 conformance actions, and a list built for an adapter that compares fewer would
+  # 227 of the 288 conformance actions, and a list built for an adapter that compares fewer would
   # leave most of the groups here with no guard at all (cerbos/query-plan-adapters#324).
   #
   # Each entry has an oracle that is not empty and not every seed. Some actions cannot join
@@ -188,9 +188,13 @@ RSpec.describe "adversarial conformance" do
   # column, and arithmetic composed ON a division. cr-div-then-add-ne is the second sub-shape
   # again, so one action speaks for it.
   #
-  # Positional scalar-list access probes equality, negation and explicit-null elements.
-  # A map() projection compared to a literal list is also refused. Each stays a probe until
-  # the adapter learns to translate it.
+  # Positional scalar-list access probes equality, negation and explicit-null elements, over
+  # the string list `tagNames` and over the number and boolean lists, where two cross-type
+  # probes compare a boolean element with 1 and a number element with true. All of them are
+  # refused at `index`, and each is listed rather than one sibling speaking for the rest: a
+  # positional lowering is exactly the change that would start translating some and not
+  # others. A map() projection compared to a literal list is also refused. Each stays a probe
+  # until the adapter learns to translate it.
   #
   # An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex with a
   # top-level alternation is a matches(), which this adapter never translates.
@@ -200,6 +204,8 @@ RSpec.describe "adversarial conformance" do
     cast-not-int cast-not-timestamp cast-not-double
     cr-div-other-column cr-div-then-add index-scalar-list map-eq-list
     index-scalar-list-not-eq index-scalar-list-null
+    index-number-list index-number-list-not-eq index-bool-list index-bool-list-not-eq
+    index-bool-list-vs-number index-number-list-vs-bool
     hier-empty-delim matches-alt
     regex-digit regex-case regex-posix
     regex-unanchored regex-dot regex-alternation
@@ -213,12 +219,12 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(282)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(288)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(295)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(301)
       # Refusals must retain their pinned messages.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(66)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(72)
       # Each new hostile group needs a non-degenerate representative.
       expect(DEGENERACY_GUARD_ACTIONS.size).to eq(100)
     end
@@ -312,6 +318,26 @@ RSpec.describe "adversarial conformance" do
       }
 
       expect(stored).to eq(expected)
+    end
+
+    # The seeder for the two scalar lists, read back in position order and compared with the
+    # corpus. Nothing this adapter translates reads them yet — every action on them is refused
+    # at `index` — so this is the only test that sees the stored rows, and a dropped null
+    # element or a lost position would otherwise wait for the first action that compares them.
+    it "seeds the number and boolean lists in corpus order, null elements included" do
+      {
+        "aNumberList" => AdvNumberListElement, "aBoolList" => AdvBoolListElement
+      }.each do |key, model|
+        stored = Hash.new { |hash, id| hash[id] = [] }
+        model.order(:resource_id, :position).pluck(:resource_id, :value).each do |id, value|
+          stored[id] << value
+        end
+
+        expected = ConformanceCorpus::SEEDS.to_h { |seed| [seed.fetch("id"), seed.fetch(key)] }
+        expect(expected.values.flatten).to include(nil), "#{key}: no null element to prove"
+        expect(expected.keys.to_h { |id| [id, stored[id]] }).to eq(expected), key
+        expect(stored.keys - expected.keys).to be_empty, key
+      end
     end
 
     # #387. `filter-as-conjunct` puts a filter() ONE LEVEL BELOW the root, where the guard that

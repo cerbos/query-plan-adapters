@@ -81,7 +81,7 @@ server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
 | Classification | Coverage |
 | --- | --- |
 | Tested against the oracle | 227 corpus actions |
-| Fail-closed | 66 actions: 55 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
+| Fail-closed | 72 actions: 61 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
 
@@ -104,7 +104,7 @@ models is a usual correlated predicate. These shapes stay:
 | `cast-int-double` | `int()` over a double column. CEL removes the fraction toward zero. PostgreSQL and MySQL round a `CAST` to the nearest whole number, so the two disagree for every value with a fraction of one half or more. |
 | `filter-as-condition`, `map-as-condition` | A `filter()` or a `map()` that a policy uses as the whole condition. Those operations give a list and not a boolean, and only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning. |
 | `filter-as-conjunct` | The same list-where-a-boolean-belongs, one level BELOW the root: `filter(...) && R.attr.aBool`. The other conjunct is one the adapter can certainly express, so dropping the one it cannot would emit a filter that returns rows the PDP denies for every seed. |
-| `index-scalar-list` | `tagNames[0]`, positional access into a scalar list. The same missing row order as `p-index`, reached through a relation mapped by member field rather than through a principal attribute. |
+| `index-scalar-list`, `index-number-list`, `index-number-list-not-eq`, `index-bool-list`, `index-bool-list-not-eq`, `index-bool-list-vs-number`, `index-number-list-vs-bool` | `tagNames[0]`, `aNumberList[0]` and `aBoolList[0]`, positional access into a list of strings, numbers or booleans. The same missing row order as `p-index`, reached through a relation mapped by member field rather than through a principal attribute. The last two compare a boolean element with `1` and a number element with `true`, which CEL answers false for every row. SQLite holds a boolean as the integer 1, so a positional lowering that compared the stored element with the literal would return rows the PDP denies. |
 | `map-eq-list` | A `map()` projection compared with `==` to a literal list. The projection is held until `size()` or `hasIntersection()` gives it a scalar meaning; comparing the ordered projection itself gives it none, and a correlated subquery has no ordering to compare element-wise against. |
 | `hier-empty-delim` | A hierarchy with an empty delimiter. Cerbos splits the path on `""` into one segment per character, so `descendentOf` becomes a test of a string prefix. The adapter makes `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself, and a path is never its own descendant. The adapter refuses the delimiter before it makes the `LIKE`. |
 
