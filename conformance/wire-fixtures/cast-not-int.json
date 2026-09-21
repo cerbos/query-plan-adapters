@@ -1,0 +1,34 @@
+{
+  "action": "cast-not-int",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "gt",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "int",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "value": 50
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

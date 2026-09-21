@@ -228,7 +228,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 42, unconditional: 7, throwing: 230 });
+    }).toEqual({ conditional: 42, unconditional: 7, throwing: 241 });
   });
 });
 
@@ -237,7 +237,7 @@ describe("corpus shapes", () => {
  *
  * `actions.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 230 of 279 shapes that is the more interesting property:
+ * together, and on an adapter that refuses 241 of 290 shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -246,7 +246,7 @@ describe("corpus shapes", () => {
  * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
  * change that moves a shape from one site to another shows up as a diff even though both sites throw
  * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
- * `binaryOperands` rejecting a computed operand is the single mechanism behind 130 of the 225, and
+ * `binaryOperands` rejecting a computed operand is the single mechanism behind 141 of the 241, and
  * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
  * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
  * a bare metadata key or a literal.
@@ -304,8 +304,8 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 132,
-      "no such operator": 36,
+      "computed operand": 141,
+      "no such operator": 38,
       "inequality over an optional key": 14,
       "not negatable": 17,
       "field-to-field": 17,

@@ -221,6 +221,17 @@ const DEGENERACY_GUARD_ACTIONS = [
   "temporal-raw-eq",
   "wildcard-contains",
   "wildcard-endswith",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
 ] as const;
 
 /**
@@ -253,6 +264,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-optional-operators",
   "regex-posix",
   "regex-repetition",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "regex-lookahead",
 ] as const;
 
 // -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
@@ -692,11 +705,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(279);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(24);
+    expect(allActions.size).toBe(290);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(25);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(249);
-    expect(THROWING_ACTIONS).toHaveLength(28);
+    expect(ORACLE_ACTIONS).toHaveLength(259);
+    expect(THROWING_ACTIONS).toHaveLength(29);
     expect(misclassified).toEqual([]);
   });
 
@@ -821,17 +834,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 249,
+      total: 259,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 213,
+      defaultPostCount: 223,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 202,
+      pushdownPostCount: 212,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

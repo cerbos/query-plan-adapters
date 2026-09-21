@@ -303,7 +303,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(150, unsupported.size(),
+        assertEquals(159, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -347,10 +347,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(118, oracleActions.size());
-        assertEquals(159, throwingActions.size());
+        assertEquals(120, oracleActions.size());
+        assertEquals(168, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(279, classified.size());
+        assertEquals(290, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -392,7 +392,10 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("owner", Map.of("type", "keyword"));
         properties.put("coOwner", Map.of("type", "keyword"));
         properties.put("tagNames", Map.of("type", "keyword"));
-        properties.put("createdBy", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
+        // Preserve malformed strings in _source while leaving them unindexed. CEL timestamp()
+        // errors on those rows; range predicates and their guarded negations must both deny them.
+        properties.put("createdBy", Map.of("type", "date", "format", "strict_date_optional_time_nanos",
+                "ignore_malformed", true));
         properties.put("updatedAt", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
         properties.put("createdAt", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
         properties.put("scope", Map.of("type", "keyword"));
@@ -699,6 +702,17 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapter result diverges from check() oracle for action '" + action + "'");
     }
 
+    @Test
+    void malformedTimestampRemainsDeniedUnderBothPolarities() throws Exception {
+        Seed malformed = seeds.stream().filter(seed -> seed.id().equals("h5")).findFirst().orElseThrow();
+        assertEquals("not-a-timestamp", isoFor(malformed),
+                "the oracle must receive the original malformed string, not a normalized date");
+        for (String action : List.of("p-timestamp", "cast-not-timestamp")) {
+            assertFalse(oracleAllowedIds(action).contains("h5"), action);
+            assertFalse(adapterFilteredIds(action).contains("h5"), action);
+        }
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("throwingActions")
     void unsupportedShapesThrow(String action) throws Exception {
@@ -843,6 +857,9 @@ class ElasticsearchAdversarialConformanceTest {
      * here as PDP/policy liveness probes for a group the list above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            "cast-not-double", "cast-not-int", "cast-not-string-missing",
+            "cast-not-string-null", "index-fractional", "index-negative",
+            "index-not-oob", "regex-eq-true", "regex-lookahead",
             "projection-exists-not-eq",
             "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-brace", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "lambda-in-literal", "lambda-in-literal-neg", "lambda-ternary", "in-var-var-omitted", "in-var-var-omitted-neg", "not-concat-unsolvable", "not-concat-unsolvable-ne", "hier-overlaps-list-prefix", "not-hasint-empty-chain", "div-by-division", "temporal-raw-eq", "not-nan-ord-le", "hasint-null-vf", "hasint-map-null", "hasint-map-null-vf", "eq-list", "ne-list",
             // Three shapes the audit added the corpus for, each refused by name here and compared

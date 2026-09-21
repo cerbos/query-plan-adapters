@@ -476,6 +476,18 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-repetition",
   "regex-unanchored",
   "temporal-raw-eq",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
+  "regex-lookahead",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1568,11 +1580,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(279);
+    expect(MANIFEST_ACTIONS.size).toBe(290);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(54);
+    expect(THROWING_ACTIONS).toHaveLength(65);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(

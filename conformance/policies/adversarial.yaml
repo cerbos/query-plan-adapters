@@ -603,7 +603,7 @@ resourcePolicy:
 
     # -- GROUP B: suspected-unsupported shapes; record throw vs silent-wrong --
 
-    # B11: timestamp comparison over an ISO-date string column (createdBy is seeded with ISO dates).
+    # B11: timestamp comparison over a string column (h5 is malformed; all other rows are ISO dates).
     - actions: ["p-timestamp"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -3052,3 +3052,103 @@ resourcePolicy:
       condition:
         match:
           expr: '!hierarchy(R.attr.parent.aString).overlaps(hierarchy("one"))'
+
+    # Remaining hostile mechanisms from issue #396.
+
+    # h3 (ab) is allowed; h5 (ab followed by newline) is denied. A dollar anchor that
+    # matches before a final newline over-grants h5.
+    - actions: ["regex-final-newline"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^ab$")'
+
+    # The pinned planner retains eq(matches(...), true), unlike a bare matches condition.
+    # a6 is the positive witness.
+    - actions: ["regex-eq-true"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("^h") == true'
+
+    # The pinned PDP plans this PCRE lookahead, but RE2 evaluation errors. The independent
+    # a1 branch keeps the oracle live; accepting lookahead over-grants h3/h5.
+    - actions: ["regex-lookahead"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString.matches("a(?=b)") || R.attr.aNumber == 5'
+
+    # The pinned PDP preserves -1; CEL indexing errors. The a1 branch keeps the oracle
+    # live; treating -1 as the last element over-grants public-tag rows.
+    - actions: ["index-negative"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames[-1] == "public" || R.attr.aNumber == 5'
+
+    # The pinned PDP preserves 0.5; CEL indexing errors. The a1 branch keeps the oracle
+    # live; truncating to zero over-grants public-tag rows.
+    - actions: ["index-fractional"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5'
+
+    # Only a6 has a second tag different from public. Missing second elements must deny
+    # even under negation, not compare unequal.
+    - actions: ["index-not-oob"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(R.attr.tagNames[1] == "public")'
+
+    # h4 (0) is allowed; malformed numeric strings must still deny under negation.
+    - actions: ["cast-not-int"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(int(R.attr.aString) > 50)'
+
+    # Missing aOptionalString raises under string() and must deny under negation; a3 is a
+    # positive witness and a1 a negative witness.
+    - actions: ["cast-not-string-missing"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(string(R.attr.aOptionalString) == "set")'
+
+    # owner aliases the same column as an explicit null. string(null) raises, so the null
+    # rows must deny under negation too.
+    - actions: ["cast-not-string-null"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(string(R.attr.owner) == "set")'
+
+    # h5 carries not-a-timestamp: a conversion error must deny under negation. a2 is
+    # allowed; a1 is denied.
+    - actions: ["cast-not-timestamp"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(timestamp(R.attr.createdBy) < timestamp("2025-01-01T00:00:00Z"))'
+
+    # The double-cast dual: h4 is allowed; permissive prefix conversion under negation
+    # over-grants malformed strings.
+    - actions: ["cast-not-double"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(double(R.attr.aString) > 50.0)'

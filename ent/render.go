@@ -413,13 +413,21 @@ func writeCast(b *sql.Builder, t queryplan.Cast) error {
 	}
 
 	b.WriteString("CAST")
-	return wrap(b, func(b *sql.Builder) error {
+	if err := wrap(b, func(b *sql.Builder) error {
 		if err := write(b, t.X); err != nil {
 			return err
 		}
 		b.WriteString(" AS ").WriteString(target)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if b.Dialect() == dialect.MySQL && t.To == queryplan.CastText {
+		// CHAR inherits the connection collation, even when the source column is case-sensitive.
+		// Keep character semantics (including size()) and compare without case folding or padding.
+		b.WriteString(" COLLATE utf8mb4_0900_bin")
+	}
+	return nil
 }
 
 func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
@@ -481,7 +489,7 @@ func castType(d string, to queryplan.CastType) (string, error) {
 	switch to {
 	case queryplan.CastText:
 		if d == dialect.MySQL {
-			return "char", nil
+			return "char character set utf8mb4", nil
 		}
 		return "text", nil
 

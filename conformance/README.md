@@ -20,6 +20,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
     - [The absent to-one parent](#the-absent-to-one-parent)
   - [Shapes that live only in a unit test](#shapes-that-live-only-in-a-unit-test)
   - [Issue #414 port and planner evidence](#issue-414-port-and-planner-evidence)
+  - [Issue #396 regex, indexing and conversion probes](#issue-396-regex-indexing-and-conversion-probes)
   - [The real to-one relation](#the-real-to-one-relation)
   - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
   - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
@@ -181,7 +182,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 26 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 27 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -249,7 +250,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 26 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 27 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -482,6 +483,35 @@ The Java unit-test registry above remains authoritative for finer operator cells
 by these actions. A broad family action does not establish coverage of every refusal location,
 operand order, or caller contract; a surviving *Corpus gap.* label is still pending port work.
 
+### Issue #396 regex, indexing and conversion probes
+
+11 actions cover the remaining mechanisms from #396. `h5` carries `"ab\n"`, while
+`h3` carries `"ab"`: `regex-final-newline` distinguishes RE2's absolute-end `$` from an
+engine that also matches before a final newline. The same new seed carries the derived
+`createdBy = "not-a-timestamp"`, exercising conversion failure in both the existing
+`p-timestamp` and the new `cast-not-timestamp` negation. The derivation checker records
+that exception independently; harnesses continue to read the materialised value.
+
+The pinned PDP **accepts and plans** `a(?=b)`, even though its RE2 checker raises on the
+lookahead. `regex-lookahead` therefore belongs in the corpus, rather than in the registry
+of shapes rejected before planning. A PCRE engine accepting the expression would allow
+`h3` and `h5`, which the checker denies. `regex-eq-true` separately pins the retained
+`eq(matches(...), true)` expression instead of assuming the planner folds its wrapper.
+
+`index-negative` and `index-fractional` preserve `-1` and `0.5` in their wire nodes. Both
+raise during CEL list access. These two actions and `regex-lookahead` include the independent
+`aNumber == 5` branch: the checker allows `a1` through that branch, keeping the oracle
+non-empty while invalid accesses or a foreign regex engine can still over-grant other rows.
+`index-not-oob` reads index 1 under negation; `a6` supplies an in-bounds unequal value,
+while shorter lists must remain denied instead of making a missing element unequal.
+
+`cast-not-int` and `cast-not-double` have the numeric string `h4` as an allowed witness;
+malformed numeric strings still deny under negation. `cast-not-string-missing` and
+`cast-not-string-null` distinguish an omitted attribute from an explicit null through
+`aOptionalString` and `owner`. Neither conversion error may become an allow under `not`.
+All 11 actions have non-empty, non-total checker oracles and belong in each adapter's
+compared or refusal-liveness guard according to its observed classification (#401).
+
 ### The real to-one relation
 
 The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
@@ -685,7 +715,7 @@ only inside a shape some adapters throw on is not proven for those adapters.
 
 `root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
 specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 26 seeds. A total oracle is exactly what the degeneracy guard below exists
+that spelling allows all 27 seeds. A total oracle is exactly what the degeneracy guard below exists
 to catch, and it would have passed against any filter whatsoever.
 
 ### Hazard classes the corpus missed
@@ -876,7 +906,8 @@ it replaced it can only fail loudly, never make both sides of a differential agr
 
 The rules the file materialises:
 
-- `createdBy`: `aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"`.
+- `createdBy`: `h5 = "not-a-timestamp"`; otherwise
+  `aNumber >= 2 ? "2024-06-01T00:00:00Z" : "2026-06-01T00:00:00Z"`.
 - `aDouble`: `a1 = -0.6`, `a2 = 0.25`, `a3 = NULL`/missing, `g1 = -9.5e18` (the int64-saturation
   witness for `double-huge-lt`/`double-huge-gt`), otherwise `aNumber + 0.3`.
 - `createdAt`: `a1 = 2020-03-15T10:30:00Z`, `a2 = 2037-01-01T00:00:00Z`, `a3 = NULL`/missing,

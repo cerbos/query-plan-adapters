@@ -2,6 +2,16 @@
   "adapter": "elasticsearch-java",
   "regenerate": "gradle goldenUpdate",
   "expectations": {
+    "cast-not-timestamp": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "createdBy": {
+            "gte": "2025-01-01T00:00:00Z"
+          }
+        }
+      }
+    },
     "cs-contains": {
       "kind": "CONDITIONAL",
       "query": {
@@ -2069,6 +2079,17 @@
     },
     "pv-structs-missing": {
       "kind": "ALWAYS_DENIED"
+    },
+    "regex-final-newline": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "regexp": {
+          "aString": {
+            "flags": "NONE",
+            "value": "ab"
+          }
+        }
+      }
     },
     "regex-grouped": {
       "kind": "CONDITIONAL",

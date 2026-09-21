@@ -575,7 +575,9 @@ derived_drift="$(jq -r -s '
   | $derived[$seed.id] as $entry
   | [
       (if $entry.createdBy != (
-         if $seed.aNumber >= 2 then "2024-06-01T00:00:00Z" else "2026-06-01T00:00:00Z" end
+         {"h5": "not-a-timestamp"} as $fixed
+         | if ($fixed | has($seed.id)) then $fixed[$seed.id]
+           elif $seed.aNumber >= 2 then "2024-06-01T00:00:00Z" else "2026-06-01T00:00:00Z" end
        ) then "createdBy" else empty end),
       (if $entry.aDouble != (
          {"a1": -0.6, "a2": 0.25, "a3": null, "g1": -9.5e18} as $fixed
@@ -639,7 +641,8 @@ cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
   "h1": { "scope": null,                    "labels": [] },
   "h2": { "scope": null,                    "labels": [] },
   "h3": { "scope": null,                    "labels": [] },
-  "h4": { "scope": null,                    "labels": [] }
+  "h4": { "scope": null,                    "labels": [] },
+  "h5": { "scope": null,                    "labels": [] }
 }
 JSON
 jq -S '.derived | map_values({scope, labels})' derived-fields.json \

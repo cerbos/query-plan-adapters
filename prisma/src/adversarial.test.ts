@@ -536,6 +536,18 @@ const DEGENERACY_LIVENESS_PROBES = [
   "temporal-raw-eq",
   "eq-list",
   "ne-list",
+  // #396: live error branches remain discriminating under negation or disjunction.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
+  "regex-lookahead",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1039,7 +1051,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 279 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 290 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1055,10 +1067,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(279);
+    expect(MANIFEST_ACTIONS.size).toBe(290);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(106);
+    expect(THROWING_ACTIONS).toHaveLength(117);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

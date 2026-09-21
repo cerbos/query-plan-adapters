@@ -309,7 +309,7 @@ describe("corpus shapes", () => {
       post: POST_ACTIONS.length,
       unconditional: UNCONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ pushed: 30, post: 214, unconditional: 7, throwing: 28 });
+    }).toEqual({ pushed: 30, post: 224, unconditional: 7, throwing: 29 });
   });
 });
 
@@ -638,16 +638,15 @@ describe("plans the planner cannot produce", () => {
  * allowed to settle into: a unit test pins the filter one adapter emits, and only a corpus action
  * asks the same question of every other adapter.
  *
- * Both gaps already have issues, and both of these blocks are to be deleted when they land:
+ * The remaining gaps are tracked below; delete these tests when their corpus coverage lands:
  *
- * - `matches` against a pattern outside the RE2 subset — cerbos/query-plan-adapters#396, "the
- *   corpus never reaches a non-trivial regex".
+ * - backreferences and trailing-wildcard/end-anchor combinations — #396.
  * - the value-list macro machinery past `exists`/`all` — cerbos/query-plan-adapters#394. The
  *   corpus drives `pv-exists`, `pv-all` and their unrolled forms; `exists_one`, the empty
  *   collection and element-field paths it does not.
  *
  * The plans here are hand-built for the same reason the sections above never are: there is no
- * fixture, because there is no action. That is the argument for the two issues rather than a
+ * fixture, because there is no action. That is the argument for the issue rather than a
  * licence to keep writing them.
  */
 describe("shapes the corpus does not reach yet", () => {
@@ -661,9 +660,9 @@ describe("shapes the corpus does not reach yet", () => {
       metadata: undefined,
     }) as PlanResourcesResponse;
 
-  // #396. A pattern the adapter cannot prove it evaluates the way RE2 does is refused rather than
-  // handed to JavaScript's own regex engine, whose backreferences and lazy quantifiers have no
-  // RE2 equivalent — translating one means answering a question the policy never asked.
+  // Corpus gap (#396): regex-lookahead now covers lookahead rejection, but these distinct
+  // backreference and trailing-wildcard/end-anchor combinations still have no corpus action.
+  // Keep their refusal contract until those exact shapes are planned and replayed.
   test.each([
     ["a backreference", "(a)\\1"],
     ["a trailing wildcard under an end anchor", "^allowed.*$"],

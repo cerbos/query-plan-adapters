@@ -77,6 +77,7 @@ RSpec.describe "adversarial conformance" do
   # under the `omitted` representation. Both pin WHY the refusal is required, not merely that
   # one happens.
   DEGENERACY_GUARD_ACTIONS = (%w[
+    cast-not-string-missing cast-not-string-null
     projection-exists-eq
     projection-exists-not-eq
     rel-not-eq-hop
@@ -190,6 +191,9 @@ RSpec.describe "adversarial conformance" do
   # An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex with a
   # top-level alternation is a matches(), which this adapter never translates.
   LIVENESS_ONLY_PROBES = %w[
+    regex-final-newline regex-eq-true regex-lookahead
+    index-negative index-fractional index-not-oob
+    cast-not-int cast-not-timestamp cast-not-double
     cr-div-other-column cr-div-then-add index-scalar-list map-eq-list
     hier-empty-delim matches-alt
     regex-digit regex-case regex-posix
@@ -204,14 +208,14 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(266)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(277)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(279)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(290)
       # Refusals must retain their pinned messages.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(55)
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(64)
       # Each new hostile group needs a non-degenerate representative.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(95)
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(97)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the

@@ -1,0 +1,30 @@
+{
+  "action": "regex-eq-true",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "matches",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "^h"
+                }
+              ]
+            }
+          },
+          {
+            "value": true
+          }
+        ]
+      }
+    }
+  }
+}
