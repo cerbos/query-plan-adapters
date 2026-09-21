@@ -479,6 +479,12 @@ const DEGENERACY_GUARD_ACTIONS = [
   "rel-not-eq-hop",
   "rel-not-contains-hop",
   "rel-not-hierarchy-hop",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
 ] as const;
 
 /**
@@ -541,6 +547,13 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-posix",
   "regex-repetition",
   "temporal-raw-eq",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "index-fractional",
+  "index-negative",
+  "regex-lookahead",
 ] as const;
 
 interface AdversarialLabel {
@@ -962,11 +975,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(281);
-    expect(unsupportedCount).toBe(81);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
+    expect(unsupportedCount).toBe(87);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(191);
-    expect(THROWING_ACTIONS).toHaveLength(88);
+    expect(ORACLE_ACTIONS).toHaveLength(196);
+    expect(THROWING_ACTIONS).toHaveLength(94);
     expect(misclassified).toEqual([]);
   });
 

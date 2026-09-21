@@ -1672,6 +1672,36 @@
         }
       }
     },
+    "index-not-oob": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when json_type(\"adversarial_resources\".\"tag_names_json\") = 'array' and json_type(\"adversarial_resources\".\"tag_names_json\", ?) is not null then (case when json_type(\"adversarial_resources\".\"tag_names_json\", ?) = 'text' then json_extract(\"adversarial_resources\".\"tag_names_json\", ?) = ? else false end) end)",
+          "params": [
+            "$[1]",
+            "$[1]",
+            "$[1]",
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "not (case when jsonb_typeof(cast(\"adversarial_resources\".\"tag_names_json\" as jsonb)) = 'array' and (cast(\"adversarial_resources\".\"tag_names_json\" as jsonb) -> cast($1 as integer)) is not null then (cast(\"adversarial_resources\".\"tag_names_json\" as jsonb) -> cast($2 as integer)) = cast($3 as jsonb) end)",
+          "params": [
+            1,
+            1,
+            "\"public\""
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when json_type(`adversarial_resources`.`tag_names_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`tag_names_json`, ?) is not null then json_extract(`adversarial_resources`.`tag_names_json`, ?) = cast(? as json) end)",
+          "params": [
+            "$[1]",
+            "$[1]",
+            "\"public\""
+          ]
+        }
+      }
+    },
     "index-scalar-list": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {

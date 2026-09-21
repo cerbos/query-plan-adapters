@@ -28,6 +28,7 @@
     "h1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 18.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "h2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 19.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "h3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 20.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
-    "h4": {"createdBy": "2026-06-01T00:00:00Z", "aDouble": 0.3, "createdAt": "2021-05-05T05:05:05Z", "updatedAt": null, "scope": null, "labels": []}
+    "h4": {"createdBy": "2026-06-01T00:00:00Z", "aDouble": 0.3, "createdAt": "2021-05-05T05:05:05Z", "updatedAt": null, "scope": null, "labels": []},
+    "h5": {"createdBy": "not-a-timestamp", "aDouble": 21.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
   }
 }

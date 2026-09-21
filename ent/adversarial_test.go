@@ -842,11 +842,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 281, "corpus size changed; triage the new action(s) before bumping")
-		require.Len(t, h.corpus.Seeds.Seeds, 26, "seed count changed")
+		require.Len(t, seen, 292, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 48, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 57, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -1054,6 +1054,8 @@ func runConformance(t *testing.T, h *harness) {
 		// seed holds a to-one parent with zero children, nor one with two or more; no aString
 		// converts to a number greater than 50), so they cannot satisfy this guard.
 		compared := []string{
+			// #396: failed conversions stay unknown under negation.
+			"cast-not-string-missing", "cast-not-string-null",
 			// #430: projection macros and negated leaves through a to-one hop.
 			"projection-exists-eq", "projection-exists-not-eq",
 			"rel-not-eq-hop", "rel-not-contains-hop", "rel-not-hierarchy-hop",
@@ -1145,6 +1147,10 @@ func runConformance(t *testing.T, h *harness) {
 		// list equality over a map() projection, which reaches a plain value position where a held
 		// collection has no scalar meaning.
 		livenessOnly := []string{
+			// #396: refusals retain live, discriminating oracle probes.
+			"regex-final-newline", "regex-eq-true", "regex-lookahead",
+			"index-negative", "index-fractional", "index-not-oob",
+			"cast-not-int", "cast-not-double", "cast-not-timestamp",
 			"cast-int-double", "cast-string-bool", "hier-list-id",
 			"arith-mod", "index-scalar-list", "map-eq-list",
 			// Index errors and explicit-null elements must stay distinguishable under negation.

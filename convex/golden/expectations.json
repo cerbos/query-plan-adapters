@@ -62,6 +62,26 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "cast-not-double": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-not-int": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-not-string-missing": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-not-string-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "cast-not-timestamp": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "cast-string-bool": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -508,6 +528,18 @@
       "path": "post"
     },
     "in-var-var-omitted-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-fractional": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-negative": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-not-oob": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
@@ -1033,6 +1065,14 @@
     },
     "pv-structs-missing": {
       "kind": "KIND_ALWAYS_DENIED"
+    },
+    "regex-eq-true": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "regex-final-newline": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
     },
     "regex-unanchored": {
       "kind": "KIND_CONDITIONAL",

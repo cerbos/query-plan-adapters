@@ -234,6 +234,9 @@ SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
 # Parent-count probes and string-cast thresholds are excluded because their
 # oracles are empty for the current seeds (including h4's numeric string "0").
 DEGENERACY_GUARD_ACTIONS = (
+    # #396: failed string conversions remain unknown under negation.
+    "cast-not-string-missing",
+    "cast-not-string-null",
     "projection-exists-eq",
     "projection-exists-not-eq",
     "rel-not-eq-hop",
@@ -332,6 +335,16 @@ DEGENERACY_GUARD_ACTIONS = (
 # guard, and stay here as PDP/policy liveness probes for a group the list above
 # cannot cover. See cerbos/query-plan-adapters#324.
 DEGENERACY_LIVENESS_PROBES = (
+    # #396: every refused boundary shape retains a discriminating oracle.
+    "regex-final-newline",
+    "regex-eq-true",
+    "regex-lookahead",
+    "index-negative",
+    "index-fractional",
+    "index-not-oob",
+    "cast-not-int",
+    "cast-not-timestamp",
+    "cast-not-double",
     # An empty hierarchy delimiter is refused before the prefix LIKE is built,
     # and a regex with a top-level alternation is a matches(), never
     # translated here.
@@ -809,11 +822,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 281
-        assert len(SEEDS) == 26
+        assert len(MANIFEST_ACTIONS) == 292
+        assert len(SEEDS) == 27
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 52
+        assert len(THROWING_ACTIONS) == 61
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported

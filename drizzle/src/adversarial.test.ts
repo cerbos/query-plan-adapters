@@ -339,6 +339,7 @@ const MANIFEST_ACTIONS = new Set([
 // for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "index-not-oob",
   "index-scalar-list",
   "index-scalar-list-not-eq",
   "index-scalar-list-null",
@@ -479,6 +480,17 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-repetition",
   "regex-unanchored",
   "temporal-raw-eq",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "regex-eq-true",
+  "regex-final-newline",
+  "regex-lookahead",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1590,11 +1602,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(281);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(53);
+    expect(THROWING_ACTIONS).toHaveLength(63);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(
@@ -1615,6 +1627,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     "index-scalar-list",
     "index-scalar-list-not-eq",
     "index-scalar-list-null",
+    "index-not-oob",
   ])("declared indexed storage: %s matches the oracle for every representation", async (action) => {
     const oracle = await oracleAllowedIds(action);
     await expectNonDegenerateOracle(action);

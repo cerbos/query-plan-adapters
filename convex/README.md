@@ -114,12 +114,12 @@ under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issu
 
 ## Conformance contract
 
-The adapter is differentially tested with 26 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
+The adapter is differentially tested with 27 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 244 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (251 actions total) |
-| Fail-closed | `filter()`/`map()` used as a condition or conjunct; `list`, `struct`, and `except` constructor/operator forms without a lowering; regex patterns outside the supported RE2 subset; a constant zero divisor whose sign the JSON hop discards; and a nested division denominator whose numeric type the plan does not preserve (27 actions). All 27 throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
+| Oracle-tested | 254 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (261 actions total) |
+| Fail-closed | `filter()`/`map()` used as a condition or conjunct; `list`, `struct`, and `except` constructor/operator forms without a lowering; regex patterns outside the supported RE2 subset; a constant zero divisor whose sign the JSON hop discards; and a nested division denominator whose numeric type the plan does not preserve (28 actions). All 28 throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds. The alignment is the `postFilter`'s doing, not a Convex filter's: the field is `nullable: true`, so the predicate is evaluated in JavaScript and the absent path raises the same CEL missing-attribute error that made `check()` deny. A deployment that stores explicit nulls while omitting the attribute would over-grant |
 | Attribute NULL convention | Needs no declaration: Convex stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does, and a stored null stays distinguishable from an absent field. Every `null-value-*` corpus probe for the explicit convention (cerbos/query-plan-adapters#308) was aligned before that option existed — including `null-value-f2f-mixed`, which Convex and Mongoose are the only two adapters to translate rather than refuse |
@@ -142,10 +142,10 @@ the split is pinned by the conformance run instead of being left to inference:
 | --- | --- | --- |
 | Convex's filter engine, alone | 29 | 40 |
 | the engine narrowing and the `postFilter` deciding (`rel-hop-and-root`) | 1 | 1 |
-| the adapter's `postFilter`, alone | 215 | 204 |
+| the adapter's `postFilter`, alone | 225 | 214 |
 | folded to an unconditional plan before any filter exists | 6 | 6 |
 
-For the 215 post-filtered actions the differential compares the adapter's CEL evaluator against the
+For the 225 post-filtered actions the differential compares the adapter's CEL evaluator against the
 PDP's CEL evaluator; Convex's own comparison and ordering semantics only get a say on the 29.
 The **pushdown mapper** is a second leg that clears `nullable` on `owner` — the one nullable field
 the seeded documents always carry, since the table declares it `v.union(v.string(), v.null())`

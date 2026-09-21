@@ -130,6 +130,24 @@
         "param_1": 2
       }
     },
+    "cast-not-string-missing": {
+      "where": {
+        "sqlite": "CAST(adversarial_resource.a_optional_string AS VARCHAR) != ?",
+        "postgresql": "CAST(adversarial_resource.a_optional_string AS VARCHAR) != %(param_1)s"
+      },
+      "params": {
+        "param_1": "set"
+      }
+    },
+    "cast-not-string-null": {
+      "where": {
+        "sqlite": "CAST(adversarial_resource.a_optional_string AS VARCHAR) != ?",
+        "postgresql": "CAST(adversarial_resource.a_optional_string AS VARCHAR) != %(param_1)s"
+      },
+      "params": {
+        "param_1": "set"
+      }
+    },
     "cast-string-double": {
       "where": {
         "sqlite": "CAST(adversarial_resource.a_double AS VARCHAR) = ?",

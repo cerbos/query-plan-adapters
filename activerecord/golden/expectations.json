@@ -51,6 +51,14 @@
       "kind": "KIND_CONDITIONAL",
       "where": "2 < (\"adversarial_resources\".\"a_number\" + 1)"
     },
+    "cast-not-string-missing": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT ((CAST(\"adversarial_resources\".\"a_optional_string\" AS TEXT) = 'set'))"
+    },
+    "cast-not-string-null": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT ((CAST(\"adversarial_resources\".\"a_optional_string\" AS TEXT) = 'set'))"
+    },
     "cast-string-double": {
       "kind": "KIND_CONDITIONAL",
       "where": "CAST(\"adversarial_resources\".\"a_double\" AS TEXT) = '-0.6'"

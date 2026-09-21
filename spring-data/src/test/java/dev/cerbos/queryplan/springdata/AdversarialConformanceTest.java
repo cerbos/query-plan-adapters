@@ -1308,14 +1308,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(281, manifest.size(),
+        assertEquals(292, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
-        assertEquals(26, SEEDS.size(), "seed count changed");
+        assertEquals(27, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(49, throwing.size(), "throwing action count changed");
+        assertEquals(60, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1428,6 +1428,10 @@ class AdversarialConformanceTest {
      * here as PDP/policy liveness probes for a group the sweep above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            "regex-final-newline", "regex-eq-true", "regex-lookahead",
+            "index-negative", "index-fractional", "index-not-oob",
+            "cast-not-int", "cast-not-string-missing", "cast-not-string-null",
+            "cast-not-timestamp", "cast-not-double",
             "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-grouped", "regex-brace", "regex-repetition", "regex-optional-operators", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "temporal-raw-eq", "eq-list", "ne-list",
             // A division nested inside further arithmetic fails closed: SQL has no value that
             // carries CEL's NaN or signed infinity through the sum.

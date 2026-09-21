@@ -223,6 +223,17 @@ const DEGENERACY_GUARD_ACTIONS = [
   "temporal-raw-eq",
   "wildcard-contains",
   "wildcard-endswith",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
 ] as const;
 
 /**
@@ -255,6 +266,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "regex-optional-operators",
   "regex-posix",
   "regex-repetition",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "regex-lookahead",
 ] as const;
 
 // -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
@@ -694,11 +707,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(281);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(24);
+    expect(allActions.size).toBe(292);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(25);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(251);
-    expect(THROWING_ACTIONS).toHaveLength(28);
+    expect(ORACLE_ACTIONS).toHaveLength(261);
+    expect(THROWING_ACTIONS).toHaveLength(29);
     expect(misclassified).toEqual([]);
   });
 
@@ -823,17 +836,17 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 251,
+      total: 261,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 215,
+      defaultPostCount: 225,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 204,
+      pushdownPostCount: 214,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });
@@ -1031,25 +1044,28 @@ describe("adversarial conformance corpus", () => {
     );
   });
 
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    //
-    // Every entry is asserted to be an action Convex actually oracle-compares. A list copied
-    // from another harness drifts into naming shapes this adapter never compares, which guard
-    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
-    // into Convex's `adapterUnsupported` set into a failure here rather than a silent no-op.
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
+  // Each action gets its own test budget: the combined serial oracle calls grow with the corpus.
+  // Guard the guard: every action must produce a non-empty, non-total oracle set, otherwise the
+  // differential comparison could pass vacuously (e.g. PDP denying all).
+  // Every entry must be an action Convex actually oracle-compares. Moving one into Convex's
+  // `adapterUnsupported` set must fail here rather than silently guard nothing (#324).
+  test.each(DEGENERACY_GUARD_ACTIONS)(
+    "%s has a non-degenerate compared oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).toContain(action);
       await expectNonDegenerateOracle(action);
-    }
-    // Asserting the complement keeps the split honest — an action Convex gains support for
-    // must move up into the guard proper.
-    for (const action of DEGENERACY_LIVENESS_PROBES) {
+    },
+  );
+
+  // Asserting the complement keeps the split honest: an action Convex gains support for must
+  // move into the compared list.
+  test.each(DEGENERACY_LIVENESS_PROBES)(
+    "%s has a non-degenerate liveness oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
-    }
-  });
+    },
+  );
   // These shapes intentionally have empty or total oracles: type errors, unequal runtime
   // types, or empty-list identities. Pin the live planner kind as well as the oracle so
   // dropping their inputs cannot silently turn a conditional error probe into a folded plan.

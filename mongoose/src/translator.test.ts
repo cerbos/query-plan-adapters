@@ -244,6 +244,380 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       ],
     },
   },
+  "cast-not-string-null": {
+    $and: [
+      {
+        $expr: {
+          $ne: [
+            {
+              $cond: {
+                if: {
+                  $in: [
+                    {
+                      $type: "$aOptionalString",
+                    },
+                    ["string", "bool", "int", "long", "double", "decimal"],
+                  ],
+                },
+                then: {
+                  $convert: {
+                    input: "$aOptionalString",
+                    to: "string",
+                    onError: null,
+                    onNull: null,
+                  },
+                },
+                else: null,
+              },
+            },
+            null,
+          ],
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $ne: [
+                    {
+                      $cond: {
+                        if: {
+                          $in: [
+                            {
+                              $type: "$aOptionalString",
+                            },
+                            [
+                              "string",
+                              "bool",
+                              "int",
+                              "long",
+                              "double",
+                              "decimal",
+                            ],
+                          ],
+                        },
+                        then: {
+                          $convert: {
+                            input: "$aOptionalString",
+                            to: "string",
+                            onError: null,
+                            onNull: null,
+                          },
+                        },
+                        else: null,
+                      },
+                    },
+                    null,
+                  ],
+                },
+              },
+              {
+                $expr: {
+                  $eq: [
+                    {
+                      $cond: {
+                        if: {
+                          $in: [
+                            {
+                              $type: "$aOptionalString",
+                            },
+                            [
+                              "string",
+                              "bool",
+                              "int",
+                              "long",
+                              "double",
+                              "decimal",
+                            ],
+                          ],
+                        },
+                        then: {
+                          $convert: {
+                            input: "$aOptionalString",
+                            to: "string",
+                            onError: null,
+                            onNull: null,
+                          },
+                        },
+                        else: null,
+                      },
+                    },
+                    "set",
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  "cast-not-timestamp": {
+    $and: [
+      {
+        $expr: {
+          $ne: [
+            {
+              $let: {
+                vars: {
+                  converted: {
+                    $cond: {
+                      if: {
+                        $eq: [
+                          {
+                            $type: "$createdBy",
+                          },
+                          "date",
+                        ],
+                      },
+                      then: "$createdBy",
+                      else: {
+                        $cond: {
+                          if: {
+                            $cond: {
+                              if: {
+                                $eq: [
+                                  {
+                                    $type: "$createdBy",
+                                  },
+                                  "string",
+                                ],
+                              },
+                              then: {
+                                $regexMatch: {
+                                  input: "$createdBy",
+                                  regex:
+                                    "^((?!0000)\\d{4})-(\\d{2})-(\\d{2})[Tt](?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?(?:[Zz]|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)\\z",
+                                },
+                              },
+                              else: false,
+                            },
+                          },
+                          then: {
+                            $convert: {
+                              input: "$createdBy",
+                              to: "date",
+                              onError: null,
+                              onNull: null,
+                            },
+                          },
+                          else: null,
+                        },
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        {
+                          $ne: ["$$converted", null],
+                        },
+                        {
+                          $gte: [
+                            "$$converted",
+                            new Date("0001-01-01T00:00:00.000Z"),
+                          ],
+                        },
+                        {
+                          $lte: [
+                            "$$converted",
+                            new Date("9999-12-31T23:59:59.999Z"),
+                          ],
+                        },
+                      ],
+                    },
+                    then: "$$converted",
+                    else: null,
+                  },
+                },
+              },
+            },
+            null,
+          ],
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $ne: [
+                    {
+                      $let: {
+                        vars: {
+                          converted: {
+                            $cond: {
+                              if: {
+                                $eq: [
+                                  {
+                                    $type: "$createdBy",
+                                  },
+                                  "date",
+                                ],
+                              },
+                              then: "$createdBy",
+                              else: {
+                                $cond: {
+                                  if: {
+                                    $cond: {
+                                      if: {
+                                        $eq: [
+                                          {
+                                            $type: "$createdBy",
+                                          },
+                                          "string",
+                                        ],
+                                      },
+                                      then: {
+                                        $regexMatch: {
+                                          input: "$createdBy",
+                                          regex:
+                                            "^((?!0000)\\d{4})-(\\d{2})-(\\d{2})[Tt](?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?(?:[Zz]|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)\\z",
+                                        },
+                                      },
+                                      else: false,
+                                    },
+                                  },
+                                  then: {
+                                    $convert: {
+                                      input: "$createdBy",
+                                      to: "date",
+                                      onError: null,
+                                      onNull: null,
+                                    },
+                                  },
+                                  else: null,
+                                },
+                              },
+                            },
+                          },
+                        },
+                        in: {
+                          $cond: {
+                            if: {
+                              $and: [
+                                {
+                                  $ne: ["$$converted", null],
+                                },
+                                {
+                                  $gte: [
+                                    "$$converted",
+                                    new Date("0001-01-01T00:00:00.000Z"),
+                                  ],
+                                },
+                                {
+                                  $lte: [
+                                    "$$converted",
+                                    new Date("9999-12-31T23:59:59.999Z"),
+                                  ],
+                                },
+                              ],
+                            },
+                            then: "$$converted",
+                            else: null,
+                          },
+                        },
+                      },
+                    },
+                    null,
+                  ],
+                },
+              },
+              {
+                $expr: {
+                  $lt: [
+                    {
+                      $let: {
+                        vars: {
+                          converted: {
+                            $cond: {
+                              if: {
+                                $eq: [
+                                  {
+                                    $type: "$createdBy",
+                                  },
+                                  "date",
+                                ],
+                              },
+                              then: "$createdBy",
+                              else: {
+                                $cond: {
+                                  if: {
+                                    $cond: {
+                                      if: {
+                                        $eq: [
+                                          {
+                                            $type: "$createdBy",
+                                          },
+                                          "string",
+                                        ],
+                                      },
+                                      then: {
+                                        $regexMatch: {
+                                          input: "$createdBy",
+                                          regex:
+                                            "^((?!0000)\\d{4})-(\\d{2})-(\\d{2})[Tt](?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,3})?(?:[Zz]|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)\\z",
+                                        },
+                                      },
+                                      else: false,
+                                    },
+                                  },
+                                  then: {
+                                    $convert: {
+                                      input: "$createdBy",
+                                      to: "date",
+                                      onError: null,
+                                      onNull: null,
+                                    },
+                                  },
+                                  else: null,
+                                },
+                              },
+                            },
+                          },
+                        },
+                        in: {
+                          $cond: {
+                            if: {
+                              $and: [
+                                {
+                                  $ne: ["$$converted", null],
+                                },
+                                {
+                                  $gte: [
+                                    "$$converted",
+                                    new Date("0001-01-01T00:00:00.000Z"),
+                                  ],
+                                },
+                                {
+                                  $lte: [
+                                    "$$converted",
+                                    new Date("9999-12-31T23:59:59.999Z"),
+                                  ],
+                                },
+                              ],
+                            },
+                            then: "$$converted",
+                            else: null,
+                          },
+                        },
+                      },
+                    },
+                    new Date("2025-01-01T00:00:00.000Z"),
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
   "cast-string-bool": {
     $and: [
       {
@@ -1705,6 +2079,64 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
   // ($arrayElemAt), and the bounds guard is why: `$arrayElemAt` past the end yields MISSING, which
   // compares equal to nothing but also raises nothing, so the emptiness check in front of it is
   // what turns an out-of-range index into a denial rather than a silent false.
+  "index-not-oob": {
+    $and: [
+      {
+        $expr: {
+          $cond: {
+            if: {
+              $isArray: "$tags.name",
+            },
+            then: {
+              $gt: [
+                {
+                  $size: "$tags.name",
+                },
+                1,
+              ],
+            },
+            else: false,
+          },
+        },
+      },
+      {
+        $nor: [
+          {
+            $and: [
+              {
+                $expr: {
+                  $cond: {
+                    if: {
+                      $isArray: "$tags.name",
+                    },
+                    then: {
+                      $gt: [
+                        {
+                          $size: "$tags.name",
+                        },
+                        1,
+                      ],
+                    },
+                    else: false,
+                  },
+                },
+              },
+              {
+                $expr: {
+                  $eq: [
+                    {
+                      $arrayElemAt: ["$tags.name", 1],
+                    },
+                    "public",
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
   "index-scalar-list": {
     $and: [
       {
@@ -3358,6 +3790,38 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
   "regex-dot": {
     aString: {
       $regex: "^a.*b\\z",
+    },
+  },
+  "regex-eq-true": {
+    $and: [
+      {
+        $expr: {
+          $eq: [
+            {
+              $type: "$aString",
+            },
+            "string",
+          ],
+        },
+      },
+      {
+        $expr: {
+          $eq: [
+            {
+              $regexMatch: {
+                input: "$aString",
+                regex: "^h",
+              },
+            },
+            true,
+          ],
+        },
+      },
+    ],
+  },
+  "regex-final-newline": {
+    aString: {
+      $regex: "^ab\\z",
     },
   },
   "regex-unanchored": {
@@ -6523,7 +6987,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 186, kinds: 7, throwing: 88 });
+    }).toEqual({ filters: 191, kinds: 7, throwing: 94 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

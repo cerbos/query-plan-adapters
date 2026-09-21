@@ -538,6 +538,18 @@ const DEGENERACY_LIVENESS_PROBES = [
   "temporal-raw-eq",
   "eq-list",
   "ne-list",
+  // #396: live error branches remain discriminating under negation or disjunction.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
+  "regex-lookahead",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1041,7 +1053,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 281 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 292 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1057,10 +1069,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(281);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(108);
+    expect(THROWING_ACTIONS).toHaveLength(119);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1440,24 +1452,26 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(stored).toEqual(expected);
   });
 
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all).
-    //
-    // Every entry is asserted to be an action Prisma actually oracle-compares. A list copied
-    // from another harness drifts into naming shapes this adapter never compares, which guard
-    // nothing (cerbos/query-plan-adapters#324); the membership assertion turns moving an action
-    // into Prisma's `adapterUnsupported` set into a failure here rather than a silent no-op.
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
+  // Each action gets its own test budget: the combined serial oracle calls grow with the corpus.
+  // Guard the guard: every action must produce a non-empty, non-total oracle set, otherwise the
+  // differential comparison could pass vacuously (e.g. PDP denying all).
+  // Every entry must be an action Prisma actually oracle-compares. Moving one into Prisma's
+  // `adapterUnsupported` set must fail here rather than silently guard nothing (#324).
+  test.each(DEGENERACY_GUARD_ACTIONS)(
+    "%s has a non-degenerate compared oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).toContain(action);
       await expectNonDegenerateOracle(action);
     }
-    // Shapes Prisma refuses to translate, so there is no comparison behind them: these carry
-    // PDP/policy liveness for their group only. Asserting the complement keeps the split
-    // honest — an action Prisma gains support for must move up into the guard proper.
-    for (const action of DEGENERACY_LIVENESS_PROBES) {
+  );
+
+  // Shapes Prisma refuses to translate carry PDP/policy liveness only. Asserting the complement
+  // keeps the split honest: an action Prisma gains support for must move into the compared list.
+  test.each(DEGENERACY_LIVENESS_PROBES)(
+    "%s has a non-degenerate liveness oracle",
+    async (action) => {
       expect(ORACLE_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
     }
-  });
+  );
 });

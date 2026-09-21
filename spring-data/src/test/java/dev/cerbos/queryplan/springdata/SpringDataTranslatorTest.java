@@ -449,7 +449,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 229, "unconditional", 3, "throwing", 49),
+                Map.of("conditional", 229, "unconditional", 3, "throwing", 60),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -791,8 +791,8 @@ class SpringDataTranslatorTest {
                             Map.entry("whole-list comparison", 2),
                             Map.entry("computed intersection", 1),
 
-                            Map.entry("computed leaf operand", 13),
-                            Map.entry("operator the reference never translates", 12),
+                            Map.entry("computed leaf operand", 21),
+                            Map.entry("operator the reference never translates", 14),
                             Map.entry("filter() in boolean position", 2),
                             Map.entry("non-numeric arithmetic operand", 2),
                             Map.entry("division inside further arithmetic", 2),
@@ -800,7 +800,7 @@ class SpringDataTranslatorTest {
                             Map.entry("map projection compared directly", 1),
                             Map.entry("empty hierarchy delimiter", 1),
                             Map.entry("mixed null conventions across two columns", 1),
-                            Map.entry("ambiguous temporal column", 1))),
+                            Map.entry("ambiguous temporal column", 2))),
                     counts);
             assertEquals(THROWING.size(),
                     counts.values().stream().mapToInt(Integer::intValue).sum());

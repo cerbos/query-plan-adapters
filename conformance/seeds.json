@@ -72,6 +72,7 @@
     {"id": "h1", "aBool": true, "aString": "a{q}*?b", "aNumber": 18, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Issue #414 wildcard and RE2 newline witness; ab is the wildcard near miss and regex repetition witness."},
     {"id": "h2", "aBool": true, "aString": "a\nb", "aNumber": 19, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Issue #414 wildcard and RE2 newline witness; ab is the wildcard near miss and regex repetition witness."},
     {"id": "h3", "aBool": true, "aString": "ab", "aNumber": 20, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Issue #414 wildcard and RE2 newline witness; ab is the wildcard near miss and regex repetition witness."},
-    {"id": "h4", "aBool": true, "aString": "0", "aNumber": 0, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Numeric-looking string witness: SQLite and MySQL coerce string 0 to numeric 0, while CEL heterogeneous equality is false."}
+    {"id": "h4", "aBool": true, "aString": "0", "aNumber": 0, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Numeric-looking string witness: SQLite and MySQL coerce string 0 to numeric 0, while CEL heterogeneous equality is false."},
+    {"id": "h5", "aBool": true, "aString": "ab\n", "aNumber": 21, "aOptionalString": "set", "tags": [], "subCategoryNames": [], "parentSeedId": null, "note": "Issue #396: final-newline regex witness; derived createdBy is malformed to exercise timestamp conversion errors under both polarities."}
   ]
 }

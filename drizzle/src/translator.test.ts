@@ -264,7 +264,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 221, unconditional: 7, throwing: 53 });
+    }).toEqual({ conditional: 222, unconditional: 7, throwing: 63 });
   });
 
   /**
@@ -285,7 +285,12 @@ describe("corpus shapes", () => {
     for (const action of CONDITIONAL_ACTIONS) {
       // Indexing now uses the column's native dialect. Paths and JSON literals deliberately
       // bind differently, and each dialect's complete query is pinned in the golden asset.
-      if (["index-scalar-list", "index-scalar-list-not-eq", "index-scalar-list-null"].includes(action)) continue;
+      if ([
+        "index-not-oob",
+        "index-scalar-list",
+        "index-scalar-list-not-eq",
+        "index-scalar-list-null",
+      ].includes(action)) continue;
       const expectation = RECORDED.get(action)!.expectation;
       if (expectation.kind !== PlanKind.CONDITIONAL) continue;
       const { postgresql } = expectation.rendered;

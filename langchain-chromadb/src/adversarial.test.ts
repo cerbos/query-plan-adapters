@@ -585,6 +585,18 @@ const DEGENERACY_LIVENESS_PROBES = [
   "temporal-raw-eq",
   "wildcard-contains",
   "wildcard-endswith",
+  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
+  "cast-not-double",
+  "cast-not-int",
+  "cast-not-string-missing",
+  "cast-not-string-null",
+  "cast-not-timestamp",
+  "index-fractional",
+  "index-negative",
+  "index-not-oob",
+  "regex-eq-true",
+  "regex-final-newline",
+  "regex-lookahead",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -887,12 +899,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(281);
+    expect(MANIFEST_ACTIONS.size).toBe(292);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(220);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(231);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(231);
+    expect(THROWING_ACTIONS).toHaveLength(242);
     expect(misclassified).toEqual([]);
   });
 

@@ -654,7 +654,7 @@ func TestDialectSpellings(t *testing.T) {
 			want: map[string]string{
 				dialect.SQLite:   "CAST(`resource`.`count` AS text)",
 				dialect.Postgres: `CAST("resource"."count" AS text)`,
-				dialect.MySQL:    "CAST(`resource`.`count` AS char)",
+				dialect.MySQL:    "CAST(`resource`.`count` AS char character set utf8mb4) COLLATE utf8mb4_0900_bin",
 			},
 		},
 		{
