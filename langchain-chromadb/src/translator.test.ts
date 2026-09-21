@@ -13,7 +13,7 @@ import type {
 } from "@cerbos/core";
 import type { Where } from "chromadb";
 
-import { PlanKind, queryPlanToChromaDB } from ".";
+import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from ".";
 import type { FieldMapper, FieldNameMapperConfig } from ".";
 import {
   ADAPTER,
@@ -61,6 +61,16 @@ function translate(
     queryPlan: planFromWireFixture(action, options.plannedAt),
     fieldNameMapper: options.fieldNameMapper ?? FIELD_NAME_MAPPER,
   });
+}
+
+/** Whatever `run` throws, or `undefined` if it returns. */
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
 }
 
 /**
@@ -189,10 +199,15 @@ describe("corpus shapes", () => {
   // `toThrow()` just as well as the limitation the corpus documents (#326). The harness makes the
   // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
   // which is what lets the completeness guard below be total.
+  //
+  // And the type, over the same roster: every corpus refusal is a well-formed plan Chroma cannot
+  // express, so a caller catching `UnsupportedOperatorError` must see all of them (#228). A site
+  // that regresses to a plain `Error` keeps its message and fails here.
   test.each(THROWING_ACTIONS)(
     "%s is refused with the message actions.json pins (%s)",
     (action, _reason, message) => {
       expect(() => translate(action)).toThrow(message);
+      expect(() => translate(action)).toThrow(UnsupportedOperatorError);
     },
   );
 
@@ -317,6 +332,64 @@ describe("the rejection sites the corpus reaches", () => {
     expect(Object.values(counts).reduce((sum, n) => sum + n, 0)).toEqual(
       THROWING_ACTIONS.length,
     );
+  });
+
+  /**
+   * The `operator` each refusal reports, which is what a caller catching `UnsupportedOperatorError`
+   * branches on (#228). Neither the pinned messages nor the sites above state it: a change that
+   * reports the enclosing comparison instead of the computed operand, or the raw operator instead
+   * of the negated one, moves this and nothing else.
+   *
+   * `lambda` is the largest entry because a collection macro is refused at its lambda operand, the
+   * computed-operand site, so `exists(...)` reports `lambda`; under negation it is refused before
+   * its operands are read, so `!exists(...)` reports `exists`.
+   */
+  test("every refusal names the operator it is about, in these numbers", () => {
+    const counts: Record<string, number> = {};
+    for (const [action] of THROWING_ACTIONS) {
+      const raised = thrownBy(() => translate(action));
+      const operator =
+        raised instanceof UnsupportedOperatorError
+          ? raised.operator
+          : "<not an UnsupportedOperatorError>";
+      counts[operator] = (counts[operator] ?? 0) + 1;
+    }
+
+    expect(counts).toEqual({
+      add: 14,
+      all: 3,
+      contains: 11,
+      div: 8,
+      double: 2,
+      endsWith: 7,
+      eq: 9,
+      except: 2,
+      exists: 7,
+      exists_one: 1,
+      ge: 1,
+      "get-field": 1,
+      hasIntersection: 5,
+      hierarchy: 14,
+      if: 18,
+      in: 11,
+      index: 6,
+      int: 3,
+      lambda: 31,
+      list: 4,
+      map: 6,
+      matches: 15,
+      mod: 1,
+      mult: 2,
+      ne: 14,
+      nin: 2,
+      overlaps: 1,
+      size: 21,
+      startsWith: 11,
+      string: 4,
+      struct: 3,
+      sub: 1,
+      timestamp: 7,
+    });
   });
 });
 
@@ -628,17 +701,29 @@ describe("plans the planner cannot produce", () => {
       metadata: undefined,
     }) as PlanResourcesResponse;
 
+  // A malformed plan is the caller's bug, not a policy shape Chroma cannot hold, so it stays a
+  // plain `Error`: a caller that routes `UnsupportedOperatorError` to a fallback must not route a
+  // half-decoded plan there with it (#228).
+  const expectPlainError = (run: () => unknown): void => {
+    const raised = thrownBy(run);
+    expect(raised).toBeInstanceOf(Error);
+    expect(raised).not.toBeInstanceOf(UnsupportedOperatorError);
+  };
+
   test("an unrecognised plan kind", () => {
-    expect(() =>
+    const run = () =>
       queryPlanToChromaDB({
         queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
         fieldNameMapper: FIELD_NAME_MAPPER,
-      }),
-    ).toThrow("Invalid query plan.");
+      });
+    expect(run).toThrow("Invalid query plan.");
+    expectPlainError(run);
   });
 
+  // The same message as the corpus's ternary, which is typed: there the operator (`if`) is one
+  // this adapter maps to no comparison at all, here it is `eq` short of an operand.
   test("a comparison with the wrong number of operands", () => {
-    expect(() =>
+    const run = () =>
       queryPlanToChromaDB({
         queryPlan: plan(
           new PlanExpression("eq", [
@@ -646,12 +731,15 @@ describe("plans the planner cannot produce", () => {
           ]),
         ),
         fieldNameMapper: FIELD_NAME_MAPPER,
-      }),
-    ).toThrow("Expected exactly two operands");
+      });
+    expect(run).toThrow("Expected exactly two operands");
+    expectPlainError(run);
   });
 
+  // Typed, unlike its neighbours: two literals is not a structural defect in the plan but a shape
+  // the `Where` grammar cannot hold, since it compares a metadata key to a literal.
   test("a comparison between two literals", () => {
-    expect(() =>
+    const run = () =>
       queryPlanToChromaDB({
         queryPlan: plan(
           new PlanExpression("eq", [
@@ -660,19 +748,23 @@ describe("plans the planner cannot produce", () => {
           ]),
         ),
         fieldNameMapper: FIELD_NAME_MAPPER,
-      }),
-    ).toThrow(
+      });
+    expect(run).toThrow(
       "Value-to-value comparisons are not supported by ChromaDB filters",
     );
+    const raised = thrownBy(run);
+    expect(raised).toBeInstanceOf(UnsupportedOperatorError);
+    expect((raised as UnsupportedOperatorError).operator).toBe("eq");
   });
 
   test("a condition that is not an expression at all", () => {
-    expect(() =>
+    const run = () =>
       queryPlanToChromaDB({
         queryPlan: plan(new PlanExpressionValue(true)),
         fieldNameMapper: FIELD_NAME_MAPPER,
-      }),
-    ).toThrow("Query plan did not contain an expression for operand");
+      });
+    expect(run).toThrow("Query plan did not contain an expression for operand");
+    expectPlainError(run);
   });
 });
 

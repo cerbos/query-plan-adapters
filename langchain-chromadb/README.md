@@ -41,7 +41,8 @@ ChromaDB stores flat scalar metadata, so the following Cerbos operators cannot b
   comparison against null cannot be represented)
 - Array/collection: `hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`, `size`
 
-Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an error.
+Any unsupported operator in the plan causes `queryPlanToChromaDB` to throw an
+`UnsupportedOperatorError` — see [Error handling](#error-handling).
 
 ### Write membership as `in`, not as a collection macro
 
@@ -284,16 +285,52 @@ const matches = await chroma.similaritySearch("query", 10, filters);
 
 ## Error handling
 
-`queryPlanToChromaDB` throws descriptive errors when:
+`queryPlanToChromaDB` fails closed: a plan it cannot express faithfully as a Chroma `Where` clause
+throws rather than returning an approximate filter. When the plan is well-formed and the refusal is
+Chroma's, the error is an `UnsupportedOperatorError`, so a caller can tell "this policy shape cannot
+be pushed to a Chroma metadata filter" apart from any other failure without matching on message text:
 
-- The plan kind is not a valid `PlanKind` value.
-- A conditional plan contains an operand that is not a `PlanExpression`.
+```ts
+import { queryPlanToChromaDB, UnsupportedOperatorError } from "@cerbos/langchain-chromadb";
+
+try {
+  const result = queryPlanToChromaDB({ queryPlan, fieldNameMapper });
+  // ...
+} catch (error) {
+  if (error instanceof UnsupportedOperatorError) {
+    // error.operator names the plan operator the refusal is about, e.g. "contains", "size" or "ne".
+    // Deny, fall back to a broader search, or surface a clearer message.
+  }
+  throw error;
+}
+```
+
+An `UnsupportedOperatorError` is thrown when:
+
 - An operator in the plan is not supported by ChromaDB's filter syntax.
-- A comparison operator is missing a variable or field name.
+- A comparison operand is a computed expression rather than a bare metadata key or a literal. Here
+  `operator` is that expression's operator (`add`, `size`), and for a collection macro such as
+  `exists` it is usually `lambda`.
+- A comparison is between two metadata keys or two literals, or tests whether a literal is contained
+  in a metadata field.
 - A `not` expression wraps an operator that cannot be negated.
 - A filter literal is null, nested, non-finite, or otherwise invalid for Chroma metadata.
 - `$ne` or `$nin` targets a field that is not declared `required: true`.
 - A fractional ordered comparison targets a field that is not configured with `numericType: "float"`.
+
+A malformed plan or a mapper misconfiguration is still a plain `Error`, so a fallback keyed on
+`UnsupportedOperatorError` does not swallow it:
+
+- The plan kind is not a valid `PlanKind` value.
+- A conditional plan contains an operand that is not a `PlanExpression`.
+- `and`/`or` has fewer than two operands, `not` does not have exactly one, or a comparison does not
+  have exactly two.
+- The field name mapper resolves a field to an empty name.
+
+`error.message` is unchanged from earlier releases: every refused corpus shape's message is still the
+one `conformance/actions.json` pins. The type, its `operator` field and its `name` — which
+`String(error)` and a stack trace now print as `UnsupportedOperatorError` rather than `Error` — are
+the addition ([#228](https://github.com/cerbos/query-plan-adapters/issues/228)).
 
 ## Example application
 

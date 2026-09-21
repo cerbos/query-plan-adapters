@@ -39,6 +39,26 @@ export type QueryPlanToChromaDBResult =
   | { kind: PK.ALWAYS_DENIED; filters?: undefined }
   | { kind: PK.CONDITIONAL; filters: Where };
 
+/**
+ * A well-formed plan asks for something a Chroma metadata filter cannot express. Thrown so a caller
+ * can route that case — a broader search, a per-document `check()`, a deny — without matching on
+ * the message, which stays the text `conformance/actions.json` pins
+ * (cerbos/query-plan-adapters#228). A malformed plan or a mapper misconfiguration is a plain `Error`.
+ *
+ * `operator` is the plan operator the refusal is about: the one the message names, after mirroring
+ * and negation (`not(eq)` over an optional key reports `ne`); a computed operand's own (`add`,
+ * `size`); the comparison itself for two keys or two literals; `if` for a ternary.
+ */
+export class UnsupportedOperatorError extends Error {
+  readonly operator: string;
+
+  constructor(operator: string, message: string) {
+    super(message);
+    this.name = "UnsupportedOperatorError";
+    this.operator = operator;
+  }
+}
+
 type ChromaLiteral = string | number | boolean;
 
 type BinaryOperands = {
@@ -89,6 +109,19 @@ const MIRRORED_OPERATOR: Readonly<Record<string, string>> = {
   ge: "le",
 };
 
+// The plan operators `whereFor` maps to a Chroma comparison. One of these with the wrong operand
+// count is a malformed plan; any other operator reaching `binaryOperands` with it — a ternary, in
+// the corpus — is a shape the `Where` grammar has no comparison for.
+const COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "in",
+]);
+
 export function queryPlanToChromaDB({
   queryPlan,
   fieldNameMapper,
@@ -135,9 +168,15 @@ export function queryPlanToChromaDB({
   }
 }
 
-function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
+function binaryOperands(
+  operator: string,
+  operands: PlanExpressionOperand[],
+): BinaryOperands {
   if (operands.length !== 2) {
-    throw Error("Expected exactly two operands");
+    if (COMPARISON_OPERATORS.has(operator)) {
+      throw Error("Expected exactly two operands");
+    }
+    throw new UnsupportedOperatorError(operator, "Expected exactly two operands");
   }
 
   let variable: PlanExpressionVariable | undefined;
@@ -147,7 +186,8 @@ function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
   for (const [index, operand] of operands.entries()) {
     if (isVariable(operand)) {
       if (variable) {
-        throw Error(
+        throw new UnsupportedOperatorError(
+          operator,
           "Variable-to-variable comparisons are not supported by ChromaDB filters",
         );
       }
@@ -155,11 +195,17 @@ function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
       variableIndex = index;
     } else if (isValue(operand)) {
       if (value) {
-        throw Error("Value-to-value comparisons are not supported by ChromaDB filters");
+        throw new UnsupportedOperatorError(
+          operator,
+          "Value-to-value comparisons are not supported by ChromaDB filters",
+        );
       }
       value = operand;
     } else {
-      throw Error("Nested expressions are not supported by ChromaDB filters");
+      throw new UnsupportedOperatorError(
+        operand.operator,
+        "Nested expressions are not supported by ChromaDB filters",
+      );
     }
   }
 
@@ -167,7 +213,8 @@ function binaryOperands(operands: PlanExpressionOperand[]): BinaryOperands {
     throw Error(`Unexpected variable ${String(operands)}`);
   }
   if (!value) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      operator,
       "Variable-to-variable comparisons are not supported by ChromaDB filters",
     );
   }
@@ -185,7 +232,8 @@ function isChromaLiteral(value: unknown): value is ChromaLiteral {
 
 function requireLiteral(value: unknown, operator: string): ChromaLiteral {
   if (!isChromaLiteral(value)) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      operator,
       `${operator} requires a finite number, string, or boolean literal`,
     );
   }
@@ -194,23 +242,33 @@ function requireLiteral(value: unknown, operator: string): ChromaLiteral {
 
 function requireNumber(value: unknown, operator: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw Error(`${operator} requires a finite number literal`);
+    throw new UnsupportedOperatorError(
+      operator,
+      `${operator} requires a finite number literal`,
+    );
   }
   return value;
 }
 
 function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw Error(`${operator} requires a non-empty literal list`);
+    throw new UnsupportedOperatorError(
+      operator,
+      `${operator} requires a non-empty literal list`,
+    );
   }
   if (!value.every(isChromaLiteral)) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      operator,
       `${operator} requires a list containing only finite numbers, strings, or booleans`,
     );
   }
   const firstType = typeof value[0];
   if (!value.every((item) => typeof item === firstType)) {
-    throw Error(`${operator} requires a list whose values have one scalar type`);
+    throw new UnsupportedOperatorError(
+      operator,
+      `${operator} requires a list whose values have one scalar type`,
+    );
   }
   return value;
 }
@@ -238,7 +296,10 @@ function whereFor(
     case "nin":
       return { [fieldName]: { $nin: requireLiteralList(value, operator) } };
     default:
-      throw Error(`Unsupported operator ${operator}`);
+      throw new UnsupportedOperatorError(
+        operator,
+        `Unsupported operator ${operator}`,
+      );
   }
 }
 
@@ -247,14 +308,18 @@ function normalizeOperator(operator: string, variableIndex: number): string {
     return operator;
   }
   if (operator === "in") {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      operator,
       "ChromaDB filters cannot test whether a literal is contained in a metadata field",
     );
   }
 
   const mirrored = MIRRORED_OPERATOR[operator];
   if (!mirrored) {
-    throw Error(`Unsupported operator ${operator}`);
+    throw new UnsupportedOperatorError(
+      operator,
+      `Unsupported operator ${operator}`,
+    );
   }
   return mirrored;
 }
@@ -265,11 +330,14 @@ function mapComparison(
   resolveField: FieldResolver,
   negate: boolean,
 ): Where {
-  const { variable, variableIndex, value } = binaryOperands(operands);
+  const { variable, variableIndex, value } = binaryOperands(operator, operands);
   const normalized = normalizeOperator(operator, variableIndex);
   const mappedOperator = negate ? NEGATED_OPERATOR[normalized] : normalized;
   if (!mappedOperator) {
-    throw Error(`Cannot negate operator ${normalized}`);
+    throw new UnsupportedOperatorError(
+      normalized,
+      `Cannot negate operator ${normalized}`,
+    );
   }
 
   const field = resolveField(variable.name);
@@ -277,7 +345,8 @@ function mapComparison(
     throw Error("Field name is required");
   }
   if (!field.required && (mappedOperator === "ne" || mappedOperator === "nin")) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      mappedOperator,
       `${mappedOperator} is unsafe for optional Chroma metadata because missing fields match the filter`,
     );
   }
@@ -287,7 +356,8 @@ function mapComparison(
     !Number.isInteger(value.value) &&
     field.numericType !== "float"
   ) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      mappedOperator,
       `${mappedOperator} cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: "float"`,
     );
   }
@@ -304,7 +374,8 @@ function mapBooleanVariable(
     throw Error("Field name is required");
   }
   if (negate && !field.required) {
-    throw Error(
+    throw new UnsupportedOperatorError(
+      "ne",
       "ne is unsafe for optional Chroma metadata because missing fields match the filter",
     );
   }
@@ -342,7 +413,10 @@ function mapOperand(
   // Check the raw operator before resolving operands so unsupported shapes keep
   // their existing refusal message and refusal site under negation.
   if (negate && !NEGATED_OPERATOR[operator]) {
-    throw Error(`Cannot negate operator ${operator}`);
+    throw new UnsupportedOperatorError(
+      operator,
+      `Cannot negate operator ${operator}`,
+    );
   }
   return mapComparison(operator, operands, resolveField, negate);
 }
