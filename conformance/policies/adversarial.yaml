@@ -317,6 +317,17 @@ resourcePolicy:
         match:
           expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
 
+    # Negation must inspect only the selected ternary arm. aBool=true permits even
+    # without a parent; a selected missing parent/optional string is an error and denies.
+    # This catches an outer NOT that either requires an unselected relation or turns
+    # a selected relation's NULL predicate into an allow.
+    - actions: ["not-ternary-parent"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? "one" : R.attr.parent.aOptionalString) == "set")'
+
     # Ternary under !(...): NOT over the OR-of-guarded-branches rewrite.
     - actions: ["ternary-negated"]
       effect: EFFECT_ALLOW
@@ -1384,9 +1395,12 @@ resourcePolicy:
           expr: 'size(R.attr.aString) < 4294967296'
 
     # ==================== constant NaN / ±Infinity ordering ====================
-    # CEL denies every ordering comparison involving NaN. not-nan-ord-le below proves
-    # this is an evaluation error, not false: negation must keep the NaN arm denied.
-    # The planner does NOT fold div(0,0), so the else arm arrives as a division subtree.
+    # CEL 0.30 (Cerbos 0.55) returns false for ordering comparisons involving NaN.
+    # not-nan-ord-le below proves negation must therefore allow the NaN arm.
+    # Cerbos 0.55 folds literal non-finite arithmetic before planning, which cannot be
+    # serialized as JSON. now() == now() is true within one evaluation (Cerbos captures
+    # one timestamp) and prevents compile-time folding, preserving the division subtree.
+    # The unguarded serialization failure is pinned in evaluation-modes/ separately.
     # Double.compare ranks NaN above every number and would turn the else arm into
     # always-true, returning every aBool=false row the PDP denies.
     - actions: ["nan-ord-ternary"]
@@ -1394,7 +1408,7 @@ resourcePolicy:
       roles: ["USER"]
       condition:
         match:
-          expr: '(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5'
+          expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
 
     # Value-first spelling: the planner preserves source order, so the mirrored branch
     # comparison places the folded NaN on the normalized LEFT (lt → gt divergence arm).
@@ -1403,7 +1417,7 @@ resourcePolicy:
       roles: ["USER"]
       condition:
         match:
-          expr: '0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)'
+          expr: '(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()'
 
     # NaN on the RIGHT of the comparison (ternary vs ternary — both sides stay
     # expressions, so no mirror moves the NaN): le(0.5, NaN) must also be false.
@@ -1412,7 +1426,7 @@ resourcePolicy:
       roles: ["USER"]
       condition:
         match:
-          expr: '(R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)'
+          expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
 
     # ±Infinity sanity: infinities are ORDERED normally in IEEE space (+Inf > 0.5 allows,
     # -Inf > 0.5 denies) — they must not be excluded the way NaN is.
@@ -1421,7 +1435,7 @@ resourcePolicy:
       roles: ["USER"]
       condition:
         match:
-          expr: '(R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5'
+          expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5) && now() == now()'
 
     # ==================== hierarchy operators (hier-*) ====================
     # Both operand orders for each operator, plus LIKE-metacharacter path segments. The
@@ -2923,13 +2937,24 @@ resourcePolicy:
         match:
           expr: 'R.attr.createdAt == R.attr.updatedAt'
 
-    # Issue #414 follow-up: preserve runtime type, missing-attribute or unordered-number semantics through composition.
+    # CEL 0.30 makes unordered comparisons false rather than errors. Under negation
+    # the NaN arm allows; the finite arm (1 <= 2) denies, keeping this probe non-total.
+    # now() == now() preserves the arithmetic subtree as explained above.
     - actions: ["not-nan-ord-le"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
       condition:
         match:
-          expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0))'
+          expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
+
+    # In CEL 0.30, NaN ordering is false even against a present string, whereas the
+    # finite-number/string arm remains a type error. Negation allows only the NaN arm.
+    - actions: ["not-nan-order-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
 
     # Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests.
     - actions: ["hasint-null-vf"]
@@ -3099,14 +3124,16 @@ resourcePolicy:
         match:
           expr: 'R.attr.aString.matches("^h") == true'
 
-    # The pinned PDP plans this PCRE lookahead, but RE2 evaluation errors. The independent
+    # A literal invalid regex is rejected at compile time in 0.55. Selecting it from
+    # known principal context defers validation and preserves the original matches plan.
+    # RE2 evaluation still errors; the literal rejection is pinned separately. The independent
     # a1 branch keeps the oracle live; accepting lookahead over-grants h3/h5.
     - actions: ["regex-lookahead"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
       condition:
         match:
-          expr: 'R.attr.aString.matches("a(?=b)") || R.attr.aNumber == 5'
+          expr: 'R.attr.aString.matches(P.attr.context == "projects:f1" ? "a(?=b)" : "^h") || R.attr.aNumber == 5'
 
     # The pinned PDP preserves -1; CEL indexing errors. The a1 branch keeps the oracle
     # live; treating -1 as the last element over-grants public-tag rows.

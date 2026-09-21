@@ -339,6 +339,8 @@ const MANIFEST_ACTIONS = new Set([
 // for that group.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "not-nan-order-string",
+  "not-ternary-parent",
   "index-not-oob",
   "index-scalar-list",
   "index-scalar-list-not-eq",
@@ -1603,7 +1605,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(293);
+    expect(MANIFEST_ACTIONS.size).toBe(295);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
@@ -1904,7 +1906,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       expect(ORACLE_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
     }
-  });
+  }, 60_000);
   // These shapes intentionally have empty or total oracles: type errors, unequal runtime
   // types, or empty-list identities. Pin the live planner kind as well as the oracle so
   // dropping their inputs cannot silently turn a conditional error probe into a folded plan.

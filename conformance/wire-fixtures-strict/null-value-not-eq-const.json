@@ -1,0 +1,27 @@
+{
+  "action": "null-value-not-eq-const",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.owner"
+                },
+                {
+                  "value": "x"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "action": "hier-descendent-cf",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "descendentOf",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "value": "dept.eng.platform"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

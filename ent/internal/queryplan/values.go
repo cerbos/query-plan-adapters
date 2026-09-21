@@ -379,10 +379,6 @@ func compareLeaf(op CmpOp, l, r value) (Expr, error) {
 	lNaN := lIsIEEE && math.IsNaN(lIEEE.v)
 	rNaN := rIsIEEE && math.IsNaN(rIEEE.v)
 
-	if (lNaN || rNaN) && op != OpEq && op != OpNe {
-		// CEL ordering raises for NaN. UNKNOWN remains an error under NOT.
-		return Lit{V: nil}, nil
-	}
 	if lNaN || rNaN {
 		other := r
 		if rNaN {
@@ -392,7 +388,8 @@ func compareLeaf(op CmpOp, l, r value) (Expr, error) {
 			other = nil
 		}
 
-		// CEL follows IEEE: NaN is unequal to everything and unordered against everything.
+		// Cerbos 0.55 follows IEEE: NaN is unequal to everything; ordered comparisons
+		// are false, so negation is true. Missing attributes still propagate UNKNOWN below.
 		result := BoolConst{V: op == OpNe}
 
 		if _, ok := asFloat(other); ok || other == nil {
@@ -446,6 +443,11 @@ func compareOrdered[T cmp.Ordered](op CmpOp, l, r T) bool {
 func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	lk, rk := scalarKind(l), scalarKind(r)
 	if lk != "" && rk != "" && lk != rk {
+		if op != OpEq && op != OpNe {
+			// Every row is UNKNOWN, including missing operands. A guarded all-NULL CASE
+			// resolves to text in PostgreSQL and cannot compose with boolean CASE arms.
+			return Lit{V: nil}, nil
+		}
 		result := mixedTypeResult(op, l, r)
 		for _, operand := range []value{l, r} {
 			if col, ok := operand.(Column); ok && col.ExplicitNull {

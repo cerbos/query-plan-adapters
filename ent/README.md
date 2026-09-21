@@ -146,14 +146,14 @@ See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 21
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions using 21
 hostile seed rows and real Ent-built queries. The whole corpus is replayed against **SQLite,
 PostgreSQL and MySQL**, so the dialect-sensitive choices this adapter makes are proved rather than
 assumed. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 233 reference conformance actions, on SQLite, PostgreSQL and MySQL |
+| Oracle-tested | 235 reference conformance actions, on SQLite, PostgreSQL and MySQL |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (SQLite and MySQL store a boolean as 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (58 actions) |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbosent.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
@@ -166,8 +166,11 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
-**Behavior changes (#414).** NaN ordering preserves CEL errors under negation, and
-membership preserves the needle's per-attribute NULL convention even when the collection is
+**Behavior change (Cerbos 0.55).** Folded NaN ordered comparisons now return false,
+so their negation returns true, matching the updated CEL evaluator. Missing attributes still
+propagate errors. These NaN semantics differ from Cerbos 0.54.
+
+**Behavior changes (#414).** Membership preserves the needle's per-attribute NULL convention even when the collection is
 empty. Declare numeric fields with `ValueNumber`, text fields with `ValueString`, and booleans
 with `ValueBool` to prevent database coercion in heterogeneous comparisons and string operations.
 Undeclared field types retain historical behavior; the plan carries no type information.
@@ -293,7 +296,7 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's error semantics. Only NaNs the adapter folds itself are handled exactly. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's IEEE semantics. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0` — both satisfy `= 0` and no portable function reads the sign bit — so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is handled exactly: the planner ships the sign and the adapter applies it (`cr-div-neg-zero`). |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. See cerbos/query-plan-adapters#308. |
 
@@ -344,9 +347,13 @@ installing a built artifact. See [`example/README.md`](example/README.md) and
 ```bash
 go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
 go test ./...                                    # adds the adversarial conformance suite (Docker)
+ADAPTER_TEST_STRICT_EVALUATION=true go test -count=1 -run TestAdversarialConformance ./...
 golangci-lint run ./...
 golangci-lint fmt ./...
 ```
+
+The adversarial suite defaults to `ADAPTER_TEST_STRICT_EVALUATION=false`; only `false` and `true`
+are accepted. CI runs both modes against their own matching Check oracle.
 
 The adversarial suite starts one Cerbos container, reading the pinned PDP version from
 `conformance/CERBOS_VERSION`, then replays the whole corpus against an in-memory SQLite database and

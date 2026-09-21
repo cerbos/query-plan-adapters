@@ -69,12 +69,18 @@ jobs:
         run: npm test
 
       # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs once per Prisma major on the baseline Node leg rather than on all three — the same
-      # two executions the standalone `adversarial` job used to perform, minus the duplicated
-      # checkout, Cerbos install and `npm install`.
+      # runs in both evaluation modes per Prisma major on the baseline Node leg. Each mode starts
+      # its own PDP so planning and the Check oracle share the engine configuration.
       - name: Run adversarial differential suite (SQLite)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:v${{ matrix.prisma-version }}
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:v${{ matrix.prisma-version }} || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       # The provider IS a translator property, unlike the Node runtime — and unlike the Prisma
       # major above it, which is an ENGINE matrix. A fractional threshold against an `Int` column,
@@ -84,7 +90,14 @@ jobs:
       # suite's own jest globalSetup, so it needs no service block on ubuntu-latest.
       - name: Run adversarial differential suite (PostgreSQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:postgres:v${{ matrix.prisma-version }}
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:postgres:v${{ matrix.prisma-version }} || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       # The third provider (cerbos/query-plan-adapters#340), and the one whose STORE CONFIGURATION
       # is part of the contract: Prisma's MySQL migration engine writes
@@ -92,10 +105,17 @@ jobs:
       # accent-insensitive, so a Prisma-managed MySQL database over-grants `cs-eq`, `unicode-eq`
       # and every `hier-*` prefix probe until someone converts the tables. This leg proves the
       # corpus against the collation README.md tells consumers to use. Gated to the baseline Node
-      # leg like the other two, giving 2 majors x 3 stores = 6 adversarial runs, all on Node 22.
+      # leg like the other two, giving 2 majors x 3 stores x 2 evaluation modes = 12 runs, all on Node 22.
       - name: Run adversarial differential suite (MySQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:mysql:v${{ matrix.prisma-version }}
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:mysql:v${{ matrix.prisma-version }} || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the

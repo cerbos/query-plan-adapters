@@ -211,47 +211,49 @@ while IFS=$'\t' read -r adapter action; do
   fi
 done <"${VALIDATION_TMP}/adapter-supported-expected"
 
-find wire-fixtures -type f -name '*.json' -exec basename {} .json \; |
-  sort >"${VALIDATION_TMP}/fixture-actions"
+for fixture_dir in wire-fixtures wire-fixtures-strict; do
+  find "${fixture_dir}" -type f -name '*.json' -exec basename {} .json \; |
+    sort >"${VALIDATION_TMP}/fixture-actions"
 
-if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/fixture-actions"; then
-  echo "Every policy action must have exactly one golden wire fixture"
-  exit 1
-fi
+  if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/fixture-actions"; then
+    echo "Every policy action must have exactly one golden wire fixture"
+    exit 1
+  fi
 
-resource_kind="$(jq -r '.resourceKind' seeds.json)"
-while IFS= read -r action; do
-  fixture="wire-fixtures/${action}.json"
-  if ! jq -e \
-    --arg action "${action}" \
-    --arg resourceKind "${resource_kind}" '
-      .action == $action
-      and .resourceKind == $resourceKind
-      and (
-        .filter.kind == "KIND_ALWAYS_ALLOWED"
-        or .filter.kind == "KIND_ALWAYS_DENIED"
-        or .filter.kind == "KIND_CONDITIONAL"
-      )
+  resource_kind="$(jq -r '.resourceKind' seeds.json)"
+  while IFS= read -r action; do
+    fixture="${fixture_dir}/${action}.json"
+    if ! jq -e \
+      --arg action "${action}" \
+      --arg resourceKind "${resource_kind}" '
+        .action == $action
+        and .resourceKind == $resourceKind
+        and (
+          .filter.kind == "KIND_ALWAYS_ALLOWED"
+          or .filter.kind == "KIND_ALWAYS_DENIED"
+          or .filter.kind == "KIND_CONDITIONAL"
+        )
+      ' "${fixture}" >/dev/null; then
+      echo "Invalid golden wire fixture content: ${fixture}"
+      exit 1
+    fi
+  done <"${VALIDATION_TMP}/policy-actions"
+
+  for action in ts-window ts-vf; do
+    fixture="${fixture_dir}/${action}.json"
+    if ! jq -e '
+      [
+        ..
+        | objects
+        | select(.expression?.operator == "timestamp")
+        | .expression.operands[0].value?
+        | select(. != null)
+      ] == ["__NOW_MINUS_24H__"]
     ' "${fixture}" >/dev/null; then
-    echo "Invalid golden wire fixture content: ${fixture}"
-    exit 1
-  fi
-done <"${VALIDATION_TMP}/policy-actions"
-
-for action in ts-window ts-vf; do
-  fixture="wire-fixtures/${action}.json"
-  if ! jq -e '
-    [
-      ..
-      | objects
-      | select(.expression?.operator == "timestamp")
-      | .expression.operands[0].value?
-      | select(. != null)
-    ] == ["__NOW_MINUS_24H__"]
-  ' "${fixture}" >/dev/null; then
-    echo "Dynamic now()-24h timestamp is not normalized in ${fixture}"
-    exit 1
-  fi
+      echo "Dynamic now()-24h timestamp is not normalized in ${fixture}"
+      exit 1
+    fi
+  done
 done
 
 # CERBOS_VERSION and CERBOS_IMAGE_DIGEST are the single source of truth for the pinned PDP: every

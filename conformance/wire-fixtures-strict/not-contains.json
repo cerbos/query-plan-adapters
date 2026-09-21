@@ -1,0 +1,27 @@
+{
+  "action": "not-contains",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "contains",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -107,12 +107,18 @@ jobs:
       - run: npm run test
 
       # The adversarial corpus discriminates MongoDB server behaviour, not the Node runtime, so
-      # it runs once per server version on the baseline Node leg — the same two executions the
-      # standalone `adversarial` job used to perform, minus the duplicated checkout, Cerbos
-      # install, MongoDB start and `npm install`.
+      # it runs in both evaluation modes per server version on the baseline Node leg. Each mode
+      # starts its own PDP so planning and the Check oracle share the engine configuration.
       - name: Run adversarial differential suite
         if: matrix.node-version == '22'
-        run: npm run test:adversarial
+        run: |
+          status=0
+          for strict_evaluation in false true; do
+            echo "::group::strictEvaluation=$strict_evaluation"
+            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       - name: Stop MongoDB
         if: always() && matrix.node-version == '22'

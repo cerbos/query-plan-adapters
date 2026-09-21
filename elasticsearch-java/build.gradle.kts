@@ -49,6 +49,13 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    val strictEvaluation = providers.environmentVariable("ADAPTER_TEST_STRICT_EVALUATION")
+        .getOrElse("false")
+    require(strictEvaluation in listOf("false", "true")) {
+        "ADAPTER_TEST_STRICT_EVALUATION must be false or true"
+    }
+    inputs.property("strictEvaluation", strictEvaluation)
+    systemProperty("adapter.test.strictEvaluation", strictEvaluation)
 
     // The suites read a shared directory from OUTSIDE this project — the conformance corpus
     // (`ElasticsearchAdversarialConformanceTest`, `ElasticsearchTranslatorTest`,

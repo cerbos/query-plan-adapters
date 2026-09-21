@@ -839,29 +839,124 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     OR: [
       {
         AND: [
-          { aBool: { equals: true } },
           {
-    OR: [
-      { aBool: { equals: true } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-        ],
-      },
-      {
-        AND: [
-          { aBool: { equals: false } },
+            aBool: {
+              equals: true
+            }
+          },
           {
             OR: [
               {
-                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
+                aBool: {
+                  equals: false
+                }
               },
-            ],
-          },
-        ],
+              {
+                AND: [
+                  {
+                    aBool: {
+                      equals: true
+                    }
+                  },
+                  {
+                    aBool: {
+                      equals: false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
+      {
+        AND: [
+          {
+            aBool: {
+              equals: false
+            }
+          },
+          {
+            OR: [
+              {
+                aBool: {
+                  equals: false
+                }
+              },
+              {
+                AND: [
+                  {
+                    aBool: {
+                      equals: true
+                    }
+                  },
+                  {
+                    aBool: {
+                      equals: false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        AND: [
+          {
+            aBool: {
+              equals: true
+            }
+          },
+          {
+            aBool: {
+              equals: false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "not-ternary-parent": {
+    OR: [
+      {
+        aBool: {
+          equals: true
+        }
+      },
+      {
+        AND: [
+          {
+            aBool: {
+              equals: false
+            }
+          },
+          {
+            parent: {
+              is: {
+                aOptionalString: {
+                  not: "set"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        AND: [
+          {
+            aBool: {
+              equals: true
+            }
+          },
+          {
+            aBool: {
+              equals: false
+            }
+          }
+        ]
+      }
+    ]
   },
   "null-eq": { aOptionalString: { equals: null } },
   "null-eq-missing": { aOptionalString: { equals: null } },
@@ -1754,7 +1849,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 166, kinds: 7, throwing: 120 });
+    }).toEqual({ filters: 167, kinds: 7, throwing: 121 });
   });
 });
 

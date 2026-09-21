@@ -58,6 +58,14 @@ final class CerbosTestImage {
                 .withPlaintext().withTimeout(CALL_TIMEOUT).buildBlockingClient();
     }
 
+    static String strictEvaluation() {
+        String strict = System.getProperty("adapter.test.strictEvaluation", "false");
+        if (!strict.equals("false") && !strict.equals("true")) {
+            throw new IllegalArgumentException("ADAPTER_TEST_STRICT_EVALUATION must be false or true");
+        }
+        return strict;
+    }
+
     private CerbosTestImage() {}
 
     private static Path conformanceDir() {

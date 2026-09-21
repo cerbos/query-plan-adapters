@@ -208,12 +208,25 @@ ternary comparisons and unsolvable string concatenation now retain CEL's error b
 
 ### Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 27 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
+(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
+For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
+corpus with strict evaluation enabled for both planning and the `check()` oracle.
+CI runs both modes for each existing adversarial store and client-version combination.
+
+**Breaking compatibility change for Cerbos 0.55.** Ordered comparisons involving NaN
+now evaluate to false, so their negation can allow a row. The adapter follows that
+behavior; Cerbos 0.54 treated the unordered comparison as an error and denied the row
+even under negation. Use this adapter with Cerbos 0.55 when policies can produce
+NaN in a negated comparison. Missing attributes and null values retain their existing
+handling.
+
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 27 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 171 reference actions |
-| Fail-closed | 109 reference actions plus the 11 reference-unsupported shapes (120 actions total) |
+| Oracle-tested | 172 reference actions |
+| Fail-closed | 110 reference actions plus the 11 reference-unsupported shapes (121 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -228,7 +241,7 @@ The `where` input each of these actions produces is pinned separately, in the tr
 
 The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL was unexecuted too. The Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value, reads a `LIKE` pattern, or collates a string.
 
-The store and the Prisma major are independent dimensions, so there are six runs and CI does all six:
+The store and the Prisma major are independent dimensions. CI runs all six combinations below in both evaluation modes:
 
 ```bash
 npm run test:adversarial:v7            # SQLite,     Prisma 7
@@ -654,7 +667,7 @@ This is the **translator unit test**: for every action in the shared conformance
 
 Every wire fixture must be classified there exactly once, so adding a corpus action fails this suite until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
 
-Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the six runs and what each one covers. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
+Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the six store/client combinations run in both evaluation modes. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
 
 ## Types
 

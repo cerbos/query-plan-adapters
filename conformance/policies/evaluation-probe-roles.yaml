@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: evaluation_probe_roles
+  definitions:
+    # Deliberately errors for the hostile principal; unrelated actions must stay allowed.
+    - name: blocked_department
+      parentRoles: [USER]
+      condition:
+        match:
+          expr: P.attr.department == "blocked"

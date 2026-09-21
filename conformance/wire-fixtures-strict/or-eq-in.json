@@ -1,0 +1,30 @@
+{
+  "action": "or-eq-in",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "or",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operator": "in",
+              "operands": [
+                {
+                  "value": "public"
+                },
+                {
+                  "variable": "request.resource.attr.tagNames"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

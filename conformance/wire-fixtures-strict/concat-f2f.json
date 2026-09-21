@@ -1,0 +1,30 @@
+{
+  "action": "concat-f2f",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "add",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ]
+            }
+          },
+          {
+            "value": "oneset"
+          }
+        ]
+      }
+    }
+  }
+}

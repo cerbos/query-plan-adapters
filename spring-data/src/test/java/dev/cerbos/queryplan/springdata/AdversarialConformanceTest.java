@@ -454,7 +454,8 @@ class AdversarialConformanceTest {
         // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
-                .withCommand("server", "--set=storage.disk.directory=/policies")
+                .withCommand("server", "--set=storage.disk.directory=/policies",
+                        "--set=engine.strictEvaluation=" + CerbosTestImage.strictEvaluation())
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-adversarial-pdp")))
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
@@ -1308,7 +1309,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(293, manifest.size(),
+        assertEquals(295, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(27, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or

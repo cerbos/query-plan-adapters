@@ -1,0 +1,20 @@
+{
+  "action": "gt-bare",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 1
+          }
+        ]
+      }
+    }
+  }
+}

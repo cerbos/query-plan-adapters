@@ -1,0 +1,34 @@
+{
+  "action": "p-timestamp",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "lt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "timestamp",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdBy"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "timestamp",
+              "operands": [
+                {
+                  "value": "2025-01-01T00:00:00Z"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

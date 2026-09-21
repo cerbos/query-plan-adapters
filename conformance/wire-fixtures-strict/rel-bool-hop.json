@@ -1,0 +1,10 @@
+{
+  "action": "rel-bool-hop",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "variable": "request.resource.attr.parent.aBool"
+    }
+  }
+}

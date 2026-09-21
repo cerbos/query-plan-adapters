@@ -321,7 +321,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when ? = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when ? = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when ? = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / ?) > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when ? = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when ? = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when ? = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / ?) > ?\n    end)",
           "params": [
             0,
             0,
@@ -331,7 +331,7 @@
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when $1 = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when $2 = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when $3 = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / $4) > $5\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null then null \n      when $1 = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when $2 = 0 and \"adversarial_resources\".\"a_number\" > 0 then false\n      when $3 = 0 then true\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / $4) > $5\n    end)",
           "params": [
             0,
             0,
@@ -341,7 +341,7 @@
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null then null \n      when ? = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when ? = 0 and `adversarial_resources`.`a_number` > 0 then false\n      when ? = 0 then true\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / ?) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null then null \n      when ? = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when ? = 0 and `adversarial_resources`.`a_number` > 0 then false\n      when ? = 0 then true\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / ?) > ?\n    end)",
           "params": [
             0,
             0,
@@ -356,19 +356,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > ?\n    end)",
           "params": [
             0
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > $1\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_double\" is null then null \n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_double\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_double\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_double\") > $1\n    end)",
           "params": [
             0
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_double` is null then null \n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_double` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_double`) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_double` is null then null \n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_double` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_double` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_double`) > ?\n    end)",
           "params": [
             0
           ]
@@ -379,21 +379,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + ?) > ?\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + ?) > ?\n    end)",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + $1) > $2\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else ((cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") + $1) > $2\n    end)",
           "params": [
             1,
             1
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else ((cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) + ?) > ?\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else ((cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) + ?) > ?\n    end)",
           "params": [
             1,
             1
@@ -431,19 +431,19 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast(? as float(53))\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast(? as float(53))\n    end)",
           "params": [
             0.5
           ]
         },
         "postgresql": {
-          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then null\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast($1 as float(53))\n    end)",
+          "sql": "(case\n      when \"adversarial_resources\".\"a_number\" is null or \"adversarial_resources\".\"a_number\" is null then null \n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" = 0 then false\n      when \"adversarial_resources\".\"a_number\" = 0 and \"adversarial_resources\".\"a_number\" > 0 then true\n      when \"adversarial_resources\".\"a_number\" = 0 then false\n      else (cast(\"adversarial_resources\".\"a_number\" as float(53)) / \"adversarial_resources\".\"a_number\") > cast($1 as float(53))\n    end)",
           "params": [
             0.5
           ]
         },
         "mysql": {
-          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then null\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) > cast(? as float(53))\n    end)",
+          "sql": "(case\n      when `adversarial_resources`.`a_number` is null or `adversarial_resources`.`a_number` is null then null \n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` = 0 then false\n      when `adversarial_resources`.`a_number` = 0 and `adversarial_resources`.`a_number` > 0 then true\n      when `adversarial_resources`.`a_number` = 0 then false\n      else (cast(`adversarial_resources`.`a_number` as float(53)) / `adversarial_resources`.`a_number`) > cast(? as float(53))\n    end)",
           "params": [
             0.5
           ]
@@ -2340,7 +2340,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))))",
           "params": [
             1,
             1,
@@ -2351,7 +2351,7 @@
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and null))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and null))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and 0 = 1))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and 0 = 1))))",
           "params": [
             true,
             true,
@@ -2362,7 +2362,7 @@
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))))",
           "params": [
             true,
             true,
@@ -2378,21 +2378,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and null))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and 0 = 1))",
           "params": [
             true,
             true
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))",
           "params": [
             true,
             true
@@ -2404,21 +2404,21 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 0 = 1))",
           "params": [
             1,
             1
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and null))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and 0 = 1))",
           "params": [
             true,
             true
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and 0 = 1))",
           "params": [
             true,
             true
@@ -2637,7 +2637,7 @@
       "kind": "KIND_CONDITIONAL",
       "rendered": {
         "sqlite": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and null))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 1 = 1))) or (not \"adversarial_resources\".\"a_bool\" = ? and ((\"adversarial_resources\".\"a_bool\" = ? and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and 1 = 1))))",
           "params": [
             1,
             1,
@@ -2648,7 +2648,7 @@
           ]
         },
         "postgresql": {
-          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and null))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and null))))",
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $3 and 1 = 1))) or (not \"adversarial_resources\".\"a_bool\" = $4 and ((\"adversarial_resources\".\"a_bool\" = $5 and 0 = 1) or (not \"adversarial_resources\".\"a_bool\" = $6 and 1 = 1))))",
           "params": [
             true,
             true,
@@ -2659,12 +2659,38 @@
           ]
         },
         "mysql": {
-          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and null))))",
+          "sql": "((`adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and 1 = 1))) or (not `adversarial_resources`.`a_bool` = ? and ((`adversarial_resources`.`a_bool` = ? and 0 = 1) or (not `adversarial_resources`.`a_bool` = ? and 1 = 1))))",
           "params": [
             true,
             true,
             true,
             true,
+            true,
+            true
+          ]
+        }
+      }
+    },
+    "not-nan-order-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and not (case when \"adversarial_resources\".\"a_string\" is null then null else (null = true) end)) or (not \"adversarial_resources\".\"a_bool\" = ? and not (case when \"adversarial_resources\".\"a_string\" is null then null else false end)))",
+          "params": [
+            1,
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and not (case when \"adversarial_resources\".\"a_string\" is null then null else (null = true) end)) or (not \"adversarial_resources\".\"a_bool\" = $2 and not (case when \"adversarial_resources\".\"a_string\" is null then null else false end)))",
+          "params": [
+            true,
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "((`adversarial_resources`.`a_bool` = ? and not (case when `adversarial_resources`.`a_string` is null then null else (null = true) end)) or (not `adversarial_resources`.`a_bool` = ? and not (case when `adversarial_resources`.`a_string` is null then null else false end)))",
+          "params": [
             true,
             true
           ]
@@ -2685,6 +2711,35 @@
         "mysql": {
           "sql": "not substr(`adversarial_resources`.`a_string`, 1, length(`adversarial_resources`.`a_optional_string`)) = `adversarial_resources`.`a_optional_string`",
           "params": []
+        }
+      }
+    },
+    "not-ternary-parent": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = ? and not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_optional_string\" = ?)) end)))",
+          "params": [
+            1,
+            1,
+            "set"
+          ]
+        },
+        "postgresql": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and 1 = 1) or (not \"adversarial_resources\".\"a_bool\" = $2 and not (case when exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and 1 = 1)) then exists (select 1 from \"adversarial_parents\" where (\"adversarial_parents\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_parents\".\"a_optional_string\" = $3)) end)))",
+          "params": [
+            true,
+            true,
+            "set"
+          ]
+        },
+        "mysql": {
+          "sql": "((`adversarial_resources`.`a_bool` = ? and 1 = 1) or (not `adversarial_resources`.`a_bool` = ? and not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and `adversarial_parents`.`a_optional_string` = ?)) end)))",
+          "params": [
+            true,
+            true,
+            "set"
+          ]
         }
       }
     },

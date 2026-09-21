@@ -697,9 +697,9 @@ module Cerbos
         ArelSupport.case_node([[ArelSupport.or_node(missing), nil]], else_value: result)
       end
 
-      # NaN equality is false and inequality is true, but CEL ordering raises an error.
-      # Represent that error as SQL NULL so negation cannot turn it into an allow. PostgreSQL
-      # instead orders NaN above every finite number, so never bind NaN into the query.
+      # Cerbos 0.55 uses IEEE false for NaN equality and ordering, true for inequality.
+      # PostgreSQL instead orders NaN above every finite number, so calculate comparisons
+      # here while preserving missing-attribute errors independently.
       def compare_non_finite(operator, left, right)
         left_value = left.is_a?(Values::IEEEConstant) ? left.value : left
         right_value = right.is_a?(Values::IEEEConstant) ? right.value : right
@@ -707,7 +707,7 @@ module Cerbos
         nan_side = [left_value, right_value].find { |v| v.is_a?(Float) && v.nan? }
         if nan_side
           other = left_value.equal?(nan_side) ? right_value : left_value
-          result = %w[lt le gt ge].include?(operator) ? nil : (operator == "ne")
+          result = (operator == "ne")
 
           return result if other.is_a?(Numeric)
           if ArelSupport.arel_node?(other)

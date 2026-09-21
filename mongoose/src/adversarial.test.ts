@@ -493,6 +493,8 @@ const DEGENERACY_GUARD_ACTIONS = [
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
+  "not-nan-order-string",
+  "not-ternary-parent",
   // An empty hierarchy separator is refused before the anchored prefix regex is built, and a
   // regex with a top-level alternation falls outside the RE2/PCRE2 subset this adapter accepts.
   "hier-empty-delim",
@@ -976,11 +978,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(293);
-    expect(unsupportedCount).toBe(88);
+    expect(MANIFEST_ACTIONS.size).toBe(295);
+    expect(unsupportedCount).toBe(90);
     expect(supportedExpectedCount).toBe(4);
     expect(ORACLE_ACTIONS).toHaveLength(196);
-    expect(THROWING_ACTIONS).toHaveLength(95);
+    expect(THROWING_ACTIONS).toHaveLength(97);
     expect(misclassified).toEqual([]);
   });
 

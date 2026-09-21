@@ -1,0 +1,24 @@
+{
+  "action": "double-negation",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "not",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

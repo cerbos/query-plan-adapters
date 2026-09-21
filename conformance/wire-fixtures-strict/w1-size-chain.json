@@ -1,0 +1,27 @@
+{
+  "action": "w1-size-chain",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "size",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subCategories"
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

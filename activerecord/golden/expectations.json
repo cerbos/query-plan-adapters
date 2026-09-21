@@ -73,11 +73,11 @@
     },
     "cr-div-neg-zero": {
       "kind": "KIND_CONDITIONAL",
-      "where": "(CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0 THEN NULL WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0)) THEN (CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) > 0.0 THEN TRUE WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) > 0.0)) THEN FALSE END) END)"
+      "where": "(CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0 THEN FALSE WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0)) THEN (CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) > 0.0 THEN TRUE WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) > 0.0)) THEN FALSE END) END)"
     },
     "cr-div-zero": {
       "kind": "KIND_CONDITIONAL",
-      "where": "(CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0 THEN NULL WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0)) THEN (CAST(\"adversarial_resources\".\"a_number\" AS REAL) / CAST(\"adversarial_resources\".\"a_number\" AS REAL)) > 0.5 END)"
+      "where": "(CASE WHEN CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0 THEN FALSE WHEN NOT ((CAST(\"adversarial_resources\".\"a_number\" AS REAL) = 0.0)) THEN (CAST(\"adversarial_resources\".\"a_number\" AS REAL) / CAST(\"adversarial_resources\".\"a_number\" AS REAL)) > 0.5 END)"
     },
     "cr-div-zero-eq-neg": {
       "kind": "KIND_CONDITIONAL",
@@ -385,15 +385,15 @@
     },
     "nan-ord-le": {
       "kind": "KIND_CONDITIONAL",
-      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) <= 0.5 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) IS NULL THEN NULL ELSE NULL END) END)"
+      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) <= 0.5 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) IS NULL THEN NULL ELSE FALSE END) END)"
     },
     "nan-ord-ternary": {
       "kind": "KIND_CONDITIONAL",
-      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN TRUE WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN NULL END)"
+      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN TRUE WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN FALSE END)"
     },
     "nan-ord-ternary-vf": {
       "kind": "KIND_CONDITIONAL",
-      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN TRUE WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN NULL END)"
+      "where": "(CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN TRUE WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN FALSE END)"
     },
     "nary-and": {
       "kind": "KIND_CONDITIONAL",
@@ -441,11 +441,19 @@
     },
     "not-nan-ord-le": {
       "kind": "KIND_CONDITIONAL",
-      "where": "NOT ((CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) <= 0.5 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) IS NULL THEN NULL ELSE NULL END) END))"
+      "where": "NOT ((CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) <= 2 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 1.0 WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN 0.5 END) IS NULL THEN NULL ELSE FALSE END) END))"
+    },
+    "not-nan-order-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT ((CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN NULL WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (\"adversarial_resources\".\"a_string\") IS NULL THEN NULL ELSE FALSE END) END))"
     },
     "not-startswith": {
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((\"adversarial_resources\".\"a_string\" LIKE (REPLACE(REPLACE(REPLACE(REPLACE(\"adversarial_resources\".\"a_optional_string\", '\\', '\\\\'), '%', '\\%'), '_', '\\_'), '[', '\\[') || '%') ESCAPE '\\'))"
+    },
+    "not-ternary-parent": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT (((CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN 'one' WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (SELECT \"cerbos_adversarial_parents_1\".\"a_optional_string\" FROM \"adversarial_parents\" \"cerbos_adversarial_parents_1\" WHERE \"cerbos_adversarial_parents_1\".\"resource_id\" = \"adversarial_resources\".\"id\") END) = 'set'))"
     },
     "null-eq": {
       "kind": "KIND_CONDITIONAL",

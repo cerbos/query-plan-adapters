@@ -1,0 +1,27 @@
+{
+  "action": "string-size",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "size",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ]
+            }
+          },
+          {
+            "value": 4
+          }
+        ]
+      }
+    }
+  }
+}

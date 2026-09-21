@@ -1,0 +1,40 @@
+{
+  "action": "rel-hop-and-root",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": true
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "contains",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                },
+                {
+                  "value": "re"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

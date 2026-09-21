@@ -1,0 +1,30 @@
+{
+  "action": "index-scalar-list",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "index",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": 0
+                }
+              ]
+            }
+          },
+          {
+            "value": "public"
+          }
+        ]
+      }
+    }
+  }
+}

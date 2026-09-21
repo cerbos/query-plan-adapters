@@ -12,6 +12,11 @@ cd "$(dirname "$0")/.."
 CERBOS_VERSION="$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)"
 CERBOS_IMAGE_DIGEST="$(tr -d '[:space:]' < ../conformance/CERBOS_IMAGE_DIGEST)"
 export CERBOS_VERSION CERBOS_IMAGE_DIGEST
+export ADAPTER_TEST_STRICT_EVALUATION="${ADAPTER_TEST_STRICT_EVALUATION-false}"
+case "${ADAPTER_TEST_STRICT_EVALUATION}" in
+  false|true) ;;
+  *) echo "ADAPTER_TEST_STRICT_EVALUATION must be false or true" >&2; exit 1 ;;
+esac
 export RUBY_VERSION="${RUBY_VERSION:-3.4}"
 export ACTIVERECORD_VERSION="${ACTIVERECORD_VERSION:-8.0}"
 

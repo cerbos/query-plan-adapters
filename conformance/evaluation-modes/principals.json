@@ -1,0 +1,4 @@
+{
+  "hostile": {"id": "hostile", "roles": ["USER"], "attr": {"level": "invalid"}},
+  "valid": {"id": "valid", "roles": ["USER"], "attr": {"blocked": false, "level": -1, "variableBlocked": false, "department": "normal"}}
+}

@@ -1,0 +1,39 @@
+{
+  "action": "except-size",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "size",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "except",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tagNames"
+                      },
+                      {
+                        "value": [
+                          "public"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

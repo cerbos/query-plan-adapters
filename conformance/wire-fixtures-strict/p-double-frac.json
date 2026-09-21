@@ -1,0 +1,30 @@
+{
+  "action": "p-double-frac",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "expression": {
+              "operator": "mult",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0.1
+                }
+              ]
+            }
+          },
+          {
+            "value": 0.3
+          }
+        ]
+      }
+    }
+  }
+}

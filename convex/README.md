@@ -114,11 +114,24 @@ under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issu
 
 ## Conformance contract
 
-The adapter is differentially tested with 27 hostile seed documents against Cerbos PDP 0.54.0 `checkResource` decisions: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
+Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
+(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
+For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
+corpus with strict evaluation enabled for both planning and the `check()` oracle.
+CI runs both modes for each existing adversarial store and client-version combination.
+
+**Breaking compatibility change for Cerbos 0.55.** Ordered comparisons involving NaN
+now evaluate to false, so their negation can allow a row. The adapter follows that
+behavior; Cerbos 0.54 treated the unordered comparison as an error and denied the row
+even under negation. Use this adapter with Cerbos 0.55 when policies can produce
+NaN in a negated comparison. Missing attributes and null values retain their existing
+handling.
+
+The adapter is differentially tested with 27 hostile seed documents against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 254 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (261 actions total) |
+| Oracle-tested | 256 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (263 actions total) |
 | Fail-closed | `filter()`/`map()` used as a condition or conjunct; `list`, `struct`, and `except` constructor/operator forms without a lowering; regex patterns outside the supported RE2 subset; a constant zero divisor whose sign the JSON hop discards; and a nested division denominator whose numeric type the plan does not preserve (30 actions). All 30 throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands *when the document omits the field for a NULL value*, which is what the conformance harness seeds. The alignment is the `postFilter`'s doing, not a Convex filter's: the field is `nullable: true`, so the predicate is evaluated in JavaScript and the absent path raises the same CEL missing-attribute error that made `check()` deny. A deployment that stores explicit nulls while omitting the attribute would over-grant |
@@ -174,8 +187,8 @@ The new fail-closed shapes include the planner's `struct`, `set-field`, `list` a
 constructors that the evaluator does not implement, regex patterns outside its documented RE2
 subset, and a division expression used as another division's denominator. The latter now fails
 during translation; previously a zero divisor could fail only while evaluating a document.
-This earlier refusal is a breaking change. NaN ordering now preserves an evaluation error under
-negation, matching CEL instead of admitting the affected rows.
+This earlier refusal is a breaking change. NaN ordering now evaluates to false on Cerbos 0.55,
+so its negation admits the affected rows; missing operands still produce evaluation errors.
 
 ## Mapping hazards
 

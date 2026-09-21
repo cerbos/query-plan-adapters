@@ -1,0 +1,20 @@
+{
+  "action": "double-threshold",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ge",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 1.5
+          }
+        ]
+      }
+    }
+  }
+}

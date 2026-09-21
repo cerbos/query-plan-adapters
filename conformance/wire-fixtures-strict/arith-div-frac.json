@@ -1,0 +1,30 @@
+{
+  "action": "arith-div-frac",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ge",
+        "operands": [
+          {
+            "expression": {
+              "operator": "div",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ]
+            }
+          },
+          {
+            "value": 1.5
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "action": "in-nested-list",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operator": "list",
+              "operands": [
+                {
+                  "value": [
+                    "one"
+                  ]
+                },
+                {
+                  "value": [
+                    "same"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

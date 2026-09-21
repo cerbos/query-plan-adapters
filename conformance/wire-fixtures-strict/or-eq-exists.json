@@ -1,0 +1,50 @@
+{
+  "action": "or-eq-exists",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "or",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operator": "exists",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operator": "lambda",
+                    "operands": [
+                      {
+                        "expression": {
+                          "operator": "eq",
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

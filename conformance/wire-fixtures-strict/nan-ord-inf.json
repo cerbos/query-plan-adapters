@@ -1,0 +1,53 @@
+{
+  "action": "nan-ord-inf",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "if",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operator": "div",
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ]
+                  }
+                },
+                {
+                  "expression": {
+                    "operator": "div",
+                    "operands": [
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "value": 0.5
+          }
+        ]
+      }
+    }
+  }
+}

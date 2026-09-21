@@ -1,0 +1,37 @@
+{
+  "action": "not-and",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "not",
+        "operands": [
+          {
+            "expression": {
+              "operator": "and",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operator": "ne",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": "one"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

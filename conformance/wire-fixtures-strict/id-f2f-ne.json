@@ -1,0 +1,20 @@
+{
+  "action": "id-f2f-ne",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "variable": "request.resource.id"
+          }
+        ]
+      }
+    }
+  }
+}
