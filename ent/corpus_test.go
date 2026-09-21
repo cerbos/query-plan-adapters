@@ -43,8 +43,13 @@ type Seed struct {
 	Note             string   `json:"note"`
 	Tags             []Tag    `json:"tags"`
 	SubCategoryNames []string `json:"subCategoryNames"`
-	ANumber          int      `json:"aNumber"`
-	ABool            bool     `json:"aBool"`
+	// ANumberList and ABoolList are homogeneous scalar lists whose elements may be null — a null
+	// element is a VALUE in CEL, not a missing one, so it decodes to a nil pointer rather than
+	// being dropped. See conformance/README.md, "Number and boolean list elements".
+	ANumberList []*float64 `json:"aNumberList"`
+	ABoolList   []*bool    `json:"aBoolList"`
+	ANumber     int        `json:"aNumber"`
+	ABool       bool       `json:"aBool"`
 }
 
 // Principal is the fixed principal every action is planned and checked with.
@@ -158,8 +163,8 @@ type Corpus struct {
 // a corpus key nothing here consumes, and a consumed key the corpus no longer carries (which would
 // otherwise decode to its zero value on both sides).
 var seedKeys = []string{
-	"aBool", "aNumber", "aOptionalString", "aString", "id", "parentSeedId",
-	"subCategoryNames", "tags",
+	"aBool", "aBoolList", "aNumber", "aNumberList", "aOptionalString", "aString", "id",
+	"parentSeedId", "subCategoryNames", "tags",
 }
 
 // seedNoteKey is documentation, never read by any harness.
@@ -632,6 +637,20 @@ func relationAttr(s *Seed) map[string]any {
 		attr["aOptionalString"] = *s.AOptionalString
 	}
 	return attr
+}
+
+// scalarList is a seed's aNumberList or aBoolList as check() attributes, element for element: a
+// nil element is sent as an explicit null, which is what the corpus spells, rather than dropped.
+func scalarList[T any](elements []*T) []any {
+	out := make([]any, 0, len(elements))
+	for _, element := range elements {
+		if element == nil {
+			out = append(out, nil)
+		} else {
+			out = append(out, *element)
+		}
+	}
+	return out
 }
 
 // parentID and innerID name the per-resource chain rows.

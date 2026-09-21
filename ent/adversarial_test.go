@@ -684,6 +684,14 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"tags":       tags,
 		"tagNames":   tagNames,
 		"categories": categories,
+		// Sent verbatim, null elements included, and stored nowhere: the adapter refuses every
+		// shape over them. A positional read is `index`, which has no case in the vendored
+		// translator (a relation has no row order to read position 0 from), so the walk fails
+		// closed before any mapping is consulted and there is no column for a filter to read. The
+		// oracle still has to see them, because the degeneracy guard proves each refused action
+		// is a live, discriminating probe rather than one the PDP denies for every row.
+		"aNumberList": scalarList(seed.ANumberList),
+		"aBoolList":   scalarList(seed.ABoolList),
 	}
 
 	// Explicit null: `owner` aliases the same column but is sent as a real null attribute.
@@ -852,11 +860,11 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 295, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 301, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 58, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 64, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -1167,6 +1175,12 @@ func runConformance(t *testing.T, h *harness) {
 			"arith-mod", "index-scalar-list", "map-eq-list",
 			// Index errors and explicit-null elements must stay distinguishable under negation.
 			"index-scalar-list-not-eq", "index-scalar-list-null",
+			// The same positional read over number and boolean elements, refused by the same
+			// missing `index` case: both polarities, and the two cross-type probes CEL answers
+			// false for every row where a JSON-as-SQL reading answers true for b4 or c1.
+			"index-number-list", "index-number-list-not-eq",
+			"index-bool-list", "index-bool-list-not-eq",
+			"index-bool-list-vs-number", "index-number-list-vs-bool",
 			// An empty hierarchy delimiter is refused before the prefix LIKE is built, and a regex
 			// with a top-level alternation is a matches(), never translated here.
 			"hier-empty-delim", "matches-alt",
