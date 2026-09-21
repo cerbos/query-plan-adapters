@@ -512,6 +512,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "not-contains",
   "arith-mod",
   "index-scalar-list",
+  "index-scalar-list-not-eq",
+  "index-scalar-list-null",
   "map-eq-list",
   // Issue #414: each new non-degenerate shape guards its classified side.
   "regex-digit",
@@ -1039,7 +1041,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   });
 
-  test("manifest assigns all 279 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 281 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1055,10 +1057,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(279);
+    expect(MANIFEST_ACTIONS.size).toBe(281);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(106);
+    expect(THROWING_ACTIONS).toHaveLength(108);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1175,7 +1177,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // operators: `hasIntersection(tagNames, ["public", null])` carries one in its value list, and
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
   // shapes means a newly added action carrying a null constant is covered automatically.
-  test("every corpus action carrying a null literal is rejected under omitted", async () => {
+  test("null field comparisons are rejected under omitted; indexed elements retain their refusal", async () => {
     const nullCarrying: string[] = [];
     for (const action of [...MANIFEST_ACTIONS].sort()) {
       const queryPlan = await cerbos.planResources({
@@ -1197,6 +1199,14 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
 
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
+      // This null compares a list element, not an optionally absent field. The index operator
+      // has no Prisma filter form under either representation, so its own refusal applies.
+      if (action === "index-scalar-list-null") {
+        await expect(adapterFilteredIds(action, "omitted")).rejects.toThrow(
+          "Unsupported operator: index",
+        );
+        continue;
+      }
       try {
         await adapterFilteredIds(
           action,

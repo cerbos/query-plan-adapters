@@ -303,7 +303,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(150, unsupported.size(),
+        assertEquals(152, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -348,9 +348,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(118, oracleActions.size());
-        assertEquals(159, throwingActions.size());
+        assertEquals(161, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(279, classified.size());
+        assertEquals(281, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -887,6 +887,8 @@ class ElasticsearchAdversarialConformanceTest {
             "not-contains",
             "arith-mod",
             "index-scalar-list",
+            "index-scalar-list-not-eq",
+            "index-scalar-list-null",
             "map-eq-list",
             // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
             // its descendant path is CONSTRUCTED by list() from a constant segment and the primary

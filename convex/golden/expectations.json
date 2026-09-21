@@ -515,6 +515,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "index-scalar-list-not-eq": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "index-scalar-list-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "lambda-field-to-field": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"

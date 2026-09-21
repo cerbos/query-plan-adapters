@@ -309,7 +309,7 @@ describe("corpus shapes", () => {
       post: POST_ACTIONS.length,
       unconditional: UNCONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ pushed: 30, post: 214, unconditional: 7, throwing: 28 });
+    }).toEqual({ pushed: 30, post: 216, unconditional: 7, throwing: 28 });
   });
 });
 

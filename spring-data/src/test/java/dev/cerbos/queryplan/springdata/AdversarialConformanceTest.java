@@ -1308,14 +1308,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(279, manifest.size(),
+        assertEquals(281, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(26, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(47, throwing.size(), "throwing action count changed");
+        assertEquals(49, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1447,6 +1447,8 @@ class AdversarialConformanceTest {
             // lowering), the positional read of a scalar list, and list equality over a map()
             // projection.
             "arith-mod", "index-scalar-list", "map-eq-list",
+            // Index errors and explicit-null elements must stay distinguishable under negation.
+            "index-scalar-list-not-eq", "index-scalar-list-null",
             // An empty hierarchy delimiter is refused before the prefix LIKE is built (the LIKE
             // would match the path itself), and a regex with a top-level alternation is a
             // matches(), which the reference never translates.

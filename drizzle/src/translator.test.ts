@@ -10,6 +10,7 @@ import { eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
 import { PgDialect } from "drizzle-orm/pg-core/dialect";
+import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-core";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle } from ".";
@@ -263,7 +264,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 218, unconditional: 7, throwing: 54 });
+    }).toEqual({ conditional: 221, unconditional: 7, throwing: 53 });
   });
 
   /**
@@ -276,12 +277,15 @@ describe("corpus shapes", () => {
    * PostgreSQL is the reference each store is compared against, so adding a store adds one
    * comparison rather than rewriting the rule.
    */
-  test("the stores differ only in how a boolean binds", () => {
+  test("outside indexed access, the stores differ only in how a boolean binds", () => {
     const unexplained: { action: string; store: GoldenStore; index: number }[] =
       [];
     const booleanDifferences: Partial<Record<GoldenStore, number>> = {};
 
     for (const action of CONDITIONAL_ACTIONS) {
+      // Indexing now uses the column's native dialect. Paths and JSON literals deliberately
+      // bind differently, and each dialect's complete query is pinned in the golden asset.
+      if (["index-scalar-list", "index-scalar-list-not-eq", "index-scalar-list-null"].includes(action)) continue;
       const expectation = RECORDED.get(action)!.expectation;
       if (expectation.kind !== PlanKind.CONDITIONAL) continue;
       const { postgresql } = expectation.rendered;
@@ -539,6 +543,57 @@ describe("mapper forms", () => {
       /No mapping/,
     );
   });
+});
+
+describe("declared index storage", () => {
+  const reference = "request.resource.attr.tagNames";
+
+  test.each(GOLDEN_STORES)("%s refuses an undeclared storage shape", (store) => {
+    const entry = MAPPERS[store][reference];
+    if (!entry || typeof entry !== "object" || !("indexable" in entry)) {
+      throw new Error("Corpus must declare index storage");
+    }
+    const { indexable: _indexable, ...undeclared } = entry;
+    expect(() => translate(store, "index-scalar-list", {
+      mapper: { ...MAPPERS[store], [reference]: undeclared },
+    })).toThrow("Index storage shape is undeclared");
+  });
+
+  test("a function mapper preserves the declared representation", () => {
+    const mapper: Mapper = (reference) => MAPPERS.postgresql[reference];
+    expect(render("postgresql", "index-scalar-list", filterFor("postgresql", "index-scalar-list", { mapper })))
+      .toEqual(render("postgresql", "index-scalar-list", filterFor("postgresql", "index-scalar-list")));
+  });
+
+  test("pgArray cannot be declared for a SQLite column", () => {
+    expect(() => translate("sqlite", "index-scalar-list", {
+      mapper: { [reference]: { column: sqliteSchema().resources.tagNamesJson, indexable: "pgArray" } },
+    })).toThrow("requires a PostgreSQL array column");
+  });
+
+  test("a column transform cannot silently disappear from indexed access", () => {
+    expect(() => translate("postgresql", "index-scalar-list", {
+      mapper: { [reference]: { column: postgresSchema().resources.tagNamesJson, indexable: "json", transform: () => sql`false` } },
+    })).toThrow("without a transform");
+  });
+
+  const converted = pgTable("converted_arrays", {
+    numericString: numeric().array(),
+    numericNumber: numeric({ mode: "number" }).array(),
+    bigintNumber: bigint({ mode: "number" }).array(),
+    realNumber: real().array(),
+    doubleNumber: doublePrecision().array(),
+  });
+  test.each([
+    converted.numericString, converted.numericNumber, converted.bigintNumber,
+    converted.realNumber, converted.doubleNumber,
+  ])(
+    "refuses array representations that change scalar types or null elements", (column) => {
+      expect(() => translate("postgresql", "index-scalar-list", {
+        mapper: { [reference]: { column, indexable: "pgArray" } },
+      })).toThrow("without custom decoding");
+    },
+  );
 });
 
 /**

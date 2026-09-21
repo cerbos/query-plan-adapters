@@ -354,6 +354,8 @@ DEGENERACY_LIVENESS_PROBES = (
     # deferred intermediate no enclosing override consumes.
     "arith-mod",
     "index-scalar-list",
+    "index-scalar-list-not-eq",
+    "index-scalar-list-null",
     "map-eq-list",
 )
 
@@ -807,11 +809,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 279
+        assert len(MANIFEST_ACTIONS) == 281
         assert len(SEEDS) == 26
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 50
+        assert len(THROWING_ACTIONS) == 52
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported
