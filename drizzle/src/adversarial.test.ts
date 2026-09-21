@@ -455,6 +455,10 @@ const DEGENERACY_GUARD_ACTIONS = [
   "index-bool-list-not-eq",
   "index-bool-list-vs-number",
   "index-number-list-vs-bool",
+  // string() over a boolean column, lowered through a CASE rather than a CAST (#418). Its oracle is
+  // every row whose aBool is true, which is what makes a CAST rendering "1" on SQLite and MySQL an
+  // under-grant of all of them rather than a near miss.
+  "cast-string-bool",
 ] as const;
 
 /**
@@ -465,8 +469,8 @@ const DEGENERACY_GUARD_ACTIONS = [
  * The list exists as of #340. Before the MySQL leg executed, this adapter translated every shape
  * in the sample and the guard was one-sided; `cast-string-double` was in the COMPARED list, on the
  * belief that `CAST(... AS TEXT)` rendered a double identically on every store. It is a syntax
- * error on MySQL. `cast-string-double` rather than its boolean sibling because its oracle is a
- * single row out of 22 — a non-empty, non-total set, which is what the guard asserts.
+ * error on MySQL. Its boolean sibling `cast-string-bool` sits in the compared list above: a boolean
+ * needs no cast target, only a CASE (#418).
  */
 const DEGENERACY_LIVENESS_PROBES = [
   "cast-string-double",
@@ -1177,8 +1181,11 @@ const MYSQL_COLLATION =
  *   adapter emits is portable by construction; this one is the single version-gated construct in
  *   it, and nothing but executing it says whether the server accepts it.
  * - **`CAST(… AS TEXT)`.** Which is not a MySQL cast target at all — the divergence this leg
- *   actually found, and the reason `string()` is now refused (`UNSUPPORTED_CONVERSIONS` in
- *   `index.ts`). Both other stores accept it.
+ *   actually found, and the reason `string()` is refused over every column but a boolean
+ *   (`UNSUPPORTED_CONVERSIONS` in `index.ts`). Both other stores accept it. A boolean is lowered
+ *   through a CASE instead, and its two literals are the one place the adapter names a MySQL
+ *   collation: a literal compares in the CONNECTION's, which is mysql2's `utf8mb4_unicode_ci`
+ *   here, not the server's `MYSQL_COLLATION` (`buildBooleanString` in `index.ts`).
  *
  * The DDL is written here rather than derived from the drizzle schema because a store owns its own
  * schema in this harness — but it deliberately names NO collation per column, unlike `ent`'s. The
@@ -1667,7 +1674,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(64);
+    expect(THROWING_ACTIONS).toHaveLength(63);
     expect(misclassified).toEqual([]);
     expect(
       [...DRIZZLE_SUPPORTED_EXPECTED].filter(

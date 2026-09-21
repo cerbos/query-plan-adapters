@@ -290,6 +290,29 @@
         }
       }
     },
+    "cast-string-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when \"adversarial_resources\".\"a_bool\" is null then null when \"adversarial_resources\".\"a_bool\" then 'true' else 'false' end) = ?",
+          "params": [
+            "true"
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when \"adversarial_resources\".\"a_bool\" is null then null when \"adversarial_resources\".\"a_bool\" then 'true' else 'false' end) = $1",
+          "params": [
+            "true"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when `adversarial_resources`.`a_bool` is null then null when `adversarial_resources`.`a_bool` then _utf8mb4'true' collate utf8mb4_0900_bin else _utf8mb4'false' collate utf8mb4_0900_bin end) = ?",
+          "params": [
+            "true"
+          ]
+        }
+      }
+    },
     "cr-contains": {
       "note": "A constant receiver with a column needle: `K.contains(aString)` cannot become a LIKE, so the adapter enumerates every substring of the constant and tests membership. Pinning the enumeration verbatim is the point — an off-by-one at either end of the window is invisible in a row comparison over 21 seeds and obvious in this list.",
       "kind": "KIND_CONDITIONAL",
