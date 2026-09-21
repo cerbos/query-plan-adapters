@@ -410,9 +410,9 @@ func buildMapper() cerbosent.Mapper {
 		// `id-*` actions). An adapter that resolves references by stripping a
 		// `request.resource.attr.` prefix never sees this name.
 		"request.resource.id": {Column: "id"},
-		// Declared boolean so `string()` over it fails closed: SQLite and MySQL store a
-		// boolean as 1/0 and render "1" where CEL and PostgreSQL render "true", and nothing
-		// in the plan names a column's type.
+		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
+		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
+		// and PostgreSQL render "true", and nothing in the plan names a column's type.
 		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
@@ -864,7 +864,7 @@ func runConformance(t *testing.T, h *harness) {
 		require.Len(t, h.corpus.Seeds.Seeds, 27, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.
-		require.Len(t, h.corpus.ThrowingActions, 64, "throwing action count changed")
+		require.Len(t, h.corpus.ThrowingActions, 63, "throwing action count changed")
 	})
 
 	t.Run("oracle", func(t *testing.T) {
@@ -1104,10 +1104,10 @@ func runConformance(t *testing.T, h *harness) {
 			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
 			// operands to 0.
 			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
-			// string() over a NUMERIC column, the half that lowers to CAST on every engine. Its
-			// boolean sibling is refused instead, so this entry proves the supported half still
-			// compares.
-			"cast-string-double",
+			// string() over both kinds of column. A NUMERIC one lowers to a plain CAST on every
+			// engine; a BOOLEAN one is spelled through a CASE before the cast, because the CAST
+			// alone renders the stored 1 as "1" on SQLite and MySQL where CEL says "true" (#418).
+			"cast-string-double", "cast-string-bool",
 			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
 			// columns ValueString. Rendered as numeric `+` it was a hard error on
 			// PostgreSQL, 0 rows on SQLite, and 16 of 21 on MySQL against a one-row oracle.
@@ -1159,9 +1159,8 @@ func runConformance(t *testing.T, h *harness) {
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
 		// Asserting the complement keeps the split honest — a shape this adapter gains support for
 		// must move up into the compared list.
-		// string() over a BOOLEAN column is refused because CAST is dialect-dependent there
-		// (#376), and the constructed hierarchy path because `list` has no translator case at
-		// all — so neither has a comparison behind it here.
+		// The constructed hierarchy path has no comparison behind it here either, because `list`
+		// has no translator case at all.
 		// #387 adds three more groups with no comparison behind them: modulo (reached through the
 		// int() cast that gives `%` an integer operand), the positional read of a scalar list, and
 		// list equality over a map() projection, which reaches a plain value position where a held
@@ -1171,7 +1170,7 @@ func runConformance(t *testing.T, h *harness) {
 			"regex-final-newline", "regex-eq-true", "regex-lookahead",
 			"index-negative", "index-fractional", "index-not-oob",
 			"cast-not-int", "cast-not-double", "cast-not-timestamp",
-			"cast-int-double", "cast-string-bool", "hier-list-id",
+			"cast-int-double", "hier-list-id",
 			"arith-mod", "index-scalar-list", "map-eq-list",
 			// Index errors and explicit-null elements must stay distinguishable under negation.
 			"index-scalar-list-not-eq", "index-scalar-list-null",

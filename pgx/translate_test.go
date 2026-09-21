@@ -55,6 +55,7 @@ func testMapper() cerbospgx.Mapper {
 		"request.resource.attr.name":  {Column: "name"},
 		"request.resource.attr.count": {Column: "count"},
 		"request.resource.attr.owner": {Column: "owner"},
+		"request.resource.attr.flag":  {Column: "flag", ValueType: cerbospgx.ValueBool},
 		"request.resource.attr.tags":  {Relation: &cerbospgx.Relation{Table: "tag", SourceColumn: "id", TargetColumn: "resource_id", Field: &cerbospgx.Entry{Column: "name"}, Fields: map[string]cerbospgx.Entry{"name": {Column: "name"}}}},
 	}
 }
@@ -489,6 +490,26 @@ func TestNumericCastsAreRejected(t *testing.T) {
 		require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 		require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
 	}
+}
+
+// TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
+// (cerbos/query-plan-adapters#418). PostgreSQL's own CAST(bool AS text) already says "true", but
+// the vendored translator serves SQLite and MySQL too, where the same CAST says "1", so the column
+// is spelled through a CASE first on every engine. The corpus's cast-string-bool proves the two
+// words against the oracle.
+//
+// Corpus gap. The IS NULL arm ahead of the column's own test is policy-reachable, and no corpus
+// action reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
+// #414 rather than its home. Without the arm a NULL column falls through to 'false', and
+// `string(x) != "true"` returns a row the PDP denies.
+func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
+	t.Parallel()
+
+	result, err := translate(t, expr("eq", expr("string", variable("request.resource.attr.flag")), val(t, "true")))
+	require.NoError(t, err)
+	require.Contains(t, result.Where,
+		`CAST((CASE WHEN ("resource"."flag" IS NULL) THEN NULL WHEN "resource"."flag" THEN $1::text ELSE $2::text END) AS text) = $3::text`)
+	require.Equal(t, []any{"true", "false", "true"}, result.Args)
 }
 
 // TestMapperQualifierCannotShadowGeneratedAliases covers the other half of the alias guard: the

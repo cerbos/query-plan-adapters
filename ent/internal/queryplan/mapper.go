@@ -119,10 +119,10 @@ const (
 	// ValueTimestamp marks a column stored as a temporal type, so a `timestamp()` conversion
 	// around it is a no-op rather than an unsupported shape.
 	ValueTimestamp
-	// ValueBool marks a column stored as a boolean. It exists so `string()` over one can fail
-	// closed: SQLite and MySQL have no boolean type and render the stored 1/0 as "1", while CEL
-	// and PostgreSQL render "true", and nothing in the plan says which type a column holds
-	// (cerbos/query-plan-adapters#376).
+	// ValueBool marks a column stored as a boolean. It exists so `string()` over one spells CEL's
+	// "true"/"false" through a CASE rather than a CAST: SQLite and MySQL have no boolean type and
+	// render the stored 1/0 as "1", while CEL and PostgreSQL render "true", and nothing in the plan
+	// says which type a column holds (cerbos/query-plan-adapters#376, #418).
 	ValueBool
 	// ValueString marks a column stored as text. It exists so CEL's `+` between two columns can
 	// be resolved to concatenation: the operator is overloaded on strings and the plan carries no
