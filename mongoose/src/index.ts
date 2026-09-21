@@ -800,6 +800,11 @@ const buildAggregationExpressionFromExpression = (
     }
     case "index": {
       const [arrOp, index] = parseConstantIndexOperands(operands);
+      // Keep `$arrayElemAt` even for index 0. Mongoose's `$expr` caster casts a comparison's
+      // literal to the schema type of a PATH on the other side, and it treats `$first`/`$last`
+      // as one: over a `[Boolean]` array, `$first == 1` is cast to `== true`, which CEL denies.
+      // `$arrayElemAt` takes an array operand, so the literal reaches the server uncast
+      // (`index-bool-list-vs-number` and `index-number-list-vs-bool` fail otherwise).
       return {
         $arrayElemAt: [buildAggregationExpression(arrOp, mapper), index],
       };

@@ -640,6 +640,14 @@ export const MAPPER: Mapper = {
       fields: { name: { field: "name" } },
     },
   },
+  // Homogeneous scalar lists stored as NATIVE arrays on the document — a plain field, not a
+  // relation, because an element is a scalar with no field of its own (`tagNames`, the other list
+  // the corpus indexes, is a projection of the `tags` objects). `$arrayElemAt` keeps each
+  // element's BSON type, so `true` is never `1` here and a null element is a null value, as it is
+  // to CEL. No `valueType`: an indexed read is compared inside `$expr`, which never consults it
+  // (see the `index` case in index.ts for why the literal also stays uncast by Mongoose there).
+  "request.resource.attr.aNumberList": { field: "aNumberList" },
+  "request.resource.attr.aBoolList": { field: "aBoolList" },
   "request.resource.attr.categories": {
     relation: {
       name: "categories",

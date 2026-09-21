@@ -49,6 +49,9 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** Homogeneous scalar lists. A null ELEMENT is a value, not an absent attribute. */
+  aNumberList: (number | null)[];
+  aBoolList: (boolean | null)[];
 }
 
 interface SeedsFile {
@@ -118,6 +121,8 @@ const SEED_KEYS = [
   "tags",
   "subCategoryNames",
   "parentSeedId",
+  "aNumberList",
+  "aBoolList",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -292,6 +297,23 @@ function parseDerivedFile(value: unknown): DerivedFile {
   return { fields, derived };
 }
 
+/** A scalar list whose elements are all `typeof kind` or null — the only two shapes the corpus
+ * gives an element. Anything else is refused rather than stored, so a list the corpus widened to a
+ * third element type fails here instead of being cast by the Mongoose schema on the way in. */
+function expectScalarList<T extends number | boolean>(
+  value: unknown,
+  kind: "number" | "boolean",
+  label: string,
+): (T | null)[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every((entry) => entry === null || typeof entry === kind)
+  ) {
+    throw new Error(`${label} must be an array of ${kind}s or nulls`);
+  }
+  return value as (T | null)[];
+}
+
 function parseSeed(value: unknown, index: number): Seed {
   const label = `seeds[${index}]`;
   const record = expectRecord(value, label);
@@ -321,6 +343,16 @@ function parseSeed(value: unknown, index: number): Seed {
       `${label}.subCategoryNames`,
     ),
     parentSeedId,
+    aNumberList: expectScalarList<number>(
+      record["aNumberList"],
+      "number",
+      `${label}.aNumberList`,
+    ),
+    aBoolList: expectScalarList<boolean>(
+      record["aBoolList"],
+      "boolean",
+      `${label}.aBoolList`,
+    ),
   };
 }
 
@@ -485,6 +517,17 @@ const DEGENERACY_GUARD_ACTIONS = [
   "index-not-oob",
   "regex-eq-true",
   "regex-final-newline",
+  // Number and boolean list elements (conformance/README.md, "Number and boolean list
+  // elements"): the positional read keeps the element's BSON type, so `true` is not `1` and a
+  // null element is a value under negation. The two cross-type probes are what a literal cast to
+  // the element's type over-grants; each carries an `aNumber == 5` branch, so neither oracle is
+  // empty.
+  "index-number-list",
+  "index-number-list-not-eq",
+  "index-bool-list",
+  "index-bool-list-not-eq",
+  "index-bool-list-vs-number",
+  "index-number-list-vs-bool",
 ] as const;
 
 /**
@@ -599,6 +642,8 @@ interface AdversarialResourceDocument {
   tags: Tag[];
   categories: AdversarialCategory[];
   parent: AdversarialParent | null;
+  aNumberList: (number | null)[];
+  aBoolList: (boolean | null)[];
 }
 
 const tagSchema = new Schema<Tag>(
@@ -665,6 +710,15 @@ const resourceSchema = new Schema<AdversarialResourceDocument>(
     tags: { type: [tagSchema], default: [] },
     categories: { type: [categorySchema], default: [] },
     parent: { type: parentSchema, default: null },
+    // Native TYPED arrays, which is what an application would declare, and deliberately so:
+    // Mongoose casts the literal of an `$expr` comparison to the schema type of the path on the
+    // other side, so `[Boolean]` is what gives it the chance to turn the cross-type probes' `1`
+    // into `true`. It does not for `$arrayElemAt`, whose operand is an array rather than a path,
+    // and the two probes prove that against the filter Mongoose actually sends: spelling index 0
+    // as `$first`, which it does cast, over-grants b4 and c1. Both casters keep a null element
+    // null.
+    aNumberList: { type: [Number], default: [] },
+    aBoolList: { type: [Boolean], default: [] },
   },
   { id: false },
 );
@@ -792,6 +846,10 @@ function asCheckResource(seed: Seed): Resource {
     // both conventions and the field-to-field probe has two explicit nulls to compare.
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
+    // Verbatim, null elements included: a null element is a value CEL compares (`null == 2` is
+    // false, its negation true), and the list itself is never absent from a seed.
+    aNumberList: seed.aNumberList,
+    aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     categories: seed.subCategoryNames.map((name) => ({
@@ -876,6 +934,8 @@ beforeAll(async () => {
           ],
         })),
         parent: storedParent(seed),
+        aNumberList: seed.aNumberList,
+        aBoolList: seed.aBoolList,
       };
     }),
   );
@@ -978,10 +1038,10 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(295);
+    expect(MANIFEST_ACTIONS.size).toBe(301);
     expect(unsupportedCount).toBe(90);
     expect(supportedExpectedCount).toBe(4);
-    expect(ORACLE_ACTIONS).toHaveLength(196);
+    expect(ORACLE_ACTIONS).toHaveLength(202);
     expect(THROWING_ACTIONS).toHaveLength(97);
     expect(misclassified).toEqual([]);
   });
@@ -1308,6 +1368,30 @@ describe("adversarial conformance corpus", () => {
         ]),
       ),
     );
+  });
+
+  // The list actions read an element's BSON type, and the stored document is what the schema's
+  // caster produced from the seed, not the seed. A caster that turned a null element into false or
+  // 0 would leave the filter reading a list check() was never sent — check() gets the corpus value
+  // verbatim. Read the lists back and compare them with the corpus, element for element.
+  test("the seeded scalar lists match the corpus verbatim, null elements included", async () => {
+    const stored = await AdversarialResource.find(
+      {},
+      { resourceId: 1, aNumberList: 1, aBoolList: 1, _id: 0 },
+    ).lean();
+    expect(
+      Object.fromEntries(
+        stored.map((doc) => [doc.resourceId, [doc.aNumberList, doc.aBoolList]]),
+      ),
+    ).toEqual(
+      Object.fromEntries(
+        SEEDS.map((seed) => [seed.id, [seed.aNumberList, seed.aBoolList]]),
+      ),
+    );
+    // Guard the guard: a null element is what a caster is likeliest to rewrite, so the comparison
+    // above only means something while the corpus still carries one in each list.
+    expect(SEEDS.some((seed) => seed.aNumberList.includes(null))).toBe(true);
+    expect(SEEDS.some((seed) => seed.aBoolList.includes(null))).toBe(true);
   });
 
   test("oracle is not degenerate", async () => {
