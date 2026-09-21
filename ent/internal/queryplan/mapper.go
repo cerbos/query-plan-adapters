@@ -129,6 +129,8 @@ const (
 	// operand types, so without a declaration the shape fails closed rather than emitting a
 	// numeric `+` that MySQL silently answers with 0 (cerbos/query-plan-adapters#391).
 	ValueString
+	// ValueNumber declares a numeric column, preventing SQL coercion in string operators.
+	ValueNumber
 )
 
 // NullConvention declares, for one attribute, that its column can be SQL NULL and how the caller

@@ -25,48 +25,17 @@ import {
 import type { ActionsFile } from "./corpus";
 
 /**
- * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
- * adapter emits. Offline — no Cerbos sidecar, no database, no generated Prisma client.
- *
- * A per-adapter suite used to braid four assertions into every test. Three of them are somebody
- * else's job now, and this file makes only the fourth:
- *
- * | assertion | who owns it |
- * | --- | --- |
- * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
- * | the rows a filter returns | `adversarial.test.ts`, against a real store with `check()` as the oracle |
- * | **the filter this adapter emits for a plan** | **here** |
- *
- * **The plans are read, not written.** A hand-built plan is a *belief* about what the planner
- * emits, and this repository keeps golden fixtures because that belief has been wrong before: a
- * planner change used to fail fixture regeneration and silently leave every adapter's hand-written
- * plans describing a wire contract that no longer existed. Sourcing from fixtures inverts that —
- * the drift check now protects the plans this file asserts against. See
- * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
- *
- * **What a pinned filter buys over the harness.** The harness proves the filter returns the right
- * rows *against the 22 rows it seeds*. Two different filters can agree on all of them and
- * disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
- * there and shows up here as a diff a reviewer reads. It is also the only place a
- * `nullAttributeRepresentation` boundary, a timestamp literal, or a mapping the corpus cannot
- * express (`subqueryFilter`) can be pinned at all.
- *
- * **Adding a corpus action fails this file.** Every wire fixture must be classified here exactly
- * once — expected filter, expected plan kind, or expected throw — and the guard at the bottom is
- * what makes a new action land as a failure rather than as silence.
+ * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
+ * and caller options that the shared corpus cannot vary. The adversarial suite separately
+ * executes filters against a store and compares them with the PDP oracle.
+ * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
  */
 
 const actionsFile: ActionsFile = JSON.parse(
   fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8")
 );
 
-/**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
- * asserting it here as well is what lets the completeness guard below be total, and it costs a
- * millisecond rather than a container.
- */
+// Refusal messages come from the same classification ledger as the live harness.
 const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
   actionsFile,
   "prisma"
@@ -90,7 +59,7 @@ function translate(
 }
 
 /**
- * The plan kind for the two corpus actions the planner resolves without a condition.
+ * Plan kinds for actions the planner resolves without a condition.
  *
  * `p-has` is `knownDivergences` for every adapter — the planner folds `has(unknown attr)` to
  * ALWAYS_ALLOWED, so the harness cannot compare it against the oracle. Translation is still
@@ -102,6 +71,11 @@ const EXPECTED_KINDS: Record<
 > = {
   "in-empty": PlanKind.ALWAYS_DENIED,
   "p-has": PlanKind.ALWAYS_ALLOWED,
+  "pv-empty-all": PlanKind.ALWAYS_ALLOWED,
+  "pv-empty-exists": PlanKind.ALWAYS_DENIED,
+  "pv-empty-not-all": PlanKind.ALWAYS_DENIED,
+  "pv-empty-not-exists": PlanKind.ALWAYS_ALLOWED,
+  "pv-structs-missing": PlanKind.ALWAYS_DENIED,
 };
 
 /**
@@ -443,7 +417,7 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   // and it is bound as one, with no narrowing through a 64-bit integer on the way.
   "double-huge-gt": { aDouble: { gt: -10000000000000000000 } },
   "double-huge-lt": { aDouble: { lt: -10000000000000000000 } },
-  "double-negation": { NOT: { aBool: { equals: false } } },
+  "double-negation": { aBool: { equals: true } },
   "double-threshold": { AND: [{ aNumber: { gte: 1.5 } }, { aNumber: { gt: 1 } }] },
   "empty-string-eq": { aString: { equals: "" } },
   "exists-on-empty": { tags: { some: { name: { equals: "public" } } } },
@@ -451,11 +425,78 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     aString: { equals: { _ref: "aOptionalString", _container: "AdversarialResource" } },
   },
   "gt-bare": { aNumber: { gt: 1 } },
+  "hasint-map-null": {
+    AND: [
+      {
+        tags: {
+          some: {
+            OR: [
+              { name: "public" },
+              { name: null },
+            ],
+          },
+        },
+      },
+      { NOT: { tags: { some: { name: null } } } },
+    ],
+  },
+  "hasint-map-null-vf": {
+    AND: [
+      {
+        tags: {
+          some: {
+            OR: [
+              { name: "public" },
+              { name: null },
+            ],
+          },
+        },
+      },
+      { NOT: { tags: { some: { name: null } } } },
+    ],
+  },
+  "hasint-map-vf": {
+    AND: [
+      { tags: { some: { name: { in: ["public", "other"] } } } },
+      { NOT: { tags: { some: { name: null } } } },
+    ],
+  },
+  "hasint-null-vf": {
+    OR: [{ tags: { some: { name: "public" } } }, { tags: { some: { name: null } } }],
+  },
   "hier-ancestor-cf": { scope: { startsWith: "dept.eng." } },
   "hier-ancestor-ff": { scope: { in: ["dept", "dept.eng"] } },
   "hier-descendent-cf": { scope: { in: ["dept", "dept.eng"] } },
   "hier-descendent-ff": { scope: { startsWith: "dept.eng." } },
-  "hier-list-id": { id: { equals: "f1" } },
+  "hier-list-id": {
+    OR: [
+      {
+        AND: [
+          { id: { equals: "f1" } },
+          {
+            OR: [
+              {
+                id: { equals: "" },
+              },
+              {
+                id: { not: "" },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        AND: [
+          {
+            id: { equals: "" },
+          },
+          {
+            id: { not: "" },
+          },
+        ],
+      },
+    ],
+  },
   "hier-meta-in": { scope: { in: ["50%", "50%.a_b"] } },
   "hier-overlaps-cf": {
     OR: [
@@ -469,6 +510,20 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { scope: { in: ["dept"] } },
       { scope: { equals: "dept.eng" } },
       { scope: { startsWith: "dept.eng." } },
+    ],
+  },
+  "hier-overlaps-list-prefix": {
+    AND: [
+      {
+        OR: [
+          {
+            scope: { equals: "" },
+          },
+          {
+            scope: { not: "" },
+          },
+        ],
+      },
     ],
   },
   "id-concat-vf": { id: { equals: "f1" } },
@@ -501,8 +556,62 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "in-null-elem-only-neg": { NOT: { aOptionalString: { equals: null } } },
   "in-null-elem-rel": { tags: { some: { name: null } } },
   "in-null-elem-rel-neg": { NOT: { tags: { some: { name: null } } } },
+  "in-numbers": {
+    aNumber: {
+      in: [2, 3, 5],
+    },
+  },
   "in-single": { aString: { equals: "one" } },
+  "lambda-in-literal": { tags: { some: { name: { in: ["public", "other"] } } } },
+  "lambda-in-literal-neg": {
+    NOT: { tags: { some: { name: { in: ["public", "other"] } } } },
+  },
   "lambda-in-principal": { tags: { some: { name: { in: ["public", "special"] } } } },
+  "lambda-ternary": {
+    OR: [
+      {
+        AND: [
+          { aBool: { equals: true } },
+          {
+            tags: {
+              some: {
+                OR: [
+                  { name: { equals: "public" } },
+                  {
+                    AND: [
+                      { name: { equals: "public" } },
+                      { NOT: { name: { equals: "public" } } },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      {
+        AND: [
+          { aBool: { equals: false } },
+          {
+            tags: {
+              some: {
+                OR: [
+                  { NOT: { name: { equals: "public" } } },
+                  {
+                    AND: [
+                      { name: { equals: "public" } },
+                      { NOT: { name: { equals: "public" } } },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
+    ],
+  },
   "le-bare": { aNumber: { lte: 2 } },
   "like-bracket": { aString: { startsWith: "[SEC]" } },
   "macro-depth3-all": {
@@ -627,6 +736,36 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   // and it is the same wire shape a DENY-composed `nand` rule produces — byte-identical
   // `filter.condition` JSON, which is why the DENY spelling ported as a delete.
   "not-and": { NOT: { AND: [{ aBool: { equals: true } }, { aString: { not: "one" } }] } },
+  "not-concat-unsolvable": {
+    NOT: {
+      AND: [
+        {
+          aOptionalString: {
+            equals: "nope",
+          },
+        },
+        {
+          aOptionalString: {
+            not: "nope",
+          },
+        },
+      ],
+    },
+  },
+  "not-concat-unsolvable-ne": {
+    OR: [
+      {
+        aOptionalString: {
+          equals: "nope",
+        },
+      },
+      {
+        aOptionalString: {
+          not: "nope",
+        },
+      },
+    ],
+  },
   "not-empty": { NOT: { tags: { none: {} } } },
   "not-exists": {
     AND: [
@@ -635,7 +774,55 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     ],
   },
   "not-gt": { NOT: { aNumber: { gt: 1 } } },
+  "not-hasint-empty-chain": {
+    AND: [
+      { categories: { some: {} } },
+      {
+        NOT: {
+          categories: {
+            some: {
+              subCategories: {
+                some: {
+                  name: {
+                    in: [],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+  },
   "not-lt": { NOT: { aNumber: { lt: 2 } } },
+  "not-nan-ord-le": {
+    OR: [
+      {
+        AND: [
+          { aBool: { equals: true } },
+          {
+    OR: [
+      { aBool: { equals: true } },
+      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
+    ],
+  },
+        ],
+      },
+      {
+        AND: [
+          { aBool: { equals: false } },
+          {
+            OR: [
+              {
+                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
+              },
+            ],
+          },
+        ],
+      },
+      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
+    ],
+  },
   "null-eq": { aOptionalString: { equals: null } },
   "null-eq-missing": { aOptionalString: { equals: null } },
   "null-ne": { aOptionalString: { not: null } },
@@ -819,17 +1006,25 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     ],
   },
   "p-not-ternary-null": {
-    NOT: {
-      OR: [
-        { AND: [{ aOptionalString: { not: "x" } }, { aNumber: { gt: 1 } }] },
-        {
-          AND: [
-            { aOptionalString: { not: "x" } },
-            { NOT: { aOptionalString: { not: "x" } } },
-          ],
-        },
-      ],
-    },
+    OR: [
+      {
+        AND: [
+          { aOptionalString: { not: "x" } },
+          {
+            aNumber: {
+              lte: 1,
+            },
+          },
+        ],
+      },
+      { NOT: { aOptionalString: { not: "x" } } },
+      {
+        AND: [
+          { aOptionalString: { not: "x" } },
+          { NOT: { aOptionalString: { not: "x" } } },
+        ],
+      },
+    ],
   },
   "p-struct": { aString: { equals: "one" } },
   "p-ternary-in-exists": {
@@ -982,6 +1177,139 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       },
     ],
   },
+  "pv-in": {
+    aOptionalString: {
+      in: [
+        "set",
+        "same",
+        "",
+        "%_o",
+        "X",
+        "Y",
+        "MIRROR",
+        "filler-1",
+        "filler-2",
+        "filler-3",
+        "filler-4",
+      ],
+    },
+  },
+  "pv-in-unrolled": {
+    aOptionalString: {
+      in: ["set", "", "%_o"],
+    },
+  },
+  "pv-not-all": {
+    OR: [
+      {
+        NOT: { aOptionalString: { equals: "set" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "same" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "%_o" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "X" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "Y" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "MIRROR" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-1" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-2" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-3" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-4" } },
+      },
+    ],
+  },
+  "pv-not-exists": {
+    AND: [
+      {
+        NOT: { aOptionalString: { equals: "set" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "same" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "%_o" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "X" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "Y" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "MIRROR" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-1" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-2" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-3" } },
+      },
+      {
+        NOT: { aOptionalString: { equals: "filler-4" } },
+      },
+    ],
+  },
+  "pv-shadow": {
+    OR: [
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+      {
+      tags: { some: { name: { equals: "public" } } },
+    },
+    ],
+  },
   "rel-bool-hop": { parent: { is: { aBool: { equals: true } } } },
   "rel-bool-hop2": { parent: { is: { inner: { is: { aBool: { equals: true } } } } } },
   "rel-contains-hop": { parent: { is: { aString: { contains: "done" } } } },
@@ -1023,7 +1351,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   },
   "rel-startswith-hop2": { parent: { is: { inner: { is: { aString: { startsWith: "100" } } } } } },
   "root-bare-bool": { aBool: { equals: true } },
+  "root-not-bool": { aBool: { equals: false } },
   "root-or": { OR: [{ aBool: { equals: true } }, { aNumber: { lt: 0 } }] },
+  "size-ge-one": { tags: { some: {} } },
   "ternary-bare": {
     OR: [
       { AND: [{ aBool: { equals: true } }, { aString: { equals: "one" } }] },
@@ -1049,12 +1379,20 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
     ],
   },
   "ternary-negated": {
-    NOT: {
-      OR: [
-        { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 1 } }] },
-        { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-      ],
-    },
+    OR: [
+      {
+        AND: [
+          { aBool: { equals: true } },
+          {
+            aNumber: {
+              lte: 1,
+            },
+          },
+        ],
+      },
+      { aBool: { equals: false } },
+      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
+    ],
   },
   "ternary-nested": {
     OR: [
@@ -1096,7 +1434,7 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
     ],
   },
-  "triple-negation": { NOT: { NOT: { aBool: { equals: false } } } },
+  "triple-negation": { aBool: { equals: false } },
   "ts-eq": { createdAt: { equals: "2024-06-01T00:00:00.000Z" } },
   "ts-eq-offset": { createdAt: { equals: "2024-06-01T00:00:00.000Z" } },
   "ts-ne": { createdAt: { not: "2024-06-01T00:00:00.000Z" } },
@@ -1197,6 +1535,16 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       },
     ],
   },
+  "wildcard-contains": {
+    aString: {
+      contains: "*?b",
+    },
+  },
+  "wildcard-endswith": {
+    aString: {
+      endsWith: "*?b",
+    },
+  },
 };
 
 describe("corpus shapes", () => {
@@ -1250,7 +1598,23 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 139, kinds: 2, throwing: 64 });
+    }).toEqual({ filters: 161, kinds: 7, throwing: 106 });
+  });
+});
+
+describe("declared scalar types", () => {
+  test("an undeclared type preserves the legacy mapper contract", () => {
+    expect(
+      translate("type-string-number", {
+        mapper: { "request.resource.attr.aString": { field: "aString" } },
+      }),
+    ).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aString: { equals: 0 } },
+    });
+    expect(() => translate("type-string-number")).toThrow(
+      "eq value type does not match mapped string field",
+    );
   });
 });
 
@@ -1406,6 +1770,26 @@ describe("relation subqueryFilter", () => {
 describe("the mapper contract", () => {
   // A mapper is caller-supplied, so these are caller errors rather than policy shapes: no corpus
   // action can produce them, because the corpus fixes one mapper per adapter.
+
+  test.each([undefined, true, false])(
+    "hierarchy segment nullability %s is respected",
+    (nullable) => {
+      const result = translate("hier-overlaps-list-prefix", {
+        mapper: { "request.resource.attr.scope": { field: "scope", nullable } },
+      });
+      expect(result).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters:
+          nullable === false
+            ? {}
+            : {
+                AND: [
+                  { OR: [{ scope: { equals: "" } }, { scope: { not: "" } }] },
+                ],
+              },
+      });
+    },
+  );
 
   test("a function mapper resolves a scalar reference", () => {
     expect(

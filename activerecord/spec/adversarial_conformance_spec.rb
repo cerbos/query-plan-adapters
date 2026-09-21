@@ -144,6 +144,8 @@ RSpec.describe "adversarial conformance" do
     # the wire the other way round; and the BELOW-cliff unroll of a principal collection, the
     # shape a principal holding three teams produces.
     %w[not-and not-contains vf-hasint pv-exists-unrolled] +
+    # Direct membership keeps a value list at both principal-list sizes (#411).
+    %w[pv-in pv-in-unrolled] +
     # CEL `%`, which is integer-only and so arrives under an int() cast. This adapter lowers
     # both, which is why the entry is here rather than among the probes below: ent, pgx and
     # spring-data all refuse the shape at the cast.
@@ -152,7 +154,17 @@ RSpec.describe "adversarial conformance" do
     # membership in a map literal (the planner folds it to its key list), and a double literal
     # beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and
     # sits in neither list; its sibling carries the group.
-    %w[string-size-gt0 in-map-keys double-huge-gt]).freeze
+    %w[string-size-gt0 in-map-keys double-huge-gt] +
+    %w[
+      wildcard-contains wildcard-endswith size-ge-one
+      in-numbers pv-shadow pv-not-exists
+      pv-not-all pv-exists-one root-not-bool
+      lambda-in-literal lambda-in-literal-neg lambda-ternary
+      in-var-var-omitted in-var-var-omitted-neg not-concat-unsolvable
+      not-concat-unsolvable-ne hier-overlaps-list-prefix not-hasint-empty-chain
+      not-nan-ord-le hasint-null-vf hasint-map-vf
+      hasint-map-null hasint-map-null-vf
+    ]).freeze
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
   # a non-degenerate oracle still proves that the PDP and the policy are live. Each one is
@@ -174,24 +186,26 @@ RSpec.describe "adversarial conformance" do
   LIVENESS_ONLY_PROBES = %w[
     cr-div-other-column cr-div-then-add index-scalar-list map-eq-list
     hier-empty-delim matches-alt
+    regex-digit regex-case regex-posix
+    regex-unanchored regex-dot regex-alternation
+    regex-grouped regex-brace regex-repetition
+    regex-optional-operators except-size except-eq
+    pv-structs pv-filter pv-map
+    div-by-division temporal-raw-eq eq-list
+    ne-list
   ].freeze
 
   describe "corpus" do
-    # This test is a control and not a formality. A new action in the corpus must not go past
-    # this adapter without a test. Increase these numbers only when you know why
-    # conformance/actions.json is larger.
+    # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(192)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(261)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(205)
-      # Every one of these carries a pinned message, so a throwing action that appears or
-      # disappears must be triaged here and cannot join the suite quietly.
-      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(20)
-      # The guard has one entry for each group of hostile shapes. A new group arrives with a
-      # new action, which the count above already stops. This number makes the second half of
-      # that decision explicit: name a representative for the new group here.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(65)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(274)
+      # Refusals must retain their pinned messages.
+      expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(55)
+      # Each new hostile group needs a non-degenerate representative.
+      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(90)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
@@ -225,6 +239,28 @@ RSpec.describe "adversarial conformance" do
         expect(ConformanceCorpus::ORACLE_ACTIONS).to include(action),
           "#{action}: in the degeneracy guard but this adapter does not compare it"
         expect_non_degenerate_oracle(action)
+      end
+    end
+
+    # These are deliberately degenerate: heterogeneous operands cannot allow, empty
+    # macros have CEL identity values, and scalar-vs-map inequality is always true.
+    it "pins the intentional empty and total oracles of the issue 414 probes" do
+      %w[
+        except-root pv-empty-exists pv-empty-not-all
+        pv-structs-null pv-structs-missing type-string-number
+        type-number-string type-columns type-size-bool
+        type-size-number type-hierarchy-number type-number-contains
+        type-needle-contains type-number-startswith type-needle-startswith
+        type-number-endswith type-needle-endswith eq-map
+        eq-map-null in-nested-list in-list-element
+        hasint-map-element
+      ].each do |action|
+        expect(AdversarialOracle.allowed_ids(action)).to be_empty, action
+      end
+      %w[
+        pv-empty-not-exists pv-empty-all ne-map
+      ].each do |action|
+        expect(AdversarialOracle.allowed_ids(action)).to eq(ConformanceCorpus::SEEDS.map { |seed| seed.fetch("id") }.sort), action
       end
     end
 

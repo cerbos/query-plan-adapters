@@ -71,9 +71,10 @@ final class LeafTranslator {
      * discriminate them.
      */
     boolean isExplicitNull(String cerbosVar, Scope scope) {
-        return scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar
-                && scalar.mapping() instanceof AttributeMapping.Field f
-                && f.nullAttributeRepresentation() == NullAttributeRepresentation.EXPLICIT;
+        if (!(scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar)) return false;
+        return scalar.mapping() instanceof AttributeMapping.Relation
+                || scalar.mapping() instanceof AttributeMapping.Field field
+                && field.nullAttributeRepresentation() == NullAttributeRepresentation.EXPLICIT;
     }
 
     /**
@@ -96,6 +97,18 @@ final class LeafTranslator {
                                jakarta.persistence.criteria.Expression<?> left,
                                jakarta.persistence.criteria.Expression<?> right,
                                boolean leftExplicit, boolean rightExplicit) {
+        if (!compatibleTypes(left.getJavaType(), right.getJavaType())) {
+            Predicate equality = leftExplicit && rightExplicit
+                    ? cb.and(cb.isNull(left), cb.isNull(right)) : cb.disjunction();
+            List<Predicate> missing = new ArrayList<>();
+            if (!leftExplicit) missing.add(cb.isNull(left));
+            if (!rightExplicit) missing.add(cb.isNull(right));
+            if (!missing.isEmpty()) {
+                equality = tri.baseUnlessUnknown(equality,
+                        () -> cb.or(missing.toArray(new Predicate[0])));
+            }
+            return "ne".equals(op) ? tri.not(equality) : equality;
+        }
         List<Predicate> present = new ArrayList<>();
         if (leftExplicit) {
             present.add(cb.isNotNull(left));
@@ -116,6 +129,18 @@ final class LeafTranslator {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     Predicate defaultLeaf(String op, Path<?> path, Object value) {
+        if (("contains".equals(op) || "startsWith".equals(op) || "endsWith".equals(op))
+                && (!String.class.equals(path.getJavaType()) || !(value instanceof String))) {
+            return tri.unknown();
+        }
+        if (ComparisonTranslator.COMPARISON_OPS.contains(op) && value != null
+                && !compatibleTypes(path.getJavaType(), value.getClass())) {
+            if ("eq".equals(op) || "ne".equals(op)) {
+                return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
+                        () -> cb.isNull(path));
+            }
+            return tri.unknown();
+        }
         // Fractional constants compare in double space: protoValueToJava yields Double only
         // for non-whole numbers, and Hibernate refuses to coerce e.g. 1.5 into an
         // Integer-typed path ("not a whole number") — but `intColumn >= 1.5` is legal CEL
@@ -140,4 +165,8 @@ final class LeafTranslator {
             default -> throw Refusals.unsupported("Unsupported operator: " + op);
         };
     }
+    static boolean compatibleTypes(Class<?> left, Class<?> right) {
+        return left.equals(right) || (Number.class.isAssignableFrom(left) && Number.class.isAssignableFrom(right));
+    }
+
 }

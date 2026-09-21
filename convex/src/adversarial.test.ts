@@ -42,6 +42,7 @@ interface StoredDocument {
   aOptionalString?: string;
   createdBy: string;
   createdAt?: string;
+  updatedAt?: string;
   scope?: string;
   owner: string | null;
   coOwner: string | null;
@@ -132,6 +133,8 @@ const MANIFEST_ACTIONS = new Set([
 // int()/double()), so they cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "pv-in",
+  "pv-in-unrolled",
   "vf-le",
   "like-percent",
   "all-on-empty",
@@ -218,6 +221,35 @@ const DEGENERACY_GUARD_ACTIONS = [
   "in-map-keys",
   "double-huge-gt",
   "hier-empty-delim",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "eq-list",
+  "hasint-map-null",
+  "hasint-map-null-vf",
+  "hasint-map-vf",
+  "hasint-null-vf",
+  "in-numbers",
+  "in-var-var-omitted",
+  "in-var-var-omitted-neg",
+  "lambda-in-literal",
+  "lambda-in-literal-neg",
+  "lambda-ternary",
+  "ne-list",
+  "not-concat-unsolvable",
+  "not-concat-unsolvable-ne",
+  "not-hasint-empty-chain",
+  "not-nan-ord-le",
+  "pv-exists-one",
+  "pv-filter",
+  "pv-map",
+  "pv-not-all",
+  "pv-not-exists",
+  "pv-shadow",
+  "regex-unanchored",
+  "root-not-bool",
+  "size-ge-one",
+  "temporal-raw-eq",
+  "wildcard-contains",
+  "wildcard-endswith",
 ] as const;
 
 /**
@@ -235,6 +267,21 @@ const DEGENERACY_LIVENESS_PROBES = [
   // `list` is not in the adapter's known-operator set, so the constructed hierarchy path is
   // refused during structural validation. It is the id-* group's only throwing member here.
   "hier-list-id",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "div-by-division",
+  "except-eq",
+  "except-size",
+  "hier-overlaps-list-prefix",
+  "pv-structs",
+  "regex-alternation",
+  "regex-brace",
+  "regex-case",
+  "regex-digit",
+  "regex-dot",
+  "regex-grouped",
+  "regex-optional-operators",
+  "regex-posix",
+  "regex-repetition",
 ] as const;
 
 // -- pushdown coverage (cerbos/query-plan-adapters#327) ------------------------------------------
@@ -291,7 +338,13 @@ const DB_DECIDED_DEFAULT = [
   "vf-le",
   "vf-lt",
   "vf-ne",
-];
+  "eq-list",
+  "in-numbers",
+  "ne-list",
+  "root-not-bool",
+  "type-number-string",
+  "type-string-number",
+].sort();
 
 /**
  * The actions `PUSHDOWN_MAPPER` moves into Convex's filter engine — the null-comparison family,
@@ -326,7 +379,14 @@ const DB_DECIDED_PUSHDOWN = [
 ].sort();
 
 /** `in-empty` folds to ALWAYS_DENIED, so no mapper can put it in either category. */
-const UNCONDITIONAL_ACTIONS = ["in-empty"];
+const UNCONDITIONAL_ACTIONS = [
+  "in-empty",
+  "pv-empty-all",
+  "pv-empty-exists",
+  "pv-empty-not-all",
+  "pv-empty-not-exists",
+  "pv-structs-missing",
+].sort();
 
 /**
  * Actions whose root `and` splits: part pushed to Convex's filter engine, the rest post-filtered.
@@ -486,6 +546,8 @@ function storedDocument(seed: Seed): StoredDocument {
   if (double !== null) document.aDouble = double;
   const timestamp = timestampFor(seed);
   if (timestamp !== null) document.createdAt = timestamp;
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) document.updatedAt = updatedAt;
   const scope = scopeFor(seed);
   if (scope !== null) document.scope = scope;
   if (seed.subCategoryNames.length > 0) {
@@ -510,18 +572,16 @@ function checkResource(seed: Seed): Resource {
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     obj: { inner: seed.aString },
-    tags: seed.tags.map(
-      (tag): Record<string, Value> =>
-        tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
+    tags: seed.tags.map((tag): Record<string, Value> =>
+      tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
     categories: seed.subCategoryNames.map((name) => ({
       name: "business",
       subCategories: [
         {
           name,
-          labels: labelsFor(seed).map(
-            (labelName): Record<string, Value> =>
-              labelName === null ? {} : { name: labelName },
+          labels: labelsFor(seed).map((labelName): Record<string, Value> =>
+            labelName === null ? {} : { name: labelName },
           ),
         },
       ],
@@ -534,6 +594,8 @@ function checkResource(seed: Seed): Resource {
   if (double !== null) attr["aDouble"] = double;
   const timestamp = timestampFor(seed);
   if (timestamp !== null) attr["createdAt"] = timestamp;
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) attr["updatedAt"] = updatedAt;
   const scope = scopeFor(seed);
   if (scope !== null) attr["scope"] = scope;
   if (seed.subCategoryNames.length > 0) {
@@ -659,11 +721,11 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(205);
-    expect(CONVEX_UNSUPPORTED).toHaveLength(3);
+    expect(allActions.size).toBe(274);
+    expect(CONVEX_UNSUPPORTED).toHaveLength(24);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(196);
-    expect(THROWING_ACTIONS).toHaveLength(7);
+    expect(ORACLE_ACTIONS).toHaveLength(244);
+    expect(THROWING_ACTIONS).toHaveLength(28);
     expect(misclassified).toEqual([]);
   });
 
@@ -785,21 +847,20 @@ describe("adversarial conformance corpus", () => {
       pushdownDb: pushdown.db,
       pushdownSplit: pushdown.split,
       pushdownPostCount: pushdown.post.length,
-      // The two mappers must differ ONLY where the pushdown leg re-executes, which is what makes
-      // skipping the other 180 actions there sound rather than a coverage hole.
+      // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 196,
+      total: 244,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
       // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 171,
+      defaultPostCount: 208,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 160,
+      pushdownPostCount: 197,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });
@@ -1016,4 +1077,86 @@ describe("adversarial conformance corpus", () => {
       await expectNonDegenerateOracle(action);
     }
   });
+  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
+  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
+  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
+  test.each([
+    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
+    {
+      action: "pv-empty-not-exists",
+      kind: PlanKind.ALWAYS_ALLOWED,
+      total: true,
+    },
+    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
+    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
+    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "pv-structs-missing",
+      kind: PlanKind.ALWAYS_DENIED,
+      total: false,
+    },
+    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "type-hierarchy-number",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
+    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
+  ])(
+    "$action preserves its intentional empty/total oracle and planner shape",
+    async ({ action, kind, total }) => {
+      const [plan, ids] = await Promise.all([
+        cerbos.planResources({
+          principal: seedsFile.principal,
+          resource: { kind: seedsFile.resourceKind },
+          action,
+        }),
+        oracleAllowedIds(action),
+      ]);
+      expect(plan.kind).toBe(kind);
+      expect(ids).toEqual(
+        total ? seedsFile.seeds.map((seed) => seed.id).sort() : [],
+      );
+    },
+  );
 });

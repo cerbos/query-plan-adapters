@@ -262,6 +262,8 @@ RENDERING_DIFFERS_ON_SQLALCHEMY_14 = (
     "f2f-startswith",
     "id-concat",
     "id-concat-vf",
+    "not-concat-unsolvable",
+    "not-concat-unsolvable-ne",
     "not-contains",
     "not-startswith",
     "p-lambda-f2f-like",
@@ -331,7 +333,7 @@ class TestCorpusShapes:
             "conditional": len(CONDITIONAL_ACTIONS),
             "unconditional": len(UNCONDITIONAL_ACTIONS),
             "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 183, "unconditional": 1, "throwing": 21}
+        } == {"conditional": 221, "unconditional": 3, "throwing": 50}
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two
@@ -377,7 +379,7 @@ class TestCorpusShapes:
         # must translate that faithfully — an unfiltered SELECT — and this is the assertion
         # that says the empty WHERE above belongs to that shape rather than to a translation
         # that quietly stopped emitting a filter.
-        assert UNCONDITIONAL_ACTIONS == ["p-has"]
+        assert UNCONDITIONAL_ACTIONS == ["p-has", "pv-empty-all", "pv-empty-not-exists"]
         assert "p-has" in ACTIONS_FILE.skipped_divergences(ADAPTER)
 
 

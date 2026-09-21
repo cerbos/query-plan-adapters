@@ -78,6 +78,8 @@ module AdversarialOracle
 
     created_at = ConformanceCorpus.created_at(seed)
     attr["createdAt"] = created_at unless created_at.nil?
+    updated_at = ConformanceCorpus.updated_at(seed)
+    attr["updatedAt"] = updated_at unless updated_at.nil?
 
     # mainCategory shows the category graph of the row as one nested object. The seed code
     # makes a maximum of one category for each row. A row without a category gets no attribute.

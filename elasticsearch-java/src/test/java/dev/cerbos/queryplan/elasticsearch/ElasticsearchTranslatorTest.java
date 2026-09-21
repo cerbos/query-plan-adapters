@@ -305,10 +305,9 @@ class ElasticsearchTranslatorTest {
         // classified cannot hide behind an actions.json that never named it.
         assertEquals(new TreeSet<>(Corpus.wireFixtureActions()), ACTIONS.manifestActions());
 
-        // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-        // shape gets dropped from an asset nobody reads end to end.
+        // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 88, "unconditional", 2, "throwing", 115),
+                Map.of("conditional", 108, "unconditional", 7, "throwing", 159),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -340,10 +339,11 @@ class ElasticsearchTranslatorTest {
         //
         //   `in-empty` is `R.attr.aString in []`, which the planner decides statically: nothing is
         //   a member of the empty list, so the plan is ALWAYS_DENIED and a caller runs no search.
-        assertEquals(List.of("in-empty", "p-has"), unconditionalActions());
-        assertEquals(List.of("p-has"), actionsOfKind("ALWAYS_ALLOWED"));
+        assertEquals(List.of("in-empty", "p-has", "pv-empty-all", "pv-empty-exists", "pv-empty-not-all",
+                "pv-empty-not-exists", "pv-structs-missing"), unconditionalActions());
+        assertEquals(List.of("p-has", "pv-empty-all", "pv-empty-not-exists"), actionsOfKind("ALWAYS_ALLOWED"));
         assertTrue(ACTIONS.skippedDivergences(Corpus.ADAPTER).contains("p-has"));
-        assertEquals(List.of("in-empty"), actionsOfKind("ALWAYS_DENIED"));
+        assertEquals(List.of("in-empty", "pv-empty-exists", "pv-empty-not-all", "pv-structs-missing"), actionsOfKind("ALWAYS_DENIED"));
     }
 
     /**
@@ -533,6 +533,16 @@ class ElasticsearchTranslatorTest {
          * reaches, named for the mechanism rather than for the message.
          */
         private final Map<String, String> sites = Map.ofEntries(
+                Map.entry("two-list difference", "except is not supported:"),
+                Map.entry("whole-list comparison", " against a list literal cannot be expressed:"),
+                Map.entry("list-valued member", "in with a list element cannot be expressed:"),
+                Map.entry("computed collection macro", "over a computed collection cannot be lowered"),
+                Map.entry("flat scalar collection macro", "Collection macros over flat scalar arrays"),
+                Map.entry("literal exists-one", "exists_one over a literal collection value"),
+                Map.entry("regex brace syntax", "matches regex has a brace"),
+                Map.entry("regex dialect syntax", "matches regex uses syntax outside"),
+                Map.entry("unanchored regex", "matches regex patterns must be fully anchored"),
+
                 // resolveLeafOperand's default: the operand slot holds a computed sub-expression —
                 // arithmetic, a cast, a ternary, an index, a projection, a count, a lambda. A term
                 // or range query compares a FIELD against a literal, and there is nowhere to
@@ -615,26 +625,35 @@ class ElasticsearchTranslatorTest {
             }
 
             assertEquals(new TreeMap<>(Map.ofEntries(
-                            Map.entry("computed leaf operand", 54),
-                            Map.entry("field-to-field", 15),
+                            Map.entry("unanchored regex", 1),
+                            Map.entry("regex dialect syntax", 4),
+                            Map.entry("regex brace syntax", 1),
+                            Map.entry("computed collection macro", 2),
+                            Map.entry("literal exists-one", 1),
+                            Map.entry("flat scalar collection macro", 2),
+                            Map.entry("list-valued member", 1),
+                            Map.entry("two-list difference", 3),
+                            Map.entry("whole-list comparison", 2),
+                            Map.entry("computed leaf operand", 64),
+                            Map.entry("field-to-field", 22),
                             Map.entry("explicit null", 8),
                             Map.entry("count threshold", 5),
                             Map.entry("constant receiver", 4),
                             Map.entry("negated exists over a collection", 4),
                             Map.entry("positive all over a collection", 4),
-                            Map.entry("count over an undeclared collection", 4),
+                            Map.entry("count over an undeclared collection", 6),
                             Map.entry("collection emptiness", 2),
-                            Map.entry("conditional value as a condition", 2),
+                            Map.entry("conditional value as a condition", 3),
                             Map.entry("exists_one", 2),
                             Map.entry("negated membership in a collection", 2),
                             Map.entry("sub-millisecond timestamp", 2),
-                            Map.entry("count over a computed collection", 1),
-                            Map.entry("hierarchy path built from a field", 1),
-                            Map.entry("negated hasIntersection over a collection", 1),
+                            Map.entry("count over a computed collection", 2),
+                            Map.entry("hierarchy path built from a field", 2),
+                            Map.entry("negated hasIntersection over a collection", 2),
                             Map.entry("null in a document array", 1),
-                            Map.entry("null in an intersection", 1),
+                            Map.entry("null in an intersection", 4),
                             Map.entry("empty hierarchy delimiter", 1),
-                            Map.entry("top-level regex alternation", 1))),
+                            Map.entry("top-level regex alternation", 2))),
                     counts);
             assertEquals(THROWING.size(),
                     counts.values().stream().mapToInt(Integer::intValue).sum());

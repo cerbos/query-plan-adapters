@@ -90,6 +90,31 @@ final class LeafTranslator {
         if (value == null) {
             return nullLeafQuery(normalizedOperator, field, variableFirst, whenTrue);
         }
+        ElasticsearchQueryPlanAdapter.ScalarType type = options.scalarTypes().get(field);
+        if (type != null && !options.operatorOverrides().containsKey(normalizedOperator)
+                && SCALAR_OPERAND_OPERATORS.contains(normalizedOperator)) {
+            boolean timestamp = operands.stream().anyMatch(operand ->
+                    operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                            && "timestamp".equals(operand.getExpression().getOperator()));
+            if (type == ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP && !timestamp) {
+                throw unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
+            }
+            boolean compatible = switch (type) {
+                case STRING, TIMESTAMP -> value instanceof String;
+                case NUMBER -> value instanceof Number;
+                case BOOLEAN -> value instanceof Boolean;
+            };
+            boolean stringOperator = Set.of("contains", "startsWith", "endsWith", "matches")
+                    .contains(normalizedOperator);
+            if (!compatible || stringOperator && type != ElasticsearchQueryPlanAdapter.ScalarType.STRING) {
+                if ("eq".equals(normalizedOperator) || "ne".equals(normalizedOperator)) {
+                    boolean matches = "ne".equals(normalizedOperator) == whenTrue;
+                    return matches ? Queries.exists(field) : Queries.matchNone();
+                }
+                // A type error is neither true nor false, including under negation.
+                return Queries.matchNone();
+            }
+        }
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
             rejectNullIntersection(values);
         }

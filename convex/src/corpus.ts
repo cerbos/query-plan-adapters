@@ -261,28 +261,24 @@ export function classifyActionsForAdapter(
     ...supportedExpected,
   ];
   const throwingActions: ThrowingAction[] = [
-    ...unsupported.map(
-      (entry): ThrowingAction => ({
-        action: entry.action,
-        reason: entry.reason,
-        message: requireMessage(
-          `adapterUnsupported.${adapter}.${entry.action}`,
-          entry.message,
-        ),
-      }),
-    ),
+    ...unsupported.map((entry): ThrowingAction => ({
+      action: entry.action,
+      reason: entry.reason,
+      message: requireMessage(
+        `adapterUnsupported.${adapter}.${entry.action}`,
+        entry.message,
+      ),
+    })),
     ...manifest.expectedUnsupported
       .filter((entry) => !supportedExpected.has(entry.action))
-      .map(
-        (entry): ThrowingAction => ({
-          action: entry.action,
-          reason: entry.shape,
-          message: requireMessage(
-            `expectedUnsupported.${entry.action}.messages.${adapter}`,
-            entry.messages[adapter],
-          ),
-        }),
-      ),
+      .map((entry): ThrowingAction => ({
+        action: entry.action,
+        reason: entry.shape,
+        message: requireMessage(
+          `expectedUnsupported.${entry.action}.messages.${adapter}`,
+          entry.messages[adapter],
+        ),
+      })),
   ];
 
   return {
@@ -353,6 +349,7 @@ export interface DerivedEntry {
   createdBy: string;
   aDouble: number | null;
   createdAt: string | null;
+  updatedAt: string | null;
   scope: string | null;
   labels: (string | null)[];
 }
@@ -384,6 +381,7 @@ const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
   "createdAt",
+  "updatedAt",
   "scope",
   "labels",
 ] as const;
@@ -407,18 +405,43 @@ const PRINCIPAL_ATTR_KEYS = [
   "context",
   "fewTeams",
   "manyTeams",
+  "zero",
+  "emptyTeams",
+  "manyStructs",
+  "nullableStructs",
+  "missingStructs",
 ] as const;
 
-/**
- * One principal attribute, checked against the two JSON shapes the corpus carries. A key-set guard
- * says nothing about a change inside a value and three of the four attributes are lists, so the
- * element type is asserted for the same reason the seed guard descends into `tags[]`.
- */
+/** Principal attributes have explicit value shapes, including absent versus null struct members. */
 function assertPrincipalAttrShape(label: string, value: unknown): void {
-  if (typeof value === "string") return;
-  if (isStringArray(value)) return;
+  const key = label.slice(label.lastIndexOf(".") + 1);
+  if (key === "context" && typeof value === "string") return;
+  if (key === "zero" && value === 0) return;
+  if (
+    ["allowedTags", "fewTeams", "manyTeams", "emptyTeams"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string")
+  )
+    return;
+  if (
+    ["manyStructs", "nullableStructs", "missingStructs"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+        return false;
+      if (key === "missingStructs") return Object.keys(entry).length === 0;
+      return (
+        Object.keys(entry).length === 1 &&
+        "name" in entry &&
+        (key === "nullableStructs"
+          ? entry.name === null
+          : typeof entry.name === "string")
+      );
+    })
+  )
+    return;
   throw new Error(
-    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`,
+    `${label} does not match its declared corpus principal shape`,
   );
 }
 
@@ -451,6 +474,7 @@ const isDerivedEntry = (value: unknown): value is DerivedEntry =>
   typeof value["createdBy"] === "string" &&
   (typeof value["aDouble"] === "number" || value["aDouble"] === null) &&
   (typeof value["createdAt"] === "string" || value["createdAt"] === null) &&
+  (typeof value["updatedAt"] === "string" || value["updatedAt"] === null) &&
   (typeof value["scope"] === "string" || value["scope"] === null) &&
   Array.isArray(value["labels"]) &&
   value["labels"].every((label) => label === null || typeof label === "string");
@@ -490,7 +514,11 @@ export function parseSeedsFile(value: unknown): SeedsFile {
   // `attr` is optional on the SDK's Principal type; the corpus always carries it, and the
   // assertion above is what proves it rather than this fallback.
   const attr = seedsFile.principal.attr ?? {};
-  assertKeys("seeds.json principal.attr", Object.keys(attr), PRINCIPAL_ATTR_KEYS);
+  assertKeys(
+    "seeds.json principal.attr",
+    Object.keys(attr),
+    PRINCIPAL_ATTR_KEYS,
+  );
   for (const [key, attrValue] of Object.entries(attr)) {
     assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, attrValue);
   }
@@ -572,7 +600,9 @@ function operandFromWire(
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt)),
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {
@@ -660,16 +690,7 @@ export function planFromWireFixture(
  */
 export interface FilterNode {
   op:
-    | "field"
-    | "eq"
-    | "neq"
-    | "lt"
-    | "lte"
-    | "gt"
-    | "gte"
-    | "and"
-    | "or"
-    | "not";
+    "field" | "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "and" | "or" | "not";
   args: unknown[];
 }
 

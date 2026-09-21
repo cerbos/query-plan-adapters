@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { describe, expect, test } from "@jest/globals";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 
 // The mapper the adversarial harness and the Convex backend both read, so the filters pinned here
 // describe a mapping that is actually executed against seeded documents somewhere.
@@ -35,68 +38,15 @@ import {
 import type { FilterNode, GoldenExpectation } from "./corpus";
 
 /**
- * Translator unit test: for every action in the shared `../conformance/` corpus, the filter this
- * adapter emits. Offline — no Cerbos sidecar, no Convex backend, no Docker.
- *
- * A per-adapter suite used to braid four assertions into every test. Three of them are somebody
- * else's job now, and this file makes only the fourth:
- *
- * | assertion | who owns it |
- * | --- | --- |
- * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
- * | the documents a filter returns | `adversarial.test.ts`, inside a real Convex backend with `check()` as the oracle |
- * | **the filter this adapter emits for a plan** | **here** |
- *
- * **The plans are read, not written.** A hand-built plan is a *belief* about what the planner
- * emits, and this repository keeps golden fixtures because that belief has been wrong before: a
- * planner change used to fail fixture regeneration and silently leave every adapter's hand-written
- * plans describing a wire contract that no longer existed. See
- * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
- *
- * **The expectations are data, not literals.** The filter this adapter is pinned to emit lives in
- * `golden/expectations.json`, a **golden expectation** file this adapter owns — never under
- * `conformance/`, where every adapter workflow triggers and one adapter re-pinning one filter would
- * re-run all the others. The file is regenerated with `npm run golden:update` and reviewed as a
- * diff, exactly like the wire fixtures it is asserted against. See
- * [ADR 0007](../../docs/adr/0007-adapters-share-data-not-code.md) and the "Golden expectations"
- * section of `conformance/README.md`.
- *
- * **What this adapter emits, and why the asset looks different from a SQL adapter's.** Every other
- * TypeScript adapter emits data — a filter object, or SQL text and its parameters. This one emits
- * a **function**, `(q) => Expression<boolean>`, plus an in-memory `postFilter` for everything
- * Convex's query engine has no operator for. There is no query text to pin, so what is recorded
- * is the call sequence that function makes against the `FilterBuilder` it is handed, together with
- * the **routing decision** — which half of the output answers the query. Convex's engine has no
- * string, collection, arithmetic or cast operators, so most of the corpus is decided by the
- * post-filter, and where the boundary falls is the single most consequential thing this translator
- * decides: an action that silently crossed it would still return the right documents (both halves
- * are supposed to) while changing what the database is asked to do.
- *
- * **What is deliberately NOT pinned here.** What the post-filter *decides*. It is a function of a
- * document, so the only assertion available is which documents it admits — and that is a row
- * comparison, which belongs in `adversarial.test.ts` where the PDP is the oracle. Pinning admitted
- * ids here would be a second, weaker copy of that suite with hand-written expectations in place of
- * an oracle.
- *
- * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here
- * exactly once — a golden expectation (a recorded filter, a routing decision, or an unconditional
- * plan kind) or a throw carrying the message `actions.json` pins — and the completeness guard
- * below is what makes a new action land as a failure rather than as silence.
+ * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
+ * and caller options that the shared corpus cannot vary. The adversarial suite separately
+ * executes filters against a store and compares them with the PDP oracle.
+ * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
  */
 
 const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
 
-/**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
- * asserting it here as well is what lets the completeness guard below be total, and it costs a
- * millisecond rather than a container.
- *
- * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset
- * too would create two places to change one string with nothing to say which is authoritative.
- */
+// Refusal messages come from the same classification ledger as the live harness.
 const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
   actionsFile,
   ADAPTER,
@@ -296,7 +246,9 @@ const RECORDED_ACTIONS = [...RECORDED.keys()];
 const byPath = (want: string): string[] =>
   RECORDED_ACTIONS.filter((action) => {
     const expectation = RECORDED.get(action)!.expectation;
-    return expectation.kind === PlanKind.CONDITIONAL && expectation.path === want;
+    return (
+      expectation.kind === PlanKind.CONDITIONAL && expectation.path === want
+    );
   });
 
 /** The actions Convex's own filter engine sees at all — `db` in full, `split` in part. */
@@ -357,7 +309,7 @@ describe("corpus shapes", () => {
       post: POST_ACTIONS.length,
       unconditional: UNCONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ pushed: 24, post: 172, unconditional: 2, throwing: 7 });
+    }).toEqual({ pushed: 30, post: 209, unconditional: 7, throwing: 28 });
   });
 });
 
@@ -459,8 +411,9 @@ describe("what the adapter asks Convex to do", () => {
         before: "post",
       });
     }
-    expect(PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)))
-      .toBe(true);
+    expect(
+      PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)),
+    ).toBe(true);
   });
 });
 
@@ -530,7 +483,8 @@ describe("mapper forms", () => {
    */
   test("an unmapped reference falls back to the plan path verbatim", () => {
     const { filter } = translate("cs-eq", { mapper: {} });
-    if (!filter) throw new Error("cs-eq emitted no filter under an empty mapper");
+    if (!filter)
+      throw new Error("cs-eq emitted no filter under an empty mapper");
     expect(recordFilter("cs-eq (empty mapper)", filter)).toEqual({
       op: "eq",
       args: [{ op: "field", args: ["request.resource.attr.aString"] }, "one"],
@@ -581,9 +535,7 @@ describe("nullAttributeRepresentation", () => {
       const node = operand as Record<string, unknown>;
       if ("value" in node) {
         const value = node["value"];
-        return (
-          value === null || (Array.isArray(value) && value.includes(null))
-        );
+        return value === null || (Array.isArray(value) && value.includes(null));
       }
       const operands = node["operands"];
       return Array.isArray(operands) && operands.some(carriesNull);
@@ -778,12 +730,20 @@ describe("shapes the corpus does not reach yet", () => {
 
     test("an empty collection keeps CEL's identity elements", () => {
       expect(
-        macroPostFilter("exists", [], compare("eq", { name: "t" }))({
+        macroPostFilter(
+          "exists",
+          [],
+          compare("eq", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(false);
       expect(
-        macroPostFilter("all", [], compare("ne", { name: "t" }))({
+        macroPostFilter(
+          "all",
+          [],
+          compare("ne", { name: "t" }),
+        )({
           aString: "alpha",
         }),
       ).toBe(true);

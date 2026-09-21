@@ -180,6 +180,7 @@ const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
   "createdAt",
+  "updatedAt",
   "scope",
   "labels",
 ] as const;
@@ -203,6 +204,11 @@ const PRINCIPAL_ATTR_KEYS = [
   "context",
   "fewTeams",
   "manyTeams",
+  "zero",
+  "emptyTeams",
+  "manyStructs",
+  "nullableStructs",
+  "missingStructs",
 ] as const;
 
 /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
@@ -210,6 +216,7 @@ interface DerivedEntry {
   createdBy: string;
   aDouble: number | null;
   createdAt: string | null;
+  updatedAt: string | null;
   scope: string | null;
   labels: (string | null)[];
 }
@@ -243,19 +250,21 @@ function assertKeys(
   }
 }
 
-/**
- * One principal attribute, checked against the two JSON shapes the corpus carries. A key-set guard
- * says nothing about a change inside a value and three of the four attributes are lists, so the
- * element type is asserted for the same reason the seed guard descends into `tags[]`.
- */
+/** Principal attributes have explicit value shapes, including absent versus null struct members. */
 function assertPrincipalAttrShape(label: string, value: unknown): void {
-  if (typeof value === "string") return;
-  if (Array.isArray(value) && value.every((el) => typeof el === "string")) {
-    return;
-  }
-  throw new Error(
-    `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`
-  );
+  const key = label.slice(label.lastIndexOf(".") + 1);
+  if (key === "context" && typeof value === "string") return;
+  if (key === "zero" && value === 0) return;
+  if (["allowedTags", "fewTeams", "manyTeams", "emptyTeams"].includes(key)
+      && Array.isArray(value) && value.every((entry) => typeof entry === "string")) return;
+  if (["manyStructs", "nullableStructs", "missingStructs"].includes(key)
+      && Array.isArray(value) && value.every((entry: unknown) => {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+        if (key === "missingStructs") return Object.keys(entry).length === 0;
+        return Object.keys(entry).length === 1 && "name" in entry
+          && (key === "nullableStructs" ? entry.name === null : typeof entry.name === "string");
+      })) return;
+  throw new Error(`${label} does not match its declared corpus principal shape`);
 }
 
 const seedsFile: SeedsFile = JSON.parse(
@@ -367,6 +376,8 @@ const MANIFEST_ACTIONS = new Set([
 // anti-vacuity test instead — see "dropping the untranslatable half over-grants" below.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "pv-in",
+  "pv-in-unrolled",
   "vf-le",
   // Prisma escapes no LIKE metacharacter at all, so every needle-carrying shape in that group is
   // a liveness probe below. `[` is the one metacharacter it can leave alone — it is literal on
@@ -430,6 +441,27 @@ const DEGENERACY_GUARD_ACTIONS = [
   // in neither list; its sibling below carries the group.
   "in-map-keys",
   "double-huge-gt",
+  // Issue #414: each new non-degenerate shape guards its classified side.
+  "wildcard-contains",
+  "wildcard-endswith",
+  "size-ge-one",
+  "in-numbers",
+  "pv-shadow",
+  "pv-not-exists",
+  "pv-not-all",
+  "root-not-bool",
+  "lambda-in-literal",
+  "lambda-in-literal-neg",
+  "lambda-ternary",
+  "not-concat-unsolvable",
+  "not-concat-unsolvable-ne",
+  "hier-overlaps-list-prefix",
+  "not-hasint-empty-chain",
+  "not-nan-ord-le",
+  "hasint-null-vf",
+  "hasint-map-vf",
+  "hasint-map-null",
+  "hasint-map-null-vf",
 ] as const;
 
 /**
@@ -476,6 +508,29 @@ const DEGENERACY_LIVENESS_PROBES = [
   "arith-mod",
   "index-scalar-list",
   "map-eq-list",
+  // Issue #414: each new non-degenerate shape guards its classified side.
+  "regex-digit",
+  "regex-case",
+  "regex-posix",
+  "regex-unanchored",
+  "regex-dot",
+  "regex-alternation",
+  "regex-grouped",
+  "regex-brace",
+  "regex-repetition",
+  "regex-optional-operators",
+  "except-size",
+  "except-eq",
+  "pv-structs",
+  "pv-exists-one",
+  "pv-filter",
+  "pv-map",
+  "in-var-var-omitted",
+  "in-var-var-omitted-neg",
+  "div-by-division",
+  "temporal-raw-eq",
+  "eq-list",
+  "ne-list",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -623,6 +678,7 @@ beforeAll(async () => {
         createdBy: isoFor(seed),
         scope: scopeFor(seed),
         createdAt: timestampFor(seed),
+        updatedAt: derivedFor(seed).updatedAt,
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
@@ -717,6 +773,10 @@ function asCheckResource(seed: Seed): Resource {
   const scope = scopeFor(seed);
   if (scope !== null) {
     attr["scope"] = scope;
+  }
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) {
+    attr["updatedAt"] = updatedAt;
   }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
@@ -936,7 +996,45 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(classify).toThrow(/pins no throw message/);
   });
 
-  test("manifest assigns all 146 policy actions exactly one Prisma outcome", () => {
+  test("intentional empty and total issue 414 oracles retain their identities", async () => {
+    for (const action of [
+      "except-root",
+      "pv-empty-exists",
+      "pv-empty-not-all",
+      "pv-structs-null",
+      "pv-structs-missing",
+      "type-string-number",
+      "type-number-string",
+      "type-columns",
+      "type-size-bool",
+      "type-size-number",
+      "type-hierarchy-number",
+      "type-number-contains",
+      "type-needle-contains",
+      "type-number-startswith",
+      "type-needle-startswith",
+      "type-number-endswith",
+      "type-needle-endswith",
+      "eq-map",
+      "eq-map-null",
+      "in-nested-list",
+      "in-list-element",
+      "hasint-map-element"
+    ]) {
+      const ids = await oracleAllowedIds(action);
+      expect(ids).toEqual([]);
+    }
+    for (const action of [
+      "pv-empty-not-exists",
+      "pv-empty-all",
+      "ne-map"
+    ]) {
+      const ids = await oracleAllowedIds(action);
+      expect(ids).toEqual(SEEDS.map((seed) => seed.id).sort());
+    }
+  });
+
+  test("manifest assigns all 274 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -952,10 +1050,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(205);
+    expect(MANIFEST_ACTIONS.size).toBe(274);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(64);
+    expect(THROWING_ACTIONS).toHaveLength(106);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

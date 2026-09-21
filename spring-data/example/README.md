@@ -155,6 +155,9 @@ it cannot reach the published jar. `run.sh` asserts that rather than leaving it 
 
 Prerequisites: Docker, curl, jq, Gradle 8.x, and JDK 17+.
 
+Both example programs use the shared Cerbos client with a 30-second deadline per PDP call.
+A stalled RPC fails instead of hanging the application or smoke test.
+
 `CERBOS_HOST` has **no default**. Cerbos's own 3592/3593 are the ports every adapter's
 `cerbos run` test sidecar binds, so a default would not fail on a mistake — it would quietly plan
 against the wrong policy suite. This example's PDP is published on 23592/23593 instead, and the
@@ -336,10 +339,11 @@ local filtering. The smoke harness therefore verifies both ends of every success
    `planResources.input.resource.kind`, `planResources.input.actions`, and a non-null
    `planResources.output.filter.kind`.
 
-Each HTTP assertion checks its own audit delta, so repeated actions cannot hide a missing or
-duplicate call. The final 42-entry resource/action multiset is a second summary check, and the
-observed resource-kind set must be exactly the three intended kinds. Readiness uses an
-unmapped route and creates no PDP traffic; after the rejected pagination/filter requests, a valid
+Each authorization-bearing HTTP assertion checks its own audit delta, so repeated actions
+cannot hide a missing or duplicate call. It also records its expected resource/action pair;
+the final audit check compares their complete multiset with the observed calls. The observed
+resource-kind set must be exactly the three intended kinds. Readiness uses an unmapped route
+and creates no PDP traffic; after the rejected pagination/filter requests, a valid
 `audit-sentinel` request acts as an audit flush barrier and the complete delta must contain only
 that sentinel.
 

@@ -99,6 +99,7 @@ module Cerbos
         # node, and that same node goes through the translation without a change. Thus
         # identity is the correct comparison here.
         @column_types = {}.compare_by_identity
+        @timestamp_operands = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
@@ -561,6 +562,10 @@ module Cerbos
       # the convention the other side keeps propagating UNKNOWN for its NULL, and a null-safe
       # operator would match the two NULLs and give too many rows.
       def definite_equality(operator, left, right, left_explicit, right_explicit)
+        if different_scalar_types?(left, right)
+          return heterogeneous_comparison(operator, left, right, left_explicit, right_explicit)
+        end
+
         present = []
         present << ArelSupport.comparison("ne", left, nil) if left_explicit
         present << ArelSupport.comparison("ne", right, nil) if right_explicit
@@ -630,6 +635,11 @@ module Cerbos
 
         reject_collection(operator, left)
         reject_collection(operator, right)
+        if [left, right].all? { |value| TEMPORAL_COLUMN_TYPES.include?(column_type(value)) } &&
+            [left, right].any? { |value| !@timestamp_operands[value] }
+          raise UnsupportedOperatorError,
+            "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()"
+        end
 
         # Both sides are constants. The translator calculates the result here. It does not
         # make SQL that is always true or always false.
@@ -643,13 +653,53 @@ module Cerbos
           return ArelSupport.comparison(operator, right, nil)
         end
 
+        if different_scalar_types?(left, right)
+          return heterogeneous_comparison(operator, left, right, false, false)
+        end
+
         ArelSupport.comparison(operator, left, right)
       end
 
-      # CEL obeys IEEE-754. NaN is not equal to any value, and it is not equal to itself. It
-      # also has no order against any value. PostgreSQL is different, because it puts NaN
-      # above all the other doubles. Thus the translator calculates these comparisons here
-      # and does not put them into the SQL of the dialect.
+      def scalar_kind(value)
+        case value
+        when ::String then :string
+        when Numeric then :number
+        when true, false then :boolean
+        else
+          case column_type(value)
+          when :string, :text then :string
+          when :integer, :bigint, :float, :decimal then :number
+          when :boolean then :boolean
+          end
+        end
+      end
+
+      def different_scalar_types?(left, right)
+        left_kind, right_kind = scalar_kind(left), scalar_kind(right)
+        left_kind && right_kind && left_kind != right_kind
+      end
+
+      # SQL affinity can equate a string such as "0" with the number zero. CEL cannot.
+      # Explicit nulls remain comparable values; an omitted operand stays an error.
+      def heterogeneous_comparison(operator, left, right, left_explicit, right_explicit)
+        return nil unless %w[eq ne].include?(operator)
+
+        equal = if left_explicit && right_explicit
+          ArelSupport.and_node([ArelSupport.comparison("eq", left, nil), ArelSupport.comparison("eq", right, nil)])
+        else
+          false
+        end
+        result = (operator == "ne") ? ArelSupport.not_node(equal) : equal
+        missing = [[left, left_explicit], [right, right_explicit]]
+          .filter_map { |operand, explicit| ArelSupport.is_null(operand) if !explicit && ArelSupport.arel_node?(operand) }
+        return result if missing.empty?
+
+        ArelSupport.case_node([[ArelSupport.or_node(missing), nil]], else_value: result)
+      end
+
+      # NaN equality is false and inequality is true, but CEL ordering raises an error.
+      # Represent that error as SQL NULL so negation cannot turn it into an allow. PostgreSQL
+      # instead orders NaN above every finite number, so never bind NaN into the query.
       def compare_non_finite(operator, left, right)
         left_value = left.is_a?(Values::IEEEConstant) ? left.value : left
         right_value = right.is_a?(Values::IEEEConstant) ? right.value : right
@@ -657,7 +707,7 @@ module Cerbos
         nan_side = [left_value, right_value].find { |v| v.is_a?(Float) && v.nan? }
         if nan_side
           other = left_value.equal?(nan_side) ? right_value : left_value
-          result = (operator == "ne")
+          result = %w[lt le gt ge].include?(operator) ? nil : (operator == "ne")
 
           return result if other.is_a?(Numeric)
           if ArelSupport.arel_node?(other)
@@ -693,6 +743,11 @@ module Cerbos
       # --- membership -----------------------------------------------------------------
 
       def membership(left, right)
+        if left.is_a?(Array) || left.is_a?(Hash) ||
+            (right.is_a?(Array) && right.any? { |member| member.is_a?(Array) || member.is_a?(Hash) })
+          raise UnsupportedOperatorError,
+            "in requires scalar elements; SQL scalar membership cannot compare a list or map element"
+        end
         return relation_membership(right.scope, left) if right.is_a?(Values::Collection)
         return relation_membership(left.scope, right) if left.is_a?(Values::Collection)
 
@@ -708,14 +763,18 @@ module Cerbos
           if value.nil?
             ArelSupport.comparison("eq", member, nil)
           elsif ArelSupport.arel_node?(value)
-            null_equality(member, value)
+            explicit_null?(value) ? null_equality(member, value) : ArelSupport.comparison("eq", member, value)
           else
             ArelSupport.comparison("eq", member, value)
           end
 
         # A bare EXISTS has two values, so `!("x" in chain)` over an absent parent is TRUE and
         # gives back a row that the PDP denies (#315). The guard makes it NULL instead.
-        scope.guarded(scope.exists(condition))
+        result = scope.guarded(scope.exists(condition))
+        if ArelSupport.arel_node?(value) && !explicit_null?(value)
+          return ArelSupport.case_node([[ArelSupport.is_null(value), nil]], else_value: result)
+        end
+        result
       end
 
       def scalar_membership(needle, values)
@@ -989,6 +1048,8 @@ module Cerbos
         reject_collection(operator, receiver)
         reject_collection(operator, needle)
 
+        require_string_operand(operator, receiver)
+        require_string_operand(operator, needle)
         matcher.match(receiver, needle, **STRING_MATCHES.fetch(operator))
       end
 
@@ -1012,8 +1073,17 @@ module Cerbos
         when ::String
           target.length
         else
+          require_string_operand("size", target)
           dialect.char_length(target)
         end
+      end
+
+      def require_string_operand(operator, value)
+        type = column_type(value)
+        return if value.is_a?(::String) || (ArelSupport.arel_node?(value) && (type.nil? || %i[string text].include?(type)))
+
+        raise UnsupportedOperatorError,
+          "#{operator} requires a string operand, got #{type || describe(value)}"
       end
 
       def has_intersection(left, right)
@@ -1060,7 +1130,10 @@ module Cerbos
         end
 
         type = column_type(value)
-        return value if TEMPORAL_COLUMN_TYPES.include?(type)
+        if TEMPORAL_COLUMN_TYPES.include?(type)
+          @timestamp_operands[value] = true
+          return value
+        end
 
         # A comparison between a string column and a Time compares two different text
         # formats. ActiveRecord makes `2025-01-01 00:00:00`, but an RFC-3339 column holds
@@ -1189,11 +1262,18 @@ module Cerbos
       def overlaps(left_node, right_node)
         left, right = matching_hierarchies(left_node, right_node)
 
-        ArelSupport.or_node([
+        result = ArelSupport.or_node([
           as_predicate(hierarchy_equal(left, right)),
           as_predicate(ancestor_of(left, right)),
           as_predicate(ancestor_of(right, left))
         ])
+        # Every list segment is evaluated, even when a constant prefix decides overlap.
+        segments = [left, right].flat_map { |path| path.segments || [path.value] }
+        missing = segments.select { |segment| ArelSupport.arel_node?(segment) }
+          .map { |segment| ArelSupport.is_null(segment) }
+        return result if missing.empty?
+
+        ArelSupport.case_node([[ArelSupport.or_node(missing), nil]], else_value: result)
       end
 
       # --- helpers --------------------------------------------------------------------
@@ -1336,7 +1416,10 @@ module Cerbos
         end
 
         def element(scope)
-          scope.mapping&.member_field ? scope.member_column : Values::Collection.new(scope: scope)
+          return Values::Collection.new(scope: scope) unless scope.mapping&.member_field
+
+          # A scalar list contains null VALUES, unlike an absent field on a struct element.
+          translator.register_null_representation(scope.member_column, :explicit)
         end
 
         def resolve_mapping(mapping, owner_model, owner_table)

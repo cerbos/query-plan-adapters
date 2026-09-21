@@ -58,7 +58,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function expectRecord(
   value: unknown,
-  label: string
+  label: string,
 ): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new Error(`${label} must be an object`);
@@ -116,13 +116,13 @@ export function assertKeys(
   label: string,
   got: string[],
   want: readonly string[],
-  optional: readonly string[] = []
+  optional: readonly string[] = [],
 ): void {
   const allowed = new Set<string>([...want, ...optional]);
   for (const key of got) {
     if (!allowed.has(key)) {
       throw new Error(
-        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`
+        `${label} carries "${key}", which this harness does not consume: an unconsumed corpus field is dropped from the stored document and the check() oracle at once`,
       );
     }
   }
@@ -130,7 +130,7 @@ export function assertKeys(
   for (const key of want) {
     if (!present.has(key)) {
       throw new Error(
-        `${label} is missing "${key}", which this harness consumes`
+        `${label} is missing "${key}", which this harness consumes`,
       );
     }
   }
@@ -203,7 +203,7 @@ function parseMessages(value: unknown, label: string): Record<string, string> {
 
 function parseAdapterMap(
   value: unknown,
-  label: string
+  label: string,
 ): Record<string, AdapterEntry[]> {
   if (value === undefined) {
     return {};
@@ -215,7 +215,7 @@ function parseAdapterMap(
       throw new Error(`${label}.${adapter} must be an array`);
     }
     result[adapter] = entries.map((entry, index) =>
-      parseAdapterEntry(entry, `${label}.${adapter}[${index}]`)
+      parseAdapterEntry(entry, `${label}.${adapter}[${index}]`),
     );
   }
   return result;
@@ -237,26 +237,26 @@ export function parseActionsFile(value: unknown): ActionsFile {
     conformance: expectStringArray(record["conformance"], "conformance"),
     adapterUnsupported: parseAdapterMap(
       record["adapterUnsupported"],
-      "adapterUnsupported"
+      "adapterUnsupported",
     ),
     adapterSupportedExpected: parseAdapterMap(
       record["adapterSupportedExpected"],
-      "adapterSupportedExpected"
+      "adapterSupportedExpected",
     ),
     expectedUnsupported: expected.map((entry, index) => {
       const parsed = expectRecord(entry, `expectedUnsupported[${index}]`);
       return {
         action: expectString(
           parsed["action"],
-          `expectedUnsupported[${index}].action`
+          `expectedUnsupported[${index}].action`,
         ),
         shape: expectString(
           parsed["shape"],
-          `expectedUnsupported[${index}].shape`
+          `expectedUnsupported[${index}].shape`,
         ),
         messages: parseMessages(
           parsed["messages"],
-          `expectedUnsupported[${index}].messages`
+          `expectedUnsupported[${index}].messages`,
         ),
       };
     }),
@@ -268,15 +268,15 @@ export function parseActionsFile(value: unknown): ActionsFile {
       return {
         action: expectString(
           parsed["action"],
-          `nullRepresentationOmitted[${index}].action`
+          `nullRepresentationOmitted[${index}].action`,
         ),
         reason: expectString(
           parsed["reason"],
-          `nullRepresentationOmitted[${index}].reason`
+          `nullRepresentationOmitted[${index}].reason`,
         ),
         messages: parseMessages(
           parsed["messages"],
-          `nullRepresentationOmitted[${index}].messages`
+          `nullRepresentationOmitted[${index}].messages`,
         ),
       };
     }),
@@ -285,11 +285,11 @@ export function parseActionsFile(value: unknown): ActionsFile {
       return {
         action: expectString(
           parsed["action"],
-          `knownDivergences[${index}].action`
+          `knownDivergences[${index}].action`,
         ),
         adapters: expectStringArray(
           parsed["adapters"],
-          `knownDivergences[${index}].adapters`
+          `knownDivergences[${index}].adapters`,
         ),
       };
     }),
@@ -312,11 +312,11 @@ export interface ThrowingAction {
 /** The pinned message, or a failure — a throwing action without one asserts nothing. */
 export function requireMessage(
   label: string,
-  message: string | undefined
+  message: string | undefined,
 ): string {
   if (message === undefined || message === "") {
     throw new Error(
-      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`
+      `actions.json pins no throw message for ${label}: the throw suite would accept a failure for any reason`,
     );
   }
   return message;
@@ -340,16 +340,16 @@ export interface ActionClassification {
 
 export function classifyActionsForAdapter(
   manifest: ActionsFile,
-  adapter: string
+  adapter: string,
 ): ActionClassification {
   const unsupportedEntries = manifest.adapterUnsupported[adapter] ?? [];
   const unsupportedActions = new Set(
-    unsupportedEntries.map((entry) => entry.action)
+    unsupportedEntries.map((entry) => entry.action),
   );
   const supportedExpectedEntries =
     manifest.adapterSupportedExpected[adapter] ?? [];
   const supportedExpectedActions = new Set(
-    supportedExpectedEntries.map((entry) => entry.action)
+    supportedExpectedEntries.map((entry) => entry.action),
   );
   // `adapterSupportedExpected` PROMOTES an `expectedUnsupported` shape, so an entry naming
   // anything else subtracts a throw that was never declared — the action would silently leave the
@@ -357,11 +357,11 @@ export function classifyActionsForAdapter(
   // enforced here rather than restated by each suite that reads the classification.
   const promotedWithoutShape = [...supportedExpectedActions].filter(
     (action) =>
-      !manifest.expectedUnsupported.some((entry) => entry.action === action)
+      !manifest.expectedUnsupported.some((entry) => entry.action === action),
   );
   if (promotedWithoutShape.length > 0) {
     throw new Error(
-      `actions.json promotes ${promotedWithoutShape.join(", ")} in adapterSupportedExpected.${adapter}, but expectedUnsupported declares no such shape to promote`
+      `actions.json promotes ${promotedWithoutShape.join(", ")} in adapterSupportedExpected.${adapter}, but expectedUnsupported declares no such shape to promote`,
     );
   }
   const nullRepresentationOmitted = manifest.nullRepresentationOmitted.map(
@@ -370,9 +370,9 @@ export function classifyActionsForAdapter(
       reason: entry.reason,
       message: requireMessage(
         `nullRepresentationOmitted.${entry.action}.messages.${adapter}`,
-        entry.messages[adapter]
+        entry.messages[adapter],
       ),
-    })
+    }),
   );
 
   return {
@@ -384,39 +384,35 @@ export function classifyActionsForAdapter(
     ]),
     oracleActions: [
       ...manifest.conformance.filter(
-        (action) => !unsupportedActions.has(action)
+        (action) => !unsupportedActions.has(action),
       ),
       ...supportedExpectedActions,
     ].sort(),
     throwingActions: [
-      ...unsupportedEntries.map(
-        (entry): ThrowingAction => ({
-          action: entry.action,
-          reason: entry.reason,
-          message: requireMessage(
-            `adapterUnsupported.${adapter}.${entry.action}`,
-            entry.message
-          ),
-        })
-      ),
+      ...unsupportedEntries.map((entry): ThrowingAction => ({
+        action: entry.action,
+        reason: entry.reason,
+        message: requireMessage(
+          `adapterUnsupported.${adapter}.${entry.action}`,
+          entry.message,
+        ),
+      })),
       ...manifest.expectedUnsupported
         .filter((entry) => !supportedExpectedActions.has(entry.action))
-        .map(
-          (entry): ThrowingAction => ({
-            action: entry.action,
-            reason: entry.shape,
-            message: requireMessage(
-              `expectedUnsupported.${entry.action}.messages.${adapter}`,
-              entry.messages[adapter]
-            ),
-          })
-        ),
+        .map((entry): ThrowingAction => ({
+          action: entry.action,
+          reason: entry.shape,
+          message: requireMessage(
+            `expectedUnsupported.${entry.action}.messages.${adapter}`,
+            entry.messages[adapter],
+          ),
+        })),
     ].sort((left, right) => left.action.localeCompare(right.action)),
     nullRepresentationOmitted,
     divergenceActions: new Set(
       manifest.knownDivergences
         .filter((entry) => entry.adapters.includes(adapter))
-        .map((entry) => entry.action)
+        .map((entry) => entry.action),
     ),
     unsupportedCount: unsupportedEntries.length,
     supportedExpectedCount: supportedExpectedEntries.length,
@@ -454,12 +450,14 @@ interface WireFixture {
 
 function operandFromWire(
   node: WireOperand,
-  plannedAt: string
+  plannedAt: string,
 ): PlanExpressionOperand {
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, plannedAt))
+      node.expression.operands.map((child) =>
+        operandFromWire(child, plannedAt),
+      ),
     );
   }
   if (node.variable !== undefined) {
@@ -467,14 +465,14 @@ function operandFromWire(
   }
   if (!("value" in node)) {
     throw new Error(
-      `Wire fixture operand is neither an expression, a variable nor a value: ${JSON.stringify(node)}`
+      `Wire fixture operand is neither an expression, a variable nor a value: ${JSON.stringify(node)}`,
     );
   }
   // The one cast in this file. A fixture is JSON the PDP produced, so its leaves are already
   // exactly the JSON shapes `Value` admits — but `JSON.parse` cannot say so, and re-validating a
   // file the corpus workflow regenerates and diffs would assert nothing new.
   return new PlanExpressionValue(
-    (node.value === "__NOW_MINUS_24H__" ? plannedAt : node.value) as Value
+    (node.value === "__NOW_MINUS_24H__" ? plannedAt : node.value) as Value,
   );
 }
 
@@ -498,10 +496,10 @@ export function wireFixtureActions(): string[] {
  */
 export function planFromWireFixture(
   action: string,
-  plannedAt: string = PLANNED_AT
+  plannedAt: string = PLANNED_AT,
 ): PlanResourcesResponse {
   const fixture: WireFixture = JSON.parse(
-    fs.readFileSync(path.join(WIRE_FIXTURES_DIR, `${action}.json`), "utf8")
+    fs.readFileSync(path.join(WIRE_FIXTURES_DIR, `${action}.json`), "utf8"),
   );
   const base = {
     cerbosCallId: "",
@@ -513,7 +511,7 @@ export function planFromWireFixture(
     case PlanKind.CONDITIONAL:
       if (!fixture.filter.condition) {
         throw new Error(
-          `Wire fixture ${action} is conditional with no condition`
+          `Wire fixture ${action} is conditional with no condition`,
         );
       }
       return {
@@ -526,7 +524,7 @@ export function planFromWireFixture(
       return { ...base, kind: fixture.filter.kind };
     default:
       throw new Error(
-        `Wire fixture ${action} has an unrecognised filter kind ${fixture.filter.kind}`
+        `Wire fixture ${action} has an unrecognised filter kind ${fixture.filter.kind}`,
       );
   }
 }
@@ -567,8 +565,8 @@ export const MAPPER: Mapper = {
   // instead — against the `id-eq-const` wire fixture in `translator.test.ts`.
   "request.resource.id": { field: "resourceId" },
   "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "aString" },
-  "request.resource.attr.aNumber": { field: "aNumber" },
+  "request.resource.attr.aString": { field: "aString", valueType: "string" },
+  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
   "request.resource.attr.aDouble": { field: "aDouble", nullable: true },
   "request.resource.attr.aOptionalString": {
     field: "aOptionalString",
@@ -578,6 +576,12 @@ export const MAPPER: Mapper = {
   "request.resource.attr.scope": { field: "scope", nullable: true },
   "request.resource.attr.createdAt": {
     field: "createdAt",
+    valueType: "dateTime",
+    nullable: true,
+  },
+  "request.resource.attr.updatedAt": {
+    field: "updatedAt",
+    valueType: "dateTime",
     nullable: true,
   },
   "request.resource.attr.owner": { field: "aOptionalString" },

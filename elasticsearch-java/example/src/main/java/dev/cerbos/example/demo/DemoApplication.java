@@ -11,6 +11,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.CodeSource;
+import java.time.Duration;
 import java.util.Map;
 
 /**
@@ -36,6 +37,10 @@ import java.util.Map;
  * </ul>
  */
 public final class DemoApplication {
+
+    // Bound stalled PDP calls in this example and in real applications. Healthy calls finish
+    // in milliseconds; this generous deadline fails a stalled stream instead of hanging forever.
+    private static final Duration CERBOS_CALL_TIMEOUT = Duration.ofSeconds(30);
 
     /**
      * The real stdout, captured before {@link #main} redirects {@link System#out}.
@@ -89,7 +94,7 @@ public final class DemoApplication {
 
     private static CerbosBlockingClient cerbosClient(String host)
             throws CerbosClientBuilder.InvalidClientConfigurationException {
-        return new CerbosClientBuilder(host).withPlaintext().buildBlockingClient();
+        return new CerbosClientBuilder(host).withPlaintext().withTimeout(CERBOS_CALL_TIMEOUT).buildBlockingClient();
     }
 
     /**

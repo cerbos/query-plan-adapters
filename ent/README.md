@@ -135,9 +135,10 @@ Leaving an attribute undeclared keeps the historical rendering — so nothing ch
 that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
 it.
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+**Declare both sides of a field-to-field equality, or neither.** For operands with the same or
+undeclared scalar types, mixing conventions is rejected: the explicit-null side needs a definite
+answer for its NULL, while the omitted side needs UNKNOWN. Incompatible declared scalar types can
+be compared through their NULL states without comparing the stored values. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -152,8 +153,8 @@ assumed. The Spring Data adapter defines the reference semantics for this compat
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 186 reference conformance actions, on SQLite, PostgreSQL and MySQL |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (SQLite and MySQL store a boolean as 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself) (17 actions) |
+| Oracle-tested | 226 reference conformance actions, on SQLite, PostgreSQL and MySQL |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (SQLite and MySQL store a boolean as 1/0 and render `"1"` where CEL and PostgreSQL render `"true"`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except`, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (46 actions) |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbosent.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -165,9 +166,18 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
+**Behavior changes (#414).** NaN ordering preserves CEL errors under negation, and
+membership preserves the needle's per-attribute NULL convention even when the collection is
+empty. Declare numeric fields with `ValueNumber`, text fields with `ValueString`, and booleans
+with `ValueBool` to prevent database coercion in heterogeneous comparisons and string operations.
+Undeclared field types retain historical behavior; the plan carries no type information.
+Bare comparisons between declared temporal columns now fail closed because timestamp storage
+loses the original RFC 3339 spelling. Use `timestamp()` on both policy operands to compare instants.
+Two-list `except`, structured list operands and constructor expressions are refused at translation.
+
 **Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`, which was correct only when both columns really were numeric and silently wrong otherwise.
 
-The eleven fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
+Fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader
 predicate. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
@@ -235,7 +245,7 @@ reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
 | --- | --- |
 | SQLite | Proved — full corpus, text timestamps compared lexicographically |
 | PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
-| MySQL | Proved — full corpus, `DATETIME(6)` columns, binary collation |
+| MySQL | Proved — full corpus, `DATETIME(6)` columns, case- and accent-sensitive NO PAD collation |
 
 The three proved dialects are not the same test three times: SQLite stores instants as text and
 booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
@@ -244,7 +254,8 @@ booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` r
 DISTINCT FROM`, `<=>`) and different cast spellings (`real`, `double precision`, `double`).
 Running all three is what makes `WithDialect` a checked claim rather than an assertion.
 
-The MySQL schema pins a **binary collation** on every string column. MySQL's default
+The MySQL schema pins **`utf8mb4_0900_as_cs`**, a case- and accent-sensitive NO PAD
+collation, on every string column. MySQL's default
 `utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
 `unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
 
@@ -273,7 +284,7 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's error semantics. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0` — both satisfy `= 0` and no portable function reads the sign bit — so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is handled exactly: the planner ships the sign and the adapter applies it (`cr-div-neg-zero`). |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. See cerbos/query-plan-adapters#308. |
 
@@ -292,7 +303,8 @@ truncates toward zero where PostgreSQL and MySQL round (`cast-int-string`, `cast
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is
 controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite, relies on
-PostgreSQL's default deterministic collation, and pins `utf8mb4_bin` on every MySQL string column.
+PostgreSQL's default deterministic collation, and pins the case- and accent-sensitive NO PAD collation `utf8mb4_0900_as_cs` on every MySQL
+string column, so trailing spaces remain significant too.
 On MySQL's **default** `utf8mb4_0900_ai_ci` — which is both case- and accent-insensitive — or a
 `_CI_` SQL Server collation, string predicates will match strings CEL would reject: an over-grant
 the adapter cannot detect. Treat collation as part of your policy contract.

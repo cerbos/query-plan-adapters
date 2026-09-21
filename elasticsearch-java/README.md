@@ -575,14 +575,20 @@ convention is the one Elasticsearch's storage already matches. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
-### Conformance contract
+#Declare scalar field types with `Options.withScalarTypes(Map<String, ScalarType>)`, keyed by the mapped Elasticsearch field name. Supported declarations are `STRING`, `NUMBER`, `BOOLEAN`, and `TIMESTAMP`. Declarations let the translator preserve CEL heterogeneous equality and reject rows where a string operation receives a non-string field, including under negation. A declared timestamp field requires an explicit `timestamp()` wrapper for scalar comparisons because the index no longer retains the original string spelling.
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 22 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The existing five-argument `Options` constructor remains available. Undeclared fields retain historical translation behavior; declare fields used in type-sensitive operations to prevent Elasticsearch coercion or query errors. Operator overrides continue to own their declared operators.
+
+## Conformance contract
+
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 26 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 87 reference conformance actions plus regex and timestamp probes (89 actions) |
-| Fail-closed | 105 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (114 actions total) |
+| Oracle-tested | 112 reference conformance actions plus regex and timestamp probes (114 actions) |
+| Fail-closed | 149 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (158 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Pass the attributes you send as explicit nulls in `explicitNullAttributes`, and the equality family over them throws instead of answering narrowly — every spelling of `!= "x"` either requires the field to exist (dropping the row CEL allows) or matches every document missing it (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -602,23 +608,41 @@ Every fail-closed shape's error message is pinned in the shared corpus (`conform
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, and adds the property the
 per-action assertions cannot state: the **distribution of the refusals over the sites in the walk
-that raise them**. 115 of the corpus's 205 shapes are refused here — the 114 fail-closed actions
+that raise them**. 159 of the corpus's 274 shapes are refused here — the 158 fail-closed actions
 above plus `null-eq-missing` — so it matters whether that happens at one catch-all or at many. It
-is twenty sites, and one mechanism — an operand slot holding a computed sub-expression, where
-the Query DSL admits only a field and a literal — accounts for 54 of them:
+is 29 sites, with 64 actions reaching the computed-operand refusal:
 
 | Rejection site | Actions |
 | --- | --- |
-| computed leaf operand (arithmetic, casts, a ternary as an operand, `map()`/`filter()`, nested `size()`, a lambda one scope too deep) | 54 |
-| field-to-field comparison | 15 |
-| explicit null against null, or against a constant | 8 |
-| count threshold over a declared collection that is not an emptiness check | 5 |
-| string operator whose receiver is the constant | 4 |
-| negated `exists` over a collection | 4 |
-| positive `all` over a collection | 4 |
-| `size()` over a field declared as neither a nested path nor a flat collection | 4 |
-| `exists_one`, collection emptiness, negated membership, a ternary as the condition, sub-millisecond timestamp | 2 each |
-| `size()` over a computed collection (`filter()`), negated `hasIntersection`, null in a document array, null in an intersection, hierarchy path built from a document field, an empty hierarchy delimiter, a top-level alternation in an anchored `matches()` pattern | 1 each |
+| computed leaf operand | 64 |
+| field-to-field | 22 |
+| explicit null | 8 |
+| count over an undeclared collection | 6 |
+| count threshold | 5 |
+| constant receiver | 4 |
+| negated exists over a collection | 4 |
+| null in an intersection | 4 |
+| positive all over a collection | 4 |
+| regex dialect syntax | 4 |
+| conditional value as a condition | 3 |
+| two-list difference | 3 |
+| collection emptiness | 2 |
+| computed collection macro | 2 |
+| count over a computed collection | 2 |
+| exists_one | 2 |
+| flat scalar collection macro | 2 |
+| hierarchy path built from a field | 2 |
+| negated hasIntersection over a collection | 2 |
+| negated membership in a collection | 2 |
+| sub-millisecond timestamp | 2 |
+| top-level regex alternation | 2 |
+| whole-list comparison | 2 |
+| empty hierarchy delimiter | 1 |
+| list-valued member | 1 |
+| literal exists-one | 1 |
+| null in a document array | 1 |
+| regex brace syntax | 1 |
+| unanchored regex | 1 |
 
 The list is asserted **total** — a shape refused by an accident rather than by a declared
 limitation matches no site and fails — and the counts are pinned, so a translator change that moves

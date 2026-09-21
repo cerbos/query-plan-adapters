@@ -1,0 +1,32 @@
+{
+  "action": "pv-in",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "in",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "value": [
+              "set",
+              "same",
+              "",
+              "%_o",
+              "X",
+              "Y",
+              "MIRROR",
+              "filler-1",
+              "filler-2",
+              "filler-3",
+              "filler-4"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

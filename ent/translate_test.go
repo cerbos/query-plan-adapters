@@ -789,8 +789,8 @@ func TestBooleanConstantsAvoidKeywords(t *testing.T) {
 
 	// A macro over an empty literal collection folds to its identity: `exists` is false, `all` true.
 	for _, tc := range []struct{ operator, want string }{
-		{operator: "exists", want: "1 = 0"},
-		{operator: "all", want: "1 = 1"},
+		{operator: "exists", want: "(1 = 0)"},
+		{operator: "all", want: "(1 = 1)"},
 	} {
 		t.Run(tc.operator, func(t *testing.T) {
 			t.Parallel()
@@ -830,8 +830,6 @@ func TestSubqueryFilterNarrowsEveryShapeBuiltOnTheRelation(t *testing.T) {
 		{name: "exists", cond: tagsExists(t)},
 		{name: "negated exists", cond: expr("not", tagsExists(t))},
 		{name: "all", cond: expr("all", variable("request.resource.attr.tags"),
-			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
-		{name: "except", cond: expr("except", variable("request.resource.attr.tags"),
 			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
 		{name: "exists_one", cond: expr("exists_one", variable("request.resource.attr.tags"),
 			expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
@@ -910,13 +908,13 @@ func TestSubqueryFilterMembershipEdges(t *testing.T) {
 		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn},
 	)), cond)
 	require.NotContains(t, empty, "IN ()")
-	require.Contains(t, empty, "WHERE (1 = 0 AND", "membership in an empty list hides every row")
+	require.Contains(t, empty, "WHERE ((1 = 0) AND", "membership in an empty list hides every row")
 
 	emptyNot, _ := translateWith(t, mapperFor(tagRelation(
 		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictNotIn},
 	)), cond)
 	require.NotContains(t, emptyNot, "IN ()")
-	require.Contains(t, emptyNot, "WHERE (1 = 1 AND", "non-membership in an empty list hides none")
+	require.Contains(t, emptyNot, "WHERE ((1 = 1) AND", "non-membership in an empty list hides none")
 
 	listed, args := translateWith(t, mapperFor(tagRelation(
 		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Values: []any{"a", "b"}},
@@ -951,7 +949,7 @@ func TestRestrictionMismatchFailsClosed(t *testing.T) {
 	valueOnIn, args := translateWith(t, mapperFor(tagRelation(
 		cerbosent.Restriction{Column: "kind", Op: cerbosent.RestrictIn, Value: "a"},
 	)), cond)
-	require.Contains(t, valueOnIn, "WHERE (1 = 0 AND")
+	require.Contains(t, valueOnIn, "WHERE ((1 = 0) AND")
 	require.NotContains(t, args, "a")
 }
 
@@ -1046,4 +1044,62 @@ func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
 	_, err = cerbosent.Translate(conditional(nullEq), "resource", omitted)
 	require.ErrorIs(t, err, cerbosent.ErrUnsupported)
 	require.Contains(t, err.Error(), "null operand")
+}
+
+// The corpus fixes scalar semantics; these vary the caller's mapping to a related
+// column, whose declared type must survive the scalar subquery wrapper.
+func TestRelatedScalarTypeDeclaration(t *testing.T) {
+	t.Parallel()
+	mapper := cerbosent.MapperMap{
+		"request.resource.attr.count": {
+			Column: "amount", ValueType: cerbosent.ValueNumber,
+			ScalarRelation: &cerbosent.Relation{Table: "details", SourceColumn: "id", TargetColumn: "resource_id"},
+		},
+	}
+	for _, operator := range []string{"contains", "startsWith", "endsWith"} {
+		t.Run(operator, func(t *testing.T) {
+			t.Parallel()
+			cond := expr(operator, variable("request.resource.attr.count"), val(t, "x"))
+			query, _ := translateWith(t, mapper, cond)
+			require.Contains(t, query, "NULL")
+			require.NotContains(t, query, "LIKE")
+		})
+	}
+	cond := expr("ne", variable("request.resource.attr.count"), val(t, "x"))
+	query, _ := translateWith(t, mapper, cond)
+	require.Contains(t, query, "IS NOT NULL", "a missing related row must remain UNKNOWN under negation")
+	require.NotContains(t, query, "<> ", "declared numbers must not be compared to SQL strings")
+}
+
+// These contracts vary type/null declarations and relation mappings that the corpus fixes.
+func TestMixedScalarTypesPreserveExplicitNullEquality(t *testing.T) {
+	t.Parallel()
+	mapper := cerbosent.MapperMap{
+		"request.resource.attr.name":  {Column: "name", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.count": {Column: "count", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionExplicit},
+	}
+	for _, operator := range []string{"eq", "ne"} {
+		cond := expr(operator, variable("request.resource.attr.name"), variable("request.resource.attr.count"))
+		query, _ := translateWith(t, mapper, cond)
+		query = strings.ReplaceAll(query, "`", `"`)
+		require.Contains(t, query, `"resource"."name" IS NULL`)
+		require.Contains(t, query, `"resource"."count" IS NULL`)
+		if operator == "ne" {
+			require.Contains(t, query, "NOT")
+		}
+	}
+}
+
+func TestOmittedRelatedMembershipNeedlePreservesMissing(t *testing.T) {
+	t.Parallel()
+	mapper := cerbosent.MapperMap{
+		"request.resource.attr.name": {
+			Column: "name", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted,
+			ScalarRelation: &cerbosent.Relation{Table: "details", SourceColumn: "id", TargetColumn: "resource_id"},
+		},
+		"request.resource.attr.tags": {Relation: &cerbosent.Relation{Table: "tag", SourceColumn: "id", TargetColumn: "resource_id", Field: &cerbosent.Entry{Column: "name", NullConvention: cerbosent.NullConventionExplicit}}},
+	}
+	cond := expr("not", expr("in", variable("request.resource.attr.name"), variable("request.resource.attr.tags")))
+	query, _ := translateWith(t, mapper, cond)
+	require.Contains(t, query, `IS NOT NULL) THEN (NOT (CASE`, "a missing related needle must remain UNKNOWN even for an empty collection")
 }

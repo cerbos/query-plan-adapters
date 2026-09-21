@@ -13,6 +13,9 @@ directory's `run.sh` starts ChromaDB, packs the adapter, installs the tarball, b
 
 It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
 
+Install the adapter's build dependencies with `npm ci` in [`../`](..) before running
+the example; `run.sh` builds the adapter before packing it.
+
 ## What it proves
 
 Not what the adapter translates. [`../src/translator.test.ts`](../src/translator.test.ts) pins the
@@ -34,7 +37,8 @@ state on this example's own sources, which do not change when the adapter's pack
 warm tree a broken `exports` map compiles clean and the break surfaces only at runtime. CI is
 always cold; the tree where someone checks the break by hand is not.
 
-**Usage shape.** Both suites run one flat filtered query. This runs all
+**Usage shape.** The adversarial suite runs a flat filtered query; the translator suite
+needs no store. This example runs all
 [five shapes](../../demo/README.md#the-five-usage-shapes), including a limit walked to the end of
 the result set and — the one that earns the exercise — the adapter's filter ANDed with the
 application's own predicate, across all three plan kinds.

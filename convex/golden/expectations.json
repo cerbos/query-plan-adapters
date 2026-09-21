@@ -213,6 +213,24 @@
         ]
       }
     },
+    "eq-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "tagNames"
+            ]
+          },
+          [
+            "public"
+          ]
+        ]
+      }
+    },
     "exists-on-empty": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -252,6 +270,22 @@
           1
         ]
       }
+    },
+    "hasint-map-null": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hasint-map-null-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hasint-map-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "hasint-null-vf": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
     },
     "hier-ancestor-cf": {
       "kind": "KIND_CONDITIONAL",
@@ -334,6 +368,10 @@
       "note": "The one plan the planner folds before any filter exists. `in` over an empty list can allow nothing, so there is nothing for either half of the adapter to decide.",
       "kind": "KIND_ALWAYS_DENIED"
     },
+    "in-list-element": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "in-map-keys": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
@@ -395,6 +433,51 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "in-numbers": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "or",
+        "args": [
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              2
+            ]
+          },
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              3
+            ]
+          },
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              5
+            ]
+          }
+        ]
+      }
+    },
     "in-single": {
       "note": "`in` is composed as `eq` comparisons joined with `or`; a one-element list collapses to the bare `eq` rather than a one-armed `or`.",
       "kind": "KIND_CONDITIONAL",
@@ -420,6 +503,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "in-var-var-omitted": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "in-var-var-omitted-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "index-scalar-list": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -428,7 +519,19 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "lambda-in-literal": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "lambda-in-literal-neg": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "lambda-in-principal": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "lambda-ternary": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
@@ -553,6 +656,24 @@
         ]
       }
     },
+    "ne-list": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "neq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "tagNames"
+            ]
+          },
+          [
+            "public"
+          ]
+        ]
+      }
+    },
     "neg-number": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
@@ -607,6 +728,14 @@
         ]
       }
     },
+    "not-concat-unsolvable": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "not-concat-unsolvable-ne": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "not-contains": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -640,6 +769,10 @@
         ]
       }
     },
+    "not-hasint-empty-chain": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "not-lt": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
@@ -660,6 +793,10 @@
           }
         ]
       }
+    },
+    "not-nan-ord-le": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
     },
     "not-startswith": {
       "kind": "KIND_CONDITIONAL",
@@ -826,11 +963,62 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "pv-empty-all": {
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
+    "pv-empty-exists": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-all": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-exists": {
+      "kind": "KIND_ALWAYS_ALLOWED"
+    },
     "pv-exists": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "pv-exists-one": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "pv-exists-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-filter": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-map": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-not-all": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-shadow": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "pv-structs-missing": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "regex-unanchored": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
@@ -924,6 +1112,27 @@
         ]
       }
     },
+    "root-not-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aBool"
+                ]
+              },
+              true
+            ]
+          }
+        ]
+      }
+    },
     "root-or": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
@@ -961,6 +1170,10 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "size-ge-one": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "size-huge-gt": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -978,6 +1191,10 @@
       "path": "post"
     },
     "string-size-gt0": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "temporal-raw-eq": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
@@ -1059,6 +1276,78 @@
     "ts-window": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
+    },
+    "type-columns": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-hierarchy-number": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-needle-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-needle-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-needle-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-number-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-number-endswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-number-startswith": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-number-string": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aNumber"
+            ]
+          },
+          "projects:f1"
+        ]
+      }
+    },
+    "type-size-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-size-number": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "type-string-number": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "field",
+            "args": [
+              "aString"
+            ]
+          },
+          0
+        ]
+      }
     },
     "unicode-eq": {
       "kind": "KIND_CONDITIONAL",
@@ -1205,6 +1494,14 @@
       "path": "post"
     },
     "w2-outer-relation": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "wildcard-contains": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "wildcard-endswith": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     }

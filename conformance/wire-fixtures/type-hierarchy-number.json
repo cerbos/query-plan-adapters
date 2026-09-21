@@ -1,0 +1,34 @@
+{
+  "action": "type-hierarchy-number",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "descendentOf",
+        "operands": [
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "hierarchy",
+              "operands": [
+                {
+                  "value": "1.2"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

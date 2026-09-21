@@ -156,6 +156,7 @@ final class SizeTranslator {
                         "size(filter(...)) requires a collection (Relation) mapping for " + var);
             }
             Path<?> path = scope.path(var);
+            if (!String.class.equals(path.getJavaType())) return tri.unknown();
             if (fractionalCollapse != null) {
                 // ne f is vacuously true only for a PRESENT string: a NULL column is a
                 // missing attribute → CEL error → deny, so it must stay excluded —

@@ -23,6 +23,7 @@ module CorpusAttributes
     "request.resource.attr.createdBy" => field("created_by"),
     "request.resource.attr.scope" => field("scope"),
     "request.resource.attr.createdAt" => field("created_at"),
+    "request.resource.attr.updatedAt" => field("updated_at"),
     # `owner` and `coOwner` alias the columns that `aOptionalString` and `scope` also map,
     # under the OTHER null convention: the oracle sends a real null attribute for them and
     # does not remove it. The declaration here is what makes the equality family definite for

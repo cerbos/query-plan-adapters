@@ -30,6 +30,7 @@ module AdversarialModels
         t.string :created_by, null: false
         t.string :scope
         t.datetime :created_at
+        t.datetime :updated_at
       end
 
       # The one REAL to-one relation of the corpus (ADR 0005). `parent` and `parent.inner` are
@@ -101,7 +102,8 @@ module AdversarialModels
         a_optional_string: seed.fetch("aOptionalString"),
         created_by: ConformanceCorpus.created_by(seed),
         scope: ConformanceCorpus.scope(seed),
-        created_at: ConformanceCorpus.created_at(seed)&.then { |iso| Time.iso8601(iso) }
+        created_at: ConformanceCorpus.created_at(seed)&.then { |iso| Time.iso8601(iso) },
+        updated_at: ConformanceCorpus.updated_at(seed)&.then { |iso| Time.iso8601(iso) }
       )
 
       # The to-one chain, with one owned row for each level. A seed with no parent gets no row

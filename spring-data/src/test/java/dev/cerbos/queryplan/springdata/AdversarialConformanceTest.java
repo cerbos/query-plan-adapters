@@ -21,7 +21,6 @@ import dev.cerbos.queryplan.springdata.testmodel.LabelEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity;
 import dev.cerbos.sdk.CerbosBlockingClient;
-import dev.cerbos.sdk.CerbosClientBuilder;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.AttributeValue;
 import dev.cerbos.sdk.builders.Principal;
@@ -139,7 +138,7 @@ class AdversarialConformanceTest {
                              String relationNote, List<Seed> seeds) {}
 
     /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
-    private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String scope,
+    private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String updatedAt, String scope,
                                 List<String> labels) {}
 
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
@@ -175,7 +174,7 @@ class AdversarialConformanceTest {
     private static final List<String> TAG_KEYS = List.of("id", "name");
 
     private static final List<String> DERIVED_KEYS =
-            List.of("createdBy", "aDouble", "createdAt", "scope", "labels");
+            List.of("createdBy", "aDouble", "createdAt", "updatedAt", "scope", "labels");
 
     // The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
     // test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides
@@ -194,7 +193,8 @@ class AdversarialConformanceTest {
     private static final List<String> PRINCIPAL_KEYS = List.of("id", "roles", "attr");
 
     private static final List<String> PRINCIPAL_ATTR_KEYS =
-            List.of("allowedTags", "context", "fewTeams", "manyTeams");
+            List.of("allowedTags", "context", "fewTeams", "manyTeams", "zero", "emptyTeams",
+                    "manyStructs", "nullableStructs", "missingStructs");
 
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
@@ -382,11 +382,8 @@ class AdversarialConformanceTest {
      *
      * <p>Asserted against the RAW JSON because {@link #principal()} rebuilds the principal from
      * {@link PrincipalSpec} — a rebuilt object could only ever report the keys this harness already
-     * names. The attribute VALUES are asserted too: a key-set guard says nothing about a change
-     * inside one, and three of the four attributes are lists. {@link #asPrincipalAttribute} accepts
-     * exactly a string and a list of strings, so a third shape fails here, next to the
-     * declaration, rather than deep in the conversion. It is the same reason the seed guard
-     * descends into {@code tags[]}.
+     * names. Attribute values are guarded as well: scalar types, collection element types and
+     * struct keys must match the corpus declaration before recursive conversion feeds both APIs.
      */
     private static void assertPrincipalCoverage(JsonNode principal) {
         assertKeys("seeds.json principal", keysOf(principal), PRINCIPAL_KEYS, List.of());
@@ -395,14 +392,26 @@ class AdversarialConformanceTest {
         for (Map.Entry<String, JsonNode> entry : attr.properties()) {
             String label = "seeds.json principal.attr." + entry.getKey();
             JsonNode value = entry.getValue();
-            boolean listOfStrings = value.isArray();
-            for (JsonNode element : value) {
-                listOfStrings &= element.isTextual();
+            switch (entry.getKey()) {
+                case "context" -> assertTrue(value.isTextual(), label);
+                case "zero" -> assertTrue(value.isNumber(), label);
+                case "manyStructs", "nullableStructs", "missingStructs" -> {
+                    assertTrue(value.isArray(), label);
+                    for (JsonNode element : value) {
+                        assertTrue(element.isObject(), label);
+                        assertKeys(label + "[]", keysOf(element),
+                                entry.getKey().equals("missingStructs") ? List.of() : List.of("name"),
+                                List.of());
+                        if (!entry.getKey().equals("missingStructs")) {
+                            assertTrue(element.get("name").isTextual() || element.get("name").isNull(), label);
+                        }
+                    }
+                }
+                default -> {
+                    assertTrue(value.isArray(), label);
+                    for (JsonNode element : value) assertTrue(element.isTextual(), label);
+                }
             }
-            assertTrue(value.isTextual() || listOfStrings, () -> label
-                    + " is neither a string nor a list of strings, the only two shapes this harness"
-                    + " consumes: a reshaped principal attribute feeds the plan and the check()"
-                    + " oracle at once");
         }
     }
 
@@ -466,8 +475,7 @@ class AdversarialConformanceTest {
         }
         cerbos.start();
         CerbosTestImage.assertPinned(cerbos);
-        client = new CerbosClientBuilder(cerbos.getHost() + ":" + cerbos.getMappedPort(3593))
-                .withPlaintext().buildBlockingClient();
+        client = CerbosTestImage.client(cerbos);
 
         emf = createEntityManagerFactory();
         seed();
@@ -568,6 +576,8 @@ class AdversarialConformanceTest {
             r.setCreatedBy(isoFor(s));
             r.setScope(scopeFor(s));
             r.setCreatedAt(tsFor(s));
+            r.setUpdatedAt(derivedFor(s).updatedAt() == null ? null
+                    : java.time.OffsetDateTime.parse(derivedFor(s).updatedAt()));
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
@@ -636,28 +646,29 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * One principal attribute, converted by the JSON type the corpus actually carries. Strings
-     * and lists of strings are the two shapes today; anything else fails loudly rather than being
-     * coerced, because a silently reshaped principal attribute feeds the plan and the oracle at
-     * once and they would agree for the wrong reason.
+     * One principal attribute, converted by the JSON type the corpus actually carries. JSON scalars, lists and structs are preserved recursively so the plan and oracle receive
+     * the same unmodified principal.
      */
     private static AttributeValue asPrincipalAttribute(String key, Object value) {
-        if (value instanceof String s) {
-            return AttributeValue.stringValue(s);
-        }
+        if (value == null) return nullAttributeValue();
+        if (value instanceof String text) return AttributeValue.stringValue(text);
+        if (value instanceof Number number) return AttributeValue.doubleValue(number.doubleValue());
+        if (value instanceof Boolean bool) return AttributeValue.boolValue(bool);
         if (value instanceof List<?> list) {
             return AttributeValue.listValue(list.stream()
-                    .map(element -> {
-                        if (element instanceof String s) {
-                            return AttributeValue.stringValue(s);
-                        }
-                        throw new IllegalStateException(
-                                "seeds.json principal.attr." + key + " holds a non-string element");
-                    })
-                    .toList());
+                    .map(element -> asPrincipalAttribute(key, element)).toList());
         }
-        throw new IllegalStateException(
-                "seeds.json principal.attr." + key + " is neither a string nor a list of strings");
+        if (value instanceof Map<?, ?> map) {
+            Map<String, AttributeValue> fields = new LinkedHashMap<>();
+            map.forEach((name, element) -> {
+                if (!(name instanceof String field)) {
+                    throw new IllegalStateException("Non-string principal field: " + key);
+                }
+                fields.put(field, asPrincipalAttribute(key + "." + field, element));
+            });
+            return AttributeValue.mapValue(fields);
+        }
+        throw new IllegalStateException("Unsupported principal attribute: " + key);
     }
 
     // -- the real to-one relation (conformance/README.md, "The real to-one relation") -----------
@@ -756,7 +767,10 @@ class AdversarialConformanceTest {
         // A NULL created_at column is a missing attribute on the check side: timestamp()
         // over it is a CEL evaluation error → deny, matching SQL NULL exclusion.
         if (tsFor(s) != null) {
-            r = r.withAttribute("createdAt", AttributeValue.stringValue(tsFor(s).toString()));
+            r = r.withAttribute("createdAt", AttributeValue.stringValue(derivedFor(s).createdAt()));
+        }
+        if (derivedFor(s).updatedAt() != null) {
+            r = r.withAttribute("updatedAt", AttributeValue.stringValue(derivedFor(s).updatedAt()));
         }
         // mainCategory mirrors the row's single category as ONE nested object (the seeder
         // creates at most one category per seed), so direct dotted-chain CEL expressions
@@ -860,7 +874,7 @@ class AdversarialConformanceTest {
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(
                         plan(action), mapping, Map.of(), representation);
-        return idsSelectedBy(spec);
+        return executeIds(spec);
     }
 
     /**
@@ -868,7 +882,7 @@ class AdversarialConformanceTest {
      * null, with no authorization clause at all, which is the query a caller runs for an
      * always-allowed plan.
      */
-    private static List<String> idsSelectedBy(Specification<ResourceEntity> spec) {
+    private static List<String> executeIds(Specification<ResourceEntity> spec) {
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -1136,7 +1150,7 @@ class AdversarialConformanceTest {
         denied.removeAll(oracle);
         assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
                 + " no over-grant for this tripwire to see");
-        List<String> unfiltered = idsSelectedBy(null);
+        List<String> unfiltered = executeIds(null);
         assertTrue(unfiltered.containsAll(denied), "the unfiltered query must return every"
                 + " row the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
         assertEquals(allIds, unfiltered);
@@ -1208,21 +1222,7 @@ class AdversarialConformanceTest {
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(response, MAPPING, Map.of());
 
-        EntityManager em = emf.createEntityManager();
-        try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<String> cq = cb.createQuery(String.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            cq.select(root.get("id")).distinct(true);
-            Predicate p = spec.toPredicate(root, cq, cb);
-            if (p != null) {
-                cq.where(p);
-            }
-            cq.orderBy(cb.asc(root.get("id")));
-            return em.createQuery(cq).getResultList();
-        } finally {
-            em.close();
-        }
+        return executeIds(spec);
     }
 
     /**
@@ -1308,14 +1308,14 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(205, manifest.size(),
+        assertEquals(274, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
-        assertEquals(22, SEEDS.size(), "seed count changed");
+        assertEquals(26, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and
         // both fail loudly on a missing one.
-        assertEquals(21, throwing.size(), "throwing action count changed");
+        assertEquals(47, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
                 "every throwing action must reach a parameterised throw case");
@@ -1342,6 +1342,24 @@ class AdversarialConformanceTest {
      * assertions above.
      */
     private static final Map<String, String> DEGENERATE_BY_CONSTRUCTION = Map.ofEntries(
+            Map.entry("pv-empty-exists", "PDP oracle is empty: Pinned empty principal collection proves CEL macro identity and planner folding."),
+            Map.entry("pv-empty-not-exists", "PDP oracle is total: Pinned empty principal collection proves CEL macro identity and planner folding."),
+            Map.entry("pv-empty-all", "PDP oracle is total: Pinned empty principal collection proves CEL macro identity and planner folding."),
+            Map.entry("pv-empty-not-all", "PDP oracle is empty: Pinned empty principal collection proves CEL macro identity and planner folding."),
+            Map.entry("pv-structs-missing", "PDP oracle is empty: Eleven principal structs force a value-list lambda; projected members include null or missing variants."),
+            Map.entry("type-string-number", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-number-string", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-columns", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-size-bool", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-size-number", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-hierarchy-number", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
+            Map.entry("type-number-contains", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."),
+            Map.entry("type-needle-contains", "PDP oracle is empty: Non-string needle must not be coerced to text by the datastore."),
+            Map.entry("type-number-startswith", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."),
+            Map.entry("type-needle-startswith", "PDP oracle is empty: Non-string needle must not be coerced to text by the datastore."),
+            Map.entry("type-number-endswith", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."),
+            Map.entry("type-needle-endswith", "PDP oracle is empty: Non-string needle must not be coerced to text by the datastore."),
+            Map.entry("in-list-element", "PDP oracle is empty: Port real non-scalar literal and symmetric intersection arrival shapes from Java gap tests."),
             // `R.attr.aString in []`: nothing is a member of the empty list, so the planner folds
             // the plan to ALWAYS_DENIED and check() denies every seed. The comparison is still
             // made — an adapter that emitted an empty IN list and let the database match nothing
@@ -1410,6 +1428,7 @@ class AdversarialConformanceTest {
      * here as PDP/policy liveness probes for a group the sweep above cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
+            "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-grouped", "regex-brace", "regex-repetition", "regex-optional-operators", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "temporal-raw-eq", "eq-list", "ne-list",
             // A division nested inside further arithmetic fails closed: SQL has no value that
             // carries CEL's NaN or signed infinity through the sum.
             "cr-div-then-add", "cr-div-then-add-ne",

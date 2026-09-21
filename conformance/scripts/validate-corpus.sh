@@ -12,6 +12,37 @@ trap cleanup EXIT INT TERM
 
 cd "${CONFORMANCE_DIR}"
 
+# Keep entry schemas closed so misspelled metadata cannot be silently ignored by loaders.
+if ! jq -e '
+  def text: type == "string" and length > 0;
+  def entry($required; $optional):
+    type == "object"
+    and (($required - keys) | length == 0)
+    and ((keys - ($required + $optional)) | length == 0)
+    and all(to_entries[] | select(.key != "messages" and .key != "adapters"); .value | text);
+  def entries($required; $optional):
+    type == "array" and all(.[]; entry($required; $optional));
+  def per_adapter($required):
+    type == "object" and all(.[]; entries($required; []));
+  def check($bucket; $valid):
+    if $valid then true else error("invalid " + $bucket + " entry schema") end;
+  check("conformance"; .conformance | type == "array" and all(.[]; text))
+  and check("adapterUnsupported"; .adapterUnsupported | per_adapter(["action", "reason", "message"]))
+  and check("adapterSupportedExpected"; .adapterSupportedExpected | per_adapter(["action", "reason"]))
+  and check("expectedUnsupported";
+    (.expectedUnsupported | entries(["action", "shape", "messages"]; ["reason"]))
+    and all(.expectedUnsupported[]; .messages | type == "object" and all(.[]; text)))
+  and check("nullRepresentationOmitted";
+    (.nullRepresentationOmitted | entries(["action", "reason", "messages"]; ["relatedIssue"]))
+    and all(.nullRepresentationOmitted[]; .messages | type == "object" and all(.[]; text)))
+  and check("knownDivergences";
+    (.knownDivergences | entries(["action", "reason", "adapters"]; ["relatedIssue"]))
+    and all(.knownDivergences[]; .adapters | type == "array" and all(.[]; text)))
+' actions.json >/dev/null; then
+  echo "actions.json entries must use their declared keys and non-empty metadata types" >&2
+  exit 1
+fi
+
 sed -n 's/^[[:space:]]*- actions: \["\([^"]*\)"\].*/\1/p' \
   policies/adversarial.yaml | sort >"${VALIDATION_TMP}/policy-actions"
 
@@ -40,13 +71,15 @@ if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/classified-ac
 fi
 
 if ! jq -e '
-  all(
+  .adapters as $roster
+  | all(
     .knownDivergences[];
     (.adapters | type == "array" and length > 0 and length == (unique | length))
     and all(.adapters[]; type == "string" and length > 0)
+    and ((.adapters - $roster) | length == 0)
   )
 ' actions.json >/dev/null; then
-  echo "Each known divergence must name a non-empty, duplicate-free adapters list"
+  echo "Each known divergence must name a non-empty, duplicate-free adapters list drawn from the roster"
   exit 1
 fi
 
@@ -526,6 +559,7 @@ if ! jq -e '
     ((.createdBy | type) == "string")
     and ((.aDouble | type) == "number" or .aDouble == null)
     and ((.createdAt | type) == "string" or .createdAt == null)
+    and ((.updatedAt | type) == "string" or .updatedAt == null)
     and ((.scope | type) == "string" or .scope == null)
     and ((.labels | type) == "array")
     and all(.labels[]; type == "string" or . == null))
@@ -558,7 +592,10 @@ derived_drift="$(jq -r -s '
          | if ($fixed | has($seed.id)) then $fixed[$seed.id]
            elif $seed.aNumber >= 2 then "2036-06-06T06:06:06Z"
            else "2021-05-05T05:05:05Z" end
-       ) then "createdAt" else empty end)
+       ) then "createdAt" else empty end),
+      (if $entry.updatedAt != (
+         {"a1": "2020-03-15T10:30:00.000Z", "a4": "2024-06-01T00:00:00Z"}[$seed.id]
+       ) then "updatedAt" else empty end)
     ]
   | select(length > 0)
   | "  \($seed.id): \(join(", "))"
@@ -598,7 +635,11 @@ cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
   "d2": { "scope": "e:prod:eu",             "labels": [] },
   "e1": { "scope": null,                    "labels": [] },
   "f1": { "scope": null,                    "labels": [] },
-  "g1": { "scope": null,                    "labels": [] }
+  "g1": { "scope": null,                    "labels": [] },
+  "h1": { "scope": null,                    "labels": [] },
+  "h2": { "scope": null,                    "labels": [] },
+  "h3": { "scope": null,                    "labels": [] },
+  "h4": { "scope": null,                    "labels": [] }
 }
 JSON
 jq -S '.derived | map_values({scope, labels})' derived-fields.json \

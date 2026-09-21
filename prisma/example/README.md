@@ -13,6 +13,9 @@ directory's `run.sh` packs the adapter, installs the tarball, builds, and runs.
 
 This is the reference implementation every other adapter's example copies.
 
+Install the adapter's build dependencies with `npm ci` in [`../`](..) before running
+the example; `run.sh` builds the adapter before packing it.
+
 ## What it proves
 
 Not what the adapter translates — [`../src/adversarial.test.ts`](../src/adversarial.test.ts)
@@ -29,8 +32,8 @@ Both halves are load-bearing and both have been checked by breaking them:
 
 | Break                                     | Example        | `npm test`  | `npm run test:adversarial` |
 | ----------------------------------------- | -------------- | ----------- | -------------------------- |
-| `exports["."]` points at a missing file    | fails (TS2307) | 223 passing | 162 passing                |
-| `lib/**/*.js` dropped from `files`         | fails (MODULE_NOT_FOUND) | 223 passing | 162 passing      |
+| `exports["."]` points at a missing file    | fails (TS2307) | passes | passes                |
+| `lib/**/*.js` dropped from `files`         | fails (MODULE_NOT_FOUND) | passes | passes      |
 
 `tsconfig.json` sets `moduleResolution: "nodenext"` for the first row specifically: the legacy
 `node10` resolver ignores `exports` entirely and falls back to `main`/`types`, so a broken

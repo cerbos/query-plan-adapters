@@ -92,8 +92,7 @@ RSpec.describe "translator" do
       expect(RECORDED.keys).to eq(RECORDED.keys.sort)
     end
 
-    # Tripwires. Bump them deliberately: a count that moves unnoticed is how a shape gets
-    # dropped from an asset nobody reads end to end.
+    # Update these tripwires only after replaying new actions against the oracle.
     it "pins how the corpus divides here" do
       conditional, unconditional = RECORDED.values.partition { |entry|
         entry.fetch("kind") == "KIND_CONDITIONAL"
@@ -103,15 +102,15 @@ RSpec.describe "translator" do
         "conditional" => conditional.size,
         "unconditional" => unconditional.size,
         "throwing" => THROWING_ACTIONS.size
-      }).to eq({"conditional" => 183, "unconditional" => 2, "throwing" => 20})
+      }).to eq({"conditional" => 212, "unconditional" => 7, "throwing" => 55})
     end
 
-    # The two unconditional folds are the planner's, not this adapter's, and each is pinned
+    # The unconditional folds are the planner's, not this adapter's, and each is pinned
     # elsewhere: in-empty is a conformance action the harness compares, and p-has is the one
     # declared upstream divergence.
     it "names the planner folds the corpus declares" do
       unconditional = RECORDED.select { |_, entry| entry.fetch("kind") != "KIND_CONDITIONAL" }
-      expect(unconditional.keys).to eq(%w[in-empty p-has])
+      expect(unconditional.keys).to eq(%w[in-empty p-has pv-empty-all pv-empty-exists pv-empty-not-all pv-empty-not-exists pv-structs-missing])
       expect(unconditional.fetch("in-empty").fetch("kind")).to eq("KIND_ALWAYS_DENIED")
       expect(unconditional.fetch("p-has").fetch("kind")).to eq("KIND_ALWAYS_ALLOWED")
       expect(ConformanceCorpus::SKIPPED).to include("p-has")

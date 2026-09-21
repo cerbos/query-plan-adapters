@@ -39,6 +39,7 @@ export const MAPPER: Record<string, MapperConfig> = {
   },
   "request.resource.attr.createdBy": { field: "createdBy" },
   "request.resource.attr.createdAt": { field: "createdAt", nullable: true },
+  "request.resource.attr.updatedAt": { field: "updatedAt", nullable: true },
   "request.resource.attr.scope": { field: "scope", nullable: true },
   "request.resource.attr.owner": { field: "owner", nullable: true },
   // `coOwner` is the explicit-null alias of the `scope` field, the second half of

@@ -52,7 +52,7 @@ equivalent spellings, and only one of them translates reliably here:
 # Fragile — translates for some principals and throws for others
 expr: P.attr.teams.exists(t, R.attr.team == t)
 
-# Portable — always a single $in
+# Direct membership — a non-empty list maps to one $in
 expr: R.attr.team in P.attr.teams
 ```
 
@@ -70,10 +70,9 @@ adapter only accepts when the mapper declares `required: true` for the field,
 because a document missing the metadata key would otherwise match `$ne` and be
 over-granted.
 
-The membership form has no such threshold. It reaches the adapter as `in`
-against a literal list at every collection size and maps to a single `$in`
-filter, which is also cheaper for ChromaDB to evaluate than an `or` chain, and
-needs no `required` assertion.
+The membership form has no such threshold. A non-empty principal list reaches
+the adapter as `in` against a literal list and maps to a single `$in` filter,
+without a `required` assertion. An empty list is folded to an always-denied plan.
 
 The cliff itself is pinned in the shared corpus rather than here, by a pair of
 actions over the same policy at two collection sizes: `pv-exists-unrolled`
@@ -83,16 +82,11 @@ are the `all` half of the same pair, and both throw — the unrolled `$ne` chain
 targets an optional metadata key, which is the over-grant `required: true`
 exists to prevent.
 
-**The membership spelling has no such pair, because it has no boundary to
-straddle.** `P.attr.*` is folded before the adapter sees anything, so
-`R.attr.x in P.attr.xs` reaches the wire as `in(key, [literals])` at every
-collection size — structurally the corpus's `p-in-null-multi`, which is
-oracle-tested — and there is no size at which the planner emits something else.
-What the retired suite pinned by planning at 9, 10, 11 and 40 elements was
-therefore a **planner** property, not a translator one, and a wire fixture
-cannot carry it. A corpus action that spells the recommendation directly is
-tracked in
-[#411](https://github.com/cerbos/query-plan-adapters/issues/411).
+The membership spelling is proved directly by `pv-in` (eleven principal values)
+and `pv-in-unrolled` (three). Despite the latter action's name, both wire fixtures
+contain `in(key, [literals])`; neither uses a lambda or an unrolled `or` chain.
+Both actions execute against ChromaDB and compare the returned IDs with the PDP
+oracle, including records where the optional metadata key is absent.
 
 ## NULL attribute representation
 
@@ -110,12 +104,12 @@ for that reason. See [#302](https://github.com/cerbos/query-plan-adapters/issues
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 22 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `checkResource` decisions using 26 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 37 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms — bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, and a disjunction of two scalar predicates; plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, which folds to a plain disjunction of equalities, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field — the first corpus shapes to compare `aDouble` here, every other one being a nested expression |
-| Fail-closed | 155 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (166 actions total) |
+| Oracle-tested | 48 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms — bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, and a disjunction of two scalar predicates; plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, which folds to a plain disjunction of equalities, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field — the first corpus shapes to compare `aDouble` here, every other one being a nested expression |
+| Fail-closed | 213 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (224 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent, and for the same reason: Chroma metadata has no null value, so a NULL column is stored as an ABSENT key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused rather than answered narrowly |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -124,7 +118,7 @@ Chroma metadata filters are limited to flat scalar comparisons and membership. N
 
 The `Where` document each translated action produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, the `required` and `numericType` declarations, the fallback for an unmapped reference, and malformed input.
 
-That test also pins **where** each refusal happens — all 164 of them, which is the `Fail-closed` row's 163 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 101 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
+That test also pins **where** each refusal happens — all 225 of them, which is the `Fail-closed` row's 224 plus the `Representation-independent` row's `null-eq-missing`, since the adapter refuses both alike. Five sixths of this corpus is fail-closed here, so the interesting property is not that a shape throws but which of the adapter's nine rejection sites it reaches — and `binaryOperands` refusing a computed operand accounts for 130 of them, because arithmetic, casts, ternaries, projections and above-cap collection macros all arrive at the wire as the same thing: an operand that is neither a bare metadata key nor a literal.
 
 ## Mapping hazards
 
@@ -346,7 +340,7 @@ literal is one the deployed adapter could not have put in a query body either.
 
 An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
 `conformance/actions.json`, and duplicating it here would be two places to change one string — which
-on an adapter that refuses 164 of the corpus's 199 shapes would make the asset almost entirely
+on an adapter that refuses 225 of the corpus's 274 shapes would make the asset almost entirely
 restatement. A wire fixture that is neither in this file nor declared unsupported fails the suite,
 which is what makes a new corpus action land as a failure rather than as silence
 ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),

@@ -1,0 +1,7 @@
+{
+  "action": "pv-empty-exists",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_ALWAYS_DENIED"
+  }
+}

@@ -45,6 +45,22 @@ for f in "${SEEDS}" "${EXPECTED}" "${ACTIONS}"; do
   jq -e . "${f}" >/dev/null || { echo "${f} is not valid JSON" >&2; exit 1; }
 done
 
+# Capture jq's status before populating the array: a failed substitution in a for-loop
+# or process substitution would silently skip every roster-based check.
+if ! adapter_roster="$(jq -er '
+  .adapters
+  | if type == "array" and length > 0
+       and all(.[]; type == "string" and length > 0 and (test("[\\r\\n]") | not))
+    then .[] else error("expected a non-empty adapters array of single-line names") end
+' "${ACTIONS}")"; then
+  echo "${ACTIONS} has no valid adapters roster" >&2
+  exit 1
+fi
+ADAPTERS=()
+while IFS= read -r adapter; do
+  ADAPTERS+=("${adapter}")
+done <<<"${adapter_roster}"
+
 # Shared jq preamble: the seed id list, and the id set the APPLICATION's own predicate selects on
 # its own. Both are derived from seeds.json so neither can drift from the rows the examples load.
 read -r -d '' JQ_LIB <<'JQ' || true
@@ -330,7 +346,7 @@ source_grep() {
 if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '/lib/.*\.rb$'; then
   fail "the source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's source is invisible to every check below"
 fi
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
+for adapter in "${ADAPTERS[@]}"; do
   example_dir="${REPO_ROOT}/${adapter}/example"
   [[ -d "${example_dir}" ]] || continue
   while IFS= read -r ref; do
@@ -377,7 +393,7 @@ echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
 # `-e` alone is not enough: run-example.sh executes the script directly, so a run.sh committed
 # without its mode bit is not a runnable example either. Testing existence alone would pass it
 # here and fail later in the example job, with a message about the runner rather than the mode bit.
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
+for adapter in "${ADAPTERS[@]}"; do
   runner="${REPO_ROOT}/${adapter}/example/run.sh"
   if [[ ! -e "${runner}" ]]; then
     fail "${adapter} has no example/run.sh — every adapter in the actions.json roster needs an" \
@@ -544,7 +560,7 @@ END {
 }
 AWK
 
-for adapter in $(jq -r '.adapters[]' "${ACTIONS}"); do
+for adapter in "${ADAPTERS[@]}"; do
   example_dir="${REPO_ROOT}/${adapter}/example"
   [[ -d "${example_dir}" ]] || continue
 

@@ -74,6 +74,18 @@
         }
       }
     },
+    "in-numbers": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$in": [
+            2,
+            3,
+            5
+          ]
+        }
+      }
+    },
     "in-single": {
       "note": "The planner folds a single-element `in` to an equality before the adapter ever sees it, so this is `$eq` rather than a one-element `$in`. Pinned because it is a shape a reader would otherwise expect to be `$in` and reach for the wrong assertion.",
       "kind": "KIND_CONDITIONAL",
@@ -188,6 +200,20 @@
         }
       }
     },
+    "pv-empty-all": {
+      "kind": "KIND_ALWAYS_ALLOWED",
+      "filters": {}
+    },
+    "pv-empty-exists": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-all": {
+      "kind": "KIND_ALWAYS_DENIED"
+    },
+    "pv-empty-not-exists": {
+      "kind": "KIND_ALWAYS_ALLOWED",
+      "filters": {}
+    },
     "pv-exists-unrolled": {
       "note": "Below the planner's 10-element unroll cap, `P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)` arrives as a plain nested `or` chain and translates. Above it — `pv-exists`, over the eleven-element `manyTeams` — the macro ships as a lambda over a literal value list and throws. That data-dependent cliff is why the README tells integrators to spell membership as `R.attr.x in P.attr.xs`, which is one `$in` at every size.",
       "kind": "KIND_CONDITIONAL",
@@ -214,6 +240,41 @@
           }
         ]
       }
+    },
+    "pv-in": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$in": [
+            "set",
+            "same",
+            "",
+            "%_o",
+            "X",
+            "Y",
+            "MIRROR",
+            "filler-1",
+            "filler-2",
+            "filler-3",
+            "filler-4"
+          ]
+        }
+      }
+    },
+    "pv-in-unrolled": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aOptionalString": {
+          "$in": [
+            "set",
+            "",
+            "%_o"
+          ]
+        }
+      }
+    },
+    "pv-structs-missing": {
+      "kind": "KIND_ALWAYS_DENIED"
     },
     "rel-bool-hop": {
       "kind": "KIND_CONDITIONAL",
@@ -305,6 +366,14 @@
         }
       }
     },
+    "root-not-bool": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aBool": {
+          "$ne": true
+        }
+      }
+    },
     "root-or": {
       "kind": "KIND_CONDITIONAL",
       "filters": {
@@ -327,6 +396,22 @@
       "filters": {
         "aBool": {
           "$ne": true
+        }
+      }
+    },
+    "type-number-string": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$eq": "projects:f1"
+        }
+      }
+    },
+    "type-string-number": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aString": {
+          "$eq": 0
         }
       }
     },

@@ -109,7 +109,8 @@ public final class SpringDataQueryPlanAdapter {
      *        whose mapping does not declare one — see
      *        {@link SpringDataQueryPlanAdapter#toSpecification(PlanResourcesResult, Map, Map,
      *        NullAttributeRepresentation)}
-     * @param maxMacroDepth the collection-macro nesting bound for this call, or empty to fall
+     * @param maxMacroDepth the collection-macro nesting bound, including literal-collection folds,
+     *        for this call. This does not bound the total expression size. Empty falls
      *        back to {@link #MAX_MACRO_DEPTH_PROPERTY} and then {@link #DEFAULT_MAX_MACRO_DEPTH}
      */
     public record Options(

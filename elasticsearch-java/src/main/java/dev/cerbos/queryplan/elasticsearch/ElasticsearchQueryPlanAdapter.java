@@ -41,6 +41,9 @@ public class ElasticsearchQueryPlanAdapter {
         record Conditional(Map<String, Object> query) implements Result {}
     }
 
+    /** The CEL scalar type stored in a mapped Elasticsearch field. */
+    public enum ScalarType { STRING, NUMBER, BOOLEAN, TIMESTAMP }
+
     /**
      * Everything a caller tells the adapter about the index a plan is translated against.
      *
@@ -58,6 +61,8 @@ public class ElasticsearchQueryPlanAdapter {
      *        {@code keyword} array, say). The adapter is handed a plan, never a mapping, so it
      *        cannot tell {@code size(aString)} from {@code size(tagNames)}: a {@code size()} over
      *        a field declared neither here nor in {@code nestedPaths} is refused
+     * @param scalarTypes optional scalar declarations keyed by mapped Elasticsearch field name;
+     *        undeclared fields retain the historical untyped lowering
      * @param explicitNullAttributes plan variables the caller sends to {@code check()} as explicit
      *        nulls when their column is NULL; see
      *        {@link ElasticsearchQueryPlanAdapter#toElasticsearchQuery(PlanResourcesResult, Options)}
@@ -67,9 +72,17 @@ public class ElasticsearchQueryPlanAdapter {
             Map<String, OperatorFunction> operatorOverrides,
             Set<String> nestedPaths,
             Set<String> collectionFields,
-            Set<String> explicitNullAttributes) {
+            Set<String> explicitNullAttributes,
+            Map<String, ScalarType> scalarTypes) {
+
+        public Options(Map<String, String> fieldMap, Map<String, OperatorFunction> operatorOverrides,
+                       Set<String> nestedPaths, Set<String> collectionFields,
+                       Set<String> explicitNullAttributes) {
+            this(fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, Map.of());
+        }
 
         public Options {
+            scalarTypes = Map.copyOf(Objects.requireNonNull(scalarTypes, "scalarTypes"));
             fieldMap = Map.copyOf(Objects.requireNonNull(fieldMap, "fieldMap"));
             operatorOverrides = Map.copyOf(
                     Objects.requireNonNull(operatorOverrides, "operatorOverrides"));
@@ -87,28 +100,34 @@ public class ElasticsearchQueryPlanAdapter {
 
         public Options withFieldMap(Map<String, String> fieldMap) {
             return new Options(
-                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes);
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
 
         public Options withOperatorOverrides(Map<String, OperatorFunction> operatorOverrides) {
             return new Options(
-                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes);
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
 
         public Options withNestedPaths(Set<String> nestedPaths) {
             return new Options(
-                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes);
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
 
         public Options withCollectionFields(Set<String> collectionFields) {
             return new Options(
-                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes);
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
 
         public Options withExplicitNullAttributes(Set<String> explicitNullAttributes) {
             return new Options(
-                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes);
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
+        /** Declare the CEL scalar type of each mapped Elasticsearch field. */
+        public Options withScalarTypes(Map<String, ScalarType> scalarTypes) {
+            return new Options(fieldMap, operatorOverrides, nestedPaths, collectionFields,
+                    explicitNullAttributes, scalarTypes);
+        }
+
     }
 
     /**

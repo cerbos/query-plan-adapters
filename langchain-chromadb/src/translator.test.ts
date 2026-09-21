@@ -7,7 +7,10 @@ import {
   PlanExpressionValue,
   PlanExpressionVariable,
 } from "@cerbos/core";
-import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
+import type {
+  PlanExpressionOperand,
+  PlanResourcesResponse,
+} from "@cerbos/core";
 import type { Where } from "chromadb";
 
 import { PlanKind, queryPlanToChromaDB } from ".";
@@ -31,60 +34,15 @@ import {
 import type { GoldenExpectation } from "./corpus";
 
 /**
- * Translator unit test: for every action in the shared `../conformance/` corpus, the Chroma `Where`
- * filter this adapter emits. Offline — no Cerbos sidecar, no ChromaDB, no Docker.
- *
- * A per-adapter suite used to braid four assertions into every test. Three of them are somebody
- * else's job now, and this file makes only the fourth:
- *
- * | assertion | who owns it |
- * | --- | --- |
- * | the plan the PDP produces for a policy | `conformance/wire-fixtures/`, replanned and diffed by the `Conformance Corpus` workflow |
- * | which shapes this adapter must refuse, and with what message | `conformance/actions.json` — read below, not restated |
- * | the documents a filter returns | `adversarial.test.ts`, against a real ChromaDB collection with `check()` as the oracle |
- * | **the filter this adapter emits for a plan** | **here** |
- *
- * **The plans are read, not written.** A hand-built plan is a *belief* about what the planner
- * emits, and this repository keeps golden fixtures because that belief has been wrong before: a
- * planner change used to fail fixture regeneration and silently leave every adapter's hand-written
- * plans describing a wire contract that no longer existed. See
- * [ADR 0006](../../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
- *
- * **The expectations are data, not literals.** The filters this adapter is pinned to emit live in
- * `golden/expectations.json`, a **golden expectation** file this adapter owns — never under
- * `conformance/`, where every adapter workflow triggers and one adapter re-pinning one filter would
- * re-run all the others. The file is regenerated with `npm run golden:update` and reviewed as a diff,
- * exactly like the wire fixtures it is asserted against. See
- * [ADR 0007](../../docs/adr/0007-adapters-share-data-not-code.md) and the "Golden expectations"
- * section of `conformance/README.md`.
- *
- * **This file reads as mostly-throws, and that is the adapter.** Chroma's `where` clause compares
- * flat scalar metadata on the document being matched: no joins, no collections, no arithmetic, no
- * pattern matching, no null. 164 of the corpus's 199 shapes are therefore fail-closed here, and
- * every one of them is asserted against the message `actions.json` pins rather than a bare "it
- * threw" — which for an adapter with this ratio is the difference between a suite and a formality
- * (cerbos/query-plan-adapters#326).
- *
- * **Adding a corpus action fails this file.** Every wire fixture must be accounted for here exactly
- * once — a golden expectation (an emitted filter or an unconditional plan kind) or a throw carrying
- * the message `actions.json` pins — and the completeness guard below is what makes a new action land
- * as a failure rather than as silence.
+ * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
+ * and caller options that the shared corpus cannot vary. The adversarial suite separately
+ * executes filters against a store and compares them with the PDP oracle.
+ * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
  */
 
 const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
 
-/**
- * The shapes `actions.json` says this adapter must refuse, each with the message it must refuse
- * them with. Identical to the classification `adversarial.test.ts` asserts against a live PDP;
- * asserting it here as well is what lets the completeness guard below be total, and it costs a
- * millisecond rather than a PDP and a vector store.
- *
- * A throwing action needs no golden expectation of its own: the message is already corpus data,
- * pinned once in `actions.json` and read by every adapter. Writing it into this adapter's asset too
- * would create two places to change one string with nothing to say which is authoritative — and on
- * an adapter that refuses five sixths of the corpus, the asset would be almost entirely restatement
- * of shared data.
- */
+// Refusal messages come from the same classification ledger as the live harness.
 const THROWING_ACTIONS = [
   ...classifyActionsForAdapter(actionsFile, ADAPTER).throwingActions,
   // The `nullRepresentationOmitted` group belongs here on this adapter and only on this adapter's
@@ -270,7 +228,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 36, unconditional: 2, throwing: 167 });
+    }).toEqual({ conditional: 42, unconditional: 7, throwing: 225 });
   });
 });
 
@@ -279,7 +237,7 @@ describe("corpus shapes", () => {
  *
  * `actions.json` pins a substring of the message per action, so the throw suite above proves every
  * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 164 of 199 shapes that is the more interesting property:
+ * together, and on an adapter that refuses 225 of 274 shapes that is the more interesting property:
  * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
  * one catch-all.
  *
@@ -288,7 +246,7 @@ describe("corpus shapes", () => {
  * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
  * change that moves a shape from one site to another shows up as a diff even though both sites throw
  * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
- * `binaryOperands` rejecting a computed operand is the single mechanism behind 101 of the 164, and
+ * `binaryOperands` rejecting a computed operand is the single mechanism behind 130 of the 225, and
  * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
  * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
  * a bare metadata key or a literal.
@@ -300,7 +258,10 @@ describe("the rejection sites the corpus reaches", () => {
     // `binaryOperands`: both sides are metadata keys, and a Where clause compares one to a literal.
     ["field-to-field", /^Variable-to-variable comparisons are not supported/],
     // `mapComparison` / `mapBooleanVariable`: $ne and $nin match a document missing the key.
-    ["inequality over an optional key", / is unsafe for optional Chroma metadata/],
+    [
+      "inequality over an optional key",
+      / is unsafe for optional Chroma metadata/,
+    ],
     // `whereFor`: the operator has no Chroma equivalent at all.
     ["no such operator", /^Unsupported operator /],
     // `negateOperand`: the operator is not in NEGATED_OPERATOR, so there is nothing to invert.
@@ -343,13 +304,13 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 103,
-      "no such operator": 19,
-      "inequality over an optional key": 12,
-      "not negatable": 11,
-      "field-to-field": 10,
-      "mirrored membership": 5,
-      "non-scalar literal": 4,
+      "computed operand": 130,
+      "no such operator": 36,
+      "inequality over an optional key": 13,
+      "not negatable": 15,
+      "field-to-field": 17,
+      "mirrored membership": 6,
+      "non-scalar literal": 5,
       "operand arity": 2,
       "fractional threshold": 1,
     });
@@ -544,9 +505,9 @@ describe("mapper forms", () => {
     const asFunction: FieldMapper = (reference) =>
       FIELD_NAME_MAPPER[reference] ?? reference;
 
-    expect(
-      translate(RECORD_ACTION, { fieldNameMapper: asFunction }),
-    ).toEqual(translate(RECORD_ACTION));
+    expect(translate(RECORD_ACTION, { fieldNameMapper: asFunction })).toEqual(
+      translate(RECORD_ACTION),
+    );
   });
 
   /**
@@ -569,11 +530,14 @@ describe("mapper forms", () => {
   test.each([
     ["a plain-string mapping", { "request.resource.attr.aString": "aString" }],
     ["an unmapped reference", {}],
-  ])("%s is optional, so an inequality over it is refused", (_label, mapper) => {
-    expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
-      /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
-    );
-  });
+  ])(
+    "%s is optional, so an inequality over it is refused",
+    (_label, mapper) => {
+      expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
+        /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
+      );
+    },
+  );
 
   /**
    * An unmapped reference is used verbatim as the metadata key. It is documented behaviour rather

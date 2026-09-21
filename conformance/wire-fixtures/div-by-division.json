@@ -1,0 +1,40 @@
+{
+  "action": "div-by-division",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "gt",
+        "operands": [
+          {
+            "expression": {
+              "operator": "div",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "expression": {
+                    "operator": "div",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "value": 0
+          }
+        ]
+      }
+    }
+  }
+}

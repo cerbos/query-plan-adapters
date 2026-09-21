@@ -65,6 +65,9 @@ if err != nil {
     return err
 }
 
+if result.Kind == cerbospgx.KindAlwaysDenied {
+    return nil // no rows are accessible; do not run the application-only query
+}
 if result.Kind == cerbospgx.KindConditional {
     where += " AND (" + result.Where + ")"
     args = append(args, result.Args...)                  // …so Result.Args must follow yours
@@ -74,7 +77,7 @@ rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
 
 **The fragment first**, with your parameters after it — pagination is the usual case. There is no
 option for this side: the fragment keeps its own numbering from `$1`, and you number yours from
-`len(result.Args)+1`:
+`len(result.Args)+1`. This example assumes you have handled the unconditional plan kinds above:
 
 ```go
 stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
@@ -171,9 +174,10 @@ Leaving an attribute undeclared keeps the historical rendering — so nothing ch
 that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
 it.
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+**Declare both sides of a field-to-field equality, or neither.** For operands with the same or
+undeclared scalar types, mixing conventions is rejected: the explicit-null side needs a definite
+answer for its NULL, while the omitted side needs UNKNOWN. Incompatible declared scalar types can
+be compared through their NULL states without comparing the stored values. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -187,8 +191,8 @@ semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 186 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (rejected in the shared vendored translator, which serves MySQL and SQLite too, even though PostgreSQL alone would render it correctly), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself) (17 actions) |
+| Oracle-tested | 226 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a column declared `ValueBool` (rejected in the shared vendored translator, which serves MySQL and SQLite too, even though PostgreSQL alone would render it correctly), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except`, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (46 actions) |
 | Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbospgx.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -200,9 +204,18 @@ hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Pyth
 adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
 Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
 
+**Behavior changes (#414).** NaN ordering preserves CEL errors under negation, and
+membership preserves the needle's per-attribute NULL convention even when the collection is
+empty. Declare numeric fields with `ValueNumber`, text fields with `ValueString`, and booleans
+with `ValueBool` to prevent database coercion in heterogeneous comparisons and string operations.
+Undeclared field types retain historical behavior; the plan carries no type information.
+Bare comparisons between declared temporal columns now fail closed because timestamp storage
+loses the original RFC 3339 spelling. Use `timestamp()` on both policy operands to compare instants.
+Two-list `except`, structured list operands and constructor expressions are refused at translation.
+
 **Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`; on PostgreSQL that is a hard `operator does not exist: text + text` for text columns, so the change turns a runtime failure into a translation-time one and refuses the shape the shared translator cannot type.
 
-The eleven fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
+Fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
 filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
@@ -273,7 +286,7 @@ at once. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than IEEE's. Only NaNs the adapter folds itself are handled exactly. |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's error semantics. Only NaNs the adapter folds itself are handled exactly. |
 | Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
 | Timestamp literals finer than a microsecond | PostgreSQL stores microsecond resolution, so a sub-microsecond bound is silently truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
 | `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |

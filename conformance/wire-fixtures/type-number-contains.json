@@ -1,0 +1,20 @@
+{
+  "action": "type-number-contains",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "contains",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": "2"
+          }
+        ]
+      }
+    }
+  }
+}

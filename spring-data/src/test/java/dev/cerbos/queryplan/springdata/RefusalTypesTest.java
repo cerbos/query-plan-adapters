@@ -82,6 +82,32 @@ class RefusalTypesTest {
      */
     private static final Map<String, Class<? extends IllegalArgumentException>> CLASSIFIED =
             Map.ofEntries(
+                    Map.entry("regex-digit", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-case", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-posix", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-unanchored", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-dot", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-alternation", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-grouped", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-brace", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-repetition", UnsupportedPlanShapeException.class),
+                    Map.entry("regex-optional-operators", UnsupportedPlanShapeException.class),
+                    Map.entry("except-root", UnsupportedPlanShapeException.class),
+                    Map.entry("except-size", UnsupportedPlanShapeException.class),
+                    Map.entry("except-eq", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-structs", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-structs-null", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-exists-one", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-filter", UnsupportedPlanShapeException.class),
+                    Map.entry("pv-map", UnsupportedPlanShapeException.class),
+                    Map.entry("temporal-raw-eq", UnsupportedPlanShapeException.class),
+                    Map.entry("eq-list", UnsupportedPlanShapeException.class),
+                    Map.entry("ne-list", UnsupportedPlanShapeException.class),
+                    Map.entry("eq-map", UnsupportedPlanShapeException.class),
+                    Map.entry("ne-map", UnsupportedPlanShapeException.class),
+                    Map.entry("eq-map-null", UnsupportedPlanShapeException.class),
+                    Map.entry("in-nested-list", UnsupportedPlanShapeException.class),
+                    Map.entry("hasint-map-element", UnsupportedPlanShapeException.class),
                     Map.entry("arith-mod", UnsupportedPlanShapeException.class),
                     Map.entry("cast-double-string", UnsupportedPlanShapeException.class),
                     Map.entry("cast-int-double", UnsupportedPlanShapeException.class),
@@ -138,7 +164,7 @@ class RefusalTypesTest {
             counts.merge(ex.getClass().getSimpleName(), 1, Integer::sum);
         }
         assertEquals(new TreeMap<>(Map.of(
-                        "UnsupportedPlanShapeException", 19,
+                        "UnsupportedPlanShapeException", 45,
                         "UnmappedAttributeException", 2)),
                 counts);
         assertEquals(THROWING.size(), counts.values().stream().mapToInt(Integer::intValue).sum());

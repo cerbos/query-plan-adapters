@@ -1,0 +1,37 @@
+{
+  "action": "ne-map",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "ne",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operator": "struct",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "set-field",
+                    "operands": [
+                      {
+                        "value": "a"
+                      },
+                      {
+                        "value": 1
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

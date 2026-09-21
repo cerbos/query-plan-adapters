@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, jest, test } from "@jest/globals";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  jest,
+  test,
+} from "@jest/globals";
 import type { Principal, Resource, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import {
@@ -46,9 +53,7 @@ jest.setTimeout(120_000);
 
 const CERBOS_PORT = 3641;
 const cerbos = new Cerbos(`127.0.0.1:${CERBOS_PORT}`, { tls: false });
-const chromaUrl = new URL(
-  process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234",
-);
+const chromaUrl = new URL(process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234");
 const chroma = new ChromaClient({
   host: chromaUrl.hostname,
   port: Number(chromaUrl.port) || 8000,
@@ -84,6 +89,7 @@ interface DerivedEntry {
   createdBy: string;
   aDouble: number | null;
   createdAt: string | null;
+  updatedAt: string | null;
   scope: string | null;
   labels: (string | null)[];
 }
@@ -135,6 +141,7 @@ const DERIVED_KEYS = [
   "createdBy",
   "aDouble",
   "createdAt",
+  "updatedAt",
   "scope",
   "labels",
 ] as const;
@@ -159,6 +166,11 @@ const PRINCIPAL_ATTR_KEYS = [
   "context",
   "fewTeams",
   "manyTeams",
+  "zero",
+  "emptyTeams",
+  "manyStructs",
+  "nullableStructs",
+  "missingStructs",
 ] as const;
 
 function assertKeys(
@@ -204,15 +216,39 @@ function assertSeedKeyCoverage(value: unknown): void {
   });
 }
 
-/**
- * Asserted against the RAW json for the same reason as the seed keys: parseSeedsFile rebuilds
- * `id` and `roles`, so a rebuilt principal could only ever report the keys this harness already
- * names.
- *
- * The attribute VALUES are asserted too. A key-set guard says nothing about a change inside one and
- * three of the four attributes are lists, so the element type is asserted for the same reason the
- * seed guard descends into `tags[]`.
- */
+/** Principal attributes have explicit value shapes, including absent versus null struct members. */
+function assertPrincipalAttrShape(label: string, value: unknown): void {
+  const key = label.slice(label.lastIndexOf(".") + 1);
+  if (key === "context" && typeof value === "string") return;
+  if (key === "zero" && value === 0) return;
+  if (
+    ["allowedTags", "fewTeams", "manyTeams", "emptyTeams"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string")
+  )
+    return;
+  if (
+    ["manyStructs", "nullableStructs", "missingStructs"].includes(key) &&
+    Array.isArray(value) &&
+    value.every((entry: unknown) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+        return false;
+      if (key === "missingStructs") return Object.keys(entry).length === 0;
+      return (
+        Object.keys(entry).length === 1 &&
+        "name" in entry &&
+        (key === "nullableStructs"
+          ? entry.name === null
+          : typeof entry.name === "string")
+      );
+    })
+  )
+    return;
+  throw new Error(
+    `${label} does not match its declared corpus principal shape`,
+  );
+}
+
 function assertPrincipalKeyCoverage(value: unknown): void {
   const principal = requireRecord(
     requireRecord(value, "seeds.json")["principal"],
@@ -226,14 +262,7 @@ function assertPrincipalKeyCoverage(value: unknown): void {
     PRINCIPAL_ATTR_KEYS,
   );
   for (const [key, entry] of Object.entries(attr)) {
-    const label = `seeds.json principal.attr.${key}`;
-    if (typeof entry === "string") continue;
-    if (Array.isArray(entry) && entry.every((el) => typeof el === "string")) {
-      continue;
-    }
-    throw Error(
-      `${label} is neither a string nor an array of strings, the only two shapes this harness consumes: a reshaped principal attribute feeds the plan and the check() oracle at once`,
-    );
+    assertPrincipalAttrShape(`seeds.json principal.attr.${key}`, entry);
   }
 }
 
@@ -243,6 +272,10 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
   const aDouble = entry["aDouble"];
   if (aDouble !== null && typeof aDouble !== "number") {
     throw Error(`${label}.aDouble must be a number or null`);
+  }
+  const updatedAt = entry["updatedAt"];
+  if (updatedAt !== null && typeof updatedAt !== "string") {
+    throw new Error(`${label}.updatedAt must be a string or null`);
   }
   const createdAt = entry["createdAt"];
   if (createdAt !== null && typeof createdAt !== "string") {
@@ -264,6 +297,7 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
     createdBy: requireString(entry["createdBy"], `${label}.createdBy`),
     aDouble,
     createdAt,
+    updatedAt,
     scope,
     labels,
   };
@@ -271,10 +305,7 @@ function parseDerivedEntry(value: unknown, label: string): DerivedEntry {
 
 function parseDerivedFile(value: unknown): DerivedFile {
   const file = requireRecord(value, "derived-fields.json");
-  const fields = parseStringArray(
-    file["fields"],
-    "derived-fields.json fields",
-  );
+  const fields = parseStringArray(file["fields"], "derived-fields.json fields");
   assertKeys("derived-fields.json fields", fields, DERIVED_KEYS);
   const derived: Record<string, DerivedEntry> = {};
   for (const [id, entry] of Object.entries(
@@ -394,6 +425,8 @@ const MANIFEST_ACTIONS = new Set([
 // (`x in []` is false for every seed) and so cannot satisfy a non-empty assertion.
 
 const DEGENERACY_GUARD_ACTIONS = [
+  "pv-in",
+  "pv-in-unrolled",
   "vf-le",
   "vf-ge",
   "vf-ne",
@@ -436,6 +469,9 @@ const DEGENERACY_GUARD_ACTIONS = [
   // construction and sits in neither list.
   "in-map-keys",
   "double-huge-gt",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "in-numbers",
+  "root-not-bool",
 ] as const;
 
 /**
@@ -500,6 +536,47 @@ const DEGENERACY_LIVENESS_PROBES = [
   "map-eq-list",
   "vf-hasint",
   "pv-all-unrolled",
+  // #414: every newly discriminating shape guards its observed execution side.
+  "div-by-division",
+  "eq-list",
+  "except-eq",
+  "except-size",
+  "hasint-map-null",
+  "hasint-map-null-vf",
+  "hasint-map-vf",
+  "hasint-null-vf",
+  "hier-overlaps-list-prefix",
+  "in-var-var-omitted",
+  "in-var-var-omitted-neg",
+  "lambda-in-literal",
+  "lambda-in-literal-neg",
+  "lambda-ternary",
+  "ne-list",
+  "not-concat-unsolvable",
+  "not-concat-unsolvable-ne",
+  "not-hasint-empty-chain",
+  "not-nan-ord-le",
+  "pv-exists-one",
+  "pv-filter",
+  "pv-map",
+  "pv-not-all",
+  "pv-not-exists",
+  "pv-shadow",
+  "pv-structs",
+  "regex-alternation",
+  "regex-brace",
+  "regex-case",
+  "regex-digit",
+  "regex-dot",
+  "regex-grouped",
+  "regex-optional-operators",
+  "regex-posix",
+  "regex-repetition",
+  "regex-unanchored",
+  "size-ge-one",
+  "temporal-raw-eq",
+  "wildcard-contains",
+  "wildcard-endswith",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -618,6 +695,10 @@ function checkResource(seed: Seed): Resource {
   if (scope !== null) {
     attr["scope"] = scope;
   }
+  const updatedAt = derivedFor(seed).updatedAt;
+  if (updatedAt !== null) {
+    attr["updatedAt"] = updatedAt;
+  }
   const createdAt = timestampFor(seed);
   if (createdAt !== null) {
     attr["createdAt"] = createdAt;
@@ -663,6 +744,10 @@ function metadataFor(seed: Seed): Metadata {
   const aDouble = doubleFor(seed);
   if (aDouble !== null) {
     metadata["aDouble"] = aDouble;
+  }
+  for (const key of ["createdAt", "updatedAt"] as const) {
+    const value = derivedFor(seed)[key];
+    if (value !== null) metadata[key] = value;
   }
   // The to-one chain, flattened onto dotted keys. A level that does not exist writes no key at
   // all, which is what the check side's missing `parent` / `parent.inner` path mirrors.
@@ -761,16 +846,13 @@ async function adapterFilteredIds(action: string): Promise<string[]> {
   const results = await activeCollection().query({
     queryEmbeddings: [BASE_EMBEDDING],
     where:
-      translated.kind === PlanKind.CONDITIONAL
-        ? translated.filters
-        : undefined,
+      translated.kind === PlanKind.CONDITIONAL ? translated.filters : undefined,
     nResults: SEEDS.length,
   });
   return [...(results.ids[0] ?? [])].sort();
 }
 
 describe("adversarial conformance corpus", () => {
-
   // Adding a throwing action without pinning its message must fail this harness rather than
   // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
   test("a throwing action with no pinned message fails classification", () => {
@@ -781,7 +863,7 @@ describe("adversarial conformance corpus", () => {
       /pins no throw message/,
     );
   });
-  test("manifest assigns all 199 policy actions exactly one Chroma outcome", () => {
+  test("manifest assigns all policy actions exactly one Chroma outcome", () => {
     const oracle = new Set(CHROMA_SUPPORTED_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -797,12 +879,12 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(205);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(37);
+    expect(MANIFEST_ACTIONS.size).toBe(274);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(48);
     expect(oracle.size).toBe(CHROMA_SUPPORTED_ACTIONS.length);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(155);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(213);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(166);
+    expect(THROWING_ACTIONS).toHaveLength(224);
     expect(misclassified).toEqual([]);
   });
 
@@ -956,4 +1038,84 @@ describe("adversarial conformance corpus", () => {
       await expectNonDegenerateOracle(action);
     }
   });
+  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
+  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
+  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
+  test.each([
+    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
+    {
+      action: "pv-empty-not-exists",
+      kind: PlanKind.ALWAYS_ALLOWED,
+      total: true,
+    },
+    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
+    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
+    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "pv-structs-missing",
+      kind: PlanKind.ALWAYS_DENIED,
+      total: false,
+    },
+    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
+    {
+      action: "type-hierarchy-number",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-contains",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-startswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-number-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    {
+      action: "type-needle-endswith",
+      kind: PlanKind.CONDITIONAL,
+      total: false,
+    },
+    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
+    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
+    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
+  ])(
+    "$action preserves its intentional empty/total oracle and planner shape",
+    async ({ action, kind, total }) => {
+      const [plan, ids] = await Promise.all([
+        cerbos.planResources({
+          principal: seedsFile.principal,
+          resource: { kind: seedsFile.resourceKind },
+          action,
+        }),
+        oracleAllowedIds(action),
+      ]);
+      expect(plan.kind).toBe(kind);
+      expect(ids).toEqual(total ? SEEDS.map((seed) => seed.id).sort() : []);
+    },
+  );
 });

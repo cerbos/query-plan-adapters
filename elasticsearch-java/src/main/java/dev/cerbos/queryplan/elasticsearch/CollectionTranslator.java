@@ -75,14 +75,16 @@ final class CollectionTranslator {
         }
 
         if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-            throw malformed(
-                    operator + " first operand must be a variable, got " + listOperand.getNodeCase());
+            throw unsupported(operator + " over a computed collection cannot be lowered to a nested query");
         }
 
         String cerbosAttr = listOperand.getVariable();
         String esField = root.field(cerbosAttr);
 
         if (!options.nestedPaths().contains(esField)) {
+            if (options.collectionFields().contains(esField)) {
+                throw unsupported("Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping");
+            }
             throw unmapped("Field '" + esField + "' is not declared in nestedPaths. "
                     + "Collection operators require nested mappings.");
         }

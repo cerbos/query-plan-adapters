@@ -13,6 +13,9 @@ Needs `docker` (with compose), `curl`, `jq`, Gradle 8.x and a JDK 17+. The runne
 Cerbos PDP; this directory's `run.sh` publishes the adapter to mavenLocal, starts Elasticsearch,
 builds this example against the published coordinate and runs the program.
 
+The Cerbos client applies a 30-second deadline to each PDP call, so a stalled RPC fails
+instead of hanging the example.
+
 ## What this example covers that the adapter's own suites cannot
 
 **Packaging.** All four suites under [`../src/test`](../src/test) compile against the adapter's own

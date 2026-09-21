@@ -14,6 +14,9 @@ the functions, builds the client, and runs it.
 
 It follows [`prisma/example/`](../../prisma/example/), which is the reference implementation.
 
+Install the adapter's build dependencies with `npm ci` in [`../`](..) before running
+the example; `run.sh` builds the adapter before packing it.
+
 ## What it proves
 
 Not what the adapter translates — [`../src/adversarial.test.ts`](../src/adversarial.test.ts)
@@ -40,8 +43,8 @@ and it is the row where the two resolvers differ:
 
 | Break                                   | `npx convex deploy`                                | `npm run build` (client) | `npm test`  |
 | --------------------------------------- | -------------------------------------------------- | ------------------------ | ----------- |
-| `exports["."]` points at a missing file  | fails — `The module "./lib/missing.js" was not found on the file system` | fails (TS2307) | 457 passing |
-| `lib/**/*.js` dropped from `files`       | fails — `The module "./lib/index.js" was not found on the file system`   | **passes** — the `.d.ts` files are still shipped, so the types resolve and only the bundle does not | 457 passing |
+| `exports["."]` points at a missing file  | fails — `The module "./lib/missing.js" was not found on the file system` | fails (TS2307) | passes |
+| `lib/**/*.js` dropped from `files`       | fails — `The module "./lib/index.js" was not found on the file system`   | **passes** — the `.d.ts` files are still shipped, so the types resolve and only the bundle does not | passes |
 
 That second row is why the deploy is not redundant with the client compile: a `files` allowlist can
 ship every type declaration and no implementation, and only something that has to *execute* the

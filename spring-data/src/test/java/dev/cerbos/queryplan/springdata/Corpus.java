@@ -294,6 +294,7 @@ final class Corpus {
             Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
             // Instant column for the ts-* timestamp() comparison actions
             Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
+            Map.entry("request.resource.attr.updatedAt", AttributeMapping.field("updatedAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
             // The corpus's one REAL to-one chain (the `rel-*` actions). obj.inner above is a flat
             // column wearing a dotted name; these are a genuine association, and a dotted jpaPath

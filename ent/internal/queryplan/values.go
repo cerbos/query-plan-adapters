@@ -75,6 +75,11 @@ func escapeLikeColumn(needle Expr) Expr {
 // case-insensitive collation over-grants here. That is a documented part of each adapter's
 // contract rather than something the translator can fix.
 func stringMatch(receiver, needle value, prefix, suffix bool) (Expr, error) {
+	for _, operand := range []value{receiver, needle} {
+		if kind := scalarKind(operand); kind != "" && kind != "string" {
+			return Lit{V: nil}, nil
+		}
+	}
 	recvStr, recvIsStr := receiver.(string)
 	needleStr, needleIsStr := needle.(string)
 
@@ -363,6 +368,10 @@ func compareLeaf(op CmpOp, l, r value) (Expr, error) {
 	lNaN := lIsIEEE && math.IsNaN(lIEEE.v)
 	rNaN := rIsIEEE && math.IsNaN(rIEEE.v)
 
+	if (lNaN || rNaN) && op != OpEq && op != OpNe {
+		// CEL ordering raises for NaN. UNKNOWN remains an error under NOT.
+		return Lit{V: nil}, nil
+	}
 	if lNaN || rNaN {
 		other := r
 		if rNaN {
@@ -424,6 +433,19 @@ func compareOrdered[T cmp.Ordered](op CmpOp, l, r T) bool {
 
 // applyComparison lowers a comparison whose operands are ordinary constants or expressions.
 func applyComparison(op CmpOp, l, r value) (Expr, error) {
+	lk, rk := scalarKind(l), scalarKind(r)
+	if lk != "" && rk != "" && lk != rk {
+		result := mixedTypeResult(op, l, r)
+		for _, operand := range []value{l, r} {
+			if col, ok := operand.(Column); ok && col.ExplicitNull {
+				continue
+			}
+			if valueExpr, ok := operand.(Expr); ok {
+				result = Case{Whens: []When{{Cond: IsNull{X: valueExpr, Negate: true}, Then: result}}}
+			}
+		}
+		return result, nil
+	}
 	if nullTest, ok, err := nullComparison(op, l, r); err != nil || ok {
 		return nullTest, err
 	}
@@ -561,6 +583,9 @@ func explicitNullColumn(e Expr) (Expr, bool) {
 // the corpus's explicit-null convention sends a NULL column as a real null attribute. SQL's
 // `IN (NULL, 'a')` never matches a NULL row, so the null members become an explicit IS NULL arm.
 func membership(x, values value) (Expr, error) {
+	if _, list := x.([]any); list {
+		return nil, fmt.Errorf("membership with a list-valued element cannot be represented by scalar SQL IN")
+	}
 	members, ok := values.([]any)
 	if !ok {
 		members = []any{values}

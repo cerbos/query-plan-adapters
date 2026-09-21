@@ -8,9 +8,9 @@ module Cerbos
       # A CEL double that is not finite: NaN, +Infinity or -Infinity.
       #
       # These values must not go into the database. PostgreSQL puts NaN above all the other
-      # doubles in an ordered comparison. IEEE-754 and CEL do the opposite. The adapter keeps
-      # these values as Ruby values. Thus it can calculate each comparison that contains one,
-      # and the result is the same for all the dialects.
+      # doubles in an ordered comparison. CEL raises an error for an unordered comparison.
+      # The adapter keeps these as Ruby values so comparisons can preserve that error under
+      # negation without depending on the database's non-finite number semantics.
       IEEEConstant = Struct.new(:value)
 
       # A ternary that the translator keeps until it finds the comparison around it. If one

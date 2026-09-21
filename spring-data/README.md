@@ -418,17 +418,23 @@ picking a direction: the two declarations conflict, and one of them is what chan
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 22 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+The adapter is differentially tested against Cerbos PDP 0.54.0 `check()` decisions using 26 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 182 of the 192 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a scalar list, list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (21 actions) |
+| Oracle-tested | 225 of the 261 reference conformance actions |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column (the Criteria API has no cast expression, and a boolean's text rendering differs across the dialects Spring Data JPA targets), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a scalar list, list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (47 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
 
-Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 184 recorded statements and 21 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 22 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+Bare comparisons between temporal columns are rejected because the database compares instants while CEL compares the original attribute strings. Use `timestamp()` explicitly when the policy intends instant comparison. This is a breaking change for plans that previously returned a filter for a bare temporal comparison.
+
+The translator preserves CEL type errors and missing-attribute errors through negation. Numeric fields are not coerced into strings for string operations, and ordering against NaN remains unknown rather than becoming a false predicate that negation could turn into an allow.
+
+Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 227 recorded statements and 47 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 26 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+
+The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
 
 The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
@@ -622,7 +628,7 @@ of "not set".
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
-Every collection macro (`exists`/`exists_one`/`all`/`filter`/
+Every mapped-relation collection macro (`exists`/`exists_one`/`all`/`filter`/
 `size(filter(...))`) translates to a single correlated aggregate subquery, but the
 lambda body inside it is translated once per polarity — positive and negated — because
 Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
@@ -640,7 +646,15 @@ the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the cha
 
 To keep a legal-but-degenerate deeply nested policy from silently timing out on
 production-sized tables, the translator bounds macro nesting depth at **5** by default
-and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time). If
+and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time).
+Literal-collection folds count as levels too: each element repeats the nested body, so they
+can multiply relation subqueries even though the fold itself adds no subquery. This counts
+macro nesting, not total expression size; list cardinality and non-macro expressions such as
+ternaries can still expand the output.
+
+**Behaviour change ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).**
+Literal folds previously bypassed this bound. A plan whose total macro depth exceeds the limit
+now throws instead of emitting a filter. The default remains 5. If
 your policies intentionally nest deeper, raise the limit per call —
 
 ```java

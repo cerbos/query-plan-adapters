@@ -43,7 +43,7 @@ final class PlanWalker {
     PlanWalker(Options options) {
         this.root = Scope.root(options.fieldMap());
         this.leaf = new LeafTranslator(options);
-        this.hierarchy = new HierarchyTranslator(root);
+        this.hierarchy = new HierarchyTranslator(root, options.scalarTypes());
         this.sizes = new SizeTranslator(options, root);
         this.collections = new CollectionTranslator(options, root, this, leaf);
     }

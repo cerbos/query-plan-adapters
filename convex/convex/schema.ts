@@ -11,6 +11,7 @@ export default defineSchema({
     aOptionalString: v.optional(v.string()),
     createdBy: v.string(),
     createdAt: v.optional(v.string()),
+    updatedAt: v.optional(v.string()),
     scope: v.optional(v.string()),
     owner: v.union(v.string(), v.null()),
     coOwner: v.union(v.string(), v.null()),

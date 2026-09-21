@@ -1,0 +1,20 @@
+{
+  "action": "type-number-string",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "eq",
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": "projects:f1"
+          }
+        ]
+      }
+    }
+  }
+}

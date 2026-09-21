@@ -27,4 +27,5 @@ Every adapter is proved against two shared corpora at the root of this repositor
 - [`conformance/`](conformance/) — deliberately hostile shapes, proving each adapter's filter
   returns exactly the rows the PDP allows.
 - [`demo/`](demo/) — one realistic domain, proving each adapter's **published package** installs,
-  imports, and composes with its ORM's real query methods.
+  imports, and composes with its ORM's real query methods. Ent and pgx use local Go module
+  replacements and prove usage shapes only, not packaging.
