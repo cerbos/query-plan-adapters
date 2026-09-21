@@ -103,17 +103,17 @@ places, and in both it takes precedence over `attr_map` and over any operator ov
 - **`size()`** counts the elements. An empty collection is `0`; an SQL NULL column, or a JSON value
   that is not an array, is UNKNOWN — CEL raises for a missing attribute, so `size(x) == 0` selects the
   empty rows and never the missing ones, and `size(x) >= 0` still excludes them.
-- **`x[i] == literal`** and **`x[i] != literal`**, for a string or `null` literal at a constant
-  non-negative position, in either operand order and under logical operators. JSON types are kept:
-  `"1"` is not `1`. An absent element is UNKNOWN, so it stays excluded under negation just as CEL's
-  index error denies it. A null *element* is a value: `[null][0] == null` is true, and so is
+- **`x[i] == literal`** and **`x[i] != literal`**, for a string, number, boolean or `null` literal
+  at a constant non-negative position, in either operand order and under logical operators. JSON
+  types are kept, as CEL's equality keeps them: `"1"` is not `1`, and a `true` element is not `1`
+  even though SQLite stores both as 1. Numbers compare as doubles. An absent element is UNKNOWN, so
+  it stays excluded under negation just as CEL's index error denies it. A null *element* is a value: `[null][0] == null` is true, and so is
   `[null][0] != "public"`. PostgreSQL arrays are read through `to_jsonb`, which addresses positions,
   so an array whose lower bound is not 1 still reads the element CEL does.
 
 Everything else over a declared element raises: a negative or fractional index (CEL raises for both,
 and neither is coerced into a valid read), a dynamic index, an ordering, a projection such as
-`x[0].name`, and a comparison with a number or boolean — no list in the conformance corpus holds
-either, so no oracle has checked that rendering yet. Everywhere else the attribute keeps resolving
+`x[0].name`, and a comparison with a list or map literal. Everywhere else the attribute keeps resolving
 through `attr_map`, so a relation marker there goes on serving `exists`, `all`, `in` and the other
 collection macros through your overrides; the column you declare must hold exactly the list you send
 to Cerbos, null elements included.
@@ -127,11 +127,11 @@ What translates with no override, and what still needs one:
 | --- | --- | --- |
 | Comparisons, logical operators, value-first and field-to-field forms, ternaries | translated | — |
 | `contains`, `startsWith`, `endsWith` | escaped `LIKE` | — |
-| Arithmetic; `string()` over a numeric or text column | translated | — |
-| `int()`, `double()`; `string()` over a boolean column | refused | an override matching your database |
+| Arithmetic; `string()` over a numeric, text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
+| `int()`, `double()` | refused | an override matching your database |
 | `size()` over a string column | `LENGTH` | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
-| `x[i] == "s"`, `x[i] != "s"`, `x[i] == null` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
+| `x[i] == literal`, `x[i] != literal` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `exists`, `all` over a literal list (a principal attribute) | folded | — |
 | `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | overrides; `require_hops` for a chain through a to-one parent |
 | `index` over any other storage | refused | an `index` override |
@@ -143,6 +143,14 @@ declare now raises. It used to return `LENGTH()` of the column — the length of
 the wrong one. `index` over a collection with no declared storage now raises a message naming the
 missing declaration rather than `Unrecognised operator: index`. Declaring the storage is new, so no
 existing mapping translates differently.
+
+**Behaviour change (#418).** `string()` over a boolean column now translates, to
+`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, where it used to raise:
+`CAST` renders `'1'` on SQLite and MySQL where CEL renders `'true'`, and the `CASE` spells CEL's two
+words on every dialect. The `IS NULL` arm keeps a NULL column UNKNOWN, since CEL has no `string()`
+for a missing or null value. The two words are literals, so on MySQL they compare in the
+*connection's* collation: make it case-sensitive, or `string(flag) == "TRUE"` selects the rows CEL
+does not.
 
 ## Example application
 
@@ -229,8 +237,8 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisio
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 235 reference conformance actions, of which the 15 that read a declared collection also run on PostgreSQL under both storage shapes |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, a negative or fractional index and an indexed object projection (`get-field`), `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, `string()` over a boolean column (SQLite and MySQL store 1/0 and render `'1'` where CEL and PostgreSQL render `'true'`), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself), two-list `except` with resource-list and principal-list receivers, constructor expressions and structured membership needles, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (58 actions) |
+| Oracle-tested | 242 reference conformance actions, of which the 21 that read a declared collection also run on PostgreSQL under both storage shapes |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, a negative or fractional index and an indexed object projection (`get-field`), `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself), two-list `except` with resource-list and principal-list receivers, constructor expressions and structured membership needles, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (57 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |

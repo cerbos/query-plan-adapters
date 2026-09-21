@@ -436,6 +436,8 @@ _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
 # The same collections as native PostgreSQL arrays. Only the PostgreSQL leg declares them; on
 # SQLite, which has no array type, the variant falls back to JSON text nothing reads.
 _COLLECTION_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(String), "postgresql")
+_NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql")
+_BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
 
 
 class AdvResource(AdvBase):
@@ -457,6 +459,13 @@ class AdvResource(AdvBase):
     tags_array = Column(_COLLECTION_ARRAY, nullable=True)
     tag_names_array = Column(_COLLECTION_ARRAY, nullable=True)
     main_sub_categories_array = Column(_COLLECTION_ARRAY, nullable=True)
+    # The corpus's two scalar lists of numbers and booleans, which exist to prove an element's
+    # JSON type survives the comparison (conformance/README.md, "Number and boolean list
+    # elements"). No relation backs them: the declared column is their only storage.
+    a_number_list_json = Column(_COLLECTION_JSON, nullable=True)
+    a_bool_list_json = Column(_COLLECTION_JSON, nullable=True)
+    a_number_list_array = Column(_NUMBER_ARRAY, nullable=True)
+    a_bool_list_array = Column(_BOOL_ARRAY, nullable=True)
 
 
 class AdvTag(AdvBase):
@@ -832,8 +841,8 @@ OPERATOR_OVERRIDES = {
     "in": _in_fn,
 }
 
-# How three collections are STORED, read by `size()` and `index` alone (#227). Each attribute
-# keeps its relation marker in ATTR_MAP too, because every collection macro still reads the
+# How the collections are STORED, read by `size()` and `index` alone (#227). The three with a
+# relation keep their marker in ATTR_MAP too, because every collection macro still reads the
 # relation: a declaration answers only the questions a collection's own storage decides. The
 # harness stores exactly the list `check()` is sent, so the ordered copy and the relation cannot
 # disagree about a row.
@@ -850,9 +859,15 @@ COLLECTION_COLUMNS = {
     "request.resource.attr.mainCategory.subCategories": CollectionColumn(
         AdvResource.main_sub_categories_json, "json"
     ),
+    "request.resource.attr.aNumberList": CollectionColumn(
+        AdvResource.a_number_list_json, "json"
+    ),
+    "request.resource.attr.aBoolList": CollectionColumn(
+        AdvResource.a_bool_list_json, "json"
+    ),
 }
 
-#: The same three, declared as PostgreSQL arrays. The corpus classifies each action against one
+#: The same five, declared as PostgreSQL arrays. The corpus classifies each action against one
 #: mapping, so the translator unit test and the SQLite harness use :data:`COLLECTION_COLUMNS`;
 #: this one is executed by the PostgreSQL leg of the harness alone.
 PG_ARRAY_COLLECTION_COLUMNS = {
@@ -862,6 +877,12 @@ PG_ARRAY_COLLECTION_COLUMNS = {
     ),
     "request.resource.attr.mainCategory.subCategories": CollectionColumn(
         AdvResource.main_sub_categories_array, "pgArray"
+    ),
+    "request.resource.attr.aNumberList": CollectionColumn(
+        AdvResource.a_number_list_array, "pgArray"
+    ),
+    "request.resource.attr.aBoolList": CollectionColumn(
+        AdvResource.a_bool_list_array, "pgArray"
     ),
 }
 

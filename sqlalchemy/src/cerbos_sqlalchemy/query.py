@@ -51,6 +51,7 @@ from sqlalchemy import (
     false,
     func,
     literal,
+    literal_column,
     not_,
     null,
     or_,
@@ -380,24 +381,27 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
 
 
 def _string_cast(c: Any) -> Any:
-    """CEL's ``string()``, for the operand types where CAST reproduces it.
+    """CEL's ``string()``.
 
-    Numeric and text columns lower cleanly: CEL formats the shortest decimal that
+    Numeric and text columns lower to a CAST: CEL formats the shortest decimal that
     round-trips, and so do SQLite, PostgreSQL (12+, where that became the default) and
     MySQL.
 
-    A BOOLEAN column does not, and it is the one type where lowering is wrong rather
-    than merely unproven. SQLite and MySQL have no boolean type and store 1/0, so
-    ``CAST(a_bool AS VARCHAR)`` is ``'1'`` where CEL's ``string(true)`` is ``'true'`` —
-    the same query returns every matching row on PostgreSQL and none on SQLite. One
-    adapter serves every dialect SQLAlchemy does, so the shape fails closed rather than
-    being silently dialect-dependent (cerbos/query-plan-adapters#376).
+    A BOOLEAN column does not go through a CAST. SQLite and MySQL have no boolean type and
+    store 1/0, so ``CAST(a_bool AS VARCHAR)`` is ``'1'`` where CEL's ``string(true)`` is
+    ``'true'`` -- the same query would return every matching row on PostgreSQL and none on
+    SQLite (cerbos/query-plan-adapters#376). A CASE spells CEL's two words on every
+    dialect instead (cerbos/query-plan-adapters#418), and its first arm is load-bearing: a
+    NULL boolean is a missing attribute or a null value, CEL has no ``string()`` for either
+    and denies the row, so the result must stay NULL rather than fall through to
+    ``'false'``. The two words are literals, so on MySQL they compare in the connection's
+    collation, which has to be case-sensitive as the columns' does.
     """
-    if isinstance(getattr(c, "type", None), Boolean):
-        raise ValueError(
-            "'string()' over a boolean column cannot be lowered to SQL CAST: SQLite "
-            "and MySQL store a boolean as 1/0 and render '1', while CEL and PostgreSQL "
-            "render 'true', so no single CAST is correct on every dialect"
+    if isinstance(_base_type(getattr(c, "type", None)), Boolean):
+        return case(
+            (c.is_(None), null()),
+            (c, literal_column("'true'", String)),
+            else_=literal_column("'false'", String),
         )
     return cast(c, String)
 
@@ -1104,8 +1108,8 @@ def get_query(
     because it is the more specific declaration. Everywhere else the attribute
     still resolves through ``attr_map``, so a relation marker there keeps
     serving the collection macros. An index is translated only as a direct
-    ``==``/``!=`` against a string or null literal at a constant non-negative
-    position; anything else over a declared collection is refused. The SQL renders on
+    ``==``/``!=`` against a scalar literal at a constant non-negative position;
+    anything else over a declared collection is refused. The SQL renders on
     SQLite and PostgreSQL. See ``cerbos_sqlalchemy.collection_storage`` and
     https://github.com/cerbos/query-plan-adapters/issues/227.
     """

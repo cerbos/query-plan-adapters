@@ -149,6 +149,15 @@
         "param_1": "set"
       }
     },
+    "cast-string-bool": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_bool IS NULL) THEN NULL WHEN adversarial_resource.a_bool THEN 'true' ELSE 'false' END = ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_bool IS NULL) THEN NULL WHEN adversarial_resource.a_bool THEN 'true' ELSE 'false' END = %(param_1)s"
+      },
+      "params": {
+        "param_1": "true"
+      }
+    },
     "cast-string-double": {
       "where": {
         "sqlite": "CAST(adversarial_resource.a_double AS VARCHAR) = ?",
@@ -840,6 +849,34 @@
         "param_1": 1
       }
     },
+    "index-bool-list": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_bool_list_json) = 'array' AND json_type(adversarial_resource.a_bool_list_json, '$[0]') IS NOT NULL THEN (json_type(adversarial_resource.a_bool_list_json, '$[0]') IN ('true', 'false') AND json_extract(adversarial_resource.a_bool_list_json, '$[0]') = ?) END = 1",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_bool_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) IS NOT NULL THEN (CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) = to_jsonb(CAST(%(param_1)s AS BOOLEAN)) END"
+      },
+      "params": {
+        "param_1": true
+      }
+    },
+    "index-bool-list-not-eq": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_bool_list_json) = 'array' AND json_type(adversarial_resource.a_bool_list_json, '$[0]') IS NOT NULL THEN (json_type(adversarial_resource.a_bool_list_json, '$[0]') IN ('true', 'false') AND json_extract(adversarial_resource.a_bool_list_json, '$[0]') = ?) END = 0",
+        "postgresql": "NOT CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_bool_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) IS NOT NULL THEN (CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) = to_jsonb(CAST(%(param_1)s AS BOOLEAN)) END"
+      },
+      "params": {
+        "param_1": true
+      }
+    },
+    "index-bool-list-vs-number": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_bool_list_json) = 'array' AND json_type(adversarial_resource.a_bool_list_json, '$[0]') IS NOT NULL THEN CASE WHEN json_type(adversarial_resource.a_bool_list_json, '$[0]') IN ('integer', 'real') THEN CAST(json_extract(adversarial_resource.a_bool_list_json, '$[0]') AS REAL) = CAST(? AS REAL) ELSE 0 END END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_bool_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) IS NOT NULL THEN CASE WHEN jsonb_typeof((CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0)) = 'number' THEN CAST((CAST(adversarial_resource.a_bool_list_json AS JSONB) -> 0) #>> '{}' AS FLOAT(53)) = CAST(%(param_1)s AS FLOAT(53)) ELSE false END END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": 1,
+        "a_number_1": 5
+      }
+    },
     "index-not-oob": {
       "where": {
         "sqlite": "CASE WHEN json_type(adversarial_resource.tag_names_json) = 'array' AND json_type(adversarial_resource.tag_names_json, '$[1]') IS NOT NULL THEN (json_type(adversarial_resource.tag_names_json, '$[1]') = 'text' AND json_extract(adversarial_resource.tag_names_json, '$[1]') = ?) END = 0",
@@ -847,6 +884,34 @@
       },
       "params": {
         "param_1": "public"
+      }
+    },
+    "index-number-list": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' AND json_type(adversarial_resource.a_number_list_json, '$[0]') IS NOT NULL THEN CASE WHEN json_type(adversarial_resource.a_number_list_json, '$[0]') IN ('integer', 'real') THEN CAST(json_extract(adversarial_resource.a_number_list_json, '$[0]') AS REAL) = CAST(? AS REAL) ELSE 0 END END = 1",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) IS NOT NULL THEN CASE WHEN jsonb_typeof((CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0)) = 'number' THEN CAST((CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) #>> '{}' AS FLOAT(53)) = CAST(%(param_1)s AS FLOAT(53)) ELSE false END END"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "index-number-list-not-eq": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' AND json_type(adversarial_resource.a_number_list_json, '$[0]') IS NOT NULL THEN CASE WHEN json_type(adversarial_resource.a_number_list_json, '$[0]') IN ('integer', 'real') THEN CAST(json_extract(adversarial_resource.a_number_list_json, '$[0]') AS REAL) = CAST(? AS REAL) ELSE 0 END END = 0",
+        "postgresql": "NOT CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) IS NOT NULL THEN CASE WHEN jsonb_typeof((CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0)) = 'number' THEN CAST((CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) #>> '{}' AS FLOAT(53)) = CAST(%(param_1)s AS FLOAT(53)) ELSE false END END"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "index-number-list-vs-bool": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' AND json_type(adversarial_resource.a_number_list_json, '$[0]') IS NOT NULL THEN (json_type(adversarial_resource.a_number_list_json, '$[0]') IN ('true', 'false') AND json_extract(adversarial_resource.a_number_list_json, '$[0]') = ?) END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' AND (CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) IS NOT NULL THEN (CAST(adversarial_resource.a_number_list_json AS JSONB) -> 0) = to_jsonb(CAST(%(param_1)s AS BOOLEAN)) END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": true,
+        "a_number_1": 5
       }
     },
     "index-scalar-list": {

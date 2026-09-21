@@ -16,11 +16,11 @@ two storage names the same strings in both:
   UNKNOWN. CEL raises an evaluation error for each, and Cerbos denies, so the row must stay
   excluded under negation too.
 - A null ELEMENT is a value: ``[null][0] == null`` is true and ``[null][0] != "x"`` is true.
-- Comparisons keep JSON's types: a string literal equals only a JSON string, as in CEL.
-- An element is compared only with a string or null literal. No list in the conformance corpus
-  holds a number or a boolean, so no oracle has ever checked such a comparison, and a JSON
-  number's equality is exactly where SQLite's REAL and PostgreSQL's numeric parsing would have
-  to be shown to agree with CEL's double. Until the corpus carries one it is refused.
+- Comparisons keep JSON's types, as CEL's heterogeneous equality does: a string literal equals
+  only a JSON string, a number only a JSON number (compared as doubles), and a boolean only a
+  JSON boolean. SQLite and MySQL store a JSON true as 1, so reading the element back as SQL and
+  comparing it with the literal would make ``[true][0] == 1`` true; the element's JSON type is
+  checked first (the corpus's ``index-bool-list-vs-number`` and ``index-number-list-vs-bool``).
 - ``size()`` of an empty collection is 0 and of an absent one is UNKNOWN, so ``size(x) == 0``
   selects the empty rows and never the missing ones.
 
@@ -33,6 +33,7 @@ a construct's clause arguments, never in a Python attribute, which is what makes
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -52,7 +53,7 @@ _MAX_INDEX = 2**31 - 1
 
 #: The refusal for every use of a declared element other than ``== literal`` / ``!= literal``.
 INDEXED_VALUE_REFUSAL = (
-    "Indexed values support only direct eq/ne comparisons with string or null literals"
+    "Indexed values support only direct eq/ne comparisons with scalar literals"
 )
 
 
@@ -101,7 +102,7 @@ def require_index_position(position: Any) -> int:
 
 
 def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> Any:
-    """``collection[position] == value`` for a string or null literal, keeping JSON's types.
+    """``collection[position] == value`` for a scalar literal, keeping JSON's types.
 
     The position is rendered inline, not bound. It is an integer ``require_index_position``
     has already checked, so there is nothing to inject, and a SQL literal is part of the
@@ -112,6 +113,12 @@ def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> A
     index = literal_column(str(require_index_position(position)), Integer)
     if value is None:
         return _ElementIsNull(document, index)
+    if isinstance(value, bool):
+        return _ElementEqualsBool(document, index, literal(value, Boolean))
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise ValueError("Indexed numeric comparisons require a finite literal")
+        return _ElementEqualsNumber(document, index, literal(value))
     if isinstance(value, str):
         return _ElementEqualsString(document, index, literal(value))
     raise ValueError(INDEXED_VALUE_REFUSAL)
@@ -156,6 +163,18 @@ class _ElementIsNull(FunctionElement):
     inherit_cache = True
 
 
+class _ElementEqualsBool(FunctionElement):
+    name = "cerbos_element_equals_bool"
+    type = Boolean()
+    inherit_cache = True
+
+
+class _ElementEqualsNumber(FunctionElement):
+    name = "cerbos_element_equals_number"
+    type = Boolean()
+    inherit_cache = True
+
+
 class _ElementEqualsString(FunctionElement):
     name = "cerbos_element_equals_string"
     type = Boolean()
@@ -167,6 +186,8 @@ _CONSTRUCTS = (
     _PgArrayDocument,
     _CollectionSize,
     _ElementIsNull,
+    _ElementEqualsBool,
+    _ElementEqualsNumber,
     _ElementEqualsString,
 )
 
@@ -250,6 +271,35 @@ def _sqlite_is_null(element, compiler, **kw):
     )
 
 
+@compiles(_ElementEqualsBool, "sqlite")
+def _sqlite_equals_bool(element, compiler, **kw):
+    # json_extract() gives a JSON true as 1 and a JSON 1 as 1 too, so the type is what tells
+    # them apart; the bound boolean is 1 or 0.
+    return _sqlite_element(
+        element,
+        compiler,
+        lambda kind, extracted, value: (
+            f"({kind} IN ('true', 'false') AND {extracted} = {value})"
+        ),
+        **kw,
+    )
+
+
+@compiles(_ElementEqualsNumber, "sqlite")
+def _sqlite_equals_number(element, compiler, **kw):
+    # CEL numbers are doubles on the wire, so an integer element and a double literal compare as
+    # the same number.
+    return _sqlite_element(
+        element,
+        compiler,
+        lambda kind, extracted, value: (
+            f"CASE WHEN {kind} IN ('integer', 'real') "
+            f"THEN CAST({extracted} AS REAL) = CAST({value} AS REAL) ELSE 0 END"
+        ),
+        **kw,
+    )
+
+
 @compiles(_ElementEqualsString, "sqlite")
 def _sqlite_equals_string(element, compiler, **kw):
     return _sqlite_element(
@@ -320,6 +370,33 @@ def _postgresql_element(element, compiler, equality, **kw):
 def _postgresql_is_null(element, compiler, **kw):
     return _postgresql_element(
         element, compiler, lambda item: f"jsonb_typeof({item}) = 'null'", **kw
+    )
+
+
+@compiles(_ElementEqualsBool, "postgresql")
+def _postgresql_equals_bool(element, compiler, **kw):
+    return _postgresql_element(
+        element,
+        compiler,
+        lambda item, value: f"{item} = to_jsonb(CAST({value} AS BOOLEAN))",
+        **kw,
+    )
+
+
+@compiles(_ElementEqualsNumber, "postgresql")
+def _postgresql_equals_number(element, compiler, **kw):
+    # A CASE rather than AND: PostgreSQL does not promise to evaluate an AND left to right, and
+    # casting a string element to a float raises. jsonb equality would compare `2` and `2.0` as
+    # numerics, which is right, but the double cast keeps it CEL's double equality.
+    return _postgresql_element(
+        element,
+        compiler,
+        lambda item, value: (
+            f"CASE WHEN jsonb_typeof({item}) = 'number' "
+            f"THEN CAST({item} #>> '{{}}' AS FLOAT(53)) = CAST({value} AS FLOAT(53)) "
+            "ELSE false END"
+        ),
+        **kw,
     )
 
 

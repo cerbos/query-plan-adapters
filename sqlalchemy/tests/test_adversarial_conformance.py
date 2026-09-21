@@ -84,6 +84,8 @@ SEED_KEYS = {
     "aString",
     "aNumber",
     "aOptionalString",
+    "aNumberList",
+    "aBoolList",
     "tags",
     "subCategoryNames",
     "parentSeedId",
@@ -304,10 +306,10 @@ DEGENERACY_GUARD_ACTIONS = (
     "id-f2f-ne",
     "id-concat",
     "id-concat-vf",
-    # string() over a NUMERIC column, the half this adapter lowers. Its boolean
-    # sibling is refused instead, so this entry proves the supported half still
-    # compares rather than joining the probes below.
+    # string() over a NUMERIC column, which lowers to a CAST, and over a BOOLEAN
+    # one, which lowers to a CASE because CAST renders 1/0 on SQLite (#418).
     "cast-string-double",
+    "cast-string-bool",
     # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
     # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
     # needing the plan to say which overload it is.
@@ -348,6 +350,15 @@ DEGENERACY_GUARD_ACTIONS = (
     "index-scalar-list-not-eq",
     "index-scalar-list-null",
     "index-not-oob",
+    # The same read over lists of numbers and booleans, where the element's JSON type
+    # decides: a true element is not 1 and a 1 is not true, though SQLite stores both
+    # as 1 (conformance/README.md, "Number and boolean list elements").
+    "index-number-list",
+    "index-number-list-not-eq",
+    "index-bool-list",
+    "index-bool-list-not-eq",
+    "index-bool-list-vs-number",
+    "index-number-list-vs-bool",
 )
 
 # Shapes this adapter refuses to translate: they have no oracle comparison to
@@ -374,8 +385,6 @@ DEGENERACY_LIVENESS_PROBES = (
     # int() over a numeric column: truncation-versus-rounding, unsupported for
     # every adapter but convex, which promotes it in adapterSupportedExpected.
     "cast-int-double",
-    # string() over a BOOLEAN column, where CAST is dialect-dependent (#376).
-    "cast-string-bool",
     # `list` has no operator-table entry, so the constructed hierarchy path is
     # refused before the hierarchy operators around it are reached.
     "hier-list-id",
@@ -603,6 +612,11 @@ def _seed(engine) -> None:
                 "tags_array": [tag["id"] for tag in seed["tags"]],
                 "tag_names_array": [tag["name"] for tag in seed["tags"]],
                 "main_sub_categories_array": list(seed["subCategoryNames"]) or None,
+                # The scalar lists, stored as the corpus spells them, null elements included.
+                "a_number_list_json": seed["aNumberList"],
+                "a_bool_list_json": seed["aBoolList"],
+                "a_number_list_array": seed["aNumberList"],
+                "a_bool_list_array": seed["aBoolList"],
             }
         )
         # The to-one chain, one owned row per level. A seed with no parent gets no
@@ -687,8 +701,15 @@ with open(
 ) as _f:
     POSTGRES_IMAGE = _f.read().strip()
 
-# The array columns the PostgreSQL leg rebases, so that none of them starts at index 1.
-_PG_ARRAY_COLUMNS = ("tags_array", "tag_names_array", "main_sub_categories_array")
+# The array columns the PostgreSQL leg rebases, so that none of them starts at index 1, with
+# the array type each one is cast back to.
+_PG_ARRAY_COLUMNS = {
+    "tags_array": "TEXT[]",
+    "tag_names_array": "TEXT[]",
+    "main_sub_categories_array": "TEXT[]",
+    "a_number_list_array": "INTEGER[]",
+    "a_bool_list_array": "BOOLEAN[]",
+}
 
 
 @pytest.fixture(scope="module")
@@ -709,12 +730,12 @@ def pg_engine():
         # `array[i + 1]` would pass against every one of them. Rebasing each non-empty array
         # to start at 0 makes that adapter read the wrong element; `to_jsonb` reads positions.
         with engine.begin() as conn:
-            for column in _PG_ARRAY_COLUMNS:
+            for column, array_type in _PG_ARRAY_COLUMNS.items():
                 conn.execute(
                     text(
                         f"UPDATE adversarial_resource SET {column} = CAST("
                         f"'[0:' || (cardinality({column}) - 1) || ']=' "
-                        f"|| CAST({column} AS TEXT) AS TEXT[]) "
+                        f"|| CAST({column} AS TEXT) AS {array_type}) "
                         f"WHERE cardinality({column}) > 0"
                     )
                 )
@@ -784,6 +805,9 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
         # field-to-field probe has two explicit nulls to compare.
         "coOwner": _scope_for(seed),
         "tagNames": [tag["name"] for tag in seed["tags"]],
+        # Verbatim, null elements included: a null element is a VALUE in CEL.
+        "aNumberList": seed["aNumberList"],
+        "aBoolList": seed["aBoolList"],
         "categories": [
             {
                 "name": "business",
@@ -911,11 +935,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 295
+        assert len(MANIFEST_ACTIONS) == 301
         assert len(SEEDS) == 27
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 58
+        assert len(THROWING_ACTIONS) == 57
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported
@@ -957,7 +981,13 @@ class TestAdversarialConformance:
         # executes on PostgreSQL any more, and one joining it should be looked at.
         assert DECLARED_COLLECTION_ACTIONS == [
             "cr-size-frac-ge",
+            "index-bool-list",
+            "index-bool-list-not-eq",
+            "index-bool-list-vs-number",
             "index-not-oob",
+            "index-number-list",
+            "index-number-list-not-eq",
+            "index-number-list-vs-bool",
             "index-scalar-list",
             "index-scalar-list-not-eq",
             "index-scalar-list-null",
@@ -976,7 +1006,7 @@ class TestAdversarialConformance:
         assert set(PG_ARRAY_COLLECTION_COLUMNS) == set(COLLECTION_COLUMNS)
         # Anti-vacuity for the rebase: an array that still started at 1 would let an adapter
         # reading `array[i + 1]` through.
-        for column in ("tags_array", "tag_names_array", "main_sub_categories_array"):
+        for column in _PG_ARRAY_COLUMNS:
             lower_bounds = {
                 row[0]
                 for row in pg_conn.execute(
