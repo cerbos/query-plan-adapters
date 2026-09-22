@@ -67,6 +67,42 @@
       "kind": "KIND_CONDITIONAL",
       "where": "CAST(\"adversarial_resources\".\"a_double\" AS TEXT) = '-0.6'"
     },
+    "compose-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((\"adversarial_resources\".\"a_number\" > 10)) AND \"adversarial_resources\".\"a_bool\" = 1)"
+    },
+    "compose-deny-only": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT ((\"adversarial_resources\".\"a_number\" < 0))"
+    },
+    "compose-derived-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((\"adversarial_resources\".\"a_bool\" = 1)) AND \"adversarial_resources\".\"a_number\" < 12)"
+    },
+    "compose-derived-role": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(\"adversarial_resources\".\"a_number\" < 5 AND \"adversarial_resources\".\"a_bool\" = 1)"
+    },
+    "compose-multi-allow": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((\"adversarial_resources\".\"a_bool\" = 1 AND \"adversarial_resources\".\"a_number\" > 15) OR (\"adversarial_resources\".\"a_bool\" = 0 AND \"adversarial_resources\".\"a_number\" < 7))"
+    },
+    "compose-multi-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((\"adversarial_resources\".\"a_number\" > 20)) AND ((\"adversarial_resources\".\"a_bool\" = 1 AND \"adversarial_resources\".\"a_number\" > 15) OR (\"adversarial_resources\".\"a_bool\" = 0 AND \"adversarial_resources\".\"a_number\" < 7)))"
+    },
+    "compose-or-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(\"adversarial_resources\".\"a_number\" > 20 OR NOT ((\"adversarial_resources\".\"a_bool\" = 1)))"
+    },
+    "compose-two-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((\"adversarial_resources\".\"a_bool\" = 0 OR \"adversarial_resources\".\"a_number\" > 18)) AND \"adversarial_resources\".\"a_number\" >= 0)"
+    },
+    "compose-variable": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((\"adversarial_resources\".\"a_number\" > 10)) AND \"adversarial_resources\".\"a_optional_string\" IN ('set', '', '%_o'))"
+    },
     "concat-f2f": {
       "kind": "KIND_CONDITIONAL",
       "where": "(\"adversarial_resources\".\"a_string\" || \"adversarial_resources\".\"a_optional_string\") = 'oneset'"
