@@ -28,12 +28,14 @@ import {
   parseSeedsFile,
   planCarriesNullLiteral,
   readCorpusJson,
+  assertPinnedPdp,
+  pdpAddress,
 } from "./corpus";
 import type { DerivedEntry, Seed } from "./corpus";
 
 const CONVEX_URL = process.env["CONVEX_URL"] ?? "http://127.0.0.1:3210";
 const convex = new ConvexHttpClient(CONVEX_URL);
-const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+const cerbos = new Cerbos(pdpAddress(), { tls: false });
 
 type StoredDocument = AdversarialDocument;
 type StoredRelationLevel = Omit<NonNullable<StoredDocument["parent"]>, "inner">;
@@ -616,6 +618,7 @@ async function adapterFilteredIds(
 }
 
 beforeAll(async () => {
+  await assertPinnedPdp(cerbos);
   await convex.mutation(api.adversarial.deleteAll, {});
   for (const seed of seedsFile.seeds) {
     await convex.mutation(api.adversarial.insert, storedDocument(seed));

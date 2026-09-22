@@ -29,6 +29,8 @@ import {
   requireNumber,
   requireRecord,
   requireString,
+  assertPinnedPdp,
+  pdpAddress,
 } from "./corpus";
 
 /**
@@ -50,8 +52,7 @@ import {
 
 jest.setTimeout(120_000);
 
-const CERBOS_PORT = 3641;
-const cerbos = new Cerbos(`127.0.0.1:${CERBOS_PORT}`, { tls: false });
+const cerbos = new Cerbos(pdpAddress(), { tls: false });
 const chromaUrl = new URL(process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234");
 const chroma = new ChromaClient({
   host: chromaUrl.hostname,
@@ -812,6 +813,7 @@ function activeCollection(): Collection {
 }
 
 beforeAll(async () => {
+  await assertPinnedPdp(cerbos);
   await chroma.heartbeat();
   try {
     await chroma.deleteCollection({ name: COLLECTION_NAME });
