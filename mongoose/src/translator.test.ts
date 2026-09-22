@@ -7357,15 +7357,9 @@ describe("timestamp literals", () => {
       mapper: MAPPER,
     });
 
-  test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why `ts-window` and `ts-vf` are `adapterUnsupported`. A tidy
-    // millisecond substitution in the loader would translate cleanly and quietly contradict
-    // actions.json.
-    expect(() => translate("ts-window")).toThrow(
-      "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
-    );
-  });
-
+  // The nanosecond instant the PDP actually folds is refused — that, and nothing else, is why
+  // `ts-window` and `ts-vf` are `adapterUnsupported`, and the refusal table above asserts it with
+  // the message actions.json pins. This is its counterpart: only the precision differs.
   test("the same plan at millisecond precision translates", () => {
     const result = at("2026-08-11T09:13:39.123Z");
     expect(result.kind).toBe(PlanKind.CONDITIONAL);

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import type { Resource, Value } from "@cerbos/core";
+import type { PlanResourcesResponse, Resource, Value } from "@cerbos/core";
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import { ConvexHttpClient } from "convex/browser";
 
@@ -11,6 +11,7 @@ import {
   type MapperVariant,
 } from "../convex/adversarialMapper";
 import type { AdversarialDocument } from "../convex/schema";
+import { executionPathOf } from "../convex/planExecution";
 import type { ExecutionPath } from "../convex/planExecution";
 import type { Mapper } from ".";
 import { PlanKind, queryPlanToConvex } from ".";
@@ -25,8 +26,8 @@ import {
   parseActionsFile,
   parseDerivedFile,
   parseSeedsFile,
+  planCarriesNullLiteral,
   readCorpusJson,
-  requireMessage,
 } from "./corpus";
 import type { DerivedEntry, Seed } from "./corpus";
 
@@ -400,23 +401,26 @@ const UNCONDITIONAL_ACTIONS = [
  */
 const SPLIT_ACTIONS = ["rel-hop-and-root"];
 
-async function executionFor(
-  action: string,
-  mapper: Mapper,
-): Promise<ExecutionPath> {
-  const queryPlan = await cerbos.planResources({
+/** The plan the live PDP produces for `action` against the corpus principal. */
+function planFor(action: string): Promise<PlanResourcesResponse> {
+  return cerbos.planResources({
     principal: seedsFile.principal,
     resource: { kind: seedsFile.resourceKind },
     action,
   });
-  if (queryPlan.kind !== PlanKind.CONDITIONAL) return "unconditional";
-  const { filter, postFilter } = queryPlanToConvex({
-    queryPlan,
-    mapper,
-    allowPostFilter: true,
-  });
-  if (filter && postFilter) return "split";
-  return filter ? "db" : "post";
+}
+
+async function executionFor(
+  action: string,
+  mapper: Mapper,
+): Promise<ExecutionPath> {
+  return executionPathOf(
+    queryPlanToConvex({
+      queryPlan: await planFor(action),
+      mapper,
+      allowPostFilter: true,
+    }),
+  );
 }
 
 /** Whether `path` — a mapped document field, dotted for nested ones — is present on `document`. */
@@ -442,27 +446,6 @@ function derivedFor(seed: Seed): DerivedEntry {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
   return entry;
-}
-
-function doubleFor(seed: Seed): number | null {
-  return derivedFor(seed).aDouble;
-}
-
-/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
-function labelsFor(seed: Seed): (string | null)[] {
-  return derivedFor(seed).labels;
-}
-
-function createdByFor(seed: Seed): string {
-  return derivedFor(seed).createdBy;
-}
-
-function timestampFor(seed: Seed): string | null {
-  return derivedFor(seed).createdAt;
-}
-
-function scopeFor(seed: Seed): string | null {
-  return derivedFor(seed).scope;
 }
 
 // -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
@@ -510,20 +493,25 @@ function storedParent(seed: Seed): StoredDocument["parent"] {
   return parent;
 }
 
+/**
+ * The document stored for a seed. It is also, minus `id`, the resource's `check()` attributes
+ * (`checkResource` below), so the stored row and the oracle cannot disagree about any value.
+ */
 function storedDocument(seed: Seed): StoredDocument {
+  const derived = derivedFor(seed);
   const document: StoredDocument = {
     id: seed.id,
     aBool: seed.aBool,
     aString: seed.aString,
     aNumber: seed.aNumber,
-    createdBy: createdByFor(seed),
+    createdBy: derived.createdBy,
     owner: seed.aOptionalString,
     // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`:
     // `scope` itself is omitted when NULL, so the corpus carries the same field under both
     // conventions and the field-to-field probe has two explicit nulls to compare.
-    coOwner: scopeFor(seed),
+    coOwner: derived.scope,
     tagNames: seed.tags.map((tag) => tag.name),
-    // Verbatim, null elements included: the same arrays go to check() below.
+    // Verbatim, null elements included.
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
@@ -535,7 +523,9 @@ function storedDocument(seed: Seed): StoredDocument {
       subCategories: [
         {
           name,
-          labels: labelsFor(seed).map((labelName) =>
+          // Third-level label names. A null element is a NULL label name — a missing element
+          // attribute.
+          labels: derived.labels.map((labelName) =>
             labelName === null ? {} : { name: labelName },
           ),
         },
@@ -545,14 +535,10 @@ function storedDocument(seed: Seed): StoredDocument {
   if (seed.aOptionalString !== null) {
     document.aOptionalString = seed.aOptionalString;
   }
-  const double = doubleFor(seed);
-  if (double !== null) document.aDouble = double;
-  const timestamp = timestampFor(seed);
-  if (timestamp !== null) document.createdAt = timestamp;
-  const updatedAt = derivedFor(seed).updatedAt;
-  if (updatedAt !== null) document.updatedAt = updatedAt;
-  const scope = scopeFor(seed);
-  if (scope !== null) document.scope = scope;
+  if (derived.aDouble !== null) document.aDouble = derived.aDouble;
+  if (derived.createdAt !== null) document.createdAt = derived.createdAt;
+  if (derived.updatedAt !== null) document.updatedAt = derived.updatedAt;
+  if (derived.scope !== null) document.scope = derived.scope;
   if (seed.subCategoryNames.length > 0) {
     document.mainCategory = {
       name: "business",
@@ -560,62 +546,20 @@ function storedDocument(seed: Seed): StoredDocument {
       subNames: seed.subCategoryNames,
     };
   }
+  // The real to-one chain. A row with no parent carries NO `parent` key — and so sends no `parent`
+  // attribute, a CEL missing-path error (deny); the same holds one level down for `parent.inner`.
   const parent = storedParent(seed);
   if (parent !== undefined) document.parent = parent;
   return document;
 }
 
 function checkResource(seed: Seed): Resource {
-  const attr: Record<string, Value> = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-    createdBy: createdByFor(seed),
-    owner: seed.aOptionalString,
-    coOwner: scopeFor(seed),
-    tagNames: seed.tags.map((tag) => tag.name),
-    aNumberList: seed.aNumberList,
-    aBoolList: seed.aBoolList,
-    obj: { inner: seed.aString },
-    tags: seed.tags.map((tag): Record<string, Value> =>
-      tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
-    ),
-    categories: seed.subCategoryNames.map((name) => ({
-      name: "business",
-      subCategories: [
-        {
-          name,
-          labels: labelsFor(seed).map((labelName): Record<string, Value> =>
-            labelName === null ? {} : { name: labelName },
-          ),
-        },
-      ],
-    })),
+  const { id, ...attr } = storedDocument(seed);
+  return {
+    kind: seedsFile.resourceKind,
+    id,
+    attr: attr as unknown as Record<string, Value>,
   };
-  if (seed.aOptionalString !== null) {
-    attr["aOptionalString"] = seed.aOptionalString;
-  }
-  const double = doubleFor(seed);
-  if (double !== null) attr["aDouble"] = double;
-  const timestamp = timestampFor(seed);
-  if (timestamp !== null) attr["createdAt"] = timestamp;
-  const updatedAt = derivedFor(seed).updatedAt;
-  if (updatedAt !== null) attr["updatedAt"] = updatedAt;
-  const scope = scopeFor(seed);
-  if (scope !== null) attr["scope"] = scope;
-  if (seed.subCategoryNames.length > 0) {
-    attr["mainCategory"] = {
-      name: "business",
-      subCategories: seed.subCategoryNames.map((name) => ({ name })),
-      subNames: seed.subCategoryNames,
-    };
-  }
-  // The real to-one chain, mirroring the stored document exactly. A row with no parent sends NO
-  // `parent` attribute — a CEL missing-path error (deny) — matching the stored document having no
-  // `parent` key; the same holds one level down for `parent.inner`.
-  const parent = storedParent(seed);
-  if (parent !== undefined) attr["parent"] = parent as unknown as Value;
-  return { kind: seedsFile.resourceKind, id: seed.id, attr };
 }
 
 async function oracleAllowedIds(action: string): Promise<string[]> {
@@ -652,11 +596,7 @@ async function adapterRun(
   nullAttributeRepresentation: "explicit" | "omitted" = "explicit",
   mapper: MapperVariant = "default",
 ): Promise<{ ids: string[]; execution: string }> {
-  const queryPlan = await cerbos.planResources({
-    principal: seedsFile.principal,
-    resource: { kind: seedsFile.resourceKind },
-    action,
-  });
+  const queryPlan = await planFor(action);
   if (queryPlan.kind === PlanKind.ALWAYS_DENIED) {
     return { ids: [], execution: "unconditional" };
   }
@@ -686,29 +626,7 @@ afterAll(async () => {
   await convex.mutation(api.adversarial.deleteAll, {});
 });
 
-/** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
-function planCarriesNullLiteral(operand: unknown): boolean {
-  if (typeof operand !== "object" || operand === null) return false;
-  const node = operand as Record<string, unknown>;
-  if ("value" in node) {
-    const value = node["value"];
-    return value === null || (Array.isArray(value) && value.includes(null));
-  }
-  const operands = node["operands"];
-  return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
-}
-
 describe("adversarial conformance corpus", () => {
-  // Adding a throwing action without pinning its message must fail this harness rather than
-  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
   test("assigns all policy actions exactly one Convex outcome", () => {
     const allActions = MANIFEST_ACTIONS;
     const oracle = new Set(ORACLE_ACTIONS);
@@ -746,11 +664,7 @@ describe("adversarial conformance corpus", () => {
   test.each(THROWING_ACTIONS)(
     "$action fails during translation with the declared message, before any filter exists",
     async ({ action, message }) => {
-      const queryPlan = await cerbos.planResources({
-        principal: seedsFile.principal,
-        resource: { kind: seedsFile.resourceKind },
-        action,
-      });
+      const queryPlan = await planFor(action);
       expect(queryPlan.kind).toBe(PlanKind.CONDITIONAL);
       expect(() =>
         queryPlanToConvex({
@@ -893,11 +807,7 @@ describe("adversarial conformance corpus", () => {
       ({ action }) => action === "filter-as-conjunct",
     );
     expect(entry).toBeDefined();
-    const queryPlan = await cerbos.planResources({
-      principal: seedsFile.principal,
-      resource: { kind: seedsFile.resourceKind },
-      action: "filter-as-conjunct",
-    });
+    const queryPlan = await planFor("filter-as-conjunct");
     expect(() =>
       queryPlanToConvex({ queryPlan, mapper: MAPPER, allowPostFilter: true }),
     ).toThrow(entry?.message);
@@ -976,11 +886,7 @@ describe("adversarial conformance corpus", () => {
   test("every corpus action carrying a null literal is rejected under omitted", async () => {
     const nullCarrying: string[] = [];
     for (const action of [...MANIFEST_ACTIONS].sort()) {
-      const queryPlan = await cerbos.planResources({
-        principal: seedsFile.principal,
-        resource: { kind: seedsFile.resourceKind },
-        action,
-      });
+      const queryPlan = await planFor(action);
       if (
         queryPlan.kind === PlanKind.CONDITIONAL &&
         planCarriesNullLiteral(queryPlan.condition)
@@ -1014,11 +920,7 @@ describe("adversarial conformance corpus", () => {
 
   test("pins the upstream has() planner over-grant", async () => {
     const action = "p-has";
-    const queryPlan = await cerbos.planResources({
-      principal: seedsFile.principal,
-      resource: { kind: seedsFile.resourceKind },
-      action,
-    });
+    const queryPlan = await planFor(action);
     const oracle = await oracleAllowedIds(action);
     const allIds = seedsFile.seeds.map((seed) => seed.id).sort();
 
@@ -1154,11 +1056,7 @@ describe("adversarial conformance corpus", () => {
     "$action preserves its intentional empty/total oracle and planner shape",
     async ({ action, kind, total }) => {
       const [plan, ids] = await Promise.all([
-        cerbos.planResources({
-          principal: seedsFile.principal,
-          resource: { kind: seedsFile.resourceKind },
-          action,
-        }),
+        planFor(action),
         oracleAllowedIds(action),
       ]);
       expect(plan.kind).toBe(kind);

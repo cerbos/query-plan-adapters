@@ -7,6 +7,7 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -44,7 +45,7 @@ final class MembershipTranslator {
      * so the wrapper must be null-tolerant — {@code List.of} is not.
      */
     private static List<?> asList(Object val) {
-        return (val instanceof List<?> l) ? l : java.util.Collections.singletonList(val);
+        return (val instanceof List<?> l) ? l : Collections.singletonList(val);
     }
 
     Predicate handleIn(List<Operand> rawOperands, Scope scope) {
@@ -329,15 +330,12 @@ final class MembershipTranslator {
         boolean hasNull = nonNull.size() < values.size();
         return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
             Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
-            if (!hasNull) {
-                return values.size() == 1 ? cb.equal(field, values.get(0)) : field.in(values);
-            }
             if (nonNull.isEmpty()) {
                 return cb.isNull(field);
             }
             Predicate match = nonNull.size() == 1
                     ? cb.equal(field, nonNull.get(0)) : field.in(nonNull);
-            return cb.or(match, cb.isNull(field));
+            return hasNull ? cb.or(match, cb.isNull(field)) : match;
         });
     }
 }

@@ -41,7 +41,7 @@ final class PlanWalker {
     private final CollectionTranslator collections;
 
     PlanWalker(Options options) {
-        this.root = Scope.root(options.fieldMap());
+        this.root = new Scope.Root(options.fieldMap());
         this.leaf = new LeafTranslator(options);
         this.hierarchy = new HierarchyTranslator(root, options.scalarTypes());
         this.sizes = new SizeTranslator(options, root);
@@ -71,17 +71,12 @@ final class PlanWalker {
         return switch (operator) {
             // De Morgan: under FALSE, `and` becomes a `should` of the negated children and `or`
             // a `must` of them.
-            case "and" -> {
+            case "and", "or" -> {
                 List<Map<String, Object>> clauses = operands.stream()
                         .map(o -> operand(o, scope, polarity))
                         .toList();
-                yield polarity.holds() ? Queries.boolMust(clauses) : Queries.boolShould(clauses);
-            }
-            case "or" -> {
-                List<Map<String, Object>> clauses = operands.stream()
-                        .map(o -> operand(o, scope, polarity))
-                        .toList();
-                yield polarity.holds() ? Queries.boolShould(clauses) : Queries.boolMust(clauses);
+                boolean conjunction = "and".equals(operator) == polarity.holds();
+                yield conjunction ? Queries.boolMust(clauses) : Queries.boolShould(clauses);
             }
             case "not" -> {
                 requireUnary("not", operands);

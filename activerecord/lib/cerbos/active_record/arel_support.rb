@@ -7,14 +7,14 @@ module Cerbos
     # Helper functions that make Arel nodes.
     #
     # They are together in one module for two reasons. Some of them hide a difference between
-    # the Arel interfaces of the supported Rails versions (7.0 to 8.x). The others hide a
+    # the Arel interfaces of the supported Rails versions (7.1 to 8.x). The others hide a
     # difference between the SQL dialects. If the adapter did not hide these differences, the
     # meaning of a filter could change.
     module ArelSupport
       module_function
 
-      # Rails 7.1 made +Arel::Nodes::Or+ n-ary, with one array argument. Before that version
-      # it was binary. The adapter examines the interface and does not use a rescue clause.
+      # Rails 7.2 made +Arel::Nodes::Or+ n-ary, with one array argument. In 7.1 it is still
+      # binary. The adapter examines the interface and does not use a rescue clause.
       # Thus a true argument error is still visible.
       OR_IS_NARY = (Arel::Nodes::Or.instance_method(:initialize).arity == 1)
 

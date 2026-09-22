@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Subquery;
 
 /**
@@ -13,4 +14,10 @@ import jakarta.persistence.criteria.Subquery;
  * built by {@link ChainSubqueries#chainSubquery}, which is where the two join-anchoring
  * invariants (owner-anchored correlation, joining through every hop) are enforced once.
  */
-record ChainSubquery<T>(Subquery<T> sub, Join<?, ?> tailJoin, Scope rebasedOuter) {}
+record ChainSubquery<T>(Subquery<T> sub, Join<?, ?> tailJoin, Scope rebasedOuter) {
+
+    /** A fresh translation of {@code builder}'s body over this subquery's element join. */
+    Predicate body(SubqueryBodyBuilder builder) {
+        return builder.build(sub, tailJoin, rebasedOuter);
+    }
+}

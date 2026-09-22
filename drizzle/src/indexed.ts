@@ -1,8 +1,18 @@
-import { is, sql } from "drizzle-orm";
+import type { PlanExpressionOperand } from "@cerbos/core";
+import { is, not, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgArray, PgColumn } from "drizzle-orm/pg-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
+
+import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mapper";
+import { isNameOperand, isValueOperand } from "./operands";
+import type { BuildFilterOptions, Mapper } from "./types";
+
+/**
+ * Constant positional access — `R.attr.list[0] == x` — over a column whose ordered storage the
+ * caller declares with `indexable`. A relation has no positional order, so it is never inferred.
+ */
 
 /** The declared representation of an ordered collection, independent of its CEL name. */
 export type Indexable = "json" | "pgArray";
@@ -89,6 +99,84 @@ export function indexedEquality({
   }
   throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
 }
+
+/** Resolve the opt-in column separately from a relation used for collection predicates. */
+export const resolveIndexedColumn = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): { column: AnyColumn; indexable: Indexable; index: number } => {
+  const [collection, position] = operands;
+  if (
+    operands.length !== 2 || !collection || !position || !isNameOperand(collection)
+  ) {
+    throw new Error(
+      "Index access requires a mapped collection and a constant position",
+    );
+  }
+  const direct = getMappingEntry(collection.name, mapper);
+  const resolved =
+    direct && isMappingConfig(direct) && direct.indexable
+      ? { mapping: direct, relations: [] }
+      : resolveFieldReference(collection.name, mapper);
+  const mapping = resolved.mapping;
+  if (!isMappingConfig(mapping) || !mapping.indexable || !mapping.column) {
+    throw new Error(
+      `Index storage shape is undeclared for '${collection.name}': declare a column with indexable: "json" or "pgArray"; a relation has no positional order`,
+    );
+  }
+  if (
+    mapping.transform ||
+    resolved.relations.some((relation) => !options.skipRelations?.has(relation))
+  ) {
+    throw new Error(
+      "Index access requires a directly addressable column without a transform",
+    );
+  }
+  if (
+    !isValueOperand(position) || typeof position.value !== "number" ||
+    !Number.isSafeInteger(position.value) || position.value < 0 ||
+    position.value > 2147483647
+  ) {
+    throw new Error(
+      "Index access requires a constant non-negative 32-bit integer position",
+    );
+  }
+  return {
+    column: mapping.column,
+    indexable: mapping.indexable,
+    index: position.value,
+  };
+};
+
+/**
+ * `index(collection, position) == literal` (or `!=`, or the literal first), under the polarity a
+ * `not` pushed down to it.
+ */
+export const buildIndexedComparison = (
+  operator: string,
+  indexed: PlanExpressionOperand & { operands: PlanExpressionOperand[] },
+  other: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+  negated: boolean,
+): SQL => {
+  const resolved = resolveIndexedColumn(indexed.operands, mapper, options);
+  if (
+    (operator !== "eq" && operator !== "ne") || !isValueOperand(other) ||
+    (other.value !== null && typeof other.value !== "string" &&
+     typeof other.value !== "boolean" && typeof other.value !== "number")
+  ) {
+    throw new Error(
+      "Indexed values support only direct eq/ne comparisons with scalar literals",
+    );
+  }
+  if (typeof other.value === "number" && !Number.isFinite(other.value)) {
+    throw new Error("Indexed numeric comparisons require a finite literal");
+  }
+  const equality = indexedEquality({ ...resolved, value: other.value });
+  return (operator === "ne") !== negated ? not(equality) : equality;
+};
 
 function postgresEquality(source: SQL, index: number, value: Scalar): SQL {
   const element = sql`(${source} -> cast(${index} as integer))`;

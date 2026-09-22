@@ -43,12 +43,12 @@ import type { FieldNameMapperConfig } from ".";
 
 export const ADAPTER = "langchain-chromadb";
 
-export const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
+const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 
 const WIRE_FIXTURES_DIR = path.join(CONFORMANCE_DIR, "wire-fixtures");
 
 /** The golden expectations this adapter owns. Never under `conformance/` — see ADR 0007. */
-export const GOLDEN_FILE = path.join(
+const GOLDEN_FILE = path.join(
   __dirname,
   "..",
   "golden",
@@ -64,7 +64,7 @@ export function readCorpusJson(file: string): unknown {
 // The corpus is read rather than typed: `JSON.parse` returns `any`, and a cast would let a corpus
 // file that changed shape reach an assertion as `undefined` instead of failing at load.
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -272,7 +272,6 @@ export type ThrowingAction = readonly [
 export interface ActionClassification {
   oracleActions: string[];
   throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
 }
 
 /** The pinned message, or a failure — a throwing action without one asserts nothing. */
@@ -340,7 +339,6 @@ export function classifyActionsForAdapter(
     throwingActions: throwingActions.sort(([left], [right]) =>
       left.localeCompare(right),
     ),
-    supportedExpected,
   };
 }
 

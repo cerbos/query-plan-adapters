@@ -67,12 +67,42 @@ func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// str writes SQL text verbatim. Only renderer-owned syntax and quoted identifiers go through it;
+// plan values go through bind.
+func (r *renderer) str(parts ...string) {
+	for _, p := range parts {
+		r.sb.WriteString(p)
+	}
+}
+
+// paren writes body inside a pair of parentheses.
+func (r *renderer) paren(body func() error) error {
+	r.str("(")
+	if err := body(); err != nil {
+		return err
+	}
+	r.str(")")
+	return nil
+}
+
+// list writes each expression in turn, separated by sep.
+func (r *renderer) list(xs []queryplan.Expr, sep string) error {
+	for i, x := range xs {
+		if i > 0 {
+			r.str(sep)
+		}
+		if err := r.write(x); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *renderer) writeColumn(c queryplan.Column) {
 	if c.Qualifier != "" {
-		r.sb.WriteString(quoteIdent(c.Qualifier))
-		r.sb.WriteString(".")
+		r.str(quoteIdent(c.Qualifier), ".")
 	}
-	r.sb.WriteString(quoteIdent(c.Name))
+	r.str(quoteIdent(c.Name))
 }
 
 // write emits one expression node. A single type switch over the tree is clearer here than
@@ -87,7 +117,7 @@ func (r *renderer) write(e queryplan.Expr) error {
 
 	case queryplan.Lit:
 		if t.V == nil {
-			r.sb.WriteString("NULL")
+			r.str("NULL")
 			return nil
 		}
 		r.bind(t.V)
@@ -95,25 +125,25 @@ func (r *renderer) write(e queryplan.Expr) error {
 
 	case queryplan.BoolConst:
 		if t.V {
-			r.sb.WriteString("TRUE")
+			r.str("TRUE")
 		} else {
-			r.sb.WriteString("FALSE")
+			r.str("FALSE")
 		}
 		return nil
 
 	case queryplan.Cmp:
-		symbol, err := cmpSymbol(t.Op)
+		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {
 			return err
 		}
-		return r.writeBinary(symbol, t.L, t.R)
+		return r.writeBinary(op, t.L, t.R)
 
 	case queryplan.Arith:
-		symbol, err := arithSymbol(t.Op)
+		op, err := symbol(arithSymbols, "arithmetic", t.Op)
 		if err != nil {
 			return err
 		}
-		return r.writeBinary(symbol, t.L, t.R)
+		return r.writeBinary(op, t.L, t.R)
 
 	case queryplan.Concat:
 		// PostgreSQL spells string concatenation `||`, which propagates NULL — so a row whose
@@ -127,111 +157,58 @@ func (r *renderer) write(e queryplan.Expr) error {
 		if t.And {
 			sep = " AND "
 		}
-		r.sb.WriteString("(")
-		for i, x := range t.Xs {
-			if i > 0 {
-				r.sb.WriteString(sep)
-			}
-			if err := r.write(x); err != nil {
-				return err
-			}
-		}
-		r.sb.WriteString(")")
-		return nil
+		return r.paren(func() error { return r.list(t.Xs, sep) })
 
 	case queryplan.Not:
-		r.sb.WriteString("(NOT ")
-		if err := r.write(t.X); err != nil {
-			return err
-		}
-		r.sb.WriteString(")")
-		return nil
+		return r.paren(func() error {
+			r.str("NOT ")
+			return r.write(t.X)
+		})
 
 	case queryplan.IsNull:
-		r.sb.WriteString("(")
-		if err := r.write(t.X); err != nil {
-			return err
-		}
+		test := " IS NULL"
 		if t.Negate {
-			r.sb.WriteString(" IS NOT NULL)")
-		} else {
-			r.sb.WriteString(" IS NULL)")
+			test = " IS NOT NULL"
 		}
-		return nil
+		return r.writePostfix(t.X, test)
 
 	case queryplan.TruthTest:
-		r.sb.WriteString("(")
-		if err := r.write(t.X); err != nil {
-			return err
-		}
-		switch t.Want {
-		case queryplan.TruthTrue:
-			r.sb.WriteString(" IS TRUE)")
-		case queryplan.TruthFalse:
-			r.sb.WriteString(" IS FALSE)")
-		case queryplan.TruthUnknown:
-			r.sb.WriteString(" IS NULL)")
-		default:
+		test, ok := truthTests[t.Want]
+		if !ok {
 			return fmt.Errorf("cannot render truth value %d", t.Want)
 		}
-		return nil
+		return r.writePostfix(t.X, test)
 
 	case queryplan.Like:
-		r.sb.WriteString("(")
-		if err := r.write(t.Receiver); err != nil {
-			return err
-		}
-		r.sb.WriteString(" LIKE ")
-		if err := r.write(t.Pattern); err != nil {
-			return err
-		}
-		// The escape character is bound rather than inlined so that neither
-		// standard_conforming_strings nor backslash_quote can change its meaning.
-		r.sb.WriteString(" ESCAPE ")
-		r.bind(`\`)
-		r.sb.WriteString(")")
-		return nil
+		return r.paren(func() error {
+			if err := r.write(t.Receiver); err != nil {
+				return err
+			}
+			r.str(" LIKE ")
+			if err := r.write(t.Pattern); err != nil {
+				return err
+			}
+			// The escape character is bound rather than inlined so that neither
+			// standard_conforming_strings nor backslash_quote can change its meaning.
+			r.str(" ESCAPE ")
+			r.bind(`\`)
+			return nil
+		})
 
 	case queryplan.NotDistinct:
 		return r.writeBinary("IS NOT DISTINCT FROM", t.L, t.R)
 
 	case queryplan.InList:
-		r.sb.WriteString("(")
-		if err := r.write(t.X); err != nil {
-			return err
-		}
-		r.sb.WriteString(" IN (")
-		for i, v := range t.Vs {
-			if i > 0 {
-				r.sb.WriteString(", ")
-			}
-			if err := r.write(v); err != nil {
+		return r.paren(func() error {
+			if err := r.write(t.X); err != nil {
 				return err
 			}
-		}
-		r.sb.WriteString("))")
-		return nil
+			r.str(" IN ")
+			return r.paren(func() error { return r.list(t.Vs, ", ") })
+		})
 
 	case queryplan.Case:
-		r.sb.WriteString("(CASE")
-		for _, w := range t.Whens {
-			r.sb.WriteString(" WHEN ")
-			if err := r.write(w.Cond); err != nil {
-				return err
-			}
-			r.sb.WriteString(" THEN ")
-			if err := r.write(w.Then); err != nil {
-				return err
-			}
-		}
-		if t.Else != nil {
-			r.sb.WriteString(" ELSE ")
-			if err := r.write(t.Else); err != nil {
-				return err
-			}
-		}
-		r.sb.WriteString(" END)")
-		return nil
+		return r.writeCase(t)
 
 	case queryplan.Call:
 		return r.writeCall(t)
@@ -247,19 +224,56 @@ func (r *renderer) write(e queryplan.Expr) error {
 	}
 }
 
-func (r *renderer) writeBinary(symbol string, l, right queryplan.Expr) error {
-	r.sb.WriteString("(")
-	if err := r.write(l); err != nil {
-		return err
-	}
-	r.sb.WriteString(" ")
-	r.sb.WriteString(symbol)
-	r.sb.WriteString(" ")
-	if err := r.write(right); err != nil {
-		return err
-	}
-	r.sb.WriteString(")")
-	return nil
+// truthTests spells each TruthTest state. PostgreSQL has the three-valued tests natively.
+var truthTests = map[queryplan.TruthValue]string{
+	queryplan.TruthTrue:    " IS TRUE",
+	queryplan.TruthFalse:   " IS FALSE",
+	queryplan.TruthUnknown: " IS NULL",
+}
+
+func (r *renderer) writeBinary(symbol string, left, right queryplan.Expr) error {
+	return r.paren(func() error {
+		if err := r.write(left); err != nil {
+			return err
+		}
+		r.str(" ", symbol, " ")
+		return r.write(right)
+	})
+}
+
+// writePostfix writes `(x<test>)`, for the IS [NOT] NULL / TRUE / FALSE family.
+func (r *renderer) writePostfix(x queryplan.Expr, test string) error {
+	return r.paren(func() error {
+		if err := r.write(x); err != nil {
+			return err
+		}
+		r.str(test)
+		return nil
+	})
+}
+
+func (r *renderer) writeCase(c queryplan.Case) error {
+	return r.paren(func() error {
+		r.str("CASE")
+		for _, w := range c.Whens {
+			r.str(" WHEN ")
+			if err := r.write(w.Cond); err != nil {
+				return err
+			}
+			r.str(" THEN ")
+			if err := r.write(w.Then); err != nil {
+				return err
+			}
+		}
+		if c.Else != nil {
+			r.str(" ELSE ")
+			if err := r.write(c.Else); err != nil {
+				return err
+			}
+		}
+		r.str(" END")
+		return nil
+	})
 }
 
 // writeCast lowers a CEL type conversion.
@@ -279,14 +293,14 @@ func (r *renderer) writeCast(c queryplan.Cast) error {
 		return fmt.Errorf("cannot render cast to %q", c.To)
 	}
 
-	r.sb.WriteString("CAST(")
-	if err := r.write(c.X); err != nil {
-		return err
-	}
-	r.sb.WriteString(" AS ")
-	r.sb.WriteString(target)
-	r.sb.WriteString(")")
-	return nil
+	r.str("CAST")
+	return r.paren(func() error {
+		if err := r.write(c.X); err != nil {
+			return err
+		}
+		r.str(" AS ", target)
+		return nil
+	})
 }
 
 func (r *renderer) writeCall(c queryplan.Call) error {
@@ -294,17 +308,7 @@ func (r *renderer) writeCall(c queryplan.Call) error {
 	// treats NULL as an empty string, which would turn a missing attribute into a match. `||`
 	// propagates NULL, keeping the row excluded.
 	if c.Name == queryplan.FuncConcat {
-		r.sb.WriteString("(")
-		for i, arg := range c.Args {
-			if i > 0 {
-				r.sb.WriteString(" || ")
-			}
-			if err := r.write(arg); err != nil {
-				return err
-			}
-		}
-		r.sb.WriteString(")")
-		return nil
+		return r.paren(func() error { return r.list(c.Args, " || ") })
 	}
 
 	name := functionNames[c.Name]
@@ -312,64 +316,54 @@ func (r *renderer) writeCall(c queryplan.Call) error {
 		return fmt.Errorf("cannot render function %q", c.Name)
 	}
 
-	r.sb.WriteString(name)
-	r.sb.WriteString("(")
-	for i, arg := range c.Args {
-		if i > 0 {
-			r.sb.WriteString(", ")
-		}
-		if err := r.write(arg); err != nil {
-			return err
-		}
-	}
-	r.sb.WriteString(")")
-	return nil
+	r.str(name)
+	return r.paren(func() error { return r.list(c.Args, ", ") })
 }
 
 func (r *renderer) writeSubquery(s queryplan.Subquery) error {
-	switch s.Kind {
-	case queryplan.SubqueryExists:
-		r.sb.WriteString("(EXISTS (SELECT 1 FROM ")
-	case queryplan.SubqueryScalar:
-		// The projection of a to-one hop. No row correlates -> SQL NULL, which is the
-		// missing-attribute error the check side raises (#375).
-		r.sb.WriteString("(SELECT ")
-		if err := r.write(s.Select); err != nil {
+	body := func() error {
+		switch s.Kind {
+		case queryplan.SubqueryExists:
+			r.str("SELECT 1")
+		case queryplan.SubqueryScalar:
+			// The projection of a to-one hop. No row correlates -> SQL NULL, which is the
+			// missing-attribute error the check side raises (#375).
+			r.str("SELECT ")
+			if err := r.write(s.Select); err != nil {
+				return err
+			}
+		case queryplan.SubqueryCount:
+			r.str("SELECT count(*)")
+		default:
+			return fmt.Errorf("cannot render subquery kind %d", s.Kind)
+		}
+
+		r.str(" FROM ")
+		for i, item := range s.From {
+			if i > 0 {
+				r.str(", ")
+			}
+			r.str(quoteIdent(item.Table), " AS ", quoteIdent(item.Alias))
+		}
+
+		r.str(" WHERE ")
+		if err := r.write(s.Correlate); err != nil {
 			return err
 		}
-		r.sb.WriteString(" FROM ")
-	case queryplan.SubqueryCount:
-		r.sb.WriteString("(SELECT count(*) FROM ")
-	default:
-		return fmt.Errorf("cannot render subquery kind %d", s.Kind)
-	}
-
-	for i, item := range s.From {
-		if i > 0 {
-			r.sb.WriteString(", ")
+		if s.Where != nil {
+			r.str(" AND ")
+			return r.write(s.Where)
 		}
-		r.sb.WriteString(quoteIdent(item.Table))
-		r.sb.WriteString(" AS ")
-		r.sb.WriteString(quoteIdent(item.Alias))
-	}
-	r.sb.WriteString(" WHERE ")
-
-	if err := r.write(s.Correlate); err != nil {
-		return err
-	}
-	if s.Where != nil {
-		r.sb.WriteString(" AND ")
-		if err := r.write(s.Where); err != nil {
-			return err
-		}
+		return nil
 	}
 
 	if s.Kind == queryplan.SubqueryExists {
-		r.sb.WriteString("))")
-	} else {
-		r.sb.WriteString(")")
+		return r.paren(func() error {
+			r.str("EXISTS ")
+			return r.paren(body)
+		})
 	}
-	return nil
+	return r.paren(body)
 }
 
 var cmpSymbols = map[queryplan.CmpOp]string{
@@ -389,20 +383,14 @@ var arithSymbols = map[queryplan.ArithOp]string{
 	queryplan.OpMod:  "%",
 }
 
-func cmpSymbol(op queryplan.CmpOp) (string, error) {
-	symbol, ok := cmpSymbols[op]
+// symbol spells an operator through its table, refusing one the table does not know rather than
+// guessing: a wrong operator is valid SQL that quietly returns a different row set.
+func symbol[Op ~string](symbols map[Op]string, kind string, op Op) (string, error) {
+	s, ok := symbols[op]
 	if !ok {
-		return "", fmt.Errorf("cannot render comparison %q", op)
+		return "", fmt.Errorf("cannot render %s %q", kind, op)
 	}
-	return symbol, nil
-}
-
-func arithSymbol(op queryplan.ArithOp) (string, error) {
-	symbol, ok := arithSymbols[op]
-	if !ok {
-		return "", fmt.Errorf("cannot render arithmetic %q", op)
-	}
-	return symbol, nil
+	return s, nil
 }
 
 var functionNames = map[queryplan.FuncName]string{

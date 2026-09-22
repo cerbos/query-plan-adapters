@@ -919,6 +919,34 @@ async function adapterFilteredIds(
   return rows.map((r) => r.id).sort();
 }
 
+/**
+ * The ids a hand-built CONDITIONAL plan selects, for the guards that synthesise shapes the corpus
+ * does not spell. Every such shape translates, so the result must be conditional.
+ */
+async function syntheticFilteredIds(
+  condition: PlanExpressionOperand
+): Promise<string[]> {
+  const result = queryPlanToPrisma({
+    queryPlan: {
+      kind: PlanKind.CONDITIONAL,
+      condition,
+      cerbosCallId: "synthetic",
+      requestId: "synthetic",
+      validationErrors: [],
+      metadata: undefined,
+    },
+    mapper: MAPPER,
+    model: MODEL,
+  });
+  expect(result.kind).toBe(PlanKind.CONDITIONAL);
+  const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
+  const rows = await prisma.adversarialResource.findMany({
+    where,
+    select: { id: true },
+  });
+  return rows.map((row) => row.id).sort();
+}
+
 /** Whether any operand anywhere in the plan is a literal null, or a list containing one. */
 function planCarriesNullLiteral(operand: unknown): boolean {
   if (typeof operand !== "object" || operand === null) return false;
@@ -1351,30 +1379,6 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     const negate = (condition: PlanExpressionOperand) =>
       new PlanExpression("not", [condition]);
 
-    const filteredIdsFor = async (
-      condition: PlanExpressionOperand
-    ): Promise<string[]> => {
-      const result = queryPlanToPrisma({
-        queryPlan: {
-          kind: PlanKind.CONDITIONAL,
-          condition,
-          cerbosCallId: "synthetic",
-          requestId: "synthetic",
-          validationErrors: [],
-          metadata: undefined,
-        },
-        mapper: MAPPER,
-        model: MODEL,
-      });
-      expect(result.kind).toBe(PlanKind.CONDITIONAL);
-      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-      const rows = await prisma.adversarialResource.findMany({
-        where,
-        select: { id: true },
-      });
-      return rows.map((row) => row.id).sort();
-    };
-
     // Each of these is TRUE for a row with no mainCategory only if the guard leaks: an
     // absent to-one parent is a CEL missing-path error, so the PDP denies it outright.
     const emptyByConstruction: [string, PlanExpressionOperand][] = [
@@ -1386,7 +1390,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     ];
 
     for (const [shape, condition] of emptyByConstruction) {
-      expect([shape, await filteredIdsFor(condition)]).toEqual([shape, []]);
+      expect([shape, await syntheticFilteredIds(condition)]).toEqual([shape, []]);
     }
 
     // The mirror image, so the loop above cannot pass by denying everything: the negation of
@@ -1394,8 +1398,8 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     const withParent = await oracleAllowedIds("w1-size-nonneg-chain");
     expect(withParent.length).toBeGreaterThan(0);
     expect(withParent.length).toBeLessThan(SEEDS.length);
-    expect(await filteredIdsFor(negate(compare("eq", 0)))).toEqual(withParent);
-    expect(await filteredIdsFor(negate(compare("lt", 1)))).toEqual(withParent);
+    expect(await syntheticFilteredIds(negate(compare("eq", 0)))).toEqual(withParent);
+    expect(await syntheticFilteredIds(negate(compare("lt", 1)))).toEqual(withParent);
   });
 
   // The corpus pins ONE ternary whose condition reaches a chain — `w1-ternary-chain-cond`, whose
@@ -1416,30 +1420,6 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       elseBranch: PlanExpressionOperand
     ) => new PlanExpression("if", [condition, thenBranch, elseBranch]);
 
-    const filteredIdsFor = async (
-      condition: PlanExpressionOperand
-    ): Promise<string[]> => {
-      const result = queryPlanToPrisma({
-        queryPlan: {
-          kind: PlanKind.CONDITIONAL,
-          condition,
-          cerbosCallId: "synthetic",
-          requestId: "synthetic",
-          validationErrors: [],
-          metadata: undefined,
-        },
-        mapper: MAPPER,
-        model: MODEL,
-      });
-      expect(result.kind).toBe(PlanKind.CONDITIONAL);
-      const where = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-      const rows = await prisma.adversarialResource.findMany({
-        where,
-        select: { id: true },
-      });
-      return rows.map((row) => row.id).sort();
-    };
-
     // The rows the chain condition is definitively TRUE for, and the ones it is definitively
     // FALSE for. Everything else — every row with no mainCategory at all — is a CEL
     // missing-path error, which selects NEITHER branch.
@@ -1453,18 +1433,18 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
 
     // The else-branch is what a bare `NOT` over the chain filter over-grants: it is TRUE for
     // every parentless row, so each of these returned the 17 missing-parent seeds on top.
-    expect(await filteredIdsFor(ternary(chainIn, FALSE, TRUE))).toEqual(
+    expect(await syntheticFilteredIds(ternary(chainIn, FALSE, TRUE))).toEqual(
       conditionFalse
     );
     expect(
-      await filteredIdsFor(
+      await syntheticFilteredIds(
         ternary(new PlanExpression("not", [chainIn]), TRUE, FALSE)
       )
     ).toEqual(conditionFalse);
     // A `not` condition in false-branch position: the double negation collapses back to the
     // positive membership, which excludes the parentless rows by itself.
     expect(
-      await filteredIdsFor(
+      await syntheticFilteredIds(
         ternary(new PlanExpression("not", [chainIn]), FALSE, TRUE)
       )
     ).toEqual(conditionTrue);
@@ -1475,7 +1455,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map((seed) => seed.id);
     expect(aBoolFalse.length).toBeGreaterThan(0);
     expect(
-      await filteredIdsFor(
+      await syntheticFilteredIds(
         ternary(
           new PlanExpression("and", [
             chainIn,

@@ -32,11 +32,45 @@ func scalarKind(v value) string {
 	return ""
 }
 
-// mixedTypeResult compares values whose declared non-null types differ.
-func mixedTypeResult(op CmpOp, l, r value) Expr {
-	if op != OpEq && op != OpNe {
-		return Lit{V: nil}
+// knownNonString reports whether v is known to be something other than a string — a string
+// operator over it is a CEL no-overload error.
+func knownNonString(v value) bool {
+	kind := scalarKind(v)
+	return kind != "" && kind != "string"
+}
+
+// compareMixedTypes lowers a comparison whose operands have known, different non-null types,
+// reporting false when the types do not both declare themselves or agree.
+//
+// CEL raises a no-overload error for an ordering across types, and answers equality across types
+// definitely: different non-null values are unequal, two explicit null values are equal.
+func compareMixedTypes(op CmpOp, l, r value) (Expr, bool) {
+	lk, rk := scalarKind(l), scalarKind(r)
+	if lk == "" || rk == "" || lk == rk {
+		return nil, false
 	}
+	if op != OpEq && op != OpNe {
+		// Every row is UNKNOWN, including missing operands. A guarded all-NULL CASE
+		// resolves to text in PostgreSQL and cannot compose with boolean CASE arms.
+		return Lit{V: nil}, true
+	}
+
+	result := mixedTypeEquality(op, l, r)
+	// Any operand that is not an explicit-null column is a missing attribute when NULL, which CEL
+	// denies: keep it UNKNOWN rather than answering definitely.
+	for _, operand := range []value{l, r} {
+		if col, ok := operand.(Column); ok && col.ExplicitNull {
+			continue
+		}
+		if valueExpr, ok := operand.(Expr); ok {
+			result = Case{Whens: []When{{Cond: IsNull{X: valueExpr, Negate: true}, Then: result}}}
+		}
+	}
+	return result, true
+}
+
+// mixedTypeEquality answers eq/ne between values whose declared non-null types differ.
+func mixedTypeEquality(op CmpOp, l, r value) Expr {
 	left, leftColumn := l.(Column)
 	right, rightColumn := r.(Column)
 	if !leftColumn || !rightColumn || !left.ExplicitNull || !right.ExplicitNull {

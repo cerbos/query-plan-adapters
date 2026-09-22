@@ -689,9 +689,8 @@ class SpringDataTranslatorTest {
      * adapter actually has, so a shape rejected by an accident cannot pass as a declared
      * limitation, which is the #326 trap at corpus scale. <strong>Pinned counts</strong> — a
      * translator change that moves a shape from one site to another shows up as a diff even though
-     * both sites throw and {@code actions.json} is unchanged; a later split of the translator
-     * ({@code SpringDataQueryPlanAdapter} is one file today) has this table to prove it moved
-     * nothing. <strong>No unmapped field</strong> — {@code Scope}'s "Unknown attribute" and
+     * both sites throw and {@code actions.json} is unchanged, so a restructuring of the
+     * translator has this table to prove it moved nothing. <strong>No unmapped field</strong> — {@code Scope}'s "Unknown attribute" and
      * "Cannot resolve" family is not a limitation of the Criteria API at all, it is this suite's
      * own mapping coming up short, and it is the exact accident #326 was filed for.
      */
@@ -844,8 +843,8 @@ class SpringDataTranslatorTest {
             // here rather than hoped for — the corpus mapping with one entry removed, and a bare
             // boolean whose attribute is redirected at a Relation (an equality against one would
             // translate as membership instead). The third substring needs a literal collection
-            // of struct elements, which no wire fixture carries; it is pinned by
-            // SpringDataQueryPlanAdapterTest.missingElementFieldFailsClosed.
+            // of struct elements, which no wire fixture carries, so it has no anti-vacuity
+            // probe here.
             assertTrue(refusal("cs-eq", Map.of()).contains("Unknown attribute"));
             assertTrue(refusal("root-bare-bool", Map.of("request.resource.attr.aBool",
                             AttributeMapping.relation("tags")))

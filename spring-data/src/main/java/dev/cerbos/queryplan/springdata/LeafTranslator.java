@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
@@ -54,7 +55,7 @@ final class LeafTranslator {
      * (mirrored operators are consulted under the mirrored name — see
      * {@link NormalizedBinary}); otherwise the supplied default applies.
      */
-    Predicate withOverride(String op, jakarta.persistence.criteria.Expression<?> field,
+    Predicate withOverride(String op, Expression<?> field,
                            Object value, Supplier<Predicate> dflt) {
         OperatorFunction override = overrides.get(op);
         if (override != null) {
@@ -94,8 +95,8 @@ final class LeafTranslator {
      * null-safe operator would match the two NULLs and over-grant.
      */
     Predicate definiteEquality(String op,
-                               jakarta.persistence.criteria.Expression<?> left,
-                               jakarta.persistence.criteria.Expression<?> right,
+                               Expression<?> left,
+                               Expression<?> right,
                                boolean leftExplicit, boolean rightExplicit) {
         if (!compatibleTypes(left.getJavaType(), right.getJavaType())) {
             Predicate equality = leftExplicit && rightExplicit
@@ -127,11 +128,20 @@ final class LeafTranslator {
         return "ne".equals(op) ? tri.not(equality) : equality;
     }
 
+    /**
+     * The translation of one scalar leaf operator when no {@link OperatorFunction} override owns
+     * it. A comparison between a column and a constant of an incompatible type — or a string
+     * match over a non-string — is decided here rather than handed to the database: CEL has no
+     * overload for it, so it errors and denies, which only UNKNOWN reproduces under negation.
+     */
     @SuppressWarnings({"rawtypes", "unchecked"})
     Predicate defaultLeaf(String op, Path<?> path, Object value) {
-        if (("contains".equals(op) || "startsWith".equals(op) || "endsWith".equals(op))
-                && (!String.class.equals(path.getJavaType()) || !(value instanceof String))) {
-            return tri.unknown();
+        StringMatch match = StringMatch.of(op);
+        if (match != null) {
+            if (!String.class.equals(path.getJavaType()) || !(value instanceof String needle)) {
+                return tri.unknown();
+            }
+            return cb.like(path.as(String.class), match.pattern(PlanValues.escapeLike(needle)), '\\');
         }
         if (ComparisonTranslator.COMPARISON_OPS.contains(op) && value != null
                 && !compatibleTypes(path.getJavaType(), value.getClass())) {
@@ -145,8 +155,7 @@ final class LeafTranslator {
         // for non-whole numbers, and Hibernate refuses to coerce e.g. 1.5 into an
         // Integer-typed path ("not a whole number") — but `intColumn >= 1.5` is legal CEL
         // that the planner emits verbatim.
-        jakarta.persistence.criteria.Expression raw =
-                (value instanceof Double) ? path.as(Double.class) : path;
+        Expression raw = (value instanceof Double) ? path.as(Double.class) : path;
         return switch (op) {
             case "eq" -> cb.equal(raw, value);
             case "ne" -> cb.notEqual(raw, value);
@@ -154,19 +163,15 @@ final class LeafTranslator {
             case "gt" -> cb.greaterThan(raw, (Comparable) value);
             case "le" -> cb.lessThanOrEqualTo(raw, (Comparable) value);
             case "ge" -> cb.greaterThanOrEqualTo(raw, (Comparable) value);
-            case "contains" -> cb.like(path.as(String.class),
-                    "%" + PlanValues.escapeLike(String.valueOf(value)) + "%", '\\');
-            case "startsWith" -> cb.like(path.as(String.class),
-                    PlanValues.escapeLike(String.valueOf(value)) + "%", '\\');
-            case "endsWith" -> cb.like(path.as(String.class),
-                    "%" + PlanValues.escapeLike(String.valueOf(value)), '\\');
             // An operator no leaf case knows — `matches` is the policy-reachable one. An
             // OperatorFunction override registered under that name is consulted first.
             default -> throw Refusals.unsupported("Unsupported operator: " + op);
         };
     }
-    static boolean compatibleTypes(Class<?> left, Class<?> right) {
-        return left.equals(right) || (Number.class.isAssignableFrom(left) && Number.class.isAssignableFrom(right));
-    }
 
+    /** Whether two Java types compare in SQL the way they compare in CEL: equal, or both numbers. */
+    static boolean compatibleTypes(Class<?> left, Class<?> right) {
+        return left.equals(right)
+                || (Number.class.isAssignableFrom(left) && Number.class.isAssignableFrom(right));
+    }
 }

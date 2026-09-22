@@ -20,29 +20,44 @@ final class Queries {
 
     private Queries() {}
 
+    /**
+     * The default lowering of every leaf operator, keyed by plan operator. A caller's
+     * {@link OperatorFunction} override for the same key replaces the entry; adding a leaf
+     * operator starts here.
+     */
     static final Map<String, OperatorFunction> DEFAULT_OPERATORS = Map.ofEntries(
-            Map.entry("eq", (field, value) ->
-                    Map.of("term", Map.of(field, Map.of("value", value)))),
-            Map.entry("lt", (field, value) ->
-                    Map.of("range", Map.of(field, Map.of("lt", value)))),
-            Map.entry("gt", (field, value) ->
-                    Map.of("range", Map.of(field, Map.of("gt", value)))),
-            Map.entry("le", (field, value) ->
-                    Map.of("range", Map.of(field, Map.of("lte", value)))),
-            Map.entry("ge", (field, value) ->
-                    Map.of("range", Map.of(field, Map.of("gte", value)))),
-            Map.entry("in", (field, value) ->
-                    Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value)))),
-            Map.entry("contains", (field, value) ->
-                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value) + "*")))),
-            Map.entry("startsWith", (field, value) ->
-                    Map.of("prefix", Map.of(field, Map.of("value", value)))),
-            Map.entry("endsWith", (field, value) ->
-                    Map.of("wildcard", Map.of(field, Map.of("value", "*" + escapeWildcard(value))))),
+            Map.entry("eq", Queries::term),
+            Map.entry("lt", (field, value) -> range(field, "lt", value)),
+            Map.entry("gt", (field, value) -> range(field, "gt", value)),
+            Map.entry("le", (field, value) -> range(field, "lte", value)),
+            Map.entry("ge", (field, value) -> range(field, "gte", value)),
+            Map.entry("in", Queries::terms),
+            Map.entry("contains", (field, value) -> wildcard(field, "*" + escapeWildcard(value) + "*")),
+            Map.entry("startsWith", Queries::prefix),
+            Map.entry("endsWith", (field, value) -> wildcard(field, "*" + escapeWildcard(value))),
             Map.entry("matches", RegexTranslator::matchesQuery),
-            Map.entry("hasIntersection", (field, value) ->
-                    Map.of("terms", Map.of(field, value instanceof List<?> l ? l : List.of(value))))
-    );
+            Map.entry("hasIntersection", Queries::terms));
+
+    static Map<String, Object> term(String field, Object value) {
+        return Map.of("term", Map.of(field, Map.of("value", value)));
+    }
+
+    /** A {@code terms} query; a scalar operand is read as a one-element list. */
+    static Map<String, Object> terms(String field, Object value) {
+        return Map.of("terms", Map.of(field, value instanceof List<?> list ? list : List.of(value)));
+    }
+
+    static Map<String, Object> prefix(String field, Object value) {
+        return Map.of("prefix", Map.of(field, Map.of("value", value)));
+    }
+
+    private static Map<String, Object> range(String field, String bound, Object value) {
+        return Map.of("range", Map.of(field, Map.of(bound, value)));
+    }
+
+    private static Map<String, Object> wildcard(String field, String pattern) {
+        return Map.of("wildcard", Map.of(field, Map.of("value", pattern)));
+    }
 
     static Map<String, Object> boolMust(List<Map<String, Object>> clauses) {
         return Map.of("bool", Map.of("must", clauses));
@@ -80,7 +95,7 @@ final class Queries {
         return Map.of("nested", Map.of("path", path, "query", query));
     }
 
-    static String escapeWildcard(Object value) {
+    private static String escapeWildcard(Object value) {
         return value.toString()
                 .replace("\\", "\\\\")
                 .replace("*", "\\*")

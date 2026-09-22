@@ -4,6 +4,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
@@ -11,6 +12,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.Temporal;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -76,10 +78,6 @@ final class ComparisonTranslator {
      */
     static final Set<String> COMPARISON_OPS =
             Set.of("eq", "ne", "lt", "gt", "le", "ge");
-
-    /** The receiver-sensitive CEL string-match methods (see {@link NormalizedBinary}). */
-    private static final Set<String> STRING_MATCH_OPS =
-            Set.of("contains", "startsWith", "endsWith");
 
     private final CriteriaBuilder cb;
     private final TriPredicate tri;
@@ -348,7 +346,8 @@ final class ComparisonTranslator {
         // needle (NormalizedBinary deliberately leaves these in source order). An unfolded
         // concat receiver (`("a" + "b").contains(R.attr.x)`) folds here too — NOT into the
         // add-solve path, which would translate the INVERTED column-haystack LIKE.
-        if (STRING_MATCH_OPS.contains(op) && right instanceof Resolved.Field needleField) {
+        StringMatch match = StringMatch.of(op);
+        if (match != null && right instanceof Resolved.Field needleField) {
             Object receiver = left instanceof Resolved.Constant c ? c.value()
                     : left instanceof Resolved.ConstantAdd ca ? ca.fold()
                     : null;
@@ -356,18 +355,13 @@ final class ComparisonTranslator {
                 if (!(receiver instanceof String haystack)) {
                     // `5.contains(x)` has no overload in CEL; the planner never folds one.
                     throw Refusals.malformed(
-                            op + " requires a string receiver, got " + typeName(receiver));
+                            op + " requires a string receiver, got "
+                                    + PlanValues.typeName(receiver));
                 }
                 Path<?> needle = scope.path(needleField.variable());
                 // The needle is a column, so it is escaped dynamically; a NULL needle is
                 // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
-                return switch (op) {
-                    case "contains" -> fieldToFieldLike(cb.literal(haystack), needle, true, true);
-                    case "startsWith" -> fieldToFieldLike(cb.literal(haystack), needle, false, true);
-                    case "endsWith" -> fieldToFieldLike(cb.literal(haystack), needle, true, false);
-                    default -> throw Refusals.internal(
-                            "Unsupported string-match operator: " + op);
-                };
+                return fieldToFieldLike(cb.literal(haystack), needle, match);
             }
             // A NULL receiver constant is not a haystack; fall through so the null-RHS
             // leaf branch below owns the error message.
@@ -570,18 +564,7 @@ final class ComparisonTranslator {
      * is total and exact, so the collapse is oracle-faithful.
      */
     private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
-        int cmp = left.compareTo(right);
-        boolean result = switch (op) {
-            case "eq" -> cmp == 0;
-            case "ne" -> cmp != 0;
-            case "lt" -> cmp < 0;
-            case "gt" -> cmp > 0;
-            case "le" -> cmp <= 0;
-            case "ge" -> cmp >= 0;
-            default -> throw Refusals.internal(
-                    "Unsupported constant timestamp comparison operator: " + op);
-        };
-        return result ? cb.conjunction() : cb.disjunction();
+        return constant(holds(op, left.compareTo(right)));
     }
 
     /**
@@ -633,7 +616,7 @@ final class ComparisonTranslator {
     /**
      * Shape description for a structured constant in an error message: size and kind
      * only — never element values, matching the adapter's no-value-leak discipline
-     * (see {@link #typeName}).
+     * (see {@link PlanValues#typeName}).
      */
     private static String constantShape(Object value) {
         if (value instanceof List<?> l) {
@@ -783,49 +766,54 @@ final class ComparisonTranslator {
      * comparison also preserves its result under negation.
      */
     Predicate constantComparison(String op, Object left, Object right) {
-        boolean result;
         if ("eq".equals(op) || "ne".equals(op)) {
             boolean equal = (left instanceof Number ln && right instanceof Number rn)
                     ? ln.doubleValue() == rn.doubleValue()
                     : Objects.equals(left, right);
-            result = "eq".equals(op) == equal;
-        } else if (left instanceof Number ln && right instanceof Number rn) {
+            return constant("eq".equals(op) == equal);
+        }
+        if (left instanceof Number ln && right instanceof Number rn) {
             double l = ln.doubleValue();
             double r = rn.doubleValue();
-            result = switch (op) {
+            return constant(switch (op) {
                 case "lt" -> l < r;
                 case "gt" -> l > r;
                 case "le" -> l <= r;
                 case "ge" -> l >= r;
                 default -> throw Refusals.internal(
                         "Unsupported constant comparison operator: " + op);
-            };
-        } else if (left instanceof String ls && right instanceof String rs) {
-            int cmp = ls.compareTo(rs);
-            result = switch (op) {
-                case "lt" -> cmp < 0;
-                case "gt" -> cmp > 0;
-                case "le" -> cmp <= 0;
-                case "ge" -> cmp >= 0;
-                default -> throw Refusals.internal(
-                        "Unsupported constant comparison operator: " + op);
-            };
-        } else {
-            // Ordering two booleans, or a string against a number, has no CEL
-            // overload: the planner would have rejected the policy.
-            throw Refusals.malformed(
-                    "Cannot order constant operands of " + op + ": "
-                            + typeName(left) + " vs " + typeName(right));
+            });
         }
-        return result ? cb.conjunction() : cb.disjunction();
+        if (left instanceof String ls && right instanceof String rs) {
+            return constant(holds(op, ls.compareTo(rs)));
+        }
+        // Ordering two booleans, or a string against a number, has no CEL
+        // overload: the planner would have rejected the policy.
+        throw Refusals.malformed(
+                "Cannot order constant operands of " + op + ": "
+                        + PlanValues.typeName(left) + " vs " + PlanValues.typeName(right));
     }
 
     /**
-     * The runtime type of a converted plan constant, for error messages — the type only,
-     * never the value, matching the adapter's no-value-leak discipline.
+     * Whether {@code op} holds for a {@link Comparable#compareTo} result — the total orders
+     * (strings, instants). Numbers never come through here: see {@link #constantComparison}.
      */
-    static String typeName(Object o) {
-        return o == null ? "null" : o.getClass().getSimpleName();
+    private static boolean holds(String op, int cmp) {
+        return switch (op) {
+            case "eq" -> cmp == 0;
+            case "ne" -> cmp != 0;
+            case "lt" -> cmp < 0;
+            case "gt" -> cmp > 0;
+            case "le" -> cmp <= 0;
+            case "ge" -> cmp >= 0;
+            default -> throw Refusals.internal(
+                    "Unsupported constant comparison operator: " + op);
+        };
+    }
+
+    /** A statically decided comparison: always-true ({@code 1=1}) or always-false ({@code 1=0}). */
+    private Predicate constant(boolean result) {
+        return result ? cb.conjunction() : cb.disjunction();
     }
 
     /**
@@ -835,11 +823,12 @@ final class ComparisonTranslator {
      */
     private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
                                              Scope scope) {
-        jakarta.persistence.criteria.Expression<?> left = scope.path(leftVar);
-        jakarta.persistence.criteria.Expression<?> right = scope.path(rightVar);
-        if (java.time.temporal.Temporal.class.isAssignableFrom(left.getJavaType())
-                || java.time.temporal.Temporal.class.isAssignableFrom(right.getJavaType())) {
-            throw Refusals.unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
+        Expression<?> left = scope.path(leftVar);
+        Expression<?> right = scope.path(rightVar);
+        if (Temporal.class.isAssignableFrom(left.getJavaType())
+                || Temporal.class.isAssignableFrom(right.getJavaType())) {
+            throw Refusals.unsupported("Bare temporal comparison cannot preserve CEL string "
+                    + "equality; use timestamp() explicitly");
         }
         boolean leftExplicit = leaf.isExplicitNull(leftVar, scope);
         boolean rightExplicit = leaf.isExplicitNull(rightVar, scope);
@@ -869,15 +858,16 @@ final class ComparisonTranslator {
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit && rightExplicit) {
             return leaf.definiteEquality(op, left, right, leftExplicit, rightExplicit);
         }
-        return switch (op) {
-            case "eq", "ne", "lt", "gt", "le", "ge" -> comparePredicate(op, left, right);
-            case "contains" -> fieldToFieldLike(left, right, true, true);
-            case "startsWith" -> fieldToFieldLike(left, right, false, true);
-            case "endsWith" -> fieldToFieldLike(left, right, true, false);
-            default -> throw Refusals.unsupported(
-                    "Field-to-field comparison is not supported for operator '" + op + "': "
-                            + leftVar + " vs " + rightVar);
-        };
+        if (COMPARISON_OPS.contains(op)) {
+            return comparePredicate(op, left, right);
+        }
+        StringMatch match = StringMatch.of(op);
+        if (match != null) {
+            return fieldToFieldLike(left, right, match);
+        }
+        throw Refusals.unsupported(
+                "Field-to-field comparison is not supported for operator '" + op + "': "
+                        + leftVar + " vs " + rightVar);
     }
 
     /**
@@ -888,8 +878,8 @@ final class ComparisonTranslator {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     Predicate comparePredicate(String op,
-                               jakarta.persistence.criteria.Expression left,
-                               jakarta.persistence.criteria.Expression right) {
+                               Expression left,
+                               Expression right) {
         return switch (op) {
             case "eq" -> cb.equal(left, right);
             case "ne" -> cb.notEqual(left, right);
@@ -901,6 +891,9 @@ final class ComparisonTranslator {
                     "Unsupported arithmetic comparison operator: " + op);
         };
     }
+
+    /** Escaped by {@link #fieldToFieldLike} in this order: the escape character itself first. */
+    private static final List<String> LIKE_METACHARACTERS = List.of("\\", "%", "_", "[");
 
     /**
      * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
@@ -923,27 +916,20 @@ final class ComparisonTranslator {
      * dialects whose {@code CONCAT} treats NULL as {@code ''} and would otherwise build a
      * match-anything {@code '%%'}.
      */
-    private Predicate fieldToFieldLike(jakarta.persistence.criteria.Expression<?> haystack,
-                                       jakarta.persistence.criteria.Expression<?> needle,
-                                       boolean leadingWildcard, boolean trailingWildcard) {
-        jakarta.persistence.criteria.Expression<String> escaped =
-                needle.as(String.class);
-        escaped = cb.function("replace", String.class,
-                escaped, cb.literal("\\"), cb.literal("\\\\"));
-        escaped = cb.function("replace", String.class,
-                escaped, cb.literal("%"), cb.literal("\\%"));
-        escaped = cb.function("replace", String.class,
-                escaped, cb.literal("_"), cb.literal("\\_"));
-        escaped = cb.function("replace", String.class,
-                escaped, cb.literal("["), cb.literal("\\["));
-        jakarta.persistence.criteria.Expression<String> pattern = escaped;
-        if (leadingWildcard) {
+    private Predicate fieldToFieldLike(Expression<?> haystack, Expression<?> needle,
+                                       StringMatch match) {
+        Expression<String> pattern = needle.as(String.class);
+        for (String metacharacter : LIKE_METACHARACTERS) {
+            pattern = cb.function("replace", String.class,
+                    pattern, cb.literal(metacharacter), cb.literal("\\" + metacharacter));
+        }
+        if (match.leadingWildcard) {
             pattern = cb.concat(cb.literal("%"), pattern);
         }
-        if (trailingWildcard) {
+        if (match.trailingWildcard) {
             pattern = cb.concat(pattern, cb.literal("%"));
         }
-        jakarta.persistence.criteria.Expression<String> guardedPattern =
+        Expression<String> guardedPattern =
                 cb.<String>selectCase()
                         .when(cb.isNull(needle), cb.nullLiteral(String.class))
                         .otherwise(pattern);

@@ -1,11 +1,14 @@
 package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
+
+import java.util.stream.Collectors;
 
 /**
  * The correlated-subquery shapes every collection operator composes over.
@@ -65,10 +68,9 @@ final class ChainSubqueries {
                                          SubqueryBodyBuilder bodyBuilder,
                                          int trueScore, int falseScore) {
         ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
-        jakarta.persistence.criteria.Expression<Integer> score = cb.<Integer>selectCase()
-                .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), trueScore)
-                .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())),
-                        falseScore)
+        Expression<Integer> score = cb.<Integer>selectCase()
+                .when(cs.body(bodyBuilder), trueScore)
+                .when(tri.not(cs.body(bodyBuilder)), falseScore)
                 .otherwise(1);
         cs.sub().select(cb.nullif(cb.coalesce(cb.max(score), 0), 1));
         return cs.sub();
@@ -94,8 +96,8 @@ final class ChainSubqueries {
     Subquery<Long> strictMatchCountSubquery(Scope scope, Scope.ResolvedRelation ref,
                                             SubqueryBodyBuilder bodyBuilder) {
         ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
-        jakarta.persistence.criteria.Expression<Long> match = cb.<Long>selectCase()
-                .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 1L)
+        Expression<Long> match = cb.<Long>selectCase()
+                .when(cs.body(bodyBuilder), 1L)
                 .otherwise(0L);
         cs.sub().select(cb.sum(
                 cb.coalesce(cb.sum(match), 0L),
@@ -123,11 +125,11 @@ final class ChainSubqueries {
      * WHENs skipped → ELSE 1 dominates the MAX → NULLIF). The body is translated once per
      * polarity (stateful negation — see {@link TriPredicate#not}).
      */
-    private jakarta.persistence.criteria.Expression<Long> undeterminedPoisonTerm(
+    private Expression<Long> undeterminedPoisonTerm(
             ChainSubquery<?> cs, SubqueryBodyBuilder bodyBuilder) {
-        jakarta.persistence.criteria.Expression<Long> determined = cb.<Long>selectCase()
-                .when(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()), 0L)
-                .when(tri.not(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter())), 0L)
+        Expression<Long> determined = cb.<Long>selectCase()
+                .when(cs.body(bodyBuilder), 0L)
+                .when(tri.not(cs.body(bodyBuilder)), 0L)
                 .otherwise(1L);
         return cb.nullif(cb.coalesce(cb.max(determined), 0L), 1L);
     }
@@ -169,7 +171,7 @@ final class ChainSubqueries {
         if (!selectInvocation) {
             String chain = ref.chain().stream()
                     .map(AttributeMapping.Relation::joinAttribute)
-                    .collect(java.util.stream.Collectors.joining("."));
+                    .collect(Collectors.joining("."));
             throw new UnsupportedOperationException(
                     "Relation '" + chain + "' requires a correlated subquery, but this Specification "
                     + "is being evaluated outside its own SELECT query — e.g. via "
@@ -221,9 +223,9 @@ final class ChainSubqueries {
      * parent leaves the enclosing comparison UNKNOWN and the row excluded under BOTH
      * polarities. A CASE with no ELSE yields NULL for the missing case.
      */
-    <N> jakarta.persistence.criteria.Expression<N> requireLeadingHops(
+    <N> Expression<N> requireLeadingHops(
             Scope scope, Scope.ResolvedRelation ref,
-            jakarta.persistence.criteria.Expression<N> value, Class<N> type) {
+            Expression<N> value, Class<N> type) {
         Predicate guard = leadingHopsExist(scope, ref);
         if (guard == null) {
             return value;
@@ -235,7 +237,7 @@ final class ChainSubqueries {
                              SubqueryBodyBuilder bodyBuilder) {
         ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
         cs.sub().select(cb.literal(1));
-        cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+        cs.sub().where(cs.body(bodyBuilder));
         return cb.exists(cs.sub());
     }
 
@@ -260,7 +262,7 @@ final class ChainSubqueries {
             return existsSubquery(scope, ref, bodyBuilder);
         }
         ChainSubquery<Long> cs = countSubquery(scope, ref);
-        cs.sub().where(bodyBuilder.build(cs.sub(), cs.tailJoin(), cs.rebasedOuter()));
+        cs.sub().where(cs.body(bodyBuilder));
         return cb.greaterThan(
                 requireLeadingHops(scope, ref, cs.sub(), Long.class), 0L);
     }

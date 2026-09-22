@@ -49,7 +49,7 @@ final class PlanWalker {
         this.tri = new TriPredicate(cb);
         this.maxMacroDepth = options.effectiveMaxMacroDepth();
         this.leaf = new LeafTranslator(cb, tri, options.operatorOverrides());
-        this.hierarchy = new HierarchyTranslator(cb);
+        this.hierarchy = new HierarchyTranslator(cb, tri);
         ChainSubqueries subqueries = new ChainSubqueries(cb, tri, selectInvocation);
         this.ternary = new TernaryTranslator(cb, tri, this);
         this.comparisons = new ComparisonTranslator(cb, tri, leaf, ternary,

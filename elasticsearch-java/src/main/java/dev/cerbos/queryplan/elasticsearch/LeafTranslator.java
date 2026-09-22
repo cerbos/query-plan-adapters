@@ -13,6 +13,7 @@ import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.ScalarType;
 
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,10 @@ final class LeafTranslator {
     private static final Set<String> SCALAR_OPERAND_OPERATORS = Set.of(
             "eq", "ne", "lt", "gt", "le", "ge", "contains", "startsWith", "endsWith", "matches");
 
+    /** The string operators, which a field declared as anything but a string can never satisfy. */
+    private static final Set<String> STRING_OPERATORS =
+            Set.of("contains", "startsWith", "endsWith", "matches");
+
     /** The mirror of each ordering operator, which is what its negation lowers to. */
     private static final Map<String, String> NEGATED_RANGE = Map.of(
             "lt", "ge", "le", "gt", "gt", "le", "ge", "lt");
@@ -46,6 +51,9 @@ final class LeafTranslator {
         record Field(String variable) implements ResolvedOperand {}
         record Literal(Object value) implements ResolvedOperand {}
     }
+
+    /** A leaf read with the field on the left, whatever order the plan carried it in. */
+    private record Comparison(String variable, Object value, boolean variableFirst) {}
 
     private final Options options;
 
@@ -59,29 +67,10 @@ final class LeafTranslator {
         if (operands.size() != 2) {
             throw malformed(operator + " requires exactly 2 operands, got " + operands.size());
         }
-
-        ResolvedOperand left = resolveLeafOperand(operands.get(0));
-        ResolvedOperand right = resolveLeafOperand(operands.get(1));
-        String variable;
-        Object value;
-        boolean variableFirst;
-        if (left instanceof ResolvedOperand.Field leftField
-                && right instanceof ResolvedOperand.Literal rightValue) {
-            variable = leftField.variable();
-            value = rightValue.value();
-            variableFirst = true;
-        } else if (left instanceof ResolvedOperand.Literal leftValue
-                && right instanceof ResolvedOperand.Field rightField) {
-            variable = rightField.variable();
-            value = leftValue.value();
-            variableFirst = false;
-        } else if (left instanceof ResolvedOperand.Field) {
-            throw unsupported(
-                    "Elasticsearch Query DSL cannot compare two document fields without scripts");
-        } else {
-            throw malformed("Leaf expression must contain exactly one document field");
-        }
-        String field = scope.field(variable);
+        Comparison comparison = resolveComparison(operands.get(0), operands.get(1));
+        String field = scope.field(comparison.variable());
+        Object value = comparison.value();
+        boolean variableFirst = comparison.variableFirst();
 
         String normalizedOperator = normalizeLeafOperator(operator, variableFirst);
         if (!whenTrue && "in".equals(normalizedOperator) && !variableFirst) {
@@ -93,30 +82,10 @@ final class LeafTranslator {
         if (value == null) {
             return nullLeafQuery(normalizedOperator, field, variableFirst, whenTrue);
         }
-        ElasticsearchQueryPlanAdapter.ScalarType type = options.scalarTypes().get(field);
-        if (type != null && !options.operatorOverrides().containsKey(normalizedOperator)
-                && SCALAR_OPERAND_OPERATORS.contains(normalizedOperator)) {
-            boolean timestamp = operands.stream().anyMatch(operand ->
-                    operand.getNodeCase() == Operand.NodeCase.EXPRESSION
-                            && "timestamp".equals(operand.getExpression().getOperator()));
-            if (type == ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP && !timestamp) {
-                throw unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
-            }
-            boolean compatible = switch (type) {
-                case STRING, TIMESTAMP -> value instanceof String;
-                case NUMBER -> value instanceof Number;
-                case BOOLEAN -> value instanceof Boolean;
-            };
-            boolean stringOperator = Set.of("contains", "startsWith", "endsWith", "matches")
-                    .contains(normalizedOperator);
-            if (!compatible || stringOperator && type != ElasticsearchQueryPlanAdapter.ScalarType.STRING) {
-                if ("eq".equals(normalizedOperator) || "ne".equals(normalizedOperator)) {
-                    boolean matches = "ne".equals(normalizedOperator) == whenTrue;
-                    return matches ? Queries.exists(field) : Queries.matchNone();
-                }
-                // A type error is neither true nor false, including under negation.
-                return Queries.matchNone();
-            }
+        Map<String, Object> typeMismatch =
+                typeMismatchQuery(normalizedOperator, field, value, operands, whenTrue);
+        if (typeMismatch != null) {
+            return typeMismatch;
         }
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
             rejectNullIntersection(values);
@@ -126,35 +95,99 @@ final class LeafTranslator {
             return nullAwareMembershipQuery(field, values, whenTrue);
         }
 
-        Map<String, Object> positive;
-        if ("in".equals(normalizedOperator)) {
-            positive = membershipQuery(field, value);
-        } else if ("ne".equals(normalizedOperator) && !options.operatorOverrides().containsKey("ne")) {
-            positive = Queries.definedAndNot(field, operatorOrDefault("eq").apply(field, value));
-        } else {
-            OperatorFunction function = options.operatorOverrides().getOrDefault(
-                    normalizedOperator, Queries.DEFAULT_OPERATORS.get(normalizedOperator));
-            if (function == null) {
-                throw unsupported("Unknown operator: " + normalizedOperator);
-            }
-            positive = function.apply(field, value);
-        }
-        if (whenTrue) {
-            return positive;
-        }
+        Map<String, Object> positive = positiveQuery(normalizedOperator, field, value);
+        return whenTrue ? positive : negatedQuery(normalizedOperator, field, value, positive);
+    }
 
-        return switch (normalizedOperator) {
-            case "eq" -> Queries.definedAndNot(field, positive);
+    /** Which operand is the document field and which the literal, or a refusal when neither is. */
+    private static Comparison resolveComparison(Operand leftOperand, Operand rightOperand) {
+        ResolvedOperand left = resolveLeafOperand(leftOperand);
+        ResolvedOperand right = resolveLeafOperand(rightOperand);
+        if (left instanceof ResolvedOperand.Field field
+                && right instanceof ResolvedOperand.Literal literal) {
+            return new Comparison(field.variable(), literal.value(), true);
+        }
+        if (left instanceof ResolvedOperand.Literal literal
+                && right instanceof ResolvedOperand.Field field) {
+            return new Comparison(field.variable(), literal.value(), false);
+        }
+        if (left instanceof ResolvedOperand.Field) {
+            throw unsupported(
+                    "Elasticsearch Query DSL cannot compare two document fields without scripts");
+        }
+        throw malformed("Leaf expression must contain exactly one document field");
+    }
+
+    /**
+     * The answer for a comparison against a field whose declared {@link ScalarType} the literal
+     * cannot inhabit, or {@code null} when the declaration does not decide it (no declaration, an
+     * override owns the operator, or the types agree).
+     *
+     * <p>CEL raises a no-overload error for a comparison across types, and an error is neither
+     * true nor false — so it matches nothing in either polarity. {@code eq} and {@code ne} are the
+     * exception: CEL's heterogeneous equality is simply false, so {@code ne} holds wherever the
+     * field is present.
+     */
+    private Map<String, Object> typeMismatchQuery(String operator, String field, Object value,
+                                                  List<Operand> operands, boolean whenTrue) {
+        ScalarType type = options.scalarTypes().get(field);
+        if (type == null || options.operatorOverrides().containsKey(operator)
+                || !SCALAR_OPERAND_OPERATORS.contains(operator)) {
+            return null;
+        }
+        boolean timestamp = operands.stream().anyMatch(operand ->
+                operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                        && "timestamp".equals(operand.getExpression().getOperator()));
+        if (type == ScalarType.TIMESTAMP && !timestamp) {
+            throw unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
+        }
+        boolean compatible = switch (type) {
+            case STRING, TIMESTAMP -> value instanceof String;
+            case NUMBER -> value instanceof Number;
+            case BOOLEAN -> value instanceof Boolean;
+        };
+        if (compatible && !(STRING_OPERATORS.contains(operator) && type != ScalarType.STRING)) {
+            return null;
+        }
+        if ("eq".equals(operator) || "ne".equals(operator)) {
+            boolean matches = "ne".equals(operator) == whenTrue;
+            return matches ? Queries.exists(field) : Queries.matchNone();
+        }
+        return Queries.matchNone();
+    }
+
+    /**
+     * The query for the operator holding. A positive {@code ne} with no {@code ne} override is
+     * {@code exists AND NOT eq}, with the caller's {@code eq} override inside it.
+     */
+    private Map<String, Object> positiveQuery(String operator, String field, Object value) {
+        if ("ne".equals(operator) && !options.operatorOverrides().containsKey("ne")) {
+            return Queries.definedAndNot(field, operatorOrDefault("eq").apply(field, value));
+        }
+        OperatorFunction function = operatorOrDefault(operator);
+        if (function == null) {
+            throw unsupported("Unknown operator: " + operator);
+        }
+        return function.apply(field, value);
+    }
+
+    /**
+     * The query for the operator NOT holding. Every negation requires the field to exist, because
+     * CEL errors (and the PDP denies) on a missing one, while a bare {@code bool.must_not} would
+     * match it.
+     */
+    private Map<String, Object> negatedQuery(
+            String operator, String field, Object value, Map<String, Object> positive) {
+        return switch (operator) {
+            case "eq", "in", "contains", "startsWith", "endsWith", "matches" ->
+                    Queries.definedAndNot(field, positive);
             case "ne" -> operatorOrDefault("eq").apply(field, value);
             // The negation of an ordering operator is its mirror, so the mirror's override is the
             // one a caller expects to see applied.
             case "lt", "le", "gt", "ge" ->
-                    operatorOrDefault(NEGATED_RANGE.get(normalizedOperator))
-                            .apply(field, value);
-            case "in", "contains", "startsWith", "endsWith", "matches" ->
-                    Queries.definedAndNot(field, positive);
+                    operatorOrDefault(NEGATED_RANGE.get(operator)).apply(field, value);
             default -> throw unsupported(
-                    "Cannot safely negate operator without scripts: " + normalizedOperator);
+                    "Cannot safely negate operator without scripts: " + operator);
         };
     }
 
@@ -278,11 +311,6 @@ final class LeafTranslator {
             default -> throw unsupported(
                     "Null values are only supported with eq, ne, and scalar in operators");
         };
-    }
-
-    /** The {@code in} lowering, through the caller's {@code in} override when there is one. */
-    private Map<String, Object> membershipQuery(String field, Object value) {
-        return operatorOrDefault("in").apply(field, value);
     }
 
     private Map<String, Object> nullAwareMembershipQuery(

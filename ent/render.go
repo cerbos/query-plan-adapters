@@ -130,18 +130,18 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
-		symbol, err := cmpSymbol(t.Op)
+		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {
 			return err
 		}
-		return writeBinary(b, symbol, t.L, t.R)
+		return writeBinary(b, op, t.L, t.R)
 
 	case queryplan.Arith:
-		symbol, err := arithSymbol(t.Op)
+		op, err := symbol(arithSymbols, "arithmetic", t.Op)
 		if err != nil {
 			return err
 		}
-		return writeBinary(b, symbol, t.L, t.R)
+		return writeBinary(b, op, t.L, t.R)
 
 	case queryplan.Concat:
 		// The same dialect-correct spelling the escaping path already uses: CONCAT() on MySQL,
@@ -158,15 +158,7 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 			sep = " AND "
 		}
 		return wrap(b, func(b *sql.Builder) error {
-			for i, x := range t.Xs {
-				if i > 0 {
-					b.WriteString(sep)
-				}
-				if err := write(b, x); err != nil {
-					return err
-				}
-			}
-			return nil
+			return writeSeparated(b, t.Xs, sep)
 		})
 
 	case queryplan.Not:
@@ -214,15 +206,7 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 			}
 			b.WriteString(" IN ")
 			return wrap(b, func(b *sql.Builder) error {
-				for i, v := range t.Vs {
-					if i > 0 {
-						b.Comma()
-					}
-					if err := write(b, v); err != nil {
-						return err
-					}
-				}
-				return nil
+				return writeSeparated(b, t.Vs, ", ")
 			})
 		})
 
@@ -296,25 +280,16 @@ func writeTruthTest(b *sql.Builder, t queryplan.TruthTest) error {
 	case queryplan.TruthUnknown:
 		return write(b, queryplan.IsNull{X: t.X})
 
-	case queryplan.TruthTrue:
+	case queryplan.TruthTrue, queryplan.TruthFalse:
 		return wrap(b, func(b *sql.Builder) error {
 			if err := write(b, t.X); err != nil {
 				return err
 			}
 			b.WriteString(" = ")
-			b.Arg(true)
+			b.Arg(t.Want == queryplan.TruthTrue)
 			return nil
 		})
 
-	case queryplan.TruthFalse:
-		return wrap(b, func(b *sql.Builder) error {
-			if err := write(b, t.X); err != nil {
-				return err
-			}
-			b.WriteString(" = ")
-			b.Arg(false)
-			return nil
-		})
 	default:
 		return fmt.Errorf("cannot render truth value %d", t.Want)
 	}
@@ -369,31 +344,23 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 
 	b.WriteString(name)
 	return wrap(b, func(b *sql.Builder) error {
-		for i, arg := range c.Args {
-			if i > 0 {
-				b.Comma()
-			}
-			if err := write(b, arg); err != nil {
-				return err
-			}
-		}
-		return nil
+		return writeSeparated(b, c.Args, ", ")
 	})
 }
 
 // writeConcat joins strings, propagating NULL.
 func writeConcat(b *sql.Builder, args []queryplan.Expr) error {
+	separator := " || "
 	if b.Dialect() == dialect.MySQL {
 		b.WriteString("CONCAT")
-		return wrap(b, func(b *sql.Builder) error {
-			return writeSeparated(b, args, ", ")
-		})
+		separator = ", "
 	}
 	return wrap(b, func(b *sql.Builder) error {
-		return writeSeparated(b, args, " || ")
+		return writeSeparated(b, args, separator)
 	})
 }
 
+// writeSeparated writes each expression in turn, separated by separator.
 func writeSeparated(b *sql.Builder, args []queryplan.Expr, separator string) error {
 	for i, arg := range args {
 		if i > 0 {
@@ -525,20 +492,14 @@ var arithSymbols = map[queryplan.ArithOp]string{
 	queryplan.OpMod:  "%",
 }
 
-func cmpSymbol(op queryplan.CmpOp) (string, error) {
-	symbol, ok := cmpSymbols[op]
+// symbol spells an operator through its table, refusing one the table does not know rather than
+// guessing: a wrong operator is valid SQL that quietly returns a different row set.
+func symbol[Op ~string](symbols map[Op]string, kind string, op Op) (string, error) {
+	s, ok := symbols[op]
 	if !ok {
-		return "", fmt.Errorf("cannot render comparison %q", op)
+		return "", fmt.Errorf("cannot render %s %q", kind, op)
 	}
-	return symbol, nil
-}
-
-func arithSymbol(op queryplan.ArithOp) (string, error) {
-	symbol, ok := arithSymbols[op]
-	if !ok {
-		return "", fmt.Errorf("cannot render arithmetic %q", op)
-	}
-	return symbol, nil
+	return s, nil
 }
 
 var functionNames = map[queryplan.FuncName]string{

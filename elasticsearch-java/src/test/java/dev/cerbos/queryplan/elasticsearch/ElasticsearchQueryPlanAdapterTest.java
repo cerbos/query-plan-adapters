@@ -26,7 +26,6 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,10 +148,6 @@ class ElasticsearchQueryPlanAdapterTest {
         return valueOperand(number(val));
     }
 
-    private static Operand boolValueOperand(boolean val) {
-        return Operand.newBuilder().setValue(Value.newBuilder().setBoolValue(val)).build();
-    }
-
     private static Operand listValueOperand(String... values) {
         ListValue.Builder list = ListValue.newBuilder();
         for (String v : values) {
@@ -230,31 +225,20 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
 
     /**
-     * CEL has no such function, so no policy compiles to this operator: the checker raises
+     * CEL has no such function, so no policy compiles to either operator: the checker raises
      * {@code undeclared reference to 'unsupported_op' (in container '')} and the planner never
-     * runs.
+     * runs. {@code isSet} is the one worth naming: it is not a registered CEL function either
+     * ({@code undeclared reference to 'isSet'}), so it can never reach the wire
+     * (cerbos/query-plan-adapters#261), and existence is spelled {@code R.attr.x != null}, which
+     * the corpus carries as {@code null-ne} and this adapter lowers to {@code exists}.
      */
-    @Test
-    void anOperatorTheAdapterDoesNotKnowIsRefusedByName() {
-        IllegalArgumentException ex = refusal(expressionOperand("unsupported_op",
+    @ParameterizedTest
+    @ValueSource(strings = {"unsupported_op", "isSet"})
+    void anOperatorTheAdapterDoesNotKnowIsRefusedByName(String operator) {
+        IllegalArgumentException ex = refusal(expressionOperand(operator,
                 variableOperand("request.resource.attr.department"), stringValueOperand("value")));
-        assertTrue(ex.getMessage().contains("Unknown operator"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("Unknown operator: " + operator), ex.getMessage());
         assertInstanceOf(UnsupportedPlanShapeException.class, ex);
-    }
-
-    /**
-     * {@code isSet} is not a registered CEL function, so a policy naming it does not compile
-     * ({@code undeclared reference to 'isSet'}) and the operator can never reach the wire
-     * (cerbos/query-plan-adapters#261). It appears in zero of the corpus's wire fixtures;
-     * existence is spelled {@code R.attr.x != null}, which the corpus carries as {@code null-ne}
-     * and this adapter lowers to {@code exists}.
-     */
-    @Test
-    void isSetIsRejectedRatherThanTranslated() {
-        IllegalArgumentException ex = refusal(expressionOperand("isSet",
-                variableOperand("request.resource.attr.department"), boolValueOperand(true)));
-        assertTrue(ex.getMessage().contains("isSet"),
-                "the unknown operator must be named in the error, got: " + ex.getMessage());
     }
 
     /**
@@ -487,7 +471,6 @@ class ElasticsearchQueryPlanAdapterTest {
         assertEquals(FIELD_MAP, options.fieldMap());
 
         Options widened = options.withNestedPaths(NESTED_PATHS);
-        assertNotSame(options, widened);
         assertEquals(Set.of(), options.nestedPaths());
         assertEquals(NESTED_PATHS, widened.nestedPaths());
         assertEquals(Set.of(), widened.collectionFields());

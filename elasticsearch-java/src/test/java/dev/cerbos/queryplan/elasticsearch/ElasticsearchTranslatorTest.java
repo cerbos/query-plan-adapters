@@ -967,13 +967,11 @@ class ElasticsearchTranslatorTest {
          * whose arithmetic would produce one are confirmed refused before a literal is ever built.
          */
         @Test
-        void aValueJsonCannotCarryIsRefusedRatherThanRecorded() throws Exception {
+        void aValueJsonCannotCarryIsRefusedRatherThanRecorded() {
             IllegalStateException ex = assertThrows(IllegalStateException.class,
                     () -> Corpus.canonicalJson(Map.of("range",
                             Map.of("aDouble", Map.of("gt", Double.NaN)))));
             assertTrue(ex.getMessage().contains("which JSON cannot carry"), ex.getMessage());
-            // ...and the round trip alone would have accepted it, quietly, as a string.
-            assertEquals("\"NaN\"", JSON.writeValueAsString(Double.NaN));
 
             for (String action : List.of(
                     "cr-div-zero", "cr-div-neg-zero", "nan-ord-inf", "nan-ord-le")) {

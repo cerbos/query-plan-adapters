@@ -28,6 +28,7 @@ import {
   classifyActionsForAdapter,
   nullRepresentationOmittedFor,
   parseActionsFile,
+  planCarriesNullLiteral,
   planFromWireFixture,
   readCorpusJson,
   readGoldenExpectations,
@@ -150,7 +151,6 @@ interface TranslateOptions {
    */
   allowPostFilter?: boolean;
   nullAttributeRepresentation?: NullAttributeRepresentation;
-  plannedAt?: string;
 }
 
 function translate(
@@ -158,7 +158,7 @@ function translate(
   options: TranslateOptions = {},
 ): QueryPlanToConvexResult<Recorder, unknown> {
   return queryPlanToConvex<Recorder, unknown>({
-    queryPlan: planFromWireFixture(action, options.plannedAt),
+    queryPlan: planFromWireFixture(action),
     mapper: options.mapper ?? MAPPER,
     allowPostFilter: options.allowPostFilter ?? true,
     ...(options.nullAttributeRepresentation
@@ -530,17 +530,6 @@ describe("nullAttributeRepresentation", () => {
    * actions the option rejects is a fact this file reports rather than one it assumes.
    */
   test("omitted rejects exactly the actions whose plan carries a null literal", () => {
-    const carriesNull = (operand: unknown): boolean => {
-      if (typeof operand !== "object" || operand === null) return false;
-      const node = operand as Record<string, unknown>;
-      if ("value" in node) {
-        const value = node["value"];
-        return value === null || (Array.isArray(value) && value.includes(null));
-      }
-      const operands = node["operands"];
-      return Array.isArray(operands) && operands.some(carriesNull);
-    };
-
     const rejected: string[] = [];
     const translated: string[] = [];
     for (const action of RECORDED_ACTIONS) {
@@ -554,7 +543,10 @@ describe("nullAttributeRepresentation", () => {
 
     const carrying = RECORDED_ACTIONS.filter((action) => {
       const plan = planFromWireFixture(action);
-      return plan.kind === PlanKind.CONDITIONAL && carriesNull(plan.condition);
+      return (
+        plan.kind === PlanKind.CONDITIONAL &&
+        planCarriesNullLiteral(plan.condition)
+      );
     });
 
     expect(rejected).toEqual(carrying);
@@ -563,6 +555,19 @@ describe("nullAttributeRepresentation", () => {
     expect(translated.length).toBeGreaterThan(0);
   });
 });
+
+// -- hand-built plans ------------------------------------------------------------------------------
+
+/** A conditional plan around a hand-built condition, for the two sections below that need one. */
+const plan = (condition: unknown): PlanResourcesResponse =>
+  ({
+    kind: PlanKind.CONDITIONAL,
+    condition: condition as PlanExpressionOperand,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  }) as PlanResourcesResponse;
 
 // -- plans the planner cannot produce --------------------------------------------------------------
 
@@ -575,16 +580,6 @@ describe("plans the planner cannot produce", () => {
   //
   // A shape CEL *can* express does not belong here, whatever its plan looks like: it belongs in
   // the corpus, where every adapter is asked about it.
-
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
 
   test("an unrecognised plan kind", () => {
     expect(() =>
@@ -650,16 +645,6 @@ describe("plans the planner cannot produce", () => {
  * licence to keep writing them.
  */
 describe("shapes the corpus does not reach yet", () => {
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
-
   // Corpus gap (#396): regex-lookahead now covers lookahead rejection, but these distinct
   // backreference and trailing-wildcard/end-anchor combinations still have no corpus action.
   // Keep their refusal contract until those exact shapes are planned and replayed.

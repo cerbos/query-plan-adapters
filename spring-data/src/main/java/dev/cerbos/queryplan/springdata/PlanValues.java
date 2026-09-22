@@ -78,8 +78,12 @@ final class PlanValues {
                         + typeName(right));
     }
 
-    /** Type-only operand description for error messages — operand VALUES never leak. */
-    private static String typeName(Object o) {
+    /**
+     * The runtime type of a converted plan constant, for error messages — the type only, never
+     * the value: plan constants can carry folded principal attributes, and every error site in
+     * the adapter keeps values out of its messages.
+     */
+    static String typeName(Object o) {
         return o == null ? "null" : o.getClass().getSimpleName();
     }
 
