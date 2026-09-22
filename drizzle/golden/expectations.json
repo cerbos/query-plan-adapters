@@ -1777,7 +1777,7 @@
           ]
         },
         "mysql": {
-          "sql": "((case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_bool_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end) or `adversarial_resources`.`a_number` = ?)",
+          "sql": "((case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_bool_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(json_extract(`adversarial_resources`.`a_bool_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end) or `adversarial_resources`.`a_number` = ?)",
           "params": [
             "$[0]",
             "$[0]",
@@ -1840,7 +1840,7 @@
           ]
         },
         "mysql": {
-          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
+          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
           "params": [
             "$[0]",
             "$[0]",
@@ -1872,7 +1872,7 @@
           ]
         },
         "mysql": {
-          "sql": "not (case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'DOUBLE') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
+          "sql": "not (case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' and json_extract(`adversarial_resources`.`a_number_list_json`, ?) is not null then (case when json_type(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(json_extract(`adversarial_resources`.`a_number_list_json`, ?)) as float(53)) = cast(? as float(53)) else false end) end)",
           "params": [
             "$[0]",
             "$[0]",

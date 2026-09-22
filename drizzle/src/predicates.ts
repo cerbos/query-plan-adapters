@@ -136,30 +136,36 @@ const bindAgainstColumn = (value: Value, column: AnyColumn): SQL | Param =>
 export type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 
 /**
+ * A string's length in CHARACTERS, the unit CEL's `size()` and every dialect's `substr()` count
+ * in. SQLite's and PostgreSQL's `length()` already count characters; MySQL's counts BYTES, so a
+ * multi-byte character (`é` is two bytes in utf8mb4) would offset every `substr()` built on it
+ * and make `size()` disagree with the PDP (#473). MySQL's character count is `char_length()`,
+ * which SQLite does not have — so, as `indexed.ts` does, the dialect is read off the Drizzle
+ * class of whichever operand is a column, and the caller still declares none. With no column
+ * among the operands there is no MySQL-side value to measure.
+ */
+export const characterLength = (
+  columns: readonly (AnyColumn | undefined)[],
+): ((expr: SQL) => SQL) =>
+  columns.some((column) => column !== undefined && is(column, MySqlColumn))
+    ? (expr) => sql`char_length(${expr})`
+    : (expr) => sql`length(${expr})`;
+
+/**
  * CEL-exact string matching: replace/substr are case-sensitive, interpret no LIKE
  * metacharacters (% _ \ in the needle match literally), and propagate NULL as SQL
  * UNKNOWN — which excludes the row under both polarities, mirroring the CEL
  * missing-attribute error (deny). The receiver is ALWAYS the haystack and the needle
  * ALWAYS the pattern; operands are never swapped.
- *
- * `substr` counts characters on every store, and so must the length that positions it. SQLite's
- * and PostgreSQL's `length()` do, but MySQL's counts BYTES, so a multi-byte needle mis-slices
- * there: `substr('\u00e9-x', 1, length('\u00e9'))` is `'\u00e9-'`, and `startsWith` under-grants while
- * its negation over-grants (seed h7). `columns` are the operands' mapped columns, whose Drizzle
- * class names the dialect exactly as it does for `size()`; any MySQL column selects
- * `char_length`.
  */
 export const buildStringMatchCondition = (
   operator: StringMatchOperator,
   receiver: NullableExpression,
   needle: NullableExpression,
-  columns: (AnyColumn | undefined)[],
+  length: (expr: SQL) => SQL,
 ): SQL => {
   const receiverExpr = receiver.expr;
   const needleExpr = needle.expr;
-  const length = columns.some((column) => is(column, MySqlColumn))
-    ? sql`char_length`
-    : sql`length`;
   switch (operator) {
     case "contains": {
       // REPLACE is case-sensitive and treats the needle literally on SQLite,
@@ -174,9 +180,9 @@ export const buildStringMatchCondition = (
         : sql`(case ${body})`;
     }
     case "startsWith":
-      return sql`substr(${receiverExpr}, 1, ${length}(${needleExpr})) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, 1, ${length(needleExpr)}) = ${needleExpr}`;
     case "endsWith":
-      return sql`substr(${receiverExpr}, ${length}(${receiverExpr}) - ${length}(${needleExpr}) + 1) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, ${length(receiverExpr)} - ${length(needleExpr)} + 1) = ${needleExpr}`;
   }
 };
 
@@ -394,7 +400,7 @@ const applyColumnComparison = (
         operator,
         columnExpression(sql`${column}`),
         constantExpression(sql`${value}`),
-        [column],
+        characterLength([column]),
       );
   }
   const ordering = binaryComparison(operator, column, bound);

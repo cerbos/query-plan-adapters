@@ -71,9 +71,12 @@ export function indexedEquality({
       throw new Error('indexable: "json" requires a MySQL JSON column');
     }
     const element = sql`json_extract(${column}, ${path})`;
+    // Every JSON number type MySQL reports is a CEL number: an integer beyond the signed 64-bit
+    // range (1e19) is `UNSIGNED INTEGER`, and an exact decimal is `DECIMAL`. Leaving either out
+    // made the equality FALSE for an element the PDP matches — and its negation TRUE (#472).
     const equality =
       typeof value === "number"
-        ? sql`(case when json_type(${element}) in ('INTEGER', 'DOUBLE') then cast(json_unquote(${element}) as float(53)) = cast(${value} as float(53)) else false end)`
+        ? sql`(case when json_type(${element}) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(${element}) as float(53)) = cast(${value} as float(53)) else false end)`
         : sql`${element} = cast(${JSON.stringify(value)} as json)`;
     // MySQL autowraps scalar JSON as a singleton array for [0]. CEL does not.
     return sql`(case when json_type(${column}) = 'ARRAY' and ${element} is not null then ${equality} end)`;
