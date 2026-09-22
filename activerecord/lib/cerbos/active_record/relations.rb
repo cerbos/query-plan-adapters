@@ -271,8 +271,14 @@ module Cerbos
           "express a composite key. Give an operator override for this attribute."
       end
 
+      # Refuses an association whose target rows the correlated subquery cannot select on its
+      # own: a polymorphic target, a subclass in a single-table hierarchy, and a model with a
+      # default scope. Each of them filters the association in a way that the plain alias of the
+      # target table does not.
+      #
       # @api private
-      def direct_hop(reflection, owner_table, owner_model, aliaser)
+      # @return [Class] the target model
+      def assert_plain_target(reflection, owner_model)
         if reflection.respond_to?(:polymorphic?) && reflection.polymorphic?
           raise UnsupportedAssociationError,
             "Association #{reflection.name.inspect} on #{owner_model.name} is a polymorphic " \
@@ -309,6 +315,13 @@ module Cerbos
             "absent from the attributes that Cerbos evaluates, so the filter would not agree " \
             "with the decision. Use unscoped models for the attributes in a policy."
         end
+
+        target
+      end
+
+      # @api private
+      def direct_hop(reflection, owner_table, owner_model, aliaser)
+        target = assert_plain_target(reflection, owner_model)
 
         table = target.arel_table.alias(aliaser.next_alias(target.table_name))
         predicates = []

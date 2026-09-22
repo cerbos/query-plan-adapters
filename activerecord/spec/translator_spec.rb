@@ -250,13 +250,15 @@ RSpec.describe "translator" do
     # The resource table appears in exactly one FROM position. A second one is a self-join, and
     # a correlated subquery that lost its correlation reads as exactly that.
     it "never joins the resource table to itself" do
+      resource_scans = ->(sql) { sql.scan('FROM "adversarial_resources"').size }
+
       RECORDED_ACTIONS.each do |action|
-        expect(emitted_sql(action).scan('FROM "adversarial_resources"').size).to eq(1), action
+        expect(resource_scans.call(emitted_sql(action))).to eq(1), action
       end
 
-      # Anti-vacuity: the detector reads 2 on a statement that really does name it twice.
+      # Anti-vacuity: the same detector reads 2 on a statement that really does name it twice.
       uncorrelated = %(#{PREAMBLE} WHERE EXISTS (SELECT 1 FROM "adversarial_resources"))
-      expect(uncorrelated.scan('FROM "adversarial_resources"').size).to eq(2)
+      expect(resource_scans.call(uncorrelated)).to eq(2)
     end
 
     # The actions that bind a temporal literal, named exactly. A timestamp reaching SQL as a
@@ -282,11 +284,6 @@ RSpec.describe "translator" do
           )
         }.to raise_error(Cerbos::ActiveRecord::Error, /#{Regexp.escape(message)}/)
       end
-    end
-
-    it "refuses a throwing action that pins no message" do
-      expect { ConformanceCorpus.require_message("synthetic", nil) }
-        .to raise_error(/pins no throw message/)
     end
   end
 

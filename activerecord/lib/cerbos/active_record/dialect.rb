@@ -53,6 +53,11 @@ module Cerbos
         else "double precision"
         end
       end
+
+      # The type name that a CAST to a string must use. MySQL has no +TEXT+ target for a CAST.
+      def text_type
+        mysql? ? "VARCHAR" : "TEXT"
+      end
     end
   end
 end
