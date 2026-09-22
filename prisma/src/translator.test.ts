@@ -107,6 +107,48 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   // assertion. Emitting `lt` here would invert the comparison — this repository's canonical bug
   // class, and the reason `vf-*` and `arith-vf` pin the same filter as their column-first twins.
   "arith-vf": { aNumber: { gt: 1 } },
+  "compose-allow-deny": {
+    AND: [{ NOT: { aNumber: { gt: 10 } } }, { aBool: { equals: true } }],
+  },
+  "compose-deny-only": { NOT: { aNumber: { lt: 0 } } },
+  "compose-derived-deny": {
+    AND: [{ NOT: { aBool: { equals: true } } }, { aNumber: { lt: 12 } }],
+  },
+  "compose-derived-role": {
+    AND: [{ aNumber: { lt: 5 } }, { aBool: { equals: true } }],
+  },
+  "compose-multi-allow": {
+    OR: [
+      { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 15 } }] },
+      { AND: [{ aBool: { equals: false } }, { aNumber: { lt: 7 } }] },
+    ],
+  },
+  "compose-multi-allow-deny": {
+    AND: [
+      { NOT: { aNumber: { gt: 20 } } },
+      {
+        OR: [
+          { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 15 } }] },
+          { AND: [{ aBool: { equals: false } }, { aNumber: { lt: 7 } }] },
+        ],
+      },
+    ],
+  },
+  "compose-or-not": {
+    OR: [{ aNumber: { gt: 20 } }, { NOT: { aBool: { equals: true } } }],
+  },
+  "compose-two-deny": {
+    AND: [
+      { NOT: { OR: [{ aBool: { equals: false } }, { aNumber: { gt: 18 } }] } },
+      { aNumber: { gte: 0 } },
+    ],
+  },
+  "compose-variable": {
+    AND: [
+      { NOT: { aNumber: { gt: 10 } } },
+      { aOptionalString: { in: ["set", "", "%_o"] } },
+    ],
+  },
   // A constant receiver with a column needle: `K.contains(aString)` cannot become a LIKE, so the
   // adapter enumerates every substring of the constant and tests membership. The enumeration is
   // long, and pinning it verbatim is the point — an off-by-one at either end of the window is
@@ -1850,7 +1892,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 167, kinds: 7, throwing: 127 });
+    }).toEqual({ filters: 176, kinds: 7, throwing: 127 });
   });
 });
 
