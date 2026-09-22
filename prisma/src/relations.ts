@@ -164,6 +164,24 @@ function buildExpressionHopsExistFilter(
 }
 
 /**
+ * `{ NOT: filter }` for a filter translated from a plan sub-expression.
+ *
+ * An unconditional filter (`{}`, which the hierarchy operators return for a relationship that
+ * holds between two constants) cannot be negated this way: Prisma drops an empty condition, so
+ * `{ NOT: {} }` is true and matches every row, where the negation of an unconditional condition
+ * matches none. Prisma has no field-free false condition to emit instead, so the shape is refused.
+ */
+export function negateFilter(filter: PrismaFilter): PrismaFilter {
+  if (Object.keys(filter).length === 0) {
+    throw new Error(
+      "Cannot negate an unconditional filter: Prisma evaluates { NOT: {} } as true and matches " +
+        "every row, where the negated condition matches none"
+    );
+  }
+  return { NOT: filter };
+}
+
+/**
  * `{ NOT: filter }`, with every to-one hop `operand` dots through required OUTSIDE the
  * negation so an absent parent stays denied (see buildExpressionHopsExistFilter).
  */
@@ -173,7 +191,8 @@ export function negateRequiringHops(
   context: TranslationContext
 ): PrismaFilter {
   const hops = buildExpressionHopsExistFilter(operand, context);
-  return hops === undefined ? { NOT: filter } : { AND: [hops, { NOT: filter }] };
+  const negated = negateFilter(filter);
+  return hops === undefined ? negated : { AND: [hops, negated] };
 }
 
 /**

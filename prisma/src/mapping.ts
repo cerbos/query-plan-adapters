@@ -90,6 +90,33 @@ export function lookupMapping(
   return typeof mapper === "function" ? mapper(key) : mapper[key];
 }
 
+/**
+ * The element field mappings of the collection at `collectionPath`. A chained collection
+ * (`R.attr.a.b`) has no mapping of its own, so it is found by descending from the longest mapped
+ * prefix through the nested `relation.fields`, the same walk resolveFieldReference performs.
+ */
+function lookupElementFields(
+  mapper: Mapper,
+  collectionPath: string
+): Record<string, MapperConfig> | undefined {
+  const direct = lookupMapping(mapper, collectionPath);
+  if (direct) {
+    return direct.relation?.fields;
+  }
+  const parts = collectionPath.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    let relation = lookupMapping(mapper, parts.slice(0, i).join("."))?.relation;
+    if (!relation) {
+      continue;
+    }
+    for (const part of parts.slice(i)) {
+      relation = relation?.fields?.[part]?.relation;
+    }
+    return relation?.fields;
+  }
+  return undefined;
+}
+
 function toRelationConfig(
   relation: NonNullable<MapperConfig["relation"]>
 ): RelationConfig {
@@ -190,13 +217,18 @@ export function resolveFieldReference(
 /**
  * Records that the lambda body being built touches a nullable element column, so the
  * enclosing collection operator can add its three-valued-logic guard.
+ *
+ * An element column is nullable unless its mapping says `nullable: false`. Omitting the guard is
+ * what over-grants (a negated `exists`, an `all` or a `hasIntersection` over `map` would admit
+ * rows holding a NULL element the PDP denies), so silence has to mean the safe reading. A
+ * nested relation is not a column and never gets a NULL guard.
  */
 function recordNullableElementField(
   context: TranslationContext,
   config: MapperConfig,
   defaultField: string
 ): void {
-  if (!config.nullable) {
+  if (config.nullable === false || config.relation) {
     return;
   }
   currentScope(context)?.nullableFields.add(config.field || defaultField);
@@ -234,10 +266,13 @@ export function enterLambdaScope(
     // A key that starts with the variable name accesses the collection element.
     if (key.startsWith(variableName + ".")) {
       const strippedKey = key.replace(variableName + ".", "");
-      const baseConfig = lookupMapping(fullMapper, collectionPath)?.relation
-        ?.fields;
+      const baseConfig = lookupElementFields(fullMapper, collectionPath);
       if (!baseConfig) {
-        return { field: strippedKey };
+        const fieldConfig = { field: strippedKey };
+        if (!strippedKey.includes(".")) {
+          recordNullableElementField(scopedContext, fieldConfig, strippedKey);
+        }
+        return fieldConfig;
       }
 
       // For nested paths, traverse the fields configuration.

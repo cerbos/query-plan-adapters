@@ -34,6 +34,7 @@ import {
 import type { ValueOperand } from "./plan";
 import {
   buildLeadingHopsExistFilter,
+  negateFilter,
   relationFilter,
   relationOperator,
   wrapInRelations,
@@ -269,7 +270,7 @@ function positiveCollectionFilter(
       return filter;
     }
     case "except":
-      return relationFilter(head, "some", { NOT: filterValue });
+      return relationFilter(head, "some", negateFilter(filterValue));
     case "all":
       if (parts.restRelations.length > 0) {
         throw new Error(
@@ -324,11 +325,11 @@ function negatedCollectionFilter(
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
       // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN).
-      return relationFilter(head, "some", { NOT: filterValue });
+      return relationFilter(head, "some", negateFilter(filterValue));
     case "except":
       // !except(c,P) = every element definitively matches P.
       return excludeNullElements(
-        requireLeadingHops(relationFilter(head, "none", { NOT: filterValue })),
+        requireLeadingHops(relationFilter(head, "none", negateFilter(filterValue))),
         parts
       );
     default:

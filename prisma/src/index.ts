@@ -25,8 +25,11 @@ export type MapperConfig = {
    * an evaluation error (deny), which matches SQL three-valued logic for simple predicates —
    * but relation subqueries (some/every/none) collapse UNKNOWN to false at the EXISTS boundary,
    * so collection macros over elements with NULL fields need an explicit guard to stay
-   * deny-aligned. Declaring nullability here enables those collection guards. Scalar hierarchy segments
-   * preserve missing-value errors by default; nullable: false declares that a segment cannot be NULL.
+   * deny-aligned. An element column is treated as nullable unless this says `false`, because
+   * the unguarded filter is the one that over-grants; declare `nullable: false` on every required
+   * element column, since Prisma rejects a `null` comparison against one. Scalar hierarchy
+   * segments likewise preserve missing-value errors unless nullable: false declares that a
+   * segment cannot be NULL.
    */
   nullable?: boolean;
   /**
@@ -52,7 +55,7 @@ export type MapperConfig = {
    * no-overload error on a null receiver in CEL, which denies under both polarities exactly as a
    * dropped row does, so they are left alone.
    *
-   * Distinct from `nullable` above, which declares that a *relation element* column can be NULL so
+   * Distinct from `nullable` above, which declares whether a *relation element* column can be NULL so
    * collection macros gain their three-valued guards. The two are independent: `nullable` is about
    * what a subquery does with an UNKNOWN element, this is about what the caller sent to the PDP.
    *

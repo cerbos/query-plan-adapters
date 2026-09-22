@@ -381,13 +381,14 @@ export const MAPPER: Record<string, MapperConfig> = {
     relation: {
       name: "tags",
       type: "many",
-      // Model name enables field-to-field comparisons between tag columns; the nullable
-      // flag on `name` enables the adapter's three-valued-logic guards for collection
-      // macros over elements whose name column is NULL (a missing attribute — a CEL
-      // error, hence deny — on the check side).
+      // Model name enables field-to-field comparisons between tag columns. `name` is NULLable
+      // in the schema, so it keeps the adapter's three-valued-logic guards for collection
+      // macros over elements whose name column is NULL (a missing attribute — a CEL error,
+      // hence deny — on the check side). Those guards are the default; every REQUIRED element
+      // column below says `nullable: false`, because Prisma rejects `{ name: null }` on one.
       model: "AdversarialTag",
       fields: {
-        id: { field: "tagId" },
+        id: { field: "tagId", nullable: false },
         name: { field: "name", valueType: "string", nullable: true  },
       },
     },
@@ -405,13 +406,13 @@ export const MAPPER: Record<string, MapperConfig> = {
       name: "categories",
       type: "many",
       fields: {
-        name: { field: "name", valueType: "string" },
+        name: { field: "name", valueType: "string", nullable: false },
         subCategories: {
           relation: {
             name: "subCategories",
             type: "many",
             fields: {
-              name: { field: "name", valueType: "string" },
+              name: { field: "name", valueType: "string", nullable: false },
               labels: {
                 relation: {
                   name: "labels",
@@ -435,12 +436,12 @@ export const MAPPER: Record<string, MapperConfig> = {
       name: "categories",
       type: "many",
       fields: {
-        name: { field: "name", valueType: "string" },
+        name: { field: "name", valueType: "string", nullable: false },
         subCategories: {
           relation: {
             name: "subCategories",
             type: "many",
-            fields: { name: { field: "name", valueType: "string" } },
+            fields: { name: { field: "name", valueType: "string", nullable: false } },
           },
         },
         // subNames: the same 2-hop chain but with a bare `field`, so plain `in` membership

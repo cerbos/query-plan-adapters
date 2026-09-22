@@ -22,6 +22,7 @@ import { isResolvedValue, resolveFieldReference } from "./mapping";
 import type { ResolvedOperand, TranslationContext } from "./mapping";
 import {
   assertDefined,
+  assertLogicalOperands,
   isNamedOperand,
   isOperatorOperand,
   isValueOperand,
@@ -56,6 +57,7 @@ export function buildPrismaFilterFromCerbosExpression(
   // Every plan operator this adapter translates. Adding an operator is adding a case here;
   // anything else is refused as unsupported.
   const { operator, operands } = expression;
+  assertLogicalOperands(operator, operands);
   switch (operator) {
     case "and":
       return {

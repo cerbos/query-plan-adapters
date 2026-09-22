@@ -10,6 +10,7 @@ import {
 import {
   COMPARISON_OPERATORS,
   assertDefined,
+  assertLogicalOperands,
   isNamedOperand,
   isOperatorOperand,
   isValueOperand,
@@ -347,6 +348,7 @@ export function constantFoldExpression(
   if (!isOperatorOperand(expr)) {
     return expr;
   }
+  assertLogicalOperands(expr.operator, expr.operands);
   const operands = expr.operands.map(constantFoldExpression);
   const folded: OperatorOperand = { operator: expr.operator, operands };
   const [first, second] = operands;

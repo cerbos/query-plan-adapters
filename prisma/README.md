@@ -62,10 +62,11 @@ throw — Prisma only supports references between fields of the same model.
 - Outer-column references inside collection expressions (e.g.
   `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
   filter lands on the model it belongs to
-- Three-valued-logic guards for nullable element columns: mark a relation field as
-  `nullable: true` in the mapper and collection macros (`all`, negated `exists`,
-  `hasIntersection` over `map`) exclude rows whose elements hold `NULL` in that column,
-  matching Cerbos's treatment of a missing attribute as a deny
+- Three-valued-logic guards for nullable element columns: collection macros (`all`, negated
+  `exists`, `hasIntersection` over `map`) exclude rows whose elements hold `NULL` in a column the
+  lambda reads, matching Cerbos's treatment of a missing attribute as a deny. A relation element
+  column is treated as nullable **unless its mapping says `nullable: false`** — see
+  [Relation element nullability](#relation-element-nullability)
 
 #### Known limitations (loud failures, never silently-wrong filters)
 
@@ -257,6 +258,51 @@ non-scalar comparison/membership literals and bare comparisons between mapped Da
 columns now throw. Use `timestamp()` on both temporal operands to request instant comparison;
 bare CEL attributes compare RFC-3339 strings whose spelling the database discarded. Negated
 ternary comparisons and unsolvable string concatenation now retain CEL's error behavior.
+
+### Relation element nullability
+
+Inside a collection macro, a relation element column whose mapping does not say `nullable: false`
+is treated as nullable, and the macro carries a guard that keeps a `NULL` element denied. Prisma
+lowers a macro to `some`/`every`/`none`, which collapse SQL's `UNKNOWN` to false at the `EXISTS`
+boundary, so without that guard `!R.attr.tags.exists(t, t.name == "x")`, an `all()` or a
+`hasIntersection()` over `map()` would return rows holding a `NULL` element that `check()`
+denies. Leaving the declaration out is therefore the safe reading, not the fast one.
+
+Declare `nullable: false` on every **required** element column the policies reach through a
+collection macro:
+
+```ts
+"request.resource.attr.tags": {
+  relation: {
+    name: "tags",
+    type: "many",
+    fields: {
+      id: { field: "id", nullable: false }, // String   — required
+      name: { field: "name" },              // String?  — nullable, guarded
+    },
+  },
+},
+```
+
+Prisma refuses a `null` comparison against a required column (``Argument `id` must not be
+null``), so an undeclared required column makes those queries fail at the client instead of
+returning rows. That failure is closed rather than open, but it is still a failure.
+
+**Breaking change in [#495](https://github.com/cerbos/query-plan-adapters/issues/495):**
+the guard used to be opt-in, with `nullable: true`, so an undeclared element column had none and
+over-granted on a `NULL` element. Mappings that declared `nullable: true` emit the same filter as
+before. A mapping that left a nullable column undeclared now returns fewer rows (an over-grant
+fix). A mapping that left a required column undeclared now needs `nullable: false`. The
+declaration also now reaches chained collections (`R.attr.a.b.exists(...)`): their element
+mappings are read from the nested `relation.fields`, where before they were ignored.
+
+The same issue made two malformed shapes throw instead of returning a filter. An `and`/`or` with
+no operands used to become `{ AND: [] }` or `{ OR: [] }`, and the constant folder reduced an
+empty `and` to an unconditional filter. The planner never emits either, and both now throw.
+Negating a sub-condition that translates to the unconditional filter `{}` also throws: Prisma
+evaluates `{ NOT: {} }` as true and would return every row. A hierarchy relation between two
+constants produces `{}`, and so does an `overlaps` whose segments are all declared
+`nullable: false`.
 
 ### Conformance contract
 
