@@ -62,17 +62,11 @@ const relationReference = (
   relation: { name, type, requiresParent },
 });
 
-/** Resolves a plan variable to a document path, through the relation it belongs to if any. */
-export const resolveFieldReference = (
+/** The document path a plan variable maps to, or undefined when the mapper has no entry for it. */
+const lookupFieldReference = (
   reference: string,
   mapper: Mapper,
-): ResolvedFieldReference => {
-  const parts = reference.split(".");
-  const lastPart = parts[parts.length - 1];
-  if (!lastPart) {
-    return { path: [reference] };
-  }
-
+): ResolvedFieldReference | undefined => {
   const config = lookupConfig(mapper, reference);
   if (config?.relation) {
     return relationReference(config.relation, config.relation.field);
@@ -81,11 +75,10 @@ export const resolveFieldReference = (
     return { path: [config.field] };
   }
 
-  if (parts.length > 1) {
-    const parentRelation = lookupConfig(
-      mapper,
-      parts.slice(0, -1).join("."),
-    )?.relation;
+  const parts = reference.split(".");
+  const lastPart = parts.pop();
+  if (parts.length > 0 && lastPart) {
+    const parentRelation = lookupConfig(mapper, parts.join("."))?.relation;
     if (parentRelation) {
       return relationReference(
         parentRelation,
@@ -94,8 +87,50 @@ export const resolveFieldReference = (
     }
   }
 
-  return { path: [reference] };
+  // An entry with neither `field` nor `relation` is the caller's opt-in to the plan path verbatim.
+  return config ? { path: [reference] } : undefined;
 };
+
+/** Resolves a plan variable to a document path, through the relation it belongs to if any. */
+export const resolveFieldReference = (
+  reference: string,
+  mapper: Mapper,
+): ResolvedFieldReference => {
+  const resolved = lookupFieldReference(reference, mapper);
+  if (!resolved) {
+    throw unmappedReferenceError(reference);
+  }
+  return resolved;
+};
+
+/**
+ * The relation a plan variable is reached through, if any. Unlike `resolveFieldReference` it does
+ * not refuse an unmapped name: the guards that ask it walk every variable in an operand, field
+ * names included (`get-field`'s second operand), and the emission site refuses the references.
+ */
+export const relationOfReference = (
+  reference: string,
+  mapper: Mapper,
+): ResolvedFieldReference["relation"] =>
+  lookupFieldReference(reference, mapper)?.relation;
+
+/**
+ * An unmapped reference is refused rather than used verbatim as a document path.
+ *
+ * A plan reference such as `request.resource.attr.status` names no field in any real collection,
+ * and MongoDB's negations match a document the path is absent from: `$ne` and `$nor` over a path
+ * nothing stores select every document, so a typo or a missing mapper entry turned
+ * `R.attr.status != "x"` into a filter returning the whole collection
+ * (cerbos/query-plan-adapters#492). A caller whose documents really are shaped like the plan path
+ * opts in per reference, with an entry — `{}` or `{ field: reference }` — or a function mapper
+ * that returns one.
+ */
+export const unmappedReferenceError = (reference: string): Error =>
+  new Error(
+    `No mapper entry for ${reference}: an unmapped reference is not used verbatim as a ` +
+      "document path, because MongoDB's $ne and $nor match every document a path is absent " +
+      "from. Map it to a field, or declare it with an entry to use the plan path as-is.",
+  );
 
 /**
  * The mapper a collection macro's lambda body is translated with: the iteration variable (and

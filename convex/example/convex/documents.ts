@@ -40,9 +40,9 @@ type Predicate = (q: FilterBuilder<Documents>) => Expression<boolean>;
 /**
  * The one piece of configuration a Convex consumer must not skip. A Cerbos plan names its
  * operands `request.resource.attr.ownerId`; a Convex document field is `ownerId`, and Convex reads
- * a dotted field name as a path INTO the document. Without this mapper the filter would ask each
- * document for `request.resource.attr.ownerId`, find nothing there, and return no rows at all —
- * quietly, because an absent path is not an error to the filter engine.
+ * a dotted field name as a path INTO the document. Without this mapper the adapter refuses the
+ * plan: an unmapped reference used to be read as a path no document stores, and a negated
+ * comparison over an absent path matches every document (cerbos/query-plan-adapters#492).
  *
  * `region` and `archived` are deliberately absent: they are the application's own fields, never
  * referenced by demo/policies/document.yaml, and composing them with the adapter's filter is

@@ -38,7 +38,15 @@ const mapperConfig = (
 ): MapperConfig | undefined =>
   typeof mapper === "function" ? mapper(reference) : mapper[reference];
 
-/** The document path a plan reference maps to; an unmapped reference is used verbatim. */
+/** Whether the caller's mapper declares `reference` at all — an entry with no `field` included. */
+export const isMappedReference = (reference: string, mapper: Mapper): boolean =>
+  mapperConfig(reference, mapper) !== undefined;
+
+/**
+ * The document path a plan reference maps to. An entry that names no `field` keeps the plan path;
+ * a reference with no entry at all never gets here, because `assertEveryReferenceMapped` refuses
+ * it before translation.
+ */
 export const resolveField = (reference: string, mapper: Mapper): string =>
   mapperConfig(reference, mapper)?.field ?? reference;
 

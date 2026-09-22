@@ -142,7 +142,7 @@ This support statement includes value-first comparisons, field-to-field expressi
 
 Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
 
-The filter each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the contract no policy can reach are asserted at all: the `allowPostFilter` gate, function mappers, the identity fallback for an unmapped reference, the `nullAttributeRepresentation` boundary, and malformed input.
+The filter each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted filter show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the contract no policy can reach are asserted at all: the `allowPostFilter` gate, function mappers, the refusal of an unmapped reference, the `nullAttributeRepresentation` boundary, and malformed input.
 
 ### What the differential proves, and what it does not
 
@@ -362,7 +362,9 @@ export type Mapper =
 - `field` rewrites a single Cerbos path to a different field name in your Convex document. Dot-notation is supported for nested fields.
 - `nullable` declares that the document field may be absent. Predicates involving that field are evaluated by the post-filter so missing values cannot be mistaken for ordinary Convex comparison results.
 
-If you omit the mapper the adapter will use the query plan paths verbatim.
+Every attribute a plan references must have a mapper entry, or translation throws `No mapper entry for <reference>` — a lambda's own iteration variable is the one exception, since the macro binds it.
+
+**Behaviour change.** An unmapped reference used to be read verbatim as a document path. No document stores a path like `request.resource.attr.status`, so the path was absent everywhere, and Convex reads an absent field as `undefined`, which a negated comparison treats as a match: a missing entry turned `R.attr.status != "x"` into a filter returning every document ([#492](https://github.com/cerbos/query-plan-adapters/issues/492)). It now throws, which is a consumer-visible break for a caller relying on the fallback, including one who passed no mapper at all. If your documents really are shaped like the plan paths, declare each reference with an entry that names no `field` (`{}`, or `{ nullable: true }`), or supply a function mapper that returns one.
 
 #### Direct fields
 
@@ -445,6 +447,7 @@ export const executePlan = internalQuery({
 - An operator listed in the plan is not implemented by this adapter (`Unsupported operator for Convex: <name>` or `Unsupported operator: <name>`).
 - The `in` operator is given a non-array value.
 - The query plan requires trusted-backend filtering and `allowPostFilter` is not set to `true`.
+- A plan references an attribute the mapper has no entry for (`No mapper entry for <reference>`).
 
 ## Limitations
 

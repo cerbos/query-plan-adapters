@@ -1,7 +1,13 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
 
-import { operatorFor } from "./evaluate";
-import { isExpression, isValue, isVariable } from "./operands";
+import type { Mapper } from "./index";
+import { lambdaComponents, operatorFor } from "./evaluate";
+import {
+  isExpression,
+  isMappedReference,
+  isValue,
+  isVariable,
+} from "./operands";
 
 // The refusals made before any filter exists. The invariant is that a shape the adapter cannot
 // express must throw at translation, never emit a filter, so every check here runs over the whole
@@ -102,5 +108,52 @@ export const assertNoNullComparisonOperands = (
 
   for (const operand of expression.operands) {
     assertNoNullComparisonOperands(operand);
+  }
+};
+
+/**
+ * Every plan reference outside a lambda's own variable has a mapper entry.
+ *
+ * An unmapped reference used to be read verbatim as a document path. A plan path such as
+ * `request.resource.attr.status` names no field any document stores, and the path is absent from
+ * every document, which the pushed-down `q.neq(...)` and a negated comparison both read as a
+ * match — so a missing entry turned `R.attr.status != "x"` into a filter returning every document
+ * (cerbos/query-plan-adapters#492). Refused up front, over the whole plan, because a reference can
+ * reach either half of the output and the post-filter would otherwise only meet it per document.
+ * A caller whose documents really are shaped like the plan paths declares each one with an entry
+ * that names no `field`.
+ */
+export const assertEveryReferenceMapped = (
+  expression: PlanExpressionOperand,
+  mapper: Mapper,
+  bound: ReadonlySet<string> = new Set(),
+): void => {
+  if (isVariable(expression)) {
+    const root = expression.name.split(".")[0]!;
+    if (bound.has(root) || isMappedReference(expression.name, mapper)) return;
+    throw new Error(
+      `No mapper entry for ${expression.name}: an unmapped reference is not used verbatim as ` +
+        "a document path, because a path absent from every document satisfies a negated " +
+        "comparison on every document. Map it to a field, or declare it with an entry to use " +
+        "the plan path as-is.",
+    );
+  }
+  if (!isExpression(expression)) return;
+  if (expression.operator === "lambda") {
+    const { body, variable } = lambdaComponents(expression);
+    assertEveryReferenceMapped(
+      body,
+      mapper,
+      new Set([...bound, variable.name]),
+    );
+    return;
+  }
+  // `get-field`'s second operand is the field name, not a reference.
+  const operands =
+    expression.operator === "get-field"
+      ? expression.operands.slice(0, 1)
+      : expression.operands;
+  for (const operand of operands) {
+    assertEveryReferenceMapped(operand, mapper, bound);
   }
 };

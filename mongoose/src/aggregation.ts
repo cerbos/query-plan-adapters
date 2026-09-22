@@ -1,7 +1,7 @@
 import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
 
 import type { Mapper, MongooseFilter } from "./index";
-import { resolveFieldReference } from "./mapper";
+import { relationOfReference, resolveFieldReference } from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
 import { normalizeRe2PatternForMongo } from "./regex";
 import {
@@ -242,7 +242,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         ],
       };
       const parentPath = isVariable(operand)
-        ? resolveFieldReference(operand.name, mapper).relation?.requiresParent
+        ? relationOfReference(operand.name, mapper)?.requiresParent
         : undefined;
       if (parentPath === undefined) {
         return size;

@@ -2,7 +2,11 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 
 import { buildEvaluationGuards } from "./aggregation";
 import type { Mapper, MongooseFilter } from "./index";
-import { isNullableReference, resolveFieldReference } from "./mapper";
+import {
+  isNullableReference,
+  relationOfReference,
+  resolveFieldReference,
+} from "./mapper";
 import { collectVariableNames } from "./operands";
 
 /** `["a", "b"]`, `v` → `{ a: { b: v } }`; an empty path is `v` itself. */
@@ -100,7 +104,7 @@ const buildRequiredParentsFilter = (
   const arrayParents = new Set<string>();
   const toOnePaths = new Set<string>();
   for (const name of collectVariableNames(operand)) {
-    const { relation } = resolveFieldReference(name, mapper);
+    const relation = relationOfReference(name, mapper);
     if (relation?.requiresParent !== undefined) {
       arrayParents.add(relation.requiresParent);
     }

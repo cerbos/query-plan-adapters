@@ -10,6 +10,7 @@ import { isExpression } from "./operands";
 import { canPushToDb, translateExpression } from "./pushdown";
 import type { FilterQ } from "./pushdown";
 import {
+  assertEveryReferenceMapped,
   assertNoListValuedCondition,
   assertNoNullComparisonOperands,
   validateStructure,
@@ -170,6 +171,7 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
         assertNoNullComparisonOperands(condition);
       }
       validateStructure(condition);
+      assertEveryReferenceMapped(condition, mapper);
 
       const result = buildFilters<Q, R>(condition, mapper);
       if (result.postFilter && !allowPostFilter) {
