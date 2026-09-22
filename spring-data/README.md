@@ -1,28 +1,11 @@
 # cerbos-spring-data
 
 > **Alpha release — `0.1.0-alpha.1`.** Operator coverage is stable; the API and the field/relation
-> mapping shapes may still change before `1.0`. We'd love feedback while it's still alpha.
+> mapping shapes may still change before `1.0`. Feedback welcome.
 
-> [!IMPORTANT]
-> **Breaking change since the last alpha:** `toSpecification(...)` now returns
-> `Specification<T>` directly. The `Result<T>` wrapper is gone — drop the second
-> `.toSpecification()` call, and check `planResult.isAlwaysDenied()` on the SDK response if you
-> were pattern-matching the result kind to skip the database.
->
-> ```java
-> // before
-> Result<Contact> result = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
-> repository.findAll(tenantBoundary.and(result.toSpecification()));
->
-> // after
-> Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
-> repository.findAll(tenantBoundary.and(allowed));
-> ```
->
-> This also raises the Spring Data JPA floor to 3.5.2 (see [Install](#install)). Rationale:
-> [ADR-0003](../docs/adr/0003-spring-data-returns-specification-directly.md).
-
-[Cerbos](https://cerbos.dev) query plan adapter for [Spring Data JPA](https://spring.io/projects/spring-data-jpa). Converts a Cerbos `PlanResources` response into a `org.springframework.data.jpa.domain.Specification<T>` you can pass straight to a `JpaSpecificationExecutor`.
+[Cerbos](https://cerbos.dev) query plan adapter for [Spring Data JPA](https://spring.io/projects/spring-data-jpa).
+Converts a Cerbos `PlanResources` response into a `org.springframework.data.jpa.domain.Specification<T>`
+you can pass straight to a `JpaSpecificationExecutor`.
 
 ## Install
 
@@ -31,6 +14,7 @@ Gradle:
 ```kotlin
 dependencies {
     implementation("dev.cerbos:cerbos-spring-data:0.1.0-alpha.1")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1") // to call the PDP
 }
 ```
 
@@ -44,13 +28,16 @@ Maven:
 </dependency>
 ```
 
-You'll also need the Cerbos Java SDK (`dev.cerbos:cerbos-sdk-java`) to call the PDP and Spring
-Data JPA (`org.springframework.data:spring-data-jpa`) **3.5.2 or later** — an always-allowed plan
-is translated to `Specification.unrestricted()`, which arrived in 3.5.2. If you take Spring Data
-JPA from the Spring Boot BOM, that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
-The adapter is developed against Spring Data JPA 3.5 / Hibernate 6.6, and CI also replays every
-suite under Spring Data JPA 4 / Hibernate 7 — the pair Spring Boot 4 manages — as a
-forward-compatibility leg (see [Build](#build)).
+Requirements:
+
+- JDK 17+.
+- Spring Data JPA (`org.springframework.data:spring-data-jpa`) **3.5.2 or later**, supplied by your
+  application — an always-allowed plan becomes `Specification.unrestricted()`, added in 3.5.2. From
+  the Spring Boot BOM that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
+- Developed against Spring Data JPA 3.5 / Hibernate 6.6; CI also runs every suite under Spring Data
+  JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Build](#build).
+- String columns the mapping references need a byte-exact collation — see
+  [Database collation requirements](#database-collation-requirements).
 
 ## Quick start
 
@@ -58,620 +45,467 @@ forward-compatibility leg (see [Build](#build)).
 import dev.cerbos.queryplan.springdata.AttributeMapping;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
+import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.Principal;
 import dev.cerbos.sdk.builders.Resource;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.util.List;
 import java.util.Map;
 
 public interface ContactRepository
         extends JpaRepository<Contact, Long>, JpaSpecificationExecutor<Contact> {}
 
-// Map Cerbos resource attributes to JPA paths or relations on your entity:
-Map<String, AttributeMapping> MAPPING = Map.of(
+// Cerbos resource attributes -> JPA paths / relations on your entity
+static final Map<String, AttributeMapping> MAPPING = Map.of(
     "request.resource.attr.ownerId",    AttributeMapping.field("owner.id"),
     "request.resource.attr.isPublic",   AttributeMapping.field("isPublic"),
     "request.resource.attr.department", AttributeMapping.field("department"),
     "request.resource.attr.tags",       AttributeMapping.relation("tags", Map.of(
-        "name", AttributeMapping.field("name")
-    ))
-);
+        "name", AttributeMapping.field("name"))));
 
-// 1) Call the PDP for a query plan
-var planResult = cerbosClient.plan(
-    Principal.newInstance("alice", "USER"),
-    Resource.newInstance("contact"),
-    "view");
+List<Contact> viewableContacts(CerbosBlockingClient cerbos, ContactRepository contacts) {
+    PlanResourcesResult plan = cerbos.plan(
+        Principal.newInstance("alice", "USER"),
+        Resource.newInstance("contact"),
+        List.of("view"));
 
-// 2) Translate to a Specification
-Specification<Contact> allowed =
-    SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+    // Optional: skip the database round trip when nothing is allowed.
+    if (plan.isAlwaysDenied()) {
+        return List.of();
+    }
 
-// 3) Execute via your repository
-List<Contact> contacts = contactRepository.findAll(allowed);
+    Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING);
+    return contacts.findAll(allowed);
+}
 ```
 
-The returned Specification covers all three plan kinds, so there is nothing to switch on:
+The returned `Specification` covers every plan kind, so you never switch on it:
 
-| Plan kind              | Specification                                                          |
-|------------------------|------------------------------------------------------------------------|
-| `KIND_ALWAYS_ALLOWED`  | `Specification.unrestricted()` — Spring Data omits the `WHERE` clause  |
-| `KIND_ALWAYS_DENIED`   | always-false predicate (`1=0`)                                         |
-| `KIND_CONDITIONAL`     | the translated predicate tree                                          |
+| Plan kind | Specification |
+|---|---|
+| `KIND_ALWAYS_ALLOWED` | `Specification.unrestricted()` — no `WHERE` clause |
+| `KIND_ALWAYS_DENIED` | always-false predicate (`1=0`) |
+| `KIND_CONDITIONAL` | the translated predicate tree |
 
-To skip the database entirely on a denied plan, ask the plan rather than the Specification —
-`planResult.isAlwaysDenied()` on the SDK response, or `response.getFilter().getKind()` on the raw
-protobuf.
-
-Compose it with your own filters:
+Compose it with your own filters and hand it to a repository method; don't call
+`Specification.toPredicate` yourself.
 
 ```java
-Specification<Contact> own =
-    (root, query, cb) -> cb.like(root.get("name"), "Smith%");
-
-Page<Contact> results = contactRepository.findAll(own.and(allowed), pageable);
+Specification<Contact> own = (root, query, cb) -> cb.like(root.get("name"), "Smith%");
+Page<Contact> page = contacts.findAll(own.and(allowed), pageable);
 ```
 
-**Hand the Specification to a repository method — composing with `.and(...)` / `.or(...)` first if
-you need to — and let Spring Data invoke it.** Calling `Specification.toPredicate` yourself is not
-a supported path.
+`toSpecification` also accepts the raw `PlanResourcesResponse` protobuf.
 
 > [!WARNING]
-> **The Specification is SELECT-only.** Never pass it to
-> `repository.delete(Specification)` or any other criteria bulk operation. Relation
-> mappings translate to correlated subqueries over collection/join tables, and
-> Hibernate's multi-table bulk delete first clears those `@ElementCollection`/join
-> tables using the same predicate — the pre-clear removes exactly the rows the
-> correlated subquery references, so the delete removes **0 entity rows while
-> silently destroying their collection rows** (e.g. all ownership entries). Under a
-> blocklist policy like `!(P.id in R.attr.ownedBy)`, the now-ownerless survivors
-> become visible to every principal. The adapter detects the bulk-delete invocation
-> context and throws `UnsupportedOperationException` before anything is deleted.
-> To delete policy-permitted rows, select ids first, then delete by id:
+> **The Specification is SELECT-only.** Never pass it to `repository.delete(Specification)` or any
+> criteria bulk operation. Hibernate's multi-table bulk delete first clears `@ElementCollection` /
+> join tables using the same predicate, which removes the rows the correlated subquery reads — the
+> delete removes 0 entities while destroying their collection rows, and under a blocklist policy the
+> now-ownerless rows become visible to everyone. The adapter detects a `CriteriaDelete` context and
+> throws `UnsupportedOperationException` before anything is deleted. Select ids, then delete by id:
 >
 > ```java
-> List<Long> ids = contactRepository.findAll(allowed)
->         .stream().map(Contact::getId).toList();
-> contactRepository.deleteAllById(ids);
+> List<Long> ids = contacts.findAll(allowed).stream().map(Contact::getId).toList();
+> contacts.deleteAllById(ids);
 > ```
+
+## Field mapping
+
+Map each `request.resource.attr.<name>` to a JPA path or an association:
+
+| Helper | Use for |
+|---|---|
+| `AttributeMapping.field("aPath")` | A column, an `@Embedded` dotted path (`"details.width"`), or a to-one path (`"owner.id"`) |
+| `AttributeMapping.field("aPath", NullAttributeRepresentation.EXPLICIT)` | Same, declaring the attribute's NULL convention (see [below](#declare-the-convention-per-attribute)) |
+| `AttributeMapping.relation("tags")` | `@ElementCollection<String>` — the elements are the values |
+| `AttributeMapping.relation("tags", "name")` | `@OneToMany<Tag>` where `name` stands in for the element in `in` / `hasIntersection` |
+| `AttributeMapping.relation("tags", Map.of("name", field("name")))` | `@OneToMany<Tag>` with member fields for lambda bodies (`t.name`); nested values may be `relation(...)` for multi-hop chains |
+| `AttributeMapping.relation("tags", "name", Map.of(...))` | Both a default member field and nested member fields |
+
+`relation(...)` names a JPA association, so the correlated subquery is a criteria association join
+and Hibernate applies that association's own `@SQLRestriction` and discriminator (see
+[Mapping hazards](#mapping-hazards)). A dotted `field` path through a to-one association is a LEFT
+join.
+
+A plan variable the mapping does not name, or names the wrong way round for its operator (a
+`relation` compared as a scalar, a `field` walked by a macro), throws `UnmappedAttributeException`
+rather than guessing a column.
 
 ### Declaring the translation: `Options`
 
-The two-argument call above is the convenience form. Everything the adapter can be told lives in
-one immutable record, `SpringDataQueryPlanAdapter.Options`, and the positional overloads
-(`mapper`, `overrides`, `nullAttributeRepresentation`) are exactly that record with the rest left
-at its defaults:
+Every setting lives in one immutable record, `SpringDataQueryPlanAdapter.Options`. The positional
+overloads (`mapper`, `overrides`, `nullAttributeRepresentation`) are shorthand for it.
 
 ```java
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter.Options;
 
 Options options = Options.of(MAPPING)
-    .withOperatorOverrides(overrides)                              // see "Supported operators"
-    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
-    .withMaxMacroDepth(8);                                         // see Gotchas
+    .withOperatorOverrides(overrides)                                     // Map<String, OperatorFunction>
+    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED) // default EXPLICIT
+    .withMaxMacroDepth(8);                                                // default 5
 
-Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, options);
+Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, options);
 ```
 
-Every collection is copied on construction and each `with…` returns a new instance, so an
-`Options` can be built once and shared across calls and threads; the map you passed in can be
-mutated afterwards without changing which columns an already-built filter resolves.
-`withMaxMacroDepth` is the per-call form of the
-`dev.cerbos.queryplan.springdata.maxMacroDepth` system property, and it wins: a value declared
-here applies, otherwise the property when set, otherwise the default of 5. The property keeps
-working — it is the one knob a caller who cannot reach every `toSpecification` call has.
+| Option | Default | See |
+|---|---|---|
+| mapping | — (required) | [Field mapping](#field-mapping) |
+| `withOperatorOverrides` | none | [Operator overrides](#operator-overrides) |
+| `withNullAttributeRepresentation` | `EXPLICIT` | [NULL attribute representation](#null-attribute-representation) |
+| `withMaxMacroDepth` | 5, or the `dev.cerbos.queryplan.springdata.maxMacroDepth` system property | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
+
+Collections are copied on construction and each `with…` returns a new instance, so build an
+`Options` once and share it across threads.
 
 ### Handling refusals
 
-A shape the adapter cannot translate throws rather than emitting a best-effort filter, and the
-throw is one of three types so a caller can route on it without matching the message:
+A shape the adapter cannot translate throws instead of emitting a best-effort filter. There are
+three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | The plan is well-formed but the JPA Criteria API cannot express it faithfully — a regex match, a cast, a list index, `mod`, `except()`, a macro nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where the "Not yet supported" table says one reaches, or answer that request another way (a per-row `check()`) |
-| `UnmappedAttributeException` | The plan uses an attribute in a way the mapping does not cover — a variable it does not name, a `Relation` where a scalar is needed or a `Field` where a collection is, a temporal column whose Java type does not pin the instant it stores, two sides of one comparison under different NULL conventions | Change the mapping |
-| `MalformedPlanException` | The plan violates the planner's wire contract — wrong arity, a lambda without a variable, a conditional plan with no condition, a literal CEL itself would reject | A hand-built plan, or an upstream bug to report |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod`, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant, mixed NULL conventions in one comparison | Change the mapping |
+| `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
-All three extend `IllegalArgumentException`, which remains the documented base type; a caller
-catching that keeps working unchanged. Translation of a conditional plan is deferred to the
-Specification's first evaluation, so that is where they are raised — except the
-`NullAttributeRepresentation.OMITTED` scan, which runs from `toSpecification` itself. The
-bulk-delete guard above is deliberately not one of these: it is an `UnsupportedOperationException`
-about the invocation context, not about the plan.
+A conditional plan is translated when the Specification is first evaluated, so that is where these
+are raised — except the `NullAttributeRepresentation.OMITTED` check, which runs in
+`toSpecification`. The bulk-delete guard is a separate `UnsupportedOperationException`.
 
-## Database collation requirements
+### Operator overrides
 
-> **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
-> byte-exact collation.** On MySQL use `utf8mb4_0900_bin` (MySQL 8.0.17+) — case-sensitive is
-> not enough, see below; on SQL Server use a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`). PostgreSQL,
-> H2, and Oracle are case-sensitive by default and are safe unless you opt into
-> case-insensitive behavior (PostgreSQL nondeterministic `ICU` collations, `citext`).
-
-**Why.** CEL string comparison at the PDP is exact and case-sensitive: with
-`R.attr.department == "finance"`, a `check()` call for a resource holding
-`department = "Finance"` returns **DENY**. But the adapter builds every string predicate
-with no collation control, so the database's column collation decides what matches. MySQL
-8's default collation, `utf8mb4_0900_ai_ci`, is case- **and** accent-insensitive, and SQL
-Server defaults to CI collations — on those defaults `WHERE department = 'finance'`
-matches the `'Finance'` row the PDP just denied. The plan-based filter silently returns
-rows the policy denies: **an authorization over-grant**, with no error or log line to
-notice. The same divergence applies to accent folding (`'résumé'` vs `'resume'`).
-
-**Case-sensitive is not byte-exact.** `utf8mb4_0900_as_cs` is case- and accent-sensitive, but it
-is still a Unicode collation, and Unicode collation gives a default-ignorable code point such as
-SOFT HYPHEN (U+00AD) no weight: `'o\u00ADne' = 'one'` is TRUE under it, so `==` and `in`
-over-grant and `!=` under-grants
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `utf8mb4_bin` is byte-exact but
-PAD SPACE, so `'a' = 'a '` is TRUE under it. `utf8mb4_0900_bin` is the one MySQL collation that is
-both byte-exact and NO PAD.
-
-**Every string predicate the adapter emits is affected:**
-
-- `eq` / `ne` (`cb.equal` / `cb.notEqual`)
-- string ordering: `lt` / `gt` / `le` / `ge`
-- the LIKE family: `contains` / `startsWith` / `endsWith`, including the constant-receiver
-  forms and the field-to-field variants built from `REPLACE`-escaped column patterns
-- `in` list membership (`path.in(...)`)
-- `hasIntersection` (both the direct-collection and `map(...)`-projection translations)
-- `hierarchy(...)` ancestor/descendant checks (prefix `LIKE` and ancestor-prefix `IN` lists)
-
-`string()` over a boolean column is the one conversion that emits no string predicate at all:
-its constant is compared in Java against the two words CEL renders, and only the boolean column
-reaches SQL. That matters beyond the column collation, because a comparison between two
-literals — which is what a `CASE` spelling `'true'`/`'false'` compared with the constant would
-be — takes the **connection** collation. MySQL Connector/J sets that to `utf8mb4_0900_ai_ci`
-unless told otherwise, even against a server whose columns are byte-exact; this
-repository's MySQL leg measured it.
-
-**`OperatorFunction` overrides are not a workaround for all of these.** In particular, the
-`hasIntersection` translation over a plain field (`path.in(values)`) is built before any
-override consultation, so a user-supplied `OperatorFunction` cannot intercept it. Fix the
-collation in the schema — that is the only route that covers every predicate site.
-
-Role and tenancy checks are the highest-risk shapes: `'admin'` vs `'Admin'` under
-`eq`/`in`/`hasIntersection`, and hierarchy descendant checks where `LIKE 'a:b:%'` matches
-`'A:B:x'`.
-
-**How this is enforced in CI.** The differential oracle suite
-(`AdversarialConformanceTest`) runs against real PostgreSQL and MySQL databases via
-Testcontainers, with mixed-case seed rows whose `check()` decisions differ from what a
-case-insensitive collation would match, and a soft-hyphen seed row (`h6`) that a
-case-sensitive but not byte-exact one would. The MySQL leg creates its schema with
-`utf8mb4_0900_bin`; running it against MySQL's default collation, or against
-`utf8mb4_0900_as_cs`, makes the suite fail, demonstrating the over-grant. Run the legs locally:
-
-```bash
-# PostgreSQL (case-sensitive by default — passes)
-ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest
-
-# MySQL with the required byte-exact collation — passes
-ADAPTER_TEST_DB=mysql gradle test --tests AdversarialConformanceTest
-
-# MySQL with its DEFAULT collation — FAILS, reproducing the over-grant
-ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
-  gradle test --tests AdversarialConformanceTest
-
-# MySQL case-sensitive but not byte-exact — FAILS on the soft-hyphen seed h6
-ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
-  gradle test --tests AdversarialConformanceTest
-```
-
-## Field mapping
-
-Map each `request.resource.attr.<name>` to a JPA path or a relation:
-
-| Helper                                                       | Use for                                                 |
-|---------------------------------------------------------------|---------------------------------------------------------|
-| `AttributeMapping.field("aPath")`                             | Simple column or `@Embedded` dotted path                |
-| `AttributeMapping.relation("tags")`                           | `@ElementCollection<String>` (bare values)              |
-| `AttributeMapping.relation("tags", "name")`                   | `@OneToMany` collection where the default member field is `name` |
-| `AttributeMapping.relation("tags", Map.of("name", field("name")))` | `@OneToMany<Tag>` with explicit nested field mapping |
-
-`Field("nested.aBool")` traverses embeddables via JPA `Path.get(...)`. Use it for both simple columns and `@Embedded` paths.
-
-`relation(...)` names a JPA association, so the correlated subquery is a criteria association join and Hibernate applies the association's own `@SQLRestriction` and discriminator to it. That is why there is no option here to declare a store-side predicate — see [Mapping hazards](#mapping-hazards).
-
-A plan variable the mapping does not name, or names the wrong way round for the operator that
-uses it — a `relation(...)` compared as a scalar, a `field(...)` walked by a collection macro — is
-refused with `UnmappedAttributeException` rather than resolved to a guessed column (see
-[Handling refusals](#handling-refusals)).
-
-## Supported operators
-
-| Cerbos operator                  | JPA Criteria translation                                            |
-|----------------------------------|---------------------------------------------------------------------|
-| `and` / `or` / `not`             | `cb.and` / `cb.or` / `cb.not`                                       |
-| `eq` / `ne`                      | `cb.equal` / `cb.notEqual` (auto `isNull`/`isNotNull` for `null` RHS) |
-| `lt` / `gt` / `le` / `ge`        | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
-| `in`                             | `path.in(values)` or correlated `EXISTS` for collections            |
-| `in(R.attr.x, R.attr.coll)` (attribute-in-attribute) | Correlated `EXISTS` comparing the collection's member column to the outer scalar column; a `NULL` scalar matches a `NULL` member element (CEL `null in [..., null]` is true) |
-| `contains` / `startsWith` / `endsWith` | `cb.like(...)` with proper `_`/`%`/`\`/`[` escaping (`[` guards SQL Server character classes — see Gotchas) — incl. the constant-receiver form (`"a,b".contains(R.attr.x)`: the constant is the haystack, the column the needle) |
-| `ne(field, null)` / `eq(field, null)` | `cb.isNotNull` / `cb.isNull`. The planner has no existence operator — `R.attr.x != null` arrives as `ne` against a null value |
-| `hasIntersection(coll, [values])` | Correlated `EXISTS` with `IN`                                      |
-| `hasIntersection(coll.map(x, x.f), [values])` | Correlated `EXISTS` with projected `IN`             |
-| `size(coll) > 0` / `>= 1`        | Correlated `EXISTS`                                                 |
-| `size(coll) == 0` / `<= 0` / `< 1`| `NOT EXISTS`                                                       |
-| `size(coll) <op> N`              | Correlated `(SELECT COUNT...) <op> N`                               |
-| `size(coll.filter(x, pred)) <op> N` | Correlated strict-count subquery: counts elements matching `pred`, NULL-poisoned (→ UNKNOWN → excluded) when any element body is undetermined |
-| `size(string)`                   | `cb.length(column)` (see Gotchas for astral-character caveat)       |
-| Field-to-field (`R.attr.a == R.attr.b`) | `cb.equal(pathA, pathB)` and friends for `eq`/`ne`/`lt`/`gt`/`le`/`ge`, incl. inside lambdas |
-| Ternary (`cond ? a : b`)         | Predicate rewrite: `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))` — nested, boolean-position, and value-first forms compose; constant residues fold (see Gotchas for `NULL` semantics) |
-| Arithmetic in comparisons (`add`/`sub`/`mult`/`div`) | `cb.sum`/`diff`/`prod`/`quot` in double space, compared via `eq`/`ne`/`lt`/`gt`/`le`/`ge`; nested and both-sides shapes compose (see Gotchas — CEL attribute arithmetic is double arithmetic) |
-| Timestamp comparisons (`timestamp(R.attr.createdAt) < now() - duration("24h")`) | Temporal column comparison for all of `eq`/`ne`/`lt`/`gt`/`le`/`ge`, both operand orders (value-first forms mirror). The planner folds `now()`/`now() - duration(...)` to a constant RFC-3339 instant at **plan time**, so the window is fixed per query — re-plan to refresh it. The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime` (both denote an absolute instant; Hibernate 6 stores them UTC-normalized). `LocalDateTime`, `java.util.Date`, and `String` columns throw a named error — they are ambiguous about the absolute instant they store (see Gotchas). A `NULL` column value is excluded, matching `check()` denying on the missing attribute. |
-| Field-to-field `contains`/`startsWith`/`endsWith` | `cb.like` over a `REPLACE`-escaped column-derived pattern (`\`, `%`, `_`, `[`), with an `IS NOT NULL` needle guard |
-| Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery joining through every hop; `exists`/`in`/`hasIntersection`/`size` all treat the chain as the flattened union of tail elements |
-| `exists(coll, lambda)`           | One correlated aggregate scoring subquery (`MAX(CASE WHEN body … WHEN NOT body … ELSE …)`) whose comparison is TRUE/FALSE/UNKNOWN per the CEL truth table — see the nested-macros gotcha |
-| `exists_one(coll, lambda)`       | One correlated strict-count subquery `= 1` (NULL-poisoned when any element body is undetermined) |
-| `all(coll, lambda)`              | Same scoring subquery as `exists`, compared for "no false and no undetermined element" |
-| `filter(coll, lambda)`           | Same as `exists` (filter returns a list — treated as "exists matching") |
-| Bare boolean variable            | `cb.equal(path, true)`                                              |
-| `eq(field, add(const1, const2))` | Constant fold then compare: `cb.equal(field, const1 ⊕ const2)`     |
-| `eq(value, add(const, field))`   | Solve for `field` (string prefix/suffix strip; numeric subtract); unsolvable cases become `1=0` / `1=1` |
-| `hierarchy(...).overlaps / ancestorOf / descendentOf` | Segment/prefix predicates (`IN` over ancestor prefixes, `LIKE 'a:b:%'` for descendants), mirroring the Prisma adapter |
-| Value-first comparisons (`5 < R.attr.x`) | Normalized field-first with the operator mirrored (`x > 5`) |
-| `string()` over a **boolean** column (`string(R.attr.flag) == "true"`, `eq`/`ne` against a string constant) | Decided in Java, byte for byte, against the two words CEL renders: `"true"` becomes `col = true`, `"false"` becomes `col = false`, and any other constant matches no row (`ne`: every non-`NULL` row). No text comparison reaches the database, so neither a dialect's `CAST` (`'1'` on MySQL) nor a connection collation can change the answer. A `NULL` column stays UNKNOWN under both polarities, matching `check()` denying the row. `string()` over any other column type is refused |
-
-Unsupported constructs raise `UnsupportedPlanShapeException` (an `IllegalArgumentException` —
-see [Handling refusals](#handling-refusals)). Some — but not all — can be overridden with an
-`OperatorFunction`:
+An `OperatorFunction` replaces the translation of one operator:
 
 ```java
 Map<String, OperatorFunction> overrides = Map.of(
-    "contains", (cb, field, value) ->
-        cb.equal(cb.lower(field.as(String.class)), value.toString().toLowerCase())
-);
+    "matches", (cb, field, value) ->
+        cb.isTrue(cb.function("regexp_like", Boolean.class, field, cb.literal(value.toString()))));
 
 Specification<Contact> allowed =
-    SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING, overrides);
+    SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING, overrides);
 ```
 
-An override is consulted only where the adapter has already resolved a `(field, value)`
-pair for a top-level operator — the plain comparisons (`eq`/`ne`/`lt`/`gt`/`le`/`ge`,
-consulted under the mirrored name for value-first forms, and including the `add`-folded and
-null-RHS forms, an arithmetic expression compared against a constant, and `string()` over a
-boolean column compared against `"true"` or `"false"`, where the override receives the column
-and that `Boolean`), the LIKE family with a **column** receiver, the scalar `in`, the
-bare boolean attribute (as `eq`), unknown top-level leaf operators such as `matches`, and
-timestamp comparisons (the override receives the parsed `java.time.Instant` as the value,
-including for column types the default translation rejects). Negation does not change
-this: `not` is applied around the built predicate, so an override reaches its operator under
-both polarities. Constructs rejected **while resolving an operand** — `mod`, `int()`/type
-casts, list indexing — throw before any override lookup and **cannot be intercepted**; the
-"Not yet supported" table below marks each row. Nor is an override consulted where there is
-no `(field, value)` pair: every correlated-subquery shape (the collection macros,
-`size(...)`, `hasIntersection` and `in` over a `Relation`, and the attribute-in-attribute
-`in(R.attr.x, R.attr.coll)`), field-to-field comparisons, the constant-receiver string matches
-(`"a,b".contains(R.attr.x)`), and `hasIntersection` over a plain `Field`, which is built as
-`path IN (values)` directly rather than through the `in` hook (see
-[Database collation requirements](#database-collation-requirements)). The Javadoc on
-`OperatorFunction` is the authoritative list.
+An override replaces the adapter's semantics with yours. Database regex dialects are not RE2, so
+this one is only correct if every pattern your policies use means the same thing in both. The
+conformance corpus does not test overrides.
 
-## Not yet supported
+The signature is `Predicate apply(CriteriaBuilder cb, Expression<?> field, Object value)`. An override
+is consulted only where the adapter has resolved a `(field, value)` pair for a top-level operator:
 
-The Criteria-based predicate builder has no shape for these CEL constructs; they
-throw `UnsupportedPlanShapeException` with a message naming the operator — except the
-ambiguous-column-type timestamp row, which is `UnmappedAttributeException`, because a
-different mapping resolves it (see [Handling refusals](#handling-refusals)). The
-"Overridable" column says whether a registered `OperatorFunction` can intercept
-the construct: rows marked **no** are rejected while resolving an operand,
-*before* any override consultation, so an override genuinely cannot fire for them.
+- **Reached:** `eq`/`ne`/`lt`/`gt`/`le`/`ge` (value-first forms under the mirrored name; `add`-folded,
+  null-RHS and arithmetic-vs-constant forms included), `string()` over a boolean column (receives the
+  column and a `Boolean`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
+  `in`, a bare boolean attribute (as `eq`), unknown leaf operators such as `matches`, and timestamp
+  comparisons (value is the parsed `java.time.Instant`, including for column types the default
+  rejects). `not` wraps the built predicate, so an override applies under both polarities.
+- **Not reached:** operand-level refusals (`mod`, casts, list indexing), every correlated-subquery
+  shape (macros, `size(...)`, `in`/`hasIntersection` over a `Relation`, `in(R.attr.x, R.attr.coll)`),
+  field-to-field comparisons, constant-receiver string matches (`"a,b".contains(R.attr.x)`), and
+  `hasIntersection` over a plain `Field` (built as `path IN (values)` directly).
 
-| Construct                                       | Example CEL                                       | Overridable | Notes |
-|-------------------------------------------------|---------------------------------------------------|-------------|-------|
-| `mod`                                           | `R.attr.aNumber % 2 == 0`                         | no          | CEL `%` is int-only and Cerbos attribute numbers are doubles, so `%` on an attribute always errors → the check API denies every row; translating to SQL `MOD` would fabricate matches. |
-| Arithmetic on non-numeric operands              | `R.attr.aString + "x" < "y"`                      | no          | Ordering through string concatenation is not translated; `add` string folding remains `eq`/`ne`-only. |
-| Regex match                                     | `R.attr.aString.matches("^foo.*")`                | yes (`matches`) | JPA has no portable regex predicate; override per-dialect (`regexp_like`, `~`, `REGEXP`). |
-| List indexing                                   | `R.attr.tags[0] == "x"`                           | no          | JPA collections are unordered sets — no positional access. |
-| Type casts (`int(...)` / `double(...)`, and `string(...)` over anything but a boolean column) | `int(R.attr.aString) > 0`                 | no          | No portable `CAST` in Criteria. `string()` over a boolean column is the one conversion translated, and it never reaches SQL as text (see the table above). |
-| `eq(map(...), [...])`                           | `R.attr.tags.map(t, t.id) == ["tag1", "tag2"]`    | no          | Use `hasIntersection(map(...), [...])` instead. |
-| Timestamp comparison on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")` with `createdAt` mapped to `LocalDateTime`/`java.util.Date`/`String` | yes (the comparison operator) | The supported shape (see table above) requires an `Instant` or `OffsetDateTime` column. Other types don't pin the absolute instant they store — a wrong zone/format assumption would silently diverge from `check()`. The override receives the parsed `Instant` and can apply schema-specific knowledge. |
-| Timestamp shapes beyond `timestamp(field) vs constant` | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp(...)` inside arithmetic | no | Only the leaf comparison shape the planner emits for time-window policies is translated; nested/derived shapes keep their named errors. |
-| `eq`/`ne` against a list constant               | `R.attr.tags == ["a", "b"]`                       | no          | Whole-list equality has no scalar-column translation (the plan arrives as `eq(variable, value-list)` verbatim); rejected before path resolution. Map the attribute as a Relation and use `in`/`hasIntersection`, or compare elements individually. |
-| `except` (list difference)                      | `size(R.attr.tags.except(["archived"])) > 0`      | no          | Cerbos `except(list, list)` is a two-list function (the wire shape is `except(variable, value-list)`, typically inside `size()` — PDP-verified); list difference has no JPA Criteria translation. Rewrite with an equivalent macro: `size(coll.except([...])) > 0` ≡ `coll.exists(x, !(x in [...]))`. |
+The `OperatorFunction` Javadoc is the authoritative list.
 
 ## NULL attribute representation
 
-`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
-a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
-and has to be told which one you use.
+`R.attr.x == null` plans the same way however your application represents a NULL column in the
+attributes it sends to `check()`, so tell the adapter which convention you use:
 
-| attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
-| --- | --- | --- |
+| Attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
+|---|---|---|
 | `{"x": null}` — explicit null | allow | selects it — aligned |
-| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
+| `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
-`NullAttributeRepresentation` defaults to `EXPLICIT`, preserving the historical `IS NULL`
-translation. If your application omits attributes for NULL columns, pass `OMITTED`: the adapter
-then rejects every null comparison operand — with `UnsupportedPlanShapeException`, since the plan
-is well-formed and it is the convention that makes every NULL-selecting rendering an over-grant —
-instead of emitting a filter that returns rows the PDP denies. Unlike the rest of the
-translation, this check runs eagerly from `toSpecification` rather than when the Specification is
-first evaluated.
+The default, `EXPLICIT`, translates to `IS NULL`. If you omit attributes for NULL columns, pass
+`OMITTED`: every null comparison operand then throws `UnsupportedPlanShapeException` instead of
+emitting a filter that returns denied rows. This check is eager (in `toSpecification`), and it
+rejects every null operand, including aligned ones like `x != null`, because a leaf can't tell
+whether an enclosing `not` will flip it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
 
 ```java
-Specification<ResourceEntity> allowed = SpringDataQueryPlanAdapter.toSpecification(
-        planResult, Options.of(mapper)
-                .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED));
-// or, positionally:
-//     SpringDataQueryPlanAdapter.toSpecification(
-//             planResult, mapper, Map.of(), NullAttributeRepresentation.OMITTED);
+SpringDataQueryPlanAdapter.toSpecification(plan,
+    Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED));
+// or positionally:
+SpringDataQueryPlanAdapter.toSpecification(plan, mapping, Map.of(), NullAttributeRepresentation.OMITTED);
 ```
-
-The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
-`!(x == null)` are aligned under both conventions — because negation is applied around the built
-predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing `not` will
-flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
-under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ### Declare the convention per attribute
 
-The option above is a whole-call default, and one policy suite can legitimately use both
-conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it per attribute instead and the call-level option only covers what
-the mapping does not:
+One policy suite can use both conventions, so you can declare it per attribute; the call-level
+option covers only undeclared attributes:
 
 ```java
 Map<String, AttributeMapping> mapping = Map.of(
     // sent as an explicit null when the column is NULL
     "request.resource.attr.owner",
     AttributeMapping.field("ownerId", NullAttributeRepresentation.EXPLICIT),
-    // omitted when the column is NULL — the call-level default applies
+    // undeclared: the call-level default applies
     "request.resource.attr.department", AttributeMapping.field("department"));
 ```
 
-Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
-`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
-rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
-`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
-polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
-in CEL, which denies exactly as UNKNOWN does.
+Declaring `EXPLICIT` asserts the column can be NULL **and** a NULL reaches `check()` as an explicit
+null. The equality family (`eq`, `ne`, `in`) over it then never renders as SQL UNKNOWN, so
+`null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
+receiver is a CEL error, which denies like UNKNOWN). Undeclared attributes keep the old rendering,
+where `!=` against a constant under-grants NULL rows.
 
-Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
-that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
-it.
+**Declare both sides of a field-to-field comparison, or neither** — mixing conventions throws
+`UnmappedAttributeException`. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308)
+and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws `UnmappedAttributeException` rather than
-picking a direction: the two declarations conflict, and one of them is what changes. See
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
-[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+## Database collation requirements
+
+> **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
+> byte-exact collation.**
+>
+> - MySQL: `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not enough.
+> - SQL Server: a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`).
+> - PostgreSQL, H2, Oracle: safe by default, unless you opt into case-insensitive behaviour
+>   (nondeterministic ICU collations, `citext`).
+
+CEL string comparison is exact: `R.attr.department == "finance"` denies a row holding `"Finance"`.
+The adapter emits string predicates without collation control, so the column collation decides.
+MySQL's default `utf8mb4_0900_ai_ci` and SQL Server's CI defaults are case- and accent-insensitive,
+so `WHERE department = 'finance'` returns the `'Finance'` row the PDP denied — **a silent
+authorization over-grant**. Role and tenancy checks (`'admin'` vs `'Admin'`, hierarchy prefixes
+`LIKE 'a:b:%'` vs `'A:B:x'`) are the highest-risk shapes.
+
+**Case-sensitive is not byte-exact.** `utf8mb4_0900_as_cs` still gives default-ignorable code points
+like SOFT HYPHEN (U+00AD) no weight, so `'o­ne' = 'one'` is TRUE: `==`/`in` over-grant and `!=`
+under-grants ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `utf8mb4_bin` is
+byte-exact but PAD SPACE (`'a' = 'a '` is TRUE). `utf8mb4_0900_bin` is both byte-exact and NO PAD.
+
+Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWith`/`endsWith`
+(including constant-receiver and field-to-field forms), `in`, `hasIntersection` (direct and
+`map(...)`), and `hierarchy(...)`. `OperatorFunction` overrides can't cover all of them (for example
+`hasIntersection` over a plain field never consults one), so fix the collation in the schema.
+
+`string()` over a boolean column is the one conversion with no string predicate in SQL — the
+constant is compared in Java — because a literal-vs-literal comparison would use the **connection**
+collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by default.
+
+CI runs the differential suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
+the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
+
+```bash
+ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest   # passes
+ADAPTER_TEST_DB=mysql    gradle test --tests AdversarialConformanceTest   # passes (utf8mb4_0900_bin)
+
+# MySQL's DEFAULT collation — FAILS, reproducing the over-grant
+ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
+  gradle test --tests AdversarialConformanceTest
+# Case-sensitive but not byte-exact — FAILS on seed h6
+ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
+  gradle test --tests AdversarialConformanceTest
+```
+
+## Supported operators
+
+| Cerbos operator | JPA Criteria translation |
+|---|---|
+| `and` / `or` / `not` | `cb.and` / `cb.or` / `cb.not` |
+| `eq` / `ne` | `cb.equal` / `cb.notEqual`; `null` RHS becomes `isNull` / `isNotNull` (`R.attr.x != null` arrives as `ne` against null) |
+| `lt` / `gt` / `le` / `ge` | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
+| Value-first (`5 < R.attr.x`) | Normalized field-first with the operator mirrored |
+| `in` | `path.in(values)`, or correlated `EXISTS` over a relation |
+| `in(R.attr.x, R.attr.coll)` | Correlated `EXISTS` comparing member to scalar; a `NULL` scalar matches a `NULL` member (CEL `null in [..., null]` is true) |
+| `contains` / `startsWith` / `endsWith` | `cb.like` with `\`, `%`, `_`, `[` escaped; also the constant-receiver form (`"a,b".contains(R.attr.x)`) |
+| Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
+| Field-to-field comparisons | `cb.equal(pathA, pathB)` and friends, including inside lambdas |
+| `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
+| `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
+| `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined |
+| `size(string)` | `cb.length(column)` (see [Gotchas](#sizestring-counts-differently-for-astral-characters)) |
+| `exists` / `all` / `filter` | One correlated aggregate scoring subquery with CEL's three-valued truth table |
+| `exists_one` | Correlated strict count `= 1`, NULL-poisoned |
+| Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
+| Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
+| Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; division guarded with `NULLIF` |
+| `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
+| `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
+| `string(R.attr.flag) == "true"` / `!=` (boolean column only) | Decided in Java: `col = true`, `col = false`, or no row for any other constant; NULL excluded under both polarities |
+| `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants |
+| Bare boolean variable | `cb.equal(path, true)` |
+
+## Not yet supported
+
+These throw `UnsupportedPlanShapeException` naming the operator — except the ambiguous-column
+timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it.
+**Overridable: no** means the refusal happens while resolving an operand, before any override is
+consulted.
+
+| Construct | Example CEL | Overridable | Notes |
+|---|---|---|---|
+| `mod` | `R.attr.aNumber % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so `check()` denies every row; SQL `MOD` would fabricate matches |
+| Arithmetic on non-numeric operands | `R.attr.aString + "x" < "y"` | no | String-concat `add` folding is `eq`/`ne`-only |
+| Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
+| List indexing | `R.attr.tags[0] == "x"` | no | JPA collections are unordered |
+| Type casts (`int()`, `double()`, `string()` except over a boolean column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria |
+| `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
+| Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
+| Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
+| `eq`/`ne` against a list constant | `R.attr.tags == ["a", "b"]` | no | Map as a relation and use `in`/`hasIntersection` |
+| `except` | `size(R.attr.tags.except(["archived"])) > 0` | no | Rewrite as `R.attr.tags.exists(x, !(x in ["archived"]))` |
 
 ## Conformance contract
 
-**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
-false, so its negation is true. This differs from Cerbos 0.54, where the comparison was
-an evaluation error and remained denied under negation. Missing attributes and other
-evaluation errors retain their existing behavior.
-
-
-The live conformance harness accepts `ADAPTER_TEST_STRICT_EVALUATION=false` (the default)
-or `true`, and rejects other values. CI runs both modes against the same corpus, comparing
-each plan with `check()` decisions from a PDP configured with that same mode.
-
-
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 29 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict
+evaluation modes using 29 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data
+implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 233 of the 288 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (the Criteria API has no cast expression; a boolean's text is the one CEL spells in exactly two words, so that comparison is decided in Java instead), and CEL's `+` over strings, which the reference lowers as arithmetic — against a constant and between two columns alike, `mod` (CEL `%` is integer-only, and the `int()` cast that would make it satisfiable has no faithful lowering), a positional read of a list — of strings, numbers or booleans alike, since the refusal is raised before the element's type is examined — list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` the reference emits would match the path itself) (66 actions) |
+| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (a boolean's text is decided in Java instead), CEL's `+` over strings (against a constant and between two columns), `mod`, a positional read of a list of any element type, list equality over a `map()` projection, and a hierarchy with an empty delimiter (66 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; this is pinned separately as an upstream divergence |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` includes NULL rows where CEL's null value says it should; undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; pinned separately as an upstream divergence. Write `R.attr.x != null` instead (see [Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)) |
 
-Bare comparisons between temporal columns are rejected because the database compares instants while CEL compares the original attribute strings. Use `timestamp()` explicitly when the policy intends instant comparison. This is a breaking change for plans that previously returned a filter for a bare temporal comparison.
+Other guarantees:
 
-The translator preserves CEL type errors and missing-attribute errors through negation. Numeric fields are not coerced into strings for string operations, and ordering against NaN remains unknown rather than becoming a false predicate that negation could turn into an allow.
+- CEL type errors and missing-attribute errors survive negation. Numeric fields are never coerced to
+  strings, and NaN ordering stays unknown rather than becoming a negatable false.
+- Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
+  true (in 0.54 it was an error and stayed denied under negation).
+- Bare comparisons between temporal columns throw: the database compares instants while CEL compares
+  the attribute strings. Use `timestamp()` for instant comparison.
+- `cr-div-then-add` and `cr-div-then-add-ne` throw: CEL carries NaN through the surrounding
+  arithmetic and SQL has no such value.
+- Every fail-closed message is pinned in `conformance/actions.json` and asserted by the conformance
+  run.
 
-Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 235 recorded statements and 66 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 29 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
-
-The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
-
-The oracle coverage includes value-first and field-to-field comparisons, literal-safe string matching, nested and correlated collection macros, three-valued null/error propagation, arithmetic and ternaries, hierarchy operations, timestamp comparisons on supported absolute-instant columns, and multi-hop relations. Unsupported shapes throw before a predicate can be used — including the two conformance shapes this reference cannot express itself (`cr-div-then-add`, `cr-div-then-add-ne`): CEL carries a NaN through the surrounding arithmetic and SQL has no value that does. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
-
-**Behaviour change.** A negated string match against a **column** needle — `!R.attr.a.contains(R.attr.b)` — used to return the rows whose needle is NULL. The null guard was spelled `needle IS NOT NULL AND haystack LIKE pattern`, which is definite FALSE for a NULL needle, and `NOT FALSE` is TRUE; CEL raises a missing-attribute error there, which denies. Those rows are now excluded under both polarities, because the guard is nested so the LIKE sees a NULL PATTERN and stays UNKNOWN. This **removes rows from results** that the PDP denies — an over-grant fix, so upgrade rather than pin ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). The positive form is unaffected: it excluded those rows already.
-
-**Behaviour change.** A hierarchy with an **empty** delimiter — `hierarchy(R.attr.scope, "")` — now throws. Cerbos splits the path on an empty delimiter into one segment per character, so `descendentOf` is a strict string-prefix test; the adapter lowered it as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matched the path **itself** (never its own descendant): the corpus's `hier-empty-delim` returned `a2` (`dept.eng`) against the constant `dept.eng`, a row the PDP denies. A shape that returned a filter now raises, which is a consumer-visible break, but the filter over-granted.
-
-**Behaviour change.** `string()` over a **boolean** column compared with a string constant — `string(R.attr.flag) == "true"` — now translates instead of throwing. CEL renders a bool as exactly `"true"` or `"false"`, so the adapter compares the constant in Java and emits `col = true`, `col = false`, or, for any other constant, a predicate no present value satisfies; a `NULL` column is excluded under both polarities, as `check()` denies it. The corpus's `cast-string-bool` compares clean against the oracle on H2, PostgreSQL and MySQL, in both strict evaluation modes and on Hibernate 7. A policy that used to raise `UnsupportedPlanShapeException` here now returns a filter; `string()` over every other column type still raises. The SQL `CASE` that spells the two words was measured and not used: its literals compare in the connection collation, which on the MySQL leg is `utf8mb4_0900_ai_ci` even though the columns are case-sensitive, so `string(R.attr.flag) == "TRUE"` returned every true row, which the PDP denies.
-
-The `mod` rejection message no longer claims the condition "can never be satisfied by the PDP". That holds for a bare `attr % n`, which is a CEL no-overload error, but not for `int(attr) % n` — the rejection stands because the cast is itself unlowerable, which is what the message now says.
+Two suites read the classification. `AdversarialConformanceTest` plans each action against a real
+PDP (30-second deadline per call) and compares returned rows with `check()`;
+`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` selects the PDP mode, and CI runs both.
+`SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/`
+and asserts the **SQL** against `golden/expectations.json` — 235 recorded statements and 66
+refusals, one per action, whose union must equal the corpus. The golden SQL catches rewrites that
+agree on all 29 seeds but would change results on rows nobody seeded.
 
 ## Mapping hazards
 
-The conformance contract above proves the *plan* side — given a policy shape, does the predicate select the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+The conformance contract proves the *plan* side. The other half is the *mapping*: **the rows the
+subquery reads must be the rows the application put into the resource attributes.** The shared
+corpus catalogues six ways that breaks, and every adapter records a position on each.
 
-This adapter builds an **ORM-association subquery.** `AttributeMapping.relation("tags")` names a JPA association, and the correlated subquery reaches it with `correlate(root).join("tags")` — a criteria association join, not a query over a bare table. Everything Hibernate applies to that association it applies here too, which closes most of the grid without any work by the caller.
+This adapter builds an **ORM-association subquery**: `AttributeMapping.relation("tags")` is reached
+with `correlate(root).join("tags")`, so everything Hibernate applies to that association applies
+here too.
 
-**There is deliberately no option to declare a store-side predicate on the mapping**, unlike the bare-table adapters (drizzle, ent, pgx, prisma). If there were, a caller could declare a filter Hibernate already applies; it would then be applied twice, silently removing rows the PDP permits — an under-grant nothing in the differential suite would catch, because the caller's own reads would still show the rows. **Your association filters are already applied; do not re-declare them.**
+**There is no option to declare a store-side predicate on the mapping** (unlike drizzle, ent, pgx and
+prisma). Hibernate already applies your association filters; declaring one again would silently
+drop rows the PDP permits. **Do not re-declare them.**
 
 | Hazard | Position | Mechanism to check |
 |---|---|---|
-| Filtered association | **Reproduced by Hibernate** | `@SQLRestriction` (`@Where` before 6.3) on the collection attribute is applied however the collection is reached, including an explicit join, so the subquery sees exactly the association's rows. The exception is `@Filter`, which only applies while it is *enabled on the session*: enable it on the same session that runs the `Specification`, and note that Hibernate does not apply filters to `EntityManager.find()`, so an application that builds attributes through `find()` and filters through queries has two views and the adapter follows the query one |
-| Default scope on the target model | **Reproduced by Hibernate** | `@SQLRestriction` on the target *entity* is applied to every query that loads it, this subquery included. A soft-delete implemented as a repository convention rather than an annotation is not — move it to `@SQLRestriction` so both sides see it |
-| Subtype discrimination | **Reproduced by Hibernate** | The single-table discriminator restriction is added whenever the join's target type is a subclass, so an association typed to a `@DiscriminatorValue` subclass is restricted to it. Declaring the association to the *base* type sees the siblings — which is also what the application sees, so the two still agree |
-| To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key carries no unique constraint. JPA believes the cardinality the mapping declares; the database is what has to enforce it. Add the unique constraint |
-| Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns, so Hibernate resolves `@JoinColumns` itself. There is no key for the adapter to get wrong |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-hop2-or-exists` and siblings) | None — a chained relation requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a dotted `jpaPath` through a to-one association is now a LEFT join rather than the Criteria API's implicit INNER join. An inner join removes the row from the WHOLE query, which is right for a standalone predicate but wrong under a disjunction — a row whose association is absent but whose OTHER branch holds is one the PDP allows. Such policies now return MORE rows: an under-grant fix, consumer-visible |
+| Filtered association | **Reproduced by Hibernate** | `@SQLRestriction` (`@Where` before 6.3) on the collection applies however it is reached, explicit join included. `@Filter` applies only while *enabled on the session* — enable it on the session that runs the `Specification`; note `EntityManager.find()` ignores filters |
+| Default scope on the target model | **Reproduced by Hibernate** | `@SQLRestriction` on the target entity applies to this subquery too. A soft-delete done as a repository convention is not — move it to `@SQLRestriction` |
+| Subtype discrimination | **Reproduced by Hibernate** | An association typed to a `@DiscriminatorValue` subclass is restricted to it; one typed to the base type sees siblings, as the application does |
+| To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key has no unique constraint. Add the constraint |
+| Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns; Hibernate resolves `@JoinColumns` |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-hop2-or-exists` and siblings) | None — a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)); a dotted to-one `jpaPath` is a LEFT join so a disjunction's other branch still holds |
 
-The three "Reproduced by Hibernate" rows are claims about Hibernate, not about this adapter, so they are worth being able to check: entity- and collection-level `@SQLRestriction` are documented in the [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where), and Hibernate's own `OneToManySQLRestrictionTests` pins the collection restriction being applied however the collection is reached, an explicit join included. Verify against the Hibernate version you actually run before relying on a row here — a wrong claim in this table is worse than no claim.
-
-One consequence of being an association subquery rather than a bare-table one is worth stating: this adapter is only as correct as the mapping is honest. A `@SQLRestriction` you add for the query side but not for the read path that builds the resource attributes makes the two disagree in the *other* direction. Keep one definition of what the association contains.
+The "Reproduced by Hibernate" rows are claims about Hibernate — see the
+[Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where)
+and Hibernate's `OneToManySQLRestrictionTests`, and verify against the version you run. The adapter
+is only as correct as the mapping is honest: keep one definition of what an association contains
+for both the query side and the code that builds resource attributes.
 
 ## Gotchas
 
-Things you're likely to hit when integrating the adapter into a Spring Boot app — see
-[`example/`](example) for two runnable end-to-end references: a photo-sharing application, and a
-smaller program covering the [shared demo domain](../demo) that every adapter's example
-implements. Both resolve this adapter from mavenLocal as a real Maven coordinate, so they also
-exercise its published POM and module metadata
-([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
-
 ### `size(string)` counts differently for astral characters
 
-CEL's `size(string)` counts Unicode code points; the adapter translates it to SQL
-`LENGTH()`, whose unit varies by database (UTF-16 units on H2, characters on PostgreSQL,
-bytes on some MySQL collations). The two only diverge for characters outside the Basic
-Multilingual Plane (emoji, some CJK extensions): `size("héllo🚀")` is 6 in CEL but
-`LENGTH` may report 7. If your data contains astral characters and a policy compares
-lengths near those values, rows can be filtered differently than a `check` call would
-decide. Keep length thresholds away from values that straddle the difference, or avoid
-`size(string)` in policies over data that contains astral characters.
+CEL counts code points; SQL `LENGTH()` counts UTF-16 units (H2), characters (PostgreSQL) or bytes
+(some MySQL collations). They differ only outside the BMP: `size("héllo🚀")` is 6 in CEL but
+`LENGTH` may say 7. Keep length thresholds away from such values, or avoid `size(string)` over
+data with emoji.
 
 ### Attribute arithmetic is double arithmetic — use double literals in policies
 
-Cerbos attribute values arrive as protobuf numbers, which CEL treats as doubles.
-CEL arithmetic has no int/double cross-type overloads, so `R.attr.aNumber + 1`
-(int literal) is an evaluation error at `check` time — every row is denied — while
-`R.attr.aNumber + 1.0` evaluates normally. The planner erases the distinction (both
-forms produce an identical wire plan), so the adapter translates the double reading,
-the only satisfiable one: `/` is true double division (`5 / 2.0 == 2.5`), never
-integer truncation. Write double literals (`1.0`, `2.0`) in policy arithmetic over
-attributes, or the plan-based filter and per-resource `check` calls will disagree.
+Attribute numbers are doubles in CEL, and there is no int/double cross overload: `R.attr.n + 1` is
+an error in `check()` (every row denied) while `R.attr.n + 1.0` works. Both plan identically, so the
+adapter translates the double reading (`/` is true division). Write `1.0`, `2.0` in policy
+arithmetic over attributes.
 
 ### MySQL: keeping arithmetic IEEE-faithful
 
-Affects only policies with **arithmetic inside a comparison** (`R.attr.aNumber * 0.1 ==
-0.3`, `R.attr.aDouble + 0.7 != 0.1`, …). Plain comparisons, `in`, LIKE, and collection
-shapes are not involved.
+Applies only to **arithmetic inside a comparison** (`R.attr.n * 0.1 == 0.3`). Two MySQL defaults
+evaluate it as exact decimal, where `3 * 0.1 == 0.3` is TRUE but CEL says FALSE — an over-grant:
 
-Two MySQL defaults each pull the adapter's deliberately-IEEE double arithmetic into
-**exact decimal** evaluation:
+- Hibernate's `MySQLDialect` casts to `decimal(53,20)`.
+- Connector/J's default client-side prepared statements inline doubles as `DECIMAL` literals.
 
-- Hibernate's `MySQLDialect` renders to-double casts as `cast(col as decimal(53,20))` —
-  its cast mapping predates MySQL 8.0.17, which added `CAST(... AS DOUBLE)`.
-- MySQL Connector/J's default **client-side** prepared statements
-  (`useServerPrepStmts=false`) interpolate double bind parameters into the statement
-  text, where MySQL parses them as exact `DECIMAL` literals.
+The adapter ships `MySqlDoubleCastFunctionContributor` (auto-discovered via `META-INF/services`),
+which on MySQL 8.0.17+ renders `cast(col as double)` for every arithmetic column. That keeps both
+prepared-statement modes correct with **no JDBC settings**. H2 and PostgreSQL are unaffected.
 
-Decimal arithmetic is not IEEE double arithmetic: `3 * 0.1 == 0.3` is TRUE in decimal
-but FALSE in CEL (`0.30000000000000004`), so on those defaults the SQL filter returns
-rows the PDP's `check()` API **denies** — a silent over-grant (verified on MySQL 8.4:
-`CAST(3 AS DECIMAL(53,20)) * 0.1 = 0.3` → 1, `CAST(3 AS DOUBLE) * 0.1 = 0.3` → 0).
+Set `useServerPrepStmts=true` in the JDBC URL if any of these apply:
 
-**What the adapter does about it.** The library ships a Hibernate `FunctionContributor`
-(`MySqlDoubleCastFunctionContributor`, discovered automatically via
-`META-INF/services`) that, on MySQL 8.0.17+, registers a cast function rendering
-`cast(col as double)`; every column entering arithmetic goes through it. Because MySQL
-promotes any expression with an approximate (DOUBLE) operand to double, the
-interpolated decimal literals stop mattering — client- and server-side prepared
-statements both agree with `check()`, with **no JDBC URL settings required**. H2 and
-PostgreSQL already render IEEE-correct casts; the contributor registers nothing there
-and their SQL is unchanged.
+- MySQL older than 8.0.17.
+- MariaDB.
+- A non-Hibernate JPA provider (the adapter falls back to `cast(col as float(53))`).
+- `hibernate.boot.allow_jdbc_metadata_access=false` with only `hibernate.dialect` set (the
+  version-gated registration is skipped).
 
-**When you still need `useServerPrepStmts=true`** (typed double binds restore IEEE
-semantics even under the decimal cast) — set it in the JDBC URL if any of these apply:
-
-- MySQL older than 8.0.17 (no `CAST(... AS DOUBLE)`).
-- MariaDB (own dialect lineage and driver; not covered by the contributor).
-- A non-Hibernate JPA provider (the contributor is Hibernate-only; the adapter then
-  falls back to the portable `cast(col as float(53))`, which MySQL would need typed
-  binds to keep in double space).
-- Hibernate configured with `hibernate.boot.allow_jdbc_metadata_access=false` and only
-  `hibernate.dialect` set: the dialect then reports its minimum supported version and
-  the version-gated registration is skipped.
-
-The differential oracle's MySQL CI leg runs with Connector/J's default client-side
-prepared statements precisely so this stays pinned (`p-double-frac` fails within
-seconds if the cast regresses to decimal); set `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true`
-to run the same leg in server-side mode — both must pass.
+CI's MySQL leg runs client-side mode so `p-double-frac` catches a regression;
+`ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true` runs it server-side. Both must pass.
 
 ### Timestamp comparisons: plan-time `now()`, and only unambiguous column types
 
-`timestamp(R.attr.createdAt) < now() - duration("24h")` reaches the adapter as a
-comparison against a **constant** instant: the planner evaluates `now()` and folds the
-duration arithmetic when the plan is produced, wrapping the result back in
-`timestamp("<RFC-3339>")`. Two consequences:
+The planner folds `now() - duration("24h")` into a constant instant when it plans, so:
 
-- The cutoff is frozen at plan time. A cached `Specification` keeps filtering against the
-  old instant — call `plan` (and re-translate) per request if the window must track wall
-  clock.
-- The mapped column must be `java.time.Instant` or `java.time.OffsetDateTime`. Both
-  unambiguously denote an absolute instant, and Hibernate 6 binds them UTC-normalized
-  (`TIMESTAMP_UTC`), so the database comparison is an instant comparison on H2,
-  PostgreSQL, and MySQL alike (the differential oracle runs all three). `LocalDateTime`
-  has no zone, `java.util.Date` binding routes through zone conversions, and `String`
-  ordering depends on format and offset — the adapter throws a named error for those
-  rather than guessing an assumption that could silently diverge from `check()`. If you
-  know your schema's zone semantics, register an `OperatorFunction` override for the
-  comparison operator: it receives the parsed `Instant` as the value.
-
-  On MySQL, Hibernate maps these columns to `TIMESTAMP`, whose range ends at
-  2038-01-19 — instants beyond that need a schema-controlled `DATETIME(6)` column
-  (still UTC-normalized by Hibernate).
+- The cutoff is frozen per plan. Re-plan per request if the window must track the clock; don't cache
+  the Specification.
+- The column must be `java.time.Instant` or `java.time.OffsetDateTime` (Hibernate 6 stores both
+  UTC-normalized). `LocalDateTime`, `java.util.Date` and `String` throw; if you know their zone
+  semantics, register an `OperatorFunction` for the comparison operator (it receives an `Instant`).
+- On MySQL these map to `TIMESTAMP`, which ends at 2038-01-19; use a `DATETIME(6)` column for later
+  instants.
 
 ### Field-to-field string matching builds its pattern with `REPLACE`
 
-`R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <escaped b>, '%') ESCAPE '\'`
-where `b` is escaped via nested `REPLACE` calls (`\`, `%`, `_`, `[`) — chosen because
-`REPLACE` is available on H2, PostgreSQL, MySQL, Oracle, and SQL Server. A `NULL`
-needle column excludes the row (`IS NOT NULL` guard), which matches CEL
-missing-attribute → deny and also defends against dialects whose `CONCAT` treats
-`NULL` as `''` (which would otherwise turn the pattern into match-everything `'%%'`).
+`R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <b escaped by nested REPLACE>, '%') ESCAPE '\'`
+(`REPLACE` is portable across H2, PostgreSQL, MySQL, Oracle and SQL Server). A NULL needle excludes
+the row under both polarities, matching CEL, and prevents `CONCAT` dialects that treat NULL as `''`
+from matching everything.
 
 ### NULL columns follow CEL error semantics — even under negation
 
-Cerbos denies a check when the condition hits a CEL evaluation error (typically a
-null/missing attribute where no null overload exists). The adapter mirrors this with SQL
-three-valued logic, including the places where naive translations leak under `NOT`:
+A CEL evaluation error denies, and the adapter reproduces this with SQL three-valued logic:
 
-- Collection macros are tri-state: `R.attr.items.all(t, t.qty > 0)` with an item whose
-  `qty` is NULL yields UNKNOWN (row excluded under both `all(...)` and `!all(...)`),
-  matching CEL's error-absorption rules — `exists` is still true if *any* element
-  matches, `all` is still false if *any* element fails, `exists_one` errors on any
-  unknown element. The tri-state machinery is folded into each macro's single scoring
-  subquery (see the nested-macros gotcha below for the cost model).
-- Ternaries carry a third arm that is UNKNOWN exactly when the condition column is NULL,
-  so `!(ternary...)` cannot flip a null-condition row to included.
+- Collection macros are tri-state: `items.all(t, t.qty > 0)` with a NULL `qty` is UNKNOWN under both
+  `all` and `!all`; `exists` is still true if any element matches, `all` still false if any fails,
+  `exists_one` errors on any unknown element.
+- A ternary with a NULL condition column is UNKNOWN, so `!(ternary)` can't include the row.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
 ### `has(...)` over-grants at the planner level — write `!= null` instead
 
-This one is an **upstream Cerbos planner issue, not an adapter bug, and it affects every
-query-plan adapter equally** (tracked in the Cerbos team's internal issue tracker). The
-planner constant-folds an attribute-presence check like
+An **upstream Cerbos planner issue that affects every adapter**: the planner folds
+`has(R.attr.aOptionalString)` to `KIND_ALWAYS_ALLOWED`, but `check()` denies resources missing the
+attribute. Translating the plan faithfully returns rows with a NULL column that `check()` would deny.
+`AdversarialConformanceTest#upstreamHasFoldOverGrantTripwire` pins the divergence and fails when an
+upstream image fixes it.
 
-```
-has(R.attr.aOptionalString)
-```
-
-to `KIND_ALWAYS_ALLOWED` — a plan that admits **every row** — even though the `check()`
-API denies resources that lack the attribute. Any adapter that translates the plan
-faithfully (as this one does) turns a `has()`-based policy into a silent authorization
-over-grant: rows whose column is `NULL` come back from `findAll(spec)` although a
-per-resource `check()` call would deny them.
-`AdversarialConformanceTest#upstreamHasFoldOverGrantTripwire` pins both halves of the
-divergence against the live PDP and fails with re-inclusion instructions the moment an
-upstream image fixes the fold.
-
-**Workaround (PDP-verified):** express presence as a null comparison instead —
+**Workaround (PDP-verified):**
 
 ```
 R.attr.aOptionalString != null
 ```
 
-The planner emits a conditional `ne(variable, null)` plan, which this adapter translates
-to `a_optional_string IS NOT NULL`, and `check()` agrees on every case: attribute missing
-→ deny, explicitly `null` → deny, present → allow. Guarding an existing policy with
-`has(R.attr.x) && R.attr.x != null` produces the identical (correct) plan, so it is a
-safe drop-in edit. The only semantic difference from true `has()` is the
-explicitly-`null` attribute value, which `has()` treats as *present* — for column-backed
-attributes that distinction doesn't exist, because SQL `NULL` is the only representation
-of "not set".
+This plans as `ne(variable, null)` → `a_optional_string IS NOT NULL`, and `check()` agrees in every
+case (missing → deny, explicit `null` → deny, present → allow). `has(R.attr.x) && R.attr.x != null`
+produces the same plan, so it is a safe drop-in edit.
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
-Every mapped-relation collection macro (`exists`/`exists_one`/`all`/`filter`/
-`size(filter(...))`) translates to a single correlated aggregate subquery, but the
-lambda body inside it is translated once per polarity — positive and negated — because
-Hibernate 6's criteria negation is stateful and a `Predicate` tree cannot be shared
-between polarities. Nesting therefore multiplies: a depth-`d` `exists` chain emits
-`2^d − 1` correlated subqueries (`exists_one` and `size(filter(...))` add a third body
-translation for their match counter, so a chain of those grows at `3^d`). Measured on
-the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the chain):
+Each macro (`exists`/`exists_one`/`all`/`filter`/`size(filter(...))`) is one correlated subquery, but
+its body is translated once per polarity, so a depth-`d` `exists` chain emits `2^d − 1` subqueries
+(`3^d` for `exists_one` / `size(filter(...))`). Measured on H2 (`MacroNestingBenchmarkTest`, ~3 000
+rows):
 
 | depth | correlated subqueries | translate | execute |
 |-------|-----------------------|-----------|---------|
@@ -680,141 +514,124 @@ the benchmark suite (`MacroNestingBenchmarkTest`, H2, ~3 000 rows across the cha
 | 3     | 7                     | ~0.6 ms   | ~2.8 ms |
 | 4     | 15                    | ~1.3 ms   | ~5.9 ms |
 
-To keep a legal-but-degenerate deeply nested policy from silently timing out on
-production-sized tables, the translator bounds macro nesting depth at **5** by default
-and throws `UnsupportedPlanShapeException` beyond it (fail closed, at translation time).
-Literal-collection folds count as levels too: each element repeats the nested body, so they
-can multiply relation subqueries even though the fold itself adds no subquery. This counts
-macro nesting, not total expression size; list cardinality and non-macro expressions such as
-ternaries can still expand the output.
-
-**Behaviour change ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).**
-Literal folds previously bypassed this bound. A plan whose total macro depth exceeds the limit
-now throws instead of emitting a filter. The default remains 5. If
-your policies intentionally nest deeper, raise the limit per call —
+Depth is capped at **5** by default; deeper plans throw `UnsupportedPlanShapeException`. Literal-list
+folds count as levels too. The cap counts macro nesting, not expression size. To raise it:
 
 ```java
 Options.of(MAPPING).withMaxMacroDepth(8)
 ```
 
-— or process-wide via a system property:
-
 ```
 -Ddev.cerbos.queryplan.springdata.maxMacroDepth=8
 ```
 
-A value declared on the call's `Options` wins; the property applies when none is, and the
-default when neither is. The property is read per translation, must be a positive integer
-(anything else is a configuration error and a plain `IllegalArgumentException`, not a refusal
-of the plan), and both apply to `exists`/`exists_one`/`all`/`filter` and `size(filter(...))`
-nesting.
+`Options` wins over the property, which wins over the default. The property is read per translation
+and must be a positive integer (otherwise a plain `IllegalArgumentException`).
 
 ### Division by a column is guarded with `NULLIF` — zero divisors deny
 
-CEL double division by zero yields ±Infinity (a defined result that a comparison could
-turn into ALLOW); SQL raises an error that would abort the whole query. The adapter
-divides by `NULLIF(divisor, 0)`, so zero-divisor rows become UNKNOWN and are excluded.
-This is deliberately under-inclusive: a policy relying on `x / 0 == Infinity` semantics
-will deny those rows here while a per-resource `check` would allow them. Constant
-arithmetic (including `0/0 → NaN`) is folded in Java with full IEEE fidelity.
+CEL `x / 0` is ±Infinity; SQL errors. The adapter divides by `NULLIF(divisor, 0)`, so zero-divisor
+rows are UNKNOWN and excluded — under-inclusive where a policy relies on `x / 0 == Infinity`.
+Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
 
 ### Ternary with a `NULL` condition column excludes the row
 
-A comparison wrapping a ternary is rewritten as
-`(cond AND cmp(then, v)) OR (NOT cond AND cmp(else, v))`. Under SQL three-valued
-logic a `NULL` condition column makes both arms unknown, so the row matches
-neither branch. This is deliberate: in CEL a null/missing ternary condition is
-an evaluation error, and Cerbos denies the check — the SQL filter and a
-per-resource `check` call agree. It differs from what a SQL `CASE WHEN` would
-do (fall through to the `ELSE` branch).
+The rewrite `(cond AND cmp(then, v)) OR (NOT cond AND cmp(else, v))` matches neither branch when
+`cond` is NULL. That matches CEL (a null condition is an error, `check()` denies), unlike SQL
+`CASE WHEN`, which would fall through to `ELSE`.
 
 ### Pin `protobuf-java` to the cerbos-sdk-java's gencode version
 
-`cerbos-sdk-java` 0.18.0 ships protobuf message classes generated against
-`protobuf-java` 4.33.5. If your application classpath ends up with an **older** runtime
-— either because you pin it explicitly, or a transitive dependency wins resolution — the
-SDK throws on first message decode:
+`cerbos-sdk-java` 0.20.1 is generated against `protobuf-java` 4.35.1. An **older** runtime on your
+classpath (pinned, or pulled in transitively by gRPC) fails on first decode:
 
 ```text
 com.google.protobuf.RuntimeVersion$ProtobufRuntimeVersionException:
   Detected incompatible Protobuf Gencode/Runtime versions when loading Principal:
-  gencode 4.33.5, runtime 4.31.1. Runtime version cannot be older than the linked gencode version.
+  gencode 4.35.1, runtime 4.31.1. Runtime version cannot be older than the linked gencode version.
 ```
 
-Fix — add a direct dependency matching the SDK's gencode:
+The adapter publishes a runtime-scope `protobuf-java` pin at the matching version. If your build
+still resolves an older one, add it directly (the Spring Boot BOM doesn't manage protobuf):
 
 ```kotlin
-implementation("com.google.protobuf:protobuf-java:4.33.5")
+implementation("com.google.protobuf:protobuf-java:4.35.1")
 ```
-
-Spring Boot's BOM does not manage `protobuf-java`, so without an explicit pin Gradle's
-default conflict resolver picks the highest version on the graph. Pinning makes the
-contract explicit and survives BOM upgrades.
 
 ### `@ElementCollection` / `@OneToMany` + `spring.jpa.open-in-view=false`
 
-Mapping a Cerbos attribute via `AttributeMapping.relation(...)` translates `"x" in tags`
-to a correlated `EXISTS` subquery — but the entity collection itself is still lazy by
-default. If your controller serializes the entity (or any field traversal happens after
-the transaction closes), you'll see:
-
-```text
-HttpMessageNotWritableException: Could not write JSON:
-  failed to lazily initialize a collection of role: …Photo.tags: could not initialize proxy - no Session
-```
-
-Pick one:
-
-- **Eager-fetch** the collection if it's small (`@ElementCollection(fetch = FetchType.EAGER)`).
-- **Do the entity-to-DTO mapping inside `@Transactional(readOnly = true)`** so the Hibernate
-  session is still open while you walk relations.
-- **Don't serialize entities** — return a DTO projection instead.
-
-The adapter itself has no opinion here — this is the same `open-in-view=false` footgun any
-JPA app hits — but it's worth flagging because Cerbos plans frequently *do* reference
-collection attributes (`tags`, `members`, `categories`), and those are the ones developers
-typically forget to fetch.
+A `relation(...)` mapping filters through `EXISTS`, but the entity's collection is still lazy.
+Serializing the entity after the transaction closes fails with
+`failed to lazily initialize a collection of role: …Photo.tags: could not initialize proxy - no Session`.
+Fix it the usual JPA way: eager-fetch small collections, map to DTOs inside
+`@Transactional(readOnly = true)`, or return DTO projections.
 
 ### MySQL / MariaDB `LIKE` backslash escaping
 
-`contains` / `startsWith` / `endsWith` translate to `cb.like(path, pattern, '\\')` — the
-adapter escapes `%`, `_`, `\`, and `[` in the user value and declares `\` as the SQL escape
-character (the three-arg `LIKE … ESCAPE '\'` form). On most databases this is exact and
-unambiguous.
+The LIKE family uses `cb.like(path, pattern, '\\')`, escaping `%`, `_`, `\` and `[` and declaring `\`
+as the escape character. MySQL and MariaDB **also** treat `\` as an escape inside string literals, so
+a literal backslash in a value can match incorrectly. If your data contains backslashes, either:
 
-MySQL and MariaDB are the exception: by default they **also** treat `\` as an escape
-character *inside the string literal itself*, so the escape is effectively applied twice and
-a literal backslash in the attribute value can match incorrectly. If your data contains
-backslashes and you target MySQL/MariaDB, either:
-
-- run the server with [`NO_BACKSLASH_ESCAPES`](https://dev.mysql.com/doc/refman/en/sql-mode.html#sqlmode_no_backslash_escapes)
-  enabled (Hibernate 6.4+ emits standard-conforming escaping in that mode), or
-- register an `OperatorFunction` override for `contains`/`startsWith`/`endsWith` that builds
-  the `LIKE` predicate with an escape character your dialect handles cleanly.
+- enable [`NO_BACKSLASH_ESCAPES`](https://dev.mysql.com/doc/refman/en/sql-mode.html#sqlmode_no_backslash_escapes)
+  (Hibernate 6.4+ emits standard escaping in that mode), or
+- register an `OperatorFunction` for `contains`/`startsWith`/`endsWith` with an escape your dialect
+  handles cleanly.
 
 Values without backslashes are unaffected.
 
 ### SQL Server `LIKE` `[` character classes
 
-T-SQL `LIKE` treats `[...]` as a character class **even when an `ESCAPE` clause is
-declared**: an unescaped `'[SEC]%'` matches one character from `{S,E,C}` — returning rows
-the PDP denies — and does *not* match a literal `[SEC]` prefix. The adapter therefore
-escapes `[` as `\[` in every pattern it generates: the constant
-`contains`/`startsWith`/`endsWith` forms, the field-to-field `REPLACE` chain, and the
-hierarchy prefix `LIKE`. With the escape declared, `\[` denotes a literal `[` on every
-supported dialect — the differential oracle's H2, PostgreSQL, and MySQL legs verify the
-escape is a semantic no-op where `[` is inert.
+T-SQL treats `[...]` as a character class even with an `ESCAPE` clause, so `'[SEC]%'` would match
+rows starting with S, E or C. The adapter escapes `[` as `\[` in every pattern it generates
+(constant LIKE, field-to-field `REPLACE`, hierarchy prefixes); elsewhere the escape is a no-op, which
+the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can open once `[` is escaped.
 
-`]` is intentionally left unescaped: it is only special on SQL Server as the closer of a
-character class, and no class can open once every `[` is escaped.
+## Behaviour changes
+
+- **Breaking** — `toSpecification(...)` returns `Specification<T>` directly; the `Result<T>` wrapper
+  is gone. Drop the second `.toSpecification()` call, and use `planResult.isAlwaysDenied()` to skip
+  the database. Raises the Spring Data JPA floor to 3.5.2
+  ([ADR 0003](../docs/adr/0003-spring-data-returns-specification-directly.md)).
+
+  ```java
+  // before
+  Result<Contact> result = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+  repository.findAll(tenantBoundary.and(result.toSpecification()));
+  // after
+  Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(planResult, MAPPING);
+  repository.findAll(tenantBoundary.and(allowed));
+  ```
+- **Breaking** — macro-depth bound now counts literal-list folds; a plan past the limit throws
+  instead of emitting a filter. Default still 5
+  ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).
+- **Breaking** — `hierarchy(R.attr.scope, "")` (empty delimiter) throws. The old `LIKE` also matched
+  the path itself (`hier-empty-delim` returned a row the PDP denies).
+- **Breaking** — bare comparisons between temporal columns throw; use `timestamp()`.
+- A negated column-needle match (`!R.attr.a.contains(R.attr.b)`) no longer returns rows whose needle
+  is NULL — an over-grant fix, fewer rows
+  ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
+- A dotted `jpaPath` through a to-one association is a LEFT join rather than an implicit INNER
+  join, so disjunctions whose other branch holds now return those rows — an under-grant fix, more
+  rows ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- `string()` over a boolean column compared with a string constant now translates instead of
+  throwing; `string()` over other types still throws.
+- The `mod` refusal message no longer claims the condition "can never be satisfied by the PDP"; it
+  names the unlowerable `int()` cast instead.
+- Constant NaN ordering follows Cerbos 0.55 (unordered comparison is false, its negation true).
+
+## Example application
+
+[`example/`](example) holds two runnable Spring Boot programs that resolve this adapter from
+mavenLocal as a real Maven coordinate
+([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)): a photo-sharing app with
+three resource kinds, and a program implementing the [shared demo domain](../demo). Run the latter
+from the repository root with `demo/scripts/run-example.sh spring-data`.
 
 ## Build
 
-JDK 17 or later and Gradle 8.x — CI pins Gradle 8.12, and so does the container below. There is no
-Gradle wrapper and no Dockerfile: run Gradle from this directory, or run the same build in the
-official Gradle image with the **repository root** mounted (every suite reads the shared corpus at
-`../conformance/`) and the Docker socket passed through (the differential suite starts a pinned
-PDP through Testcontainers):
+JDK 17+ and Gradle 8.x (CI pins 8.12). There is no Gradle wrapper. The suites read `../conformance/`,
+so in Docker mount the **repository root** and pass the Docker socket through (the differential
+suite starts containers):
 
 ```bash
 # From the repository root:
@@ -822,60 +639,52 @@ docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
   -e TESTCONTAINERS_RYUK_DISABLED=true --network host -w /repo/spring-data gradle:8.12-jdk17 \
   gradle build --no-daemon
 
-# Or with a local Gradle 8.x + JDK 17+, from spring-data/:
+# Or locally, from spring-data/:
 gradle build --no-daemon
 ```
 
-Two environment variables select what the build runs against, and CI runs every combination it
-documents:
+| Variable | Values | Selects |
+|---|---|---|
+| `ADAPTER_TEST_DB` | `h2` (default), `postgres`, `mysql` | Database for the differential suite |
+| `ADAPTER_TEST_ORM` | `baseline` (default), `next` | Hibernate 6.6 / Spring Data JPA 3.5, or Hibernate 7 / Spring Data JPA 4 (declared in [`build.gradle.kts`](build.gradle.kts)); unknown values fail |
+| `ADAPTER_TEST_STRICT_EVALUATION` | `false` (default), `true` | PDP strict evaluation mode |
+| `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
+| `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
 
-- `ADAPTER_TEST_DB` — `h2` (default), `postgres` or `mysql`: the database the differential suite
-  executes against (see [Testing](#testing)).
-- `ADAPTER_TEST_ORM` — `baseline` (default) or `next`: the ORM version set, declared once in
-  [`build.gradle.kts`](build.gradle.kts). `baseline` is Hibernate 6.6 / Spring Data JPA 3.5, the
-  line the golden asset was rendered under; `next` is Hibernate 7 / Spring Data JPA 4, the pair
-  Spring Boot 4 manages, run as a forward-compatibility leg (see
-  [The golden expectations](#the-golden-expectations)). An unknown value fails rather than falling
-  back to the baseline.
+Hibernate 7 / Spring Data JPA 4 needs no translation change. Spring Data JPA 4 removed
+`JpaSpecificationExecutor.delete(Specification)`, so the bulk-delete hazard can't be reached through
+that overload there; the guard still fires on any `CriteriaDelete`.
 
 ## Testing
 
-Four suites, with distinct roles. Only the differential one needs Docker.
-
 | Suite | Role | Needs |
 |---|---|---|
-| `SpringDataTranslatorTest` | **Translator unit test**: every action in the shared [conformance corpus](../conformance) translated from its golden wire fixture, and the SQL asserted against [`golden/expectations.json`](golden/expectations.json) | nothing — no PDP, no database, no JDBC connection |
-| `SpringDataQueryPlanAdapterTest` | The adapter's **call contract**: malformed operands the planner never emits, operator overrides, mapping validation, the macro-depth property, the bulk-delete guard — plus the policy-expressible shapes the corpus does not carry yet | H2 (in-process) |
-| `RepositorySurfaceTest` | The **Spring Data glue**: `findAll` / `count` / `findAll(spec, Pageable)` on one Specification, entity de-duplication over a multi-element collection match, composition with a caller's Specification. Plans read from wire fixtures | H2 (in-process) |
-| `AdversarialConformanceTest` | **Differential**: hostile policy shapes and hostile seed data planned by a real PDP; the adapter's filtered rows compared per action against an oracle computed from the PDP's own `check()` API. No hand-computed expectations, so any semantic divergence between the generated SQL and Cerbos's evaluation fails mechanically | Docker (Testcontainers starts the pinned PDP, and PostgreSQL or MySQL when `ADAPTER_TEST_DB` selects one) |
+| `SpringDataTranslatorTest` | **Translator unit test**: every [corpus](../conformance) action translated from its wire fixture, SQL asserted against [`golden/expectations.json`](golden/expectations.json) | nothing — no PDP, no database |
+| `SpringDataQueryPlanAdapterTest` | Call contract: malformed operands, overrides, mapping validation, macro depth, bulk-delete guard, plus corpus-gap shapes | H2 in-process |
+| `RepositorySurfaceTest` | Spring Data glue: `findAll` / `count` / paging, de-duplication, composition | H2 in-process |
+| `AdversarialConformanceTest` | Differential: real PDP plans, rows compared with `check()` per action | Docker (pinned PDP, plus PostgreSQL/MySQL when selected) |
 
 ```bash
-gradle test           # all four
-gradle goldenUpdate   # rewrite golden/expectations.json from what the translator emits today
-
-ADAPTER_TEST_DB=postgres gradle test   # the differential suite on a real PostgreSQL
-ADAPTER_TEST_DB=mysql gradle test      # … on a real MySQL (see "Database collation requirements")
+gradle test                            # all four
+gradle goldenUpdate                    # rewrite golden/expectations.json
+ADAPTER_TEST_DB=postgres gradle test   # differential suite on PostgreSQL
+ADAPTER_TEST_DB=mysql gradle test      # … on MySQL (see "Database collation requirements")
 ADAPTER_TEST_ORM=next gradle test      # every suite under Hibernate 7 / Spring Data JPA 4
 ```
 
-The PostgreSQL and MySQL servers the differential suite starts are pinned by tag **and** digest in
-[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE), read by
-`DatabaseTestImages` at runtime and declared as inputs of `gradle test`. Files rather than Java
-constants for one reason: `renovate.json`'s custom manager bumps `<SERVICE>_IMAGE` files and
-nothing else, so a reference held in source would never get a Renovate PR.
-`conformance/scripts/validate-corpus.sh` scans the same files, holds every reference to one digest
-per tag, and refuses a tag without a digest.
+The PostgreSQL and MySQL images are pinned by tag and digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
+and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them;
+`conformance/scripts/validate-corpus.sh` checks them).
 
 ### The golden expectations
 
 `golden/expectations.json` is this adapter's [golden expectation](../conformance/README.md#golden-expectations)
-file: the SQL it is pinned to emit for each corpus action, regenerated with `gradle goldenUpdate`
-and reviewed as a diff. An action the corpus says this adapter must refuse carries no entry —
-its message is already pinned in `conformance/actions.json`.
-
-The adapter emits a JPA `Specification`, so the recorded value is that Specification **rendered**:
-the query the differential harness executes (`select distinct re1_0.id from resources re1_0`),
-minus that preamble, leaving the root joins and the filter.
+file: the SQL it must emit for each corpus action, rewritten by `gradle goldenUpdate` and reviewed as
+a diff (`gradle test` never regenerates). Refused actions have no entry; their messages are pinned in
+`conformance/actions.json`. Each entry is the rendered Specification minus the
+`select distinct re1_0.id from resources re1_0` preamble — root `joins` (only where a to-one hop
+emits one, always asserted to be `left join`) and the `where` clause — for H2, PostgreSQL and MySQL,
+with literals inlined:
 
 ```jsonc
 "rel-bool-hop": {
@@ -884,36 +693,8 @@ minus that preamble, leaving the root joins and the filter.
 }
 ```
 
-- **Three dialects, because they genuinely differ** — and because CI executes all three. MySQL has
-  no boolean type, doubles the backslashes in a `LIKE` escape, and is the only one where
-  `MySqlDoubleCastFunctionContributor` replaces `decimal(53,20)` with `cast(… as double)`; H2 and
-  PostgreSQL disagree about how many fractional digits a timestamp literal keeps.
-- **`joins` appears only where a shape emits one**, which is a to-one hop through a dotted
-  `jpaPath`. A rule asserts every one of them is a `left join` — an inner join would remove a row
-  whose association is absent from the whole query, which is wrong under a disjunction ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
-- **Literals are inlined rather than bound**, so the operands — the half of a filter an
-  authorization bug hides in — are in the asset rather than behind a `?`. A rule asserts no
-  placeholder survives.
-- **The file declares the Hibernate minor that rendered it.** The SQL is the adapter's Criteria
-  tree plus Hibernate's renderer, and `hibernate-core` is a `compileOnly` dependency — a consumer
-  brings their own. See `conformance/README.md`, "When the generator is an input". CI therefore
-  runs the suite under two Hibernate majors (`ADAPTER_TEST_ORM`, see [Build](#build)): on the
-  `baseline` the asset declares, every recorded byte is asserted and `gradle goldenUpdate` is the
-  only way to move one; on `next` — Hibernate 7 / Spring Data JPA 4, a test-only
-  forward-compatibility leg until `example/` moves to Spring Boot 4 — `goldenUpdate` refuses to
-  run, and `SpringDataTranslatorTest` asserts a pinned divergence list in **both** directions
-  instead of the bytes. That list is one renderer change, and the suite asserts the
-  characterisation rather than leaving it to a comment: Hibernate 7's `MySQLDialect` renders a
-  boolean literal as `true` where 6.6 rendered `1`, so exactly the shapes whose MySQL statement
-  compares a boolean column diverge, on MySQL only. Every one of them is still an oracle
-  comparison on both majors, so what the bytes do not cover there, the rows do.
-
-**Hibernate 7 / Spring Data JPA 4.** The adapter's own sources compile against both majors
-(`MySqlDoubleCastFunctionContributor`, the classpath-guarded Hibernate probe, and
-`Specification.unrestricted()` are unchanged), and the differential suite passes on Hibernate 7
-with no translation change. One consumer-visible difference is Spring Data's, not the adapter's:
-Spring Data JPA 4 removed `JpaSpecificationExecutor.delete(Specification)` in favour of
-`delete(DeleteSpecification)`, so the bulk-delete hazard the adapter guards against (the warning
-under [Quick start](#quick-start)) can no longer be reached through that overload at all — the
-guard still fires on any `CriteriaDelete` invocation.
-
+The file declares `"hibernate": "6.6"`, because Hibernate's renderer (a `compileOnly` dependency the
+consumer brings) shapes the bytes. `goldenUpdate` refuses to run under another major; on the `next`
+leg `SpringDataTranslatorTest` instead asserts a pinned divergence list in both directions — Hibernate
+7's `MySQLDialect` renders boolean literals as `true` where 6.6 rendered `1`, on MySQL only. See
+`conformance/README.md`, "When the generator is an input".
