@@ -82,6 +82,53 @@ throw — Prisma only supports references between fields of the same model.
 - Cross-model column comparisons throw (Prisma field references are same-model only).
   This includes membership between an outer scalar column and a related collection column.
 
+#### Operators Prisma `where` cannot express
+
+[#224](https://github.com/cerbos/query-plan-adapters/issues/224) re-audited the filter types that
+Prisma 6.19 and 7.9 generate, for SQLite, PostgreSQL and MySQL. Both majors expose the same
+surface. A scalar filter offers `equals`, `in`/`notIn`, `lt`/`lte`/`gt`/`gte`, `contains`/
+`startsWith`/`endsWith`, `mode` and `not`, and its operand is either a constant or a same-model
+field reference. A scalar list filter offers `has`, `hasSome`, `hasEvery`, `isEmpty` and `equals`.
+A relation filter offers `some`, `every` and `none`. Nothing in `where` takes an expression, so
+the following shapes have no spelling and throw:
+
+| CEL shape | Corpus actions | Why Prisma cannot express it |
+| --- | --- | --- |
+| `a % b` | `arith-mod` | No modulo operator. The adapter solves `add`/`sub`/`mult`/`div` against a constant into a plain column comparison, but `%` is not invertible, so no solved comparison exists. |
+| Arithmetic on both sides | `arith-both` | Field references compare two columns as they are. There is no operand that is an expression over a column. |
+| `matches` | `regex-*`, `p-matches`, `matches-alt` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). The full-text `search` operator matches `tsquery` lexemes, not a pattern. Even raw SQL has no RE2 on these providers: SQLite has no `REGEXP` without a loaded function, and PostgreSQL's and MySQL's dialects differ from RE2 (drizzle refuses `matches` for the same reason). |
+| List index `l[i]` | `index-*` | List filters test membership, emptiness or whole-list equality, never a position. |
+| `int()`, `double()`, `string()` | `cast-*` | No cast operator. A SQL `CAST` also would not reproduce CEL's conversion errors: SQLite, for example, reads `CAST('abc' AS INTEGER)` as `0`. |
+| `size()` of a string, or of a list that isn't a mapped relation | `string-size-gt0`, `type-size-*`, `pv-filter`, `size-filter-count`, `pv-except`, `except-size` | No length filter, and a relation filter has no count (`_count` exists only in `orderBy`, `select` and aggregates, see [prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). Emptiness of a mapped relation is the one size shape the adapter translates. |
+
+Every one of these is pinned as a throw in `conformance/actions.json`, with the message this
+adapter raises. The adapter only ever returns a `where` object, so it has no other honest answer.
+The issue weighed three escape hatches and adopted none of them:
+
+- **A `$queryRaw` fragment.** Prisma 5–7 have no raw predicate inside `where`
+  ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
+  [prisma/prisma#11568](https://github.com/prisma/prisma/issues/11568)), so this means a separate raw query.
+  The adapter would have to write SQL separately for each provider,
+  and its return type would stop being a `where` input the caller can compose with its own filter.
+  Regex and cast semantics would still differ from CEL, as the table says.
+- **Ids from a raw subquery, then `{ id: { in: ids } }`.** Same SQL problems, plus a second round
+  trip that materialises every candidate id in the application.
+- **An in-memory post-filter.** This is the convex adapter's design: push down what the query
+  engine can express, evaluate the rest over the fetched rows, and require
+  `allowPostFilter: true` to opt in. It is the only option that keeps `matches` exact, but a
+  query can then scan rows the caller never paginated over. Revisit it if there is demand.
+
+When a policy needs one of these shapes over a Prisma model, the practical workaround is a
+**derived column**. The application computes the value when it writes the row and the policy reads
+that attribute instead: an `isEven` boolean instead of `R.attr.n % 2 == 0`, a `nameLength` integer
+instead of `size(R.attr.name) > 0`, a `primaryTag` string instead of `R.attr.tags[0]`. All three
+compile to plain Prisma filters.
+
+Prisma 8 (a release candidate as of September 2026) is out of scope. It replaces the
+`findMany({ where })` object this adapter emits with a new client API, and its SQL query builder
+accepts raw `fns.raw` predicates in `where()`, which could express `%`, casts and column
+arithmetic. The adapter supports Prisma 5–7 only.
+
 #### Database collation is an authorization invariant
 
 Cerbos string comparisons are case-sensitive. Prisma delegates comparison semantics to the
