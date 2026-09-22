@@ -229,7 +229,6 @@ export interface ThrowingAction {
 export interface ActionClassification {
   oracleActions: string[];
   throwingActions: ThrowingAction[];
-  supportedExpected: Set<string>;
 }
 
 /** The pinned message, or a failure — a throwing action without one asserts nothing. */
@@ -286,7 +285,6 @@ export function classifyActionsForAdapter(
     throwingActions: throwingActions.sort((left, right) =>
       left.action.localeCompare(right.action),
     ),
-    supportedExpected,
   };
 }
 
@@ -588,11 +586,9 @@ export function parseDerivedFile(value: unknown, seeds: Seed[]): DerivedFile {
  * PDP's clock at nanosecond precision, and this adapter compares timestamps as strings in
  * JavaScript rather than lowering them to a store's own type, so the nine digits it has to carry
  * are the nine digits a real plan carries. A tidy millisecond instant here would quietly stop
- * exercising the precision this adapter's post-filter is written to preserve, and
- * `translator.test.ts` walks both sides of that boundary through the `plannedAt` override on
- * `planFromWireFixture`.
+ * exercising the precision this adapter's post-filter is written to preserve.
  */
-export const PLANNED_AT = "2026-08-11T09:13:39.123456789Z";
+const PLANNED_AT = "2026-08-11T09:13:39.123456789Z";
 
 interface WireOperand {
   expression?: { operator: string; operands: WireOperand[] };
@@ -606,16 +602,11 @@ interface WireFixture {
   filter: { kind: string; condition?: WireOperand };
 }
 
-function operandFromWire(
-  node: WireOperand,
-  plannedAt: string,
-): PlanExpressionOperand {
+function operandFromWire(node: WireOperand): PlanExpressionOperand {
   if (node.expression) {
     return new PlanExpression(
       node.expression.operator,
-      node.expression.operands.map((child) =>
-        operandFromWire(child, plannedAt),
-      ),
+      node.expression.operands.map(operandFromWire),
     );
   }
   if (node.variable !== undefined) {
@@ -630,8 +621,24 @@ function operandFromWire(
   // exactly the JSON shapes `Value` admits — but `JSON.parse` cannot say so, and re-validating a
   // file the corpus workflow regenerates and diffs would assert nothing new.
   return new PlanExpressionValue(
-    (node.value === "__NOW_MINUS_24H__" ? plannedAt : node.value) as Value,
+    (node.value === "__NOW_MINUS_24H__" ? PLANNED_AT : node.value) as Value,
   );
+}
+
+/**
+ * Whether any operand anywhere in a plan condition is a literal null, or a list containing one —
+ * the set `nullAttributeRepresentation: "omitted"` must reject. Walks the plan as plain data, so it
+ * reads a decoded fixture and a live PDP response alike, independently of the adapter's own scan.
+ */
+export function planCarriesNullLiteral(operand: unknown): boolean {
+  if (typeof operand !== "object" || operand === null) return false;
+  const node = operand as Record<string, unknown>;
+  if ("value" in node) {
+    const value = node["value"];
+    return value === null || (Array.isArray(value) && value.includes(null));
+  }
+  const operands = node["operands"];
+  return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
 }
 
 /** Every action the corpus has a golden wire fixture for, sorted. */
@@ -652,10 +659,7 @@ export function wireFixtureActions(): string[] {
  * belief about what the planner emits, and this repository keeps fixtures precisely because that
  * belief has been wrong before. See docs/adr/0006.
  */
-export function planFromWireFixture(
-  action: string,
-  plannedAt: string = PLANNED_AT,
-): PlanResourcesResponse {
+export function planFromWireFixture(action: string): PlanResourcesResponse {
   const fixture: WireFixture = JSON.parse(
     fs.readFileSync(path.join(WIRE_FIXTURES_DIR, `${action}.json`), "utf8"),
   );
@@ -675,7 +679,7 @@ export function planFromWireFixture(
       return {
         ...base,
         kind: PlanKind.CONDITIONAL,
-        condition: operandFromWire(fixture.filter.condition, plannedAt),
+        condition: operandFromWire(fixture.filter.condition),
       };
     case PlanKind.ALWAYS_ALLOWED:
     case PlanKind.ALWAYS_DENIED:
