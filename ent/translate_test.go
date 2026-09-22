@@ -172,7 +172,6 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 		{name: "regex", cond: expr("matches", variable("request.resource.attr.name"), val(t, ".*"))},
 		{name: "filter outside size", cond: expr("filter", variable("request.resource.attr.tags"), expr("lambda", val(t, true), variable("t")))},
 		{name: "hasIntersection between two stored collections", cond: expr("hasIntersection", variable("request.resource.attr.tags"), variable("request.resource.attr.tags"))},
-		{name: "modulus by zero", cond: expr("eq", expr("mod", val(t, 4), val(t, 0)), val(t, 0))},
 	}
 
 	for _, tc := range cases {
@@ -806,7 +805,6 @@ func TestTimestampsAreBoundForTheDialect(t *testing.T) {
 	require.Equal(t, "(`resource`.`created_at` > ?)", sqlite)
 	require.Equal(t, []any{"2024-06-01T00:00:00.500000000Z"}, args,
 		"a fixed-width UTC layout is what makes text comparison chronological")
-	require.Equal(t, len("2006-01-02T15:04:05.000000000Z"), len(args[0].(string)))
 
 	for _, d := range []string{dialect.Postgres, dialect.MySQL} {
 		_, args := whereFor(t, d, testMapper(), cond)

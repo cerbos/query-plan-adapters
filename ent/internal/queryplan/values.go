@@ -44,6 +44,19 @@ type condValue struct {
 	els  value
 }
 
+// mapArms applies f to both arms, keeping the condition.
+func (cv condValue) mapArms(f func(value) (value, error)) (condValue, error) {
+	then, err := f(cv.then)
+	if err != nil {
+		return condValue{}, err
+	}
+	els, err := f(cv.els)
+	if err != nil {
+		return condValue{}, err
+	}
+	return condValue{cond: cv.cond, then: then, els: els}, nil
+}
+
 const likeEscape = `\`
 
 // escapeLikeLiteral escapes LIKE metacharacters in a constant needle.
@@ -86,10 +99,9 @@ func escapeLikeColumn(needle Expr) Expr {
 // case-insensitive collation over-grants here. That is a documented part of each adapter's
 // contract rather than something the translator can fix.
 func stringMatch(receiver, needle value, prefix, suffix bool) (Expr, error) {
-	for _, operand := range []value{receiver, needle} {
-		if kind := scalarKind(operand); kind != "" && kind != "string" {
-			return Lit{V: nil}, nil
-		}
+	if knownNonString(receiver) || knownNonString(needle) {
+		// A string operator over a declared non-string is a CEL no-overload error: UNKNOWN.
+		return Lit{V: nil}, nil
 	}
 	recvStr, recvIsStr := receiver.(string)
 	needleStr, needleIsStr := needle.(string)
@@ -289,26 +301,12 @@ func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
 	}
 
 	if cv, ok := l.(condValue); ok {
-		then, err := combine(cv.then, r)
-		if err != nil {
-			return nil, true, err
-		}
-		els, err := combine(cv.els, r)
-		if err != nil {
-			return nil, true, err
-		}
-		return condValue{cond: cv.cond, then: then, els: els}, true, nil
+		out, err := cv.mapArms(func(arm value) (value, error) { return combine(arm, r) })
+		return out, true, err
 	}
 	if cv, ok := r.(condValue); ok {
-		then, err := combine(l, cv.then)
-		if err != nil {
-			return nil, true, err
-		}
-		els, err := combine(l, cv.els)
-		if err != nil {
-			return nil, true, err
-		}
-		return condValue{cond: cv.cond, then: then, els: els}, true, nil
+		out, err := cv.mapArms(func(arm value) (value, error) { return combine(l, arm) })
+		return out, true, err
 	}
 	return nil, false, nil
 }
@@ -441,23 +439,8 @@ func compareOrdered[T cmp.Ordered](op CmpOp, l, r T) bool {
 
 // applyComparison lowers a comparison whose operands are ordinary constants or expressions.
 func applyComparison(op CmpOp, l, r value) (Expr, error) {
-	lk, rk := scalarKind(l), scalarKind(r)
-	if lk != "" && rk != "" && lk != rk {
-		if op != OpEq && op != OpNe {
-			// Every row is UNKNOWN, including missing operands. A guarded all-NULL CASE
-			// resolves to text in PostgreSQL and cannot compose with boolean CASE arms.
-			return Lit{V: nil}, nil
-		}
-		result := mixedTypeResult(op, l, r)
-		for _, operand := range []value{l, r} {
-			if col, ok := operand.(Column); ok && col.ExplicitNull {
-				continue
-			}
-			if valueExpr, ok := operand.(Expr); ok {
-				result = Case{Whens: []When{{Cond: IsNull{X: valueExpr, Negate: true}, Then: result}}}
-			}
-		}
-		return result, nil
+	if mixed, ok := compareMixedTypes(op, l, r); ok {
+		return mixed, nil
 	}
 	if nullTest, ok, err := nullComparison(op, l, r); err != nil || ok {
 		return nullTest, err
@@ -811,19 +794,12 @@ func asExpr(v value) (Expr, error) {
 	}
 }
 
-// asFloat reports whether v is a numeric constant. Booleans are excluded: CEL does not treat
-// them as numbers, and Go would happily compare them if they slipped through.
+// asFloat reports whether v is a numeric constant. Every number the plan carries decodes to
+// float64 (see decodeValue), and every constant the translator folds stays one. Booleans are
+// excluded: CEL does not treat them as numbers.
 func asFloat(v value) (float64, bool) {
-	switch t := v.(type) {
-	case float64:
-		return t, true
-	case int:
-		return float64(t), true
-	case int64:
-		return float64(t), true
-	default:
-		return 0, false
-	}
+	f, ok := v.(float64)
+	return f, ok
 }
 
 // asFloatExpr lifts an operand to a float-typed expression, casting a column so that integer

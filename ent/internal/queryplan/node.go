@@ -1,13 +1,18 @@
 // Copyright 2021-2026 Zenauth Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-// Package queryplan is this adapter's plan translator: it walks a Cerbos `PlanResources`
-// condition tree and lowers it into the small SQL expression tree in expr.go, which render.go
-// then emits as PostgreSQL.
+// Package queryplan is the Go adapters' shared plan translator: it walks a Cerbos `PlanResources`
+// condition tree and lowers it into the small, dialect-free SQL expression tree in expr.go. Each
+// module's own render.go then emits that tree for its engine — an ent predicate in the ent module,
+// a PostgreSQL fragment in the pgx module.
 //
-// It is internal to the cerbospgx module and deliberately self-contained — the adapter ships as a
-// standalone Go module with no dependency on anything else in this repository, so a consumer only
-// ever pulls in github.com/cerbos/query-plan-adapters/pgx.
+// The package is vendored byte-for-byte into both modules (see expr.go) so that each ships as a
+// standalone Go module with no dependency on anything else in this repository.
+//
+// The files split along the translation's stages: node.go decodes the protobuf plan, translate.go
+// walks it (operator dispatch, macros, relations, NULL-operand rejection), values.go folds and
+// lowers operands (comparisons, arithmetic, LIKE, timestamps, hierarchies), scalar_types.go
+// handles caller-declared column types, and mapper.go resolves plan variables onto storage.
 //
 // The semantics encoded here (value-first operand inversion, LIKE metacharacter escaping,
 // three-valued logic under negation) are proved against ../../../conformance/, the shared
@@ -75,7 +80,7 @@ func decodeOperand(op *enginev1.PlanResourcesFilter_Expression_Operand) (*node, 
 			// An unset Value would decode to Go nil and silently become an IS NULL test.
 			return nil, fmt.Errorf("value operand carries no value in query plan")
 		}
-		return &node{kind: nodeValue, value: decodeValue(t.Value)}, nil
+		return valueNode(decodeValue(t.Value)), nil
 
 	default:
 		return nil, fmt.Errorf("unrecognised operand shape %T in query plan", t)
@@ -134,7 +139,7 @@ func decodeValue(v *structpb.Value) any {
 	}
 }
 
-// cloneWithValue returns a value node carrying v, used when substituting a lambda variable.
-func cloneWithValue(v any) *node {
+// valueNode returns a value node carrying v.
+func valueNode(v any) *node {
 	return &node{kind: nodeValue, value: v}
 }

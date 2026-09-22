@@ -91,14 +91,20 @@ const (
 	ternaryOperands = 3
 )
 
-// Operators whose semantics do not depend on which operand holds the column. eq/ne are symmetric,
-// and value-first `in` (`value in R.attr.list`) still means membership against the collection, so
-// all three normalise to column-first. Every OTHER operator keeps its wire (source) order when the
-// value comes first — a receiver-style string match would otherwise swap haystack and needle.
-var orderInsensitive = map[string]bool{"eq": true, "ne": true, "in": true}
-
 var comparisonOps = map[string]CmpOp{
 	"eq": OpEq, "ne": OpNe, "lt": OpLt, "le": OpLe, "gt": OpGt, "ge": OpGe,
+}
+
+// binaryOperators lowers the non-comparison binary operators once binaryPredicate has resolved
+// and normalised their operands. Adding a binary operator is one entry here.
+var binaryOperators = map[string]func(l, r value) (Expr, error){
+	"in":           membership,
+	"contains":     func(l, r value) (Expr, error) { return stringMatch(l, r, true, true) },
+	"startsWith":   func(l, r value) (Expr, error) { return stringMatch(l, r, false, true) },
+	"endsWith":     func(l, r value) (Expr, error) { return stringMatch(l, r, true, false) },
+	"ancestorOf":   ancestorOf,
+	"descendentOf": descendentOf,
+	"overlaps":     hierarchyOverlaps,
 }
 
 var arithmeticOps = map[string]ArithOp{
@@ -177,11 +183,11 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 	if _, ok := comparisonOps[n.operator]; ok {
 		return b.binaryPredicate(n, m, negated)
 	}
+	if _, ok := binaryOperators[n.operator]; ok {
+		return b.binaryPredicate(n, m, negated)
+	}
 
 	switch n.operator {
-	case "in", "contains", "startsWith", "endsWith", "ancestorOf", "descendentOf", "overlaps":
-		return b.binaryPredicate(n, m, negated)
-
 	case "hasIntersection":
 		return b.hasIntersection(n, m, negated)
 
@@ -226,7 +232,7 @@ func (b *builder) ternaryPredicate(n *node, m Mapper, negated bool) (Expr, error
 	}}, nil
 }
 
-// binaryPredicate lowers the comparison, membership, string-match and hierarchy operators.
+// binaryPredicate lowers the comparisons and binaryOperators.
 func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error) {
 	if len(n.operands) != binaryOperands {
 		return nil, fmt.Errorf(
@@ -236,7 +242,8 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 
 	left, right := n.operands[0], n.operands[1]
 	operator := n.operator
-	if _, comparison := comparisonOps[operator]; comparison && left.isVariable() && right.isVariable() {
+	cmpOp, comparison := comparisonOps[operator]
+	if comparison && left.isVariable() && right.isVariable() {
 		l, lok := m.Resolve(left.variable)
 		r, rok := m.Resolve(right.variable)
 		if lok && rok && (l.ValueType == ValueTimestamp || r.ValueType == ValueTimestamp) {
@@ -258,14 +265,14 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	// The planner preserves policy source order, so `1 < R.attr.x` arrives value-first and must
-	// translate as `x > 1`, not `x < 1` (cerbos/query-plan-adapters#257).
-	if left.isValue() && right.isVariable() {
-		if cmp, ok := comparisonOps[operator]; ok && cmp.Mirror() != cmp {
-			left, right = right, left
-			operator = mirroredName(operator)
-		} else if orderInsensitive[operator] {
-			left, right = right, left
-		}
+	// translate as `x > 1`, not `x < 1` (cerbos/query-plan-adapters#257). A comparison normalises
+	// to column-first by mirroring (eq/ne mirror to themselves), and value-first `in`
+	// (`value in R.attr.list`) still means membership against the collection. Every OTHER operator
+	// keeps its wire (source) order — a receiver-style string match would otherwise swap haystack
+	// and needle.
+	if left.isValue() && right.isVariable() && (comparison || operator == "in") {
+		left, right = right, left
+		cmpOp = cmpOp.Mirror()
 	}
 
 	lv, err := b.value(left, m)
@@ -278,44 +285,16 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	var out Expr
-	switch operator {
-	case "in":
-		out, err = membership(lv, rv)
-	case "contains":
-		out, err = stringMatch(lv, rv, true, true)
-	case "startsWith":
-		out, err = stringMatch(lv, rv, false, true)
-	case "endsWith":
-		out, err = stringMatch(lv, rv, true, false)
-	case "ancestorOf":
-		out, err = ancestorOf(lv, rv)
-	case "descendentOf":
-		out, err = descendentOf(lv, rv)
-	case "overlaps":
-		out, err = hierarchyOverlaps(lv, rv)
-	default:
-		out, err = compare(comparisonOps[operator], lv, rv)
+	if comparison {
+		out, err = compare(cmpOp, lv, rv)
+	} else {
+		out, err = binaryOperators[operator](lv, rv)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	return negate(out, negated), nil
-}
-
-func mirroredName(op string) string {
-	switch op {
-	case "lt":
-		return "gt"
-	case "gt":
-		return "lt"
-	case "le":
-		return "ge"
-	case "ge":
-		return "le"
-	default:
-		return op
-	}
 }
 
 // membershipOverRelation lowers `<value> in R.attr.<collection>` where the collection is stored in
@@ -405,23 +384,49 @@ var (
 	allSemantics = macroSemantics{witness: TruthFalse, witnessResult: false, defaultResult: true}
 )
 
-// relationScope resolves a relation into the FROM list and correlation predicate of a subquery
-// over it. Intermediate hops are joined inside the subquery; only the parent row correlates out.
-func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem, Expr) {
-	from := make([]FromItem, 0, len(rel.Via)+1)
-	from = append(from, FromItem{Table: rel.Table, Alias: alias})
-	preds := make([]Expr, 0, len(rel.Via)+1)
-	preds = appendRestrictions(preds, alias, rel.SubqueryFilter)
+// scope is the FROM list and correlation predicate of a subquery over a relation — everything
+// every shape built on that relation shares, so each shape only has to say what it asks of it.
+type scope struct {
+	correlate Expr
+	from      []FromItem
+}
 
-	inner := alias
+// exists is `EXISTS (SELECT 1 FROM <scope> WHERE <correlate> AND where)`.
+func (s scope) exists(where Expr) Subquery {
+	return Subquery{Kind: SubqueryExists, From: s.from, Correlate: s.correlate, Where: where}
+}
+
+// count is `(SELECT COUNT(*) FROM <scope> WHERE <correlate> AND where)`; a nil where counts every
+// correlated row.
+func (s scope) count(where Expr) Subquery {
+	return Subquery{Kind: SubqueryCount, From: s.from, Correlate: s.correlate, Where: where}
+}
+
+// relationScope resolves a relation into the scope of a subquery over it. Intermediate hops are
+// joined inside the subquery; only the parent row correlates out.
+func (b *builder) relationScope(rel *Relation, alias, parent string) scope {
+	from := []FromItem{{Table: rel.Table, Alias: alias}}
+	preds := appendRestrictions(nil, alias, rel.SubqueryFilter)
+	return b.joinHops(rel, parent, alias, from, preds)
+}
+
+// joinHops appends rel.Via's intermediate tables to a subquery's FROM list, joining each to the
+// table one step further in (inner), and finally correlates the outermost table with the parent
+// row. An empty inner means there is no element table to join the first hop to — the hop-only
+// chain hopsExist builds.
+func (b *builder) joinHops(rel *Relation, parent, inner string, from []FromItem, preds []Expr) scope {
 	for _, hop := range rel.Via {
 		hopAlias := b.newAlias()
 		from = append(from, FromItem{Table: hop.Table, Alias: hopAlias})
-		preds = append(preds, Cmp{
-			Op: OpEq,
-			L:  Column{Qualifier: inner, Name: hop.ChildColumn},
-			R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
-		})
+		if inner != "" {
+			preds = append(preds, Cmp{
+				Op: OpEq,
+				L:  Column{Qualifier: inner, Name: hop.ChildColumn},
+				R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
+			})
+		}
+		// A hop the application's own reads hide is a hop that does not exist as far as the
+		// resource attributes are concerned, so every subquery over it carries the restriction.
 		preds = appendRestrictions(preds, hopAlias, hop.SubqueryFilter)
 		inner = hopAlias
 	}
@@ -432,7 +437,7 @@ func (b *builder) relationScope(rel *Relation, alias, parent string) ([]FromItem
 		R:  Column{Qualifier: parent, Name: rel.SourceColumn},
 	})
 
-	return from, and(preds...)
+	return scope{from: from, correlate: and(preds...)}
 }
 
 // appendRestrictions lowers the caller-declared store-side predicates for one table into the
@@ -489,36 +494,9 @@ func (b *builder) hopsExist(rel *Relation, parent string) Expr {
 	if len(rel.Via) == 0 {
 		return nil
 	}
-
-	from := make([]FromItem, 0, len(rel.Via))
-	preds := make([]Expr, 0, len(rel.Via))
-
-	var inner string
-	for i, hop := range rel.Via {
-		hopAlias := b.newAlias()
-		from = append(from, FromItem{Table: hop.Table, Alias: hopAlias})
-		if i > 0 {
-			// Hop i's ChildColumn lives on the table one step further in, which for the hop-only
-			// chain is the previous hop rather than the element table.
-			preds = append(preds, Cmp{
-				Op: OpEq,
-				L:  Column{Qualifier: inner, Name: hop.ChildColumn},
-				R:  Column{Qualifier: hopAlias, Name: hop.JoinColumn},
-			})
-		}
-		// A hop the application's own reads hide is a hop that does not exist as far as the
-		// resource attributes are concerned, so the guard has to agree with relationScope here.
-		preds = appendRestrictions(preds, hopAlias, hop.SubqueryFilter)
-		inner = hopAlias
-	}
-
-	preds = append(preds, Cmp{
-		Op: OpEq,
-		L:  Column{Qualifier: inner, Name: rel.TargetColumn},
-		R:  Column{Qualifier: parent, Name: rel.SourceColumn},
-	})
-
-	return Subquery{Kind: SubqueryExists, From: from, Correlate: and(preds...)}
+	// The same hop joins and restrictions relationScope builds, minus the element table: hop i's
+	// ChildColumn lives on the previous hop here, and the first hop has nothing further in.
+	return b.joinHops(rel, parent, "", nil, nil).exists(nil)
 }
 
 // requireHops makes expr UNKNOWN unless every intermediate to-one hop exists. The CASE has no
@@ -533,21 +511,12 @@ func (b *builder) requireHops(rel *Relation, parent string, expr Expr) Expr {
 
 // triStateExists builds the CASE that preserves CEL's three states across a correlated subquery.
 func (b *builder) triStateExists(rel *Relation, alias, parent string, body Expr, sem macroSemantics, negated bool) Expr {
-	from, correlate := b.relationScope(rel, alias, parent)
-
-	witness := Subquery{
-		Kind: SubqueryExists, From: from, Correlate: correlate,
-		Where: TruthTest{X: body, Want: sem.witness},
-	}
-	unknown := Subquery{
-		Kind: SubqueryExists, From: from, Correlate: correlate,
-		Where: TruthTest{X: body, Want: TruthUnknown},
-	}
+	s := b.relationScope(rel, alias, parent)
 
 	triState := Case{
 		Whens: []When{
-			{Cond: witness, Then: BoolConst{V: sem.witnessResult}},
-			{Cond: unknown, Then: Lit{V: nil}},
+			{Cond: s.exists(TruthTest{X: body, Want: sem.witness}), Then: BoolConst{V: sem.witnessResult}},
+			{Cond: s.exists(TruthTest{X: body, Want: TruthUnknown}), Then: Lit{V: nil}},
 		},
 		Else: BoolConst{V: sem.defaultResult},
 	}
@@ -594,7 +563,10 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 		return nil, err
 	}
 
-	from, correlate := b.relationScope(rel, alias, entry.Qualifier)
+	// Built before the switch even though exists and all build their own inside triStateExists:
+	// building a scope numbers the aliases of a chain's hops, so moving this would renumber the
+	// generated aliases in the emitted SQL.
+	s := b.relationScope(rel, alias, entry.Qualifier)
 
 	switch n.operator {
 	case "exists":
@@ -606,17 +578,10 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 	case "exists_one":
 		// exists_one never absorbs an erroring element, so the UNKNOWN witness is checked first
 		// and only then is the exact-one count decided.
-		unknown := Subquery{
-			Kind: SubqueryExists, From: from, Correlate: correlate,
-			Where: TruthTest{X: bodyExpr, Want: TruthUnknown},
-		}
-		count := Subquery{
-			Kind: SubqueryCount, From: from, Correlate: correlate,
-			Where: TruthTest{X: bodyExpr, Want: TruthTrue},
-		}
+		count := s.count(TruthTest{X: bodyExpr, Want: TruthTrue})
 		triState := Case{
 			Whens: []When{
-				{Cond: unknown, Then: Lit{V: nil}},
+				{Cond: s.exists(TruthTest{X: bodyExpr, Want: TruthUnknown}), Then: Lit{V: nil}},
 				{Cond: Cmp{Op: OpEq, L: count, R: Lit{V: float64(1)}}, Then: BoolConst{V: true}},
 			},
 			Else: BoolConst{V: false},
@@ -659,15 +624,6 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 		return nil, err
 	}
 
-	// CEL identity over an empty collection: exists() matches nothing, all() matches everything.
-	combinesWithOr := (operator == "exists") != negated
-	if len(list) == 0 {
-		if operator == "exists" {
-			return BoolConst{V: negated}, nil
-		}
-		return BoolConst{V: !negated}, nil
-	}
-
 	parts := make([]Expr, 0, len(list))
 	for _, element := range list {
 		substituted, err := substituteLambdaVariable(body, variable, element)
@@ -681,7 +637,10 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 		parts = append(parts, p)
 	}
 
-	if combinesWithOr {
+	// exists() is a disjunction of its bodies and all() a conjunction, swapped under negation
+	// (De Morgan). An empty list needs no special case: or() and and() over no parts are CEL's
+	// identities, so exists() matches nothing and all() matches everything.
+	if (operator == "exists") != negated {
 		return or(parts...), nil
 	}
 	return and(parts...), nil
@@ -746,20 +705,8 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 		// checked before the intersection witness.
 		triState := Case{
 			Whens: []When{
-				{
-					Cond: Subquery{
-						Kind: SubqueryExists, From: deferred.from, Correlate: deferred.correlate,
-						Where: IsNull{X: deferred.body},
-					},
-					Then: Lit{V: nil},
-				},
-				{
-					Cond: Subquery{
-						Kind: SubqueryExists, From: deferred.from, Correlate: deferred.correlate,
-						Where: TruthTest{X: member, Want: TruthTrue},
-					},
-					Then: BoolConst{V: true},
-				},
+				{Cond: deferred.exists(IsNull{X: deferred.body}), Then: Lit{V: nil}},
+				{Cond: deferred.exists(TruthTest{X: member, Want: TruthTrue}), Then: BoolConst{V: true}},
 			},
 			Else: BoolConst{V: false},
 		}
@@ -779,10 +726,9 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 // comparison, so lowering them eagerly is impossible. Holding the correlated scope and the
 // per-element expression lets the consuming operator build exactly the subquery it needs.
 type deferredCollection struct {
-	correlate Expr
-	body      Expr
-	from      []FromItem
-	isMap     bool
+	body Expr
+	scope
+	isMap bool
 }
 
 // macro names the CEL macro this collection came from, for error messages.
@@ -829,9 +775,8 @@ func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 		return nil, err
 	}
 
-	from, correlate := b.relationScope(rel, alias, entry.Qualifier)
 	return deferredCollection{
-		from: from, correlate: correlate, body: bodyExpr, isMap: n.operator == "map",
+		scope: b.relationScope(rel, alias, entry.Qualifier), body: bodyExpr, isMap: n.operator == "map",
 	}, nil
 }
 
@@ -987,14 +932,11 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 		if entry, ok := m.Resolve(operand.variable); ok && entry.Relation != nil {
 			// size() counts elements without evaluating them, so a NULL element column still
 			// counts and no error guard is needed.
-			from, correlate := b.relationScope(entry.Relation, b.newAlias(), entry.Qualifier)
+			count := b.relationScope(entry.Relation, b.newAlias(), entry.Qualifier).count(nil)
 			// An absent to-one parent counts as UNKNOWN, not 0: `size(chain) == 0` and
 			// `size(chain) >= 0` are both TRUE over an empty count and would return every
 			// parentless row (#309).
-			return b.requireHops(
-				entry.Relation, entry.Qualifier,
-				Subquery{Kind: SubqueryCount, From: from, Correlate: correlate},
-			), nil
+			return b.requireHops(entry.Relation, entry.Qualifier, count), nil
 		}
 	}
 
@@ -1009,17 +951,8 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 		// CEL's filter never absorbs an erroring element: a single UNKNOWN body poisons the
 		// whole count, so the error guard comes before the count rather than after it.
 		return Case{
-			Whens: []When{{
-				Cond: Subquery{
-					Kind: SubqueryExists, From: deferred.from, Correlate: deferred.correlate,
-					Where: TruthTest{X: deferred.body, Want: TruthUnknown},
-				},
-				Then: Lit{V: nil},
-			}},
-			Else: Subquery{
-				Kind: SubqueryCount, From: deferred.from, Correlate: deferred.correlate,
-				Where: TruthTest{X: deferred.body, Want: TruthTrue},
-			},
+			Whens: []When{{Cond: deferred.exists(TruthTest{X: deferred.body, Want: TruthUnknown}), Then: Lit{V: nil}}},
+			Else:  deferred.count(TruthTest{X: deferred.body, Want: TruthTrue}),
 		}, nil
 	}
 	if s, ok := v.(string); ok {
@@ -1034,7 +967,7 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 	if err != nil {
 		return nil, err
 	}
-	if kind := scalarKind(v); kind != "" && kind != "string" {
+	if knownNonString(v) {
 		return Lit{V: nil}, nil
 	}
 	return Call{Name: FuncCharLength, Args: []Expr{e}}, nil
@@ -1273,11 +1206,11 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 // never makes that collapse.
 func (b *builder) scalarThroughHop(entry Entry) Expr {
 	alias := b.newAlias()
-	from, correlate := b.relationScope(entry.ScalarRelation, alias, entry.Qualifier)
+	s := b.relationScope(entry.ScalarRelation, alias, entry.Qualifier)
 	return Subquery{
 		Kind:      SubqueryScalar,
-		From:      from,
-		Correlate: correlate,
+		From:      s.from,
+		Correlate: s.correlate,
 		Select: Column{
 			Qualifier:    alias,
 			Name:         entry.Column,
@@ -1314,7 +1247,7 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 
 	case n.isVariable():
 		if n.variable == variable {
-			return cloneWithValue(element), nil
+			return valueNode(element), nil
 		}
 		if rest, ok := strings.CutPrefix(n.variable, variable+"."); ok && rest != "" {
 			current := element
@@ -1333,7 +1266,7 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 				}
 				current = next
 			}
-			return cloneWithValue(current), nil
+			return valueNode(current), nil
 		}
 		return n, nil
 	}

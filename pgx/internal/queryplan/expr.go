@@ -23,7 +23,7 @@ type Expr interface {
 }
 
 // CmpOp is a comparison operator. These are the six CEL comparisons after value-first mirroring
-// has been applied (see mirroredOperators in translate.go).
+// has been applied (see binaryPredicate in translate.go).
 type CmpOp string
 
 const (
