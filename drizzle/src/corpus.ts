@@ -710,7 +710,7 @@ export function postgresSchema() {
  *   The `(6)` is the corpus's own precision — the a5 seed carries microseconds.
  *
  * The COLLATION is deliberately absent from every string column, unlike `ent`'s hand-written MySQL
- * DDL: the harness starts the server with a case- and accent-sensitive default and the tables
+ * DDL: the harness starts the server with a byte-exact default and the tables
  * inherit it, which keeps the requirement in ONE place rather than repeated on nine columns. It is
  * a requirement either way — see `adversarial.test.ts`, `MYSQL_COLLATION`.
  */

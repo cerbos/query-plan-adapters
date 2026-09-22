@@ -644,7 +644,9 @@ cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
   "h2": { "scope": null,                    "labels": [] },
   "h3": { "scope": null,                    "labels": [] },
   "h4": { "scope": null,                    "labels": [] },
-  "h5": { "scope": null,                    "labels": [] }
+  "h5": { "scope": null,                    "labels": [] },
+  "h6": { "scope": null,                    "labels": [] },
+  "h7": { "scope": null,                    "labels": [] }
 }
 JSON
 jq -S '.derived | map_values({scope, labels})' derived-fields.json \

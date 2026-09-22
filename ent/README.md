@@ -262,7 +262,7 @@ previous versions accepted them and could render SQL with inconsistent dialect s
 | --- | --- |
 | SQLite | Proved — full corpus, text timestamps compared lexicographically |
 | PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
-| MySQL | Proved — full corpus, `DATETIME(6)` columns, case- and accent-sensitive NO PAD collation |
+| MySQL | Proved — full corpus, `DATETIME(6)` columns, byte-exact NO PAD collation (`utf8mb4_0900_bin`) |
 
 The three proved dialects are not the same test three times: SQLite stores instants as text and
 booleans as integers, PostgreSQL has real types for both, MySQL needs `CONCAT` rather than `||`
@@ -275,10 +275,10 @@ MySQL string casts explicitly use `utf8mb4_0900_bin` (MySQL 8.0.17+) so the conn
 collation cannot make `string(value) == "set"` match `"Set"`, or make its negation drop that
 row. The result remains a character string, preserving character-count semantics.
 
-The MySQL schema pins **`utf8mb4_0900_as_cs`**, a case- and accent-sensitive NO PAD
-collation, on every string column. MySQL's default
-`utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which over-grants on `cs-eq`,
-`unicode-eq` and every hierarchy prefix probe — see [Collation](#collation) below.
+The MySQL schema pins **`utf8mb4_0900_bin`**, the byte-exact NO PAD collation, on every
+string column. MySQL's default `utf8mb4_0900_ai_ci` is both case- and accent-insensitive, which
+over-grants on `cs-eq`, `unicode-eq` and every hierarchy prefix probe, and even the case- and
+accent-sensitive `utf8mb4_0900_as_cs` ignores a soft hyphen — see [Collation](#collation) below.
 
 ### Identifier quoting
 
@@ -324,11 +324,16 @@ truncates toward zero where PostgreSQL and MySQL round (`cast-int-string`, `cast
 
 CEL string comparison and matching are case-sensitive and byte-exact, while `LIKE` collation is
 controlled by the database. The suite sets `PRAGMA case_sensitive_like = ON` on SQLite, relies on
-PostgreSQL's default deterministic collation, and pins the case- and accent-sensitive NO PAD collation `utf8mb4_0900_as_cs` on every MySQL
-string column, so trailing spaces remain significant too.
+PostgreSQL's default deterministic collation, and pins the byte-exact NO PAD collation
+`utf8mb4_0900_bin` (MySQL 8.0.17+) on every MySQL string column, so trailing spaces remain
+significant too.
 On MySQL's **default** `utf8mb4_0900_ai_ci` — which is both case- and accent-insensitive — or a
 `_CI_` SQL Server collation, string predicates will match strings CEL would reject: an over-grant
-the adapter cannot detect. Treat collation as part of your policy contract.
+the adapter cannot detect. **Case-sensitive is not byte-exact**: `utf8mb4_0900_as_cs` gives a
+default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight, so `"o\u00ADne"` equals
+`"one"` under it — an over-grant on `==` and `in`, and an under-grant on `!=`
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Treat collation as part of
+your policy contract.
 
 ## Example application
 

@@ -131,16 +131,20 @@ arithmetic. The adapter supports Prisma 5–7 only.
 
 #### Database collation is an authorization invariant
 
-Cerbos string comparisons are case-sensitive. Prisma delegates comparison semantics to the
+Cerbos string comparisons are byte-exact. Prisma delegates comparison semantics to the
 database collation, so a case-insensitive or accent-insensitive collation can make a generated
 authorization filter return rows that Cerbos would deny. Treat the database collation used by
 mapped authorization columns as part of the policy contract:
 
 - PostgreSQL: use a deterministic, case-sensitive collation and avoid `citext` or an
   insensitive Prisma query mode for mapped fields.
-- MySQL/MariaDB: choose a case-sensitive (`_cs`) or binary collation rather than the common
-  case-insensitive (`_ci`) defaults — `utf8mb4_0900_as_cs` is the one this adapter's own MySQL
-  conformance leg runs under. **On MySQL this is not something you can leave to the server.**
+- MySQL: use `utf8mb4_0900_bin` (MySQL 8.0.17+), the one collation that is byte-exact and NO
+  PAD, and the one this adapter's own MySQL conformance leg runs under. Case-sensitive (`_cs`) is
+  not enough: `utf8mb4_0900_as_cs` gives a default-ignorable code point such as SOFT HYPHEN
+  (U+00AD) no weight, so `'o\u00ADne' = 'one'` is TRUE under it
+  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)); `utf8mb4_bin` is PAD SPACE,
+  so `'a' = 'a '` is TRUE under it. MariaDB has no `_0900_` collations; its byte-exact NO PAD
+  equivalent is `utf8mb4_nopad_bin`, which this repository does not execute. **On MySQL this is not something you can leave to the server.**
   Prisma's migration engine writes `DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
   into every `CREATE TABLE` and ignores the server's configured default, and Prisma's schema
   language has no collation attribute to override it — so a Prisma-managed MySQL database is
@@ -148,13 +152,14 @@ mapped authorization columns as part of the policy contract:
   tables after migrating:
 
   ```sql
-  ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+  ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
   ```
 
   Measured, not theoretical: replaying this adapter's conformance corpus under
-  `utf8mb4_unicode_ci` on `mysql:8.4` makes **42 of the 136 oracle-tested actions disagree with
-  the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed `"one"`, and every
-  collection macro over a tag name follows.
+  `utf8mb4_unicode_ci` on `mysql:8.4` makes **58 of the 172 oracle-tested actions
+  disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed `"one"`,
+  and every collection macro over a tag name follows — and replaying it under
+  `utf8mb4_0900_as_cs` makes **17** disagree, every one of them on the soft-hyphen seed `h6`.
 - SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
   collation.
 - SQLite: do not apply `COLLATE NOCASE` to mapped fields, and **also set
@@ -268,7 +273,7 @@ even under negation. Use this adapter with Cerbos 0.55 when policies can produce
 NaN in a negated comparison. Missing attributes and null values retain their existing
 handling.
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 27 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
@@ -299,7 +304,7 @@ npm run test:adversarial:mysql:v7      # MySQL,      Prisma 7  (testcontainers)
 npm run test:adversarial:mysql:v6      # MySQL,      Prisma 6  (testcontainers)
 ```
 
-The MySQL legs run under `utf8mb4_0900_as_cs`, applied to the tables after `prisma db push` for the reason the [collation section](#database-collation-is-an-authorization-invariant) gives. `ADAPTER_TEST_MYSQL_COLLATION` replays them under any other collation, which is how the 42-action figure quoted there was measured. Every corpus action that translates on SQLite and PostgreSQL translates and agrees on MySQL too, so the classification is unchanged by this leg: it added no fail-closed shape and moved none.
+The MySQL legs run under `utf8mb4_0900_bin`, applied to the tables after `prisma db push` for the reason the [collation section](#database-collation-is-an-authorization-invariant) gives. `ADAPTER_TEST_MYSQL_COLLATION` replays them under any other collation, which is how the figures quoted there were measured. Every corpus action that translates on SQLite and PostgreSQL translates and agrees on MySQL too, so the classification is unchanged by this leg: it added no fail-closed shape and moved none.
 
 SQL Server and CockroachDB are still **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
 

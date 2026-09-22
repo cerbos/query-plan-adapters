@@ -184,8 +184,8 @@ about the invocation context, not about the plan.
 ## Database collation requirements
 
 > **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
-> binary or case-sensitive collation.** On MySQL use `utf8mb4_bin` or `utf8mb4_0900_as_cs`;
-> on SQL Server use a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`). PostgreSQL,
+> byte-exact collation.** On MySQL use `utf8mb4_0900_bin` (MySQL 8.0.17+) — case-sensitive is
+> not enough, see below; on SQL Server use a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`). PostgreSQL,
 > H2, and Oracle are case-sensitive by default and are safe unless you opt into
 > case-insensitive behavior (PostgreSQL nondeterministic `ICU` collations, `citext`).
 
@@ -198,6 +198,14 @@ Server defaults to CI collations — on those defaults `WHERE department = 'fina
 matches the `'Finance'` row the PDP just denied. The plan-based filter silently returns
 rows the policy denies: **an authorization over-grant**, with no error or log line to
 notice. The same divergence applies to accent folding (`'résumé'` vs `'resume'`).
+
+**Case-sensitive is not byte-exact.** `utf8mb4_0900_as_cs` is case- and accent-sensitive, but it
+is still a Unicode collation, and Unicode collation gives a default-ignorable code point such as
+SOFT HYPHEN (U+00AD) no weight: `'o\u00ADne' = 'one'` is TRUE under it, so `==` and `in`
+over-grant and `!=` under-grants
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `utf8mb4_bin` is byte-exact but
+PAD SPACE, so `'a' = 'a '` is TRUE under it. `utf8mb4_0900_bin` is the one MySQL collation that is
+both byte-exact and NO PAD.
 
 **Every string predicate the adapter emits is affected:**
 
@@ -214,7 +222,7 @@ its constant is compared in Java against the two words CEL renders, and only the
 reaches SQL. That matters beyond the column collation, because a comparison between two
 literals — which is what a `CASE` spelling `'true'`/`'false'` compared with the constant would
 be — takes the **connection** collation. MySQL Connector/J sets that to `utf8mb4_0900_ai_ci`
-unless told otherwise, even against a server whose columns are `utf8mb4_0900_as_cs`; this
+unless told otherwise, even against a server whose columns are byte-exact; this
 repository's MySQL leg measured it.
 
 **`OperatorFunction` overrides are not a workaround for all of these.** In particular, the
@@ -229,19 +237,24 @@ Role and tenancy checks are the highest-risk shapes: `'admin'` vs `'Admin'` unde
 **How this is enforced in CI.** The differential oracle suite
 (`AdversarialConformanceTest`) runs against real PostgreSQL and MySQL databases via
 Testcontainers, with mixed-case seed rows whose `check()` decisions differ from what a
-case-insensitive collation would match. The MySQL leg creates its schema with
-`utf8mb4_0900_as_cs`; running it against MySQL's default collation makes the suite fail,
-demonstrating the over-grant. Run the legs locally:
+case-insensitive collation would match, and a soft-hyphen seed row (`h6`) that a
+case-sensitive but not byte-exact one would. The MySQL leg creates its schema with
+`utf8mb4_0900_bin`; running it against MySQL's default collation, or against
+`utf8mb4_0900_as_cs`, makes the suite fail, demonstrating the over-grant. Run the legs locally:
 
 ```bash
 # PostgreSQL (case-sensitive by default — passes)
 ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest
 
-# MySQL with the required case-sensitive collation — passes
+# MySQL with the required byte-exact collation — passes
 ADAPTER_TEST_DB=mysql gradle test --tests AdversarialConformanceTest
 
 # MySQL with its DEFAULT collation — FAILS, reproducing the over-grant
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
+  gradle test --tests AdversarialConformanceTest
+
+# MySQL case-sensitive but not byte-exact — FAILS on the soft-hyphen seed h6
+ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
   gradle test --tests AdversarialConformanceTest
 ```
 
@@ -439,7 +452,7 @@ or `true`, and rejects other values. CI runs both modes against the same corpus,
 each plan with `check()` decisions from a PDP configured with that same mode.
 
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 27 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 29 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
@@ -453,7 +466,7 @@ Bare comparisons between temporal columns are rejected because the database comp
 
 The translator preserves CEL type errors and missing-attribute errors through negation. Numeric fields are not coerced into strings for string operations, and ordering against NaN remains unknown rather than becoming a false predicate that negation could turn into an allow.
 
-Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 235 recorded statements and 66 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 27 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
+Two suites read that classification, and they answer different questions. `AdversarialConformanceTest` plans each action against a real PDP and compares the rows the filter returns with `check()`. `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/` and asserts the **SQL** against `golden/expectations.json` — 235 recorded statements and 66 refusals, one per action, with the union asserted to be the corpus exactly. What the second buys over the first is the rows nobody seeded: two different queries can agree on all 29 seeds and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes the oracle and shows up there as a diff.
 
 The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
 

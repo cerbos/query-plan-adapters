@@ -83,8 +83,10 @@ Drizzle and Prisma also replay the corpus against real PostgreSQL and real MySQL
 (testcontainers, so Docker is required): `npm run test:adversarial:postgres` and
 `…:adversarial:mysql`, each with a `…:v6` / `…:v7` split on Prisma. The store is chosen with
 `ADAPTER_TEST_DB` (`sqlite` by default); an unknown value fails rather than falling back. The
-MySQL legs pin a case- and accent-sensitive collation, because MySQL's default makes `=` itself
-case-insensitive and CEL's is byte-exact — a store misconfiguration, not an adapter limitation.
+MySQL legs pin the byte-exact NO PAD collation `utf8mb4_0900_bin`, because MySQL's default makes
+`=` itself case-insensitive and CEL's is byte-exact — a store misconfiguration, not an adapter
+limitation. Case-sensitive is not byte-exact: `utf8mb4_0900_as_cs` ignores a soft hyphen, which
+seed `h6` witnesses ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
 `ADAPTER_TEST_MYSQL_COLLATION` replays either leg under another collation to measure what the
 default costs.
 

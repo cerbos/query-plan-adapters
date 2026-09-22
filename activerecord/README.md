@@ -235,10 +235,12 @@ Declare the convention on both attributes, or on neither. Refer to
 CEL compares strings with attention to the case of the letters. The dialect controls the
 collation of `LIKE`. Thus a collation without attention to the case makes `contains`,
 `startsWith` and `endsWith` select more rows than the policy permits. On SQLite, set
-`PRAGMA case_sensitive_like = ON`. On MySQL, use a `_bin` collation or a `_cs` collation for
-the columns in your policies. `string()` over a boolean column compares two literals and no
+`PRAGMA case_sensitive_like = ON`. On MySQL, use `utf8mb4_0900_bin` (MySQL 8.0.17+) for the
+columns in your policies. A `_cs` collation is not enough: `utf8mb4_0900_as_cs` ignores a soft
+hyphen (U+00AD), so `'o\u00ADne' = 'one'` is TRUE under it, and `utf8mb4_bin` is PAD SPACE, so
+`'a' = 'a '` is TRUE under it ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `string()` over a boolean column compares two literals and no
 column, so MySQL uses the collation of the connection for it. Make that collation
-case-sensitive too: with the default `utf8mb4_0900_ai_ci`, `string(R.attr.flag) == "TRUE"`
+byte-exact too: with the default `utf8mb4_0900_ai_ci`, `string(R.attr.flag) == "TRUE"`
 selects the rows where the flag is true, and CEL selects none.
 
 The suites here use SQLite only. This adapter has no test coverage for the other dialects.
