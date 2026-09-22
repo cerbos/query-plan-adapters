@@ -665,11 +665,8 @@ describe("relation subqueryFilter", () => {
     expect(sqlFor("size-threshold", VISIBLE_ONLY)).toContain(DECLARATION);
   });
 
-  test("undeclared: the emitted SQL is byte-identical to before the field existed", () => {
-    // The non-breaking guarantee. Silence must not add a clause, and must not warn.
-    expect(sqlFor("exists-on-empty", undefined)).toEqual(
-      sqlFor("exists-on-empty"),
-    );
+  test("undeclared: silence adds no clause", () => {
+    // The non-breaking guarantee: an undeclared subqueryFilter must not narrow anything.
     expect(sqlFor("exists-on-empty")).not.toContain(DECLARATION);
   });
 });

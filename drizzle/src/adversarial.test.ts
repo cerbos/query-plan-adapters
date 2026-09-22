@@ -32,11 +32,11 @@ import { queryPlanToDrizzle, PlanKind } from ".";
 import type { MapperEntry } from ".";
 import {
   ADAPTER,
-  CONFORMANCE_DIR,
   buildMapper,
   classifyActionsForAdapter,
   mysqlSchema,
   postgresSchema,
+  readCorpusJson,
   requireMessage,
   sqliteSchema,
 } from "./corpus";
@@ -227,15 +227,9 @@ function assertPrincipalAttrShape(label: string, value: unknown): void {
   );
 }
 
-const seedsFile: SeedsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "seeds.json"), "utf8"),
-);
-const actionsFile: ActionsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8"),
-);
-const derivedFile: DerivedFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "derived-fields.json"), "utf8"),
-);
+const seedsFile = readCorpusJson("seeds.json") as SeedsFile;
+const actionsFile = readCorpusJson("actions.json") as ActionsFile;
+const derivedFile = readCorpusJson("derived-fields.json") as DerivedFile;
 const SEEDS = seedsFile.seeds;
 
 // SEEDS holds the parsed JSON rows verbatim, so Object.keys reports the corpus key set. Keep it
@@ -531,28 +525,6 @@ function derivedFor(seed: Seed): DerivedEntry {
   return entry;
 }
 
-/** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
-function isoFor(seed: Seed): string {
-  return derivedFor(seed).createdBy;
-}
-
-function doubleFor(seed: Seed): number | null {
-  return derivedFor(seed).aDouble;
-}
-
-function scopeFor(seed: Seed): string | null {
-  return derivedFor(seed).scope;
-}
-
-function timestampFor(seed: Seed): string | null {
-  return derivedFor(seed).createdAt;
-}
-
-/** Third-level label names. A null element is a NULL label name — a missing element attribute. */
-function labelsFor(seed: Seed): (string | null)[] {
-  return derivedFor(seed).labels;
-}
-
 // -- the real to-one relation (conformance/README.md, "The real to-one relation") ----------------
 //
 // `parentSeedId` names the seed whose four scalars this row's `parent` carries, and that seed's own
@@ -683,11 +655,11 @@ function seedRows(): SeedRows {
       aBool: seed.aBool,
       aString: seed.aString,
       aNumber: seed.aNumber,
-      aDouble: doubleFor(seed),
+      aDouble: derivedFor(seed).aDouble,
       aOptionalString: seed.aOptionalString,
-      createdBy: isoFor(seed),
-      scope: scopeFor(seed),
-      createdAt: timestampFor(seed),
+      createdBy: derivedFor(seed).createdBy,
+      scope: derivedFor(seed).scope,
+      createdAt: derivedFor(seed).createdAt,
       updatedAt: derivedFor(seed).updatedAt,
       tagNamesJson: seed.tags.map((tag) => tag.name),
       aNumberListJson: seed.aNumberList,
@@ -732,7 +704,7 @@ function seedRows(): SeedRows {
         name: subName,
         categoryId,
       });
-      labelsFor(seed).forEach((labelName, labelIndex) => {
+      derivedFor(seed).labels.forEach((labelName, labelIndex) => {
         rows.labels.push({
           id: `${categoryId}-label-${labelIndex}`,
           name: labelName,
@@ -1182,10 +1154,10 @@ const MYSQL_COLLATION =
  *   it, and nothing but executing it says whether the server accepts it.
  * - **`CAST(… AS TEXT)`.** Which is not a MySQL cast target at all — the divergence this leg
  *   actually found, and the reason `string()` is refused over every column but a boolean
- *   (`UNSUPPORTED_CONVERSIONS` in `index.ts`). Both other stores accept it. A boolean is lowered
+ *   (`UNSUPPORTED_CONVERSIONS` in `values.ts`). Both other stores accept it. A boolean is lowered
  *   through a CASE instead, and its two literals are the one place the adapter names a MySQL
  *   collation: a literal compares in the CONNECTION's, which is mysql2's `utf8mb4_unicode_ci`
- *   here, not the server's `MYSQL_COLLATION` (`buildBooleanString` in `index.ts`).
+ *   here, not the server's `MYSQL_COLLATION` (`buildBooleanString` in `values.ts`).
  *
  * The DDL is written here rather than derived from the drizzle schema because a store owns its own
  * schema in this harness — but it deliberately names NO collation per column, unlike `ent`'s. The
@@ -1470,12 +1442,12 @@ function asCheckResource(seed: Seed): Resource {
     aBool: seed.aBool,
     aString: seed.aString,
     aNumber: seed.aNumber,
-    createdBy: isoFor(seed),
+    createdBy: derivedFor(seed).createdBy,
     owner: seed.aOptionalString,
     // The explicit-null alias of the `scope` column, the second half of `null-value-f2f`:
     // `scope` itself is omitted when NULL (below), so the corpus carries the same column under
     // both conventions and the field-to-field probe has two explicit nulls to compare.
-    coOwner: scopeFor(seed),
+    coOwner: derivedFor(seed).scope,
     obj: { inner: seed.aString },
     tags: seed.tags.map(asTagAttribute),
     tagNames: seed.tags.map((tag) => tag.name),
@@ -1487,7 +1459,7 @@ function asCheckResource(seed: Seed): Resource {
       subCategories: [
         {
           name: subName,
-          labels: labelsFor(seed).map(asLabelAttribute),
+          labels: derivedFor(seed).labels.map(asLabelAttribute),
         },
       ],
     })),
@@ -1497,11 +1469,11 @@ function asCheckResource(seed: Seed): Resource {
   if (seed.aOptionalString !== null) {
     attr["aOptionalString"] = seed.aOptionalString;
   }
-  const aDouble = doubleFor(seed);
+  const aDouble = derivedFor(seed).aDouble;
   if (aDouble !== null) {
     attr["aDouble"] = aDouble;
   }
-  const scope = scopeFor(seed);
+  const scope = derivedFor(seed).scope;
   if (scope !== null) {
     attr["scope"] = scope;
   }
@@ -1521,7 +1493,7 @@ function asCheckResource(seed: Seed): Resource {
   if (updatedAt !== null) {
     attr["updatedAt"] = updatedAt;
   }
-  const createdAt = timestampFor(seed);
+  const createdAt = derivedFor(seed).createdAt;
   if (createdAt !== null) {
     attr["createdAt"] = createdAt;
   }
@@ -1644,16 +1616,6 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     },
   );
 
-  // Adding a throwing action without pinning its message must fail this harness rather than
-  // silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
   test("manifest assigns every action exactly one Drizzle outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));

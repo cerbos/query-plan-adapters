@@ -63,7 +63,7 @@ import type { MapperEntry, RelationMapping } from ".";
 
 export const ADAPTER = "drizzle";
 
-export const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
+const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 
 const WIRE_FIXTURES_DIR = path.join(CONFORMANCE_DIR, "wire-fixtures");
 
