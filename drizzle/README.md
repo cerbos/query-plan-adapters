@@ -1,25 +1,183 @@
 # Cerbos + Drizzle ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Drizzle ORM](https://orm.drizzle.team/) SQL expression. This allows you to use Cerbos query plans directly inside your Drizzle queries.
+Translates a [Cerbos](https://cerbos.dev) query plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan))
+into a [Drizzle ORM](https://orm.drizzle.team/) `SQL` expression you can pass to `.where()`.
 
-## Features
+## Install
 
-- Supports logical operators: `and`, `or`, `not`
-- Supports comparison operators: `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in`
-- Supports string operators: `contains`, `startsWith`, `endsWith`
-- Supports nullability checks: `eq`/`ne` against a null value map to `IS NULL` / `IS NOT NULL`
-  (the planner emits no existence operator)
-- Supports set-aware operators such as `hasIntersection`, `exists`, `exists_one`, and `all`
-- Supports relation-aware mappings, including nested relations and many-to-many joins
-- Works with Drizzle SQLite, PostgreSQL, MySQL and PlanetScale drivers
+```bash
+npm install @cerbos/orm-drizzle @cerbos/core
+npm install @cerbos/grpc   # or @cerbos/http — any Cerbos client that can call planResources
+```
+
+- Node 22+
+- Peer dependencies: `drizzle-orm` `^0.44.0 || ^0.45.0`, `@cerbos/core` `^0.32.0 || ^0.33.0`.
+  Install `@cerbos/core` yourself so your Cerbos client and the adapter share one copy of the plan
+  types (npm 7+ does this automatically; pnpm and Yarn need it declared).
+- The adapter depends on no Cerbos client, so an HTTP application does not pull in gRPC.
+- Stores executed in CI: SQLite, PostgreSQL, MySQL 8.0.17+. PlanetScale emits the same SQL as MySQL
+  but is **not executed anywhere**, so the conformance contract does not cover it.
+- String columns need a byte-exact collation — see
+  [Database collation requirement](#database-collation-requirement).
+
+## Quick start
+
+```ts
+import { GRPC } from "@cerbos/grpc";
+import { PlanKind, queryPlanToDrizzle, type Mapper } from "@cerbos/orm-drizzle";
+import { and, eq } from "drizzle-orm";
+import { db } from "./db";
+import { resources } from "./schema";
+
+const cerbos = new GRPC("localhost:3593", { tls: false });
+
+const mapper: Mapper = {
+  "request.resource.attr.status": resources.status,
+  "request.resource.attr.owner": resources.ownerId,
+};
+
+const queryPlan = await cerbos.planResources({
+  principal: { id: "user1", roles: ["user"] },
+  resource: { kind: "resource" },
+  action: "view",
+});
+
+const result = queryPlanToDrizzle({ queryPlan, mapper });
+
+let rows;
+switch (result.kind) {
+  case PlanKind.ALWAYS_DENIED:
+    rows = []; // never run the query
+    break;
+  case PlanKind.ALWAYS_ALLOWED:
+    rows = await db.select().from(resources).where(eq(resources.deleted, false));
+    break;
+  case PlanKind.CONDITIONAL:
+    rows = await db
+      .select()
+      .from(resources)
+      .where(and(eq(resources.deleted, false), result.filter));
+    break;
+}
+```
+
+`queryPlanToDrizzle` returns `{ kind }`, plus a `filter` (a Drizzle `SQL`) when the kind is
+`CONDITIONAL`. Compose `filter` with your own predicates using `and()`. Handle `ALWAYS_DENIED` by
+returning nothing: if you turn it into `undefined` and pass it to `and()`, Drizzle drops it and your
+query returns rows the PDP denied. Any attribute the plan references but the mapper does not resolve
+throws.
+
+## Mapping attributes
+
+The mapper maps Cerbos attribute references (`request.resource.attr.*`, `request.principal.attr.*`,
+including nested paths such as `request.resource.attr.owner.email`) to Drizzle columns. It is either
+an object keyed by reference, or a function `(reference) => MapperEntry | undefined`.
+
+Each entry is one of:
+
+| Entry | Use |
+| --- | --- |
+| A Drizzle column | The common case |
+| `{ column, ...options }` | A column plus options: `valueType`, `indexable`, `nullAttributeRepresentation` |
+| `{ transform }` or a bare function | You build the SQL for each comparison yourself |
+| `{ relation: { ... } }` | The attribute lives on a related table |
+
+### Custom transforms
+
+A transform receives `{ operator, value }` (`operator` is one of `eq`, `ne`, `lt`, `le`, `gt`, `ge`,
+`in`, `contains`, `startsWith`, `endsWith`) and returns `SQL`:
+
+```ts
+import { eq, sql } from "drizzle-orm";
+
+const mapper: Mapper = {
+  "request.resource.attr.title": {
+    transform: ({ operator, value }) => {
+      if (operator !== "eq") throw new Error(`Unsupported operator ${operator}`);
+      return eq(sql`lower(${resources.title})`, String(value).toLowerCase());
+    },
+  },
+};
+```
+
+A transform mapping cannot be used as a value expression (for example, the other side of a
+field-to-field comparison) or with index access; those throw.
+
+### Relations
+
+Relations become correlated `EXISTS` subqueries. `type` is `"one"` or `"many"`; name the related
+table and the join columns, then either a single `field` or a `fields` map. A path segment that is
+not in `fields` falls back to the related table's column of that name.
+
+```ts
+const mapper: Mapper = {
+  "request.resource.attr.owner": {
+    relation: {
+      type: "one",
+      table: owners,
+      sourceColumn: resources.ownerId,
+      targetColumn: owners.id,
+      fields: { email: owners.email },
+    },
+  },
+  "request.resource.attr.tags": {
+    relation: {
+      type: "many",
+      table: resourceTags,
+      sourceColumn: resources.id,
+      targetColumn: resourceTags.resourceId,
+      fields: {
+        name: {
+          relation: {
+            type: "one",
+            table: tags,
+            sourceColumn: resourceTags.tagId,
+            targetColumn: tags.id,
+            field: tags.name,
+          },
+        },
+      },
+    },
+  },
+};
+```
+
+`request.resource.attr.owner.email` and `request.resource.attr.tags.name` now translate into
+`EXISTS` subqueries over `owners` and `tags`.
+
+The subquery reads the table **bare**. If your own reads of that table filter it (soft delete,
+tenant, subtype), declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate).
+See [Mapping hazards](#mapping-hazards).
+
+### Collections
+
+- `hasIntersection(map(R.attr.tags, t, t.name), ["a"])` becomes `column IN (...)` over the mapped
+  field. Either operand order works; a pair with no literal list throws.
+- `exists`, `exists_one` and `all` over a relation-mapped attribute become correlated subqueries.
+- `filter()` is supported inside `size(filter(...))`. On its own it returns a list, not a boolean,
+  and throws.
+- For a relation that stores scalar values, set `collectionValueType: "scalar"` and the relation's
+  `field`. This enables membership such as `R.attr.owner in R.attr.tagNames`, including explicit
+  `null` elements.
+
+## Timestamps
+
+Attributes compared through CEL's `timestamp()` must opt in:
+
+```ts
+"request.resource.attr.createdAt": { column: resources.createdAt, valueType: "timestamp" },
+```
+
+Constants must be strict RFC 3339, within years 0001–9999, and exactly representable at millisecond
+precision (digits after the third fractional digit must be zero). They are normalized to UTC. Your
+column and database must keep the same precision. Sub-millisecond `now()` thresholds and
+`timestamp()` over an untyped string throw.
 
 ## Indexed collection columns
 
-Declare ordered column storage to translate `R.attr.tags[0] == "public"`:
+To translate `R.attr.tags[0] == "public"`, declare ordered column storage:
 
 ```ts
-import type { Mapper } from "@cerbos/orm-drizzle";
-
 const mapper = {
   "request.resource.attr.tags": {
     column: resources.tags,
@@ -28,76 +186,58 @@ const mapper = {
 } satisfies Mapper;
 ```
 
-`json` supports PostgreSQL JSON/JSONB, SQLite JSON text, and MySQL JSON columns. `pgArray`
-supports PostgreSQL arrays of text, varchar, boolean, integer and smallint.
-Numeric, bigint, temporal and custom array decoders are rejected because their application values
-can differ from their SQL representation. Floating-point arrays are also refused: PostgreSQL
-serializes their NaN and infinity elements as JSON strings. Array positions are zero-based, including PostgreSQL
-arrays with a nonstandard lower bound. Values and paths are bound parameters.
+| `indexable` | Supported columns |
+| --- | --- |
+| `"json"` | PostgreSQL JSON/JSONB, SQLite JSON text, MySQL JSON |
+| `"pgArray"` | PostgreSQL arrays of `text`, `varchar`, `boolean`, `integer`, `smallint` |
 
-The supported form is a direct `==` or `!=` comparison with a scalar literal (string, finite
-number, boolean or null), in either operand order and under logical operators. The index must be
-a constant non-negative 32-bit integer. Dynamic or negative indexes, object-field projection,
-ordered comparisons and indexes nested inside other value expressions still throw. Undeclared
-storage also throws: a related table alone does not define list order. This is opt-in; existing
-mappings keep their behavior.
-
-An absent element, SQL NULL collection, or non-array JSON value produces SQL UNKNOWN, so it stays
-excluded under negation. A null **element** is a value: `[null][0] == null` is true, and
-`[null][0] != "public"` is true. JSON strings, numbers and booleans retain their types. The
-attribute's null-representation option does not change these list-element semantics.
-
-A mapper entry may carry both a `column` with `indexable` and a `relation`: indexing reads the
-ordered column, while collection predicates read the relation. Both must represent exactly the
-same list sent to Cerbos, including null elements; the caller owns keeping those representations
-consistent. Do not apply custom decoding that changes the collection values.
-
-**Behavior change:** the indexed scalar equality action and its negated and null variants now
-execute against the corpus oracle on SQLite, PostgreSQL and MySQL. PostgreSQL additionally runs
-them against JSON and native text arrays with a zero lower bound. Each query still runs entirely
-in the database.
-
-Number and boolean elements are proved the same way, by the corpus's `index-number-list`,
-`index-bool-list`, their negations and two cross-type probes, on all three stores and — on
-PostgreSQL — against jsonb, plain json and zero-based `integer[]` / `boolean[]` columns. The
-cross-type probes are the reason the element's JSON type is checked before it is compared: CEL's
-equality is heterogeneous, so `[true][0] == 1` and `[1][0] == true` are both false, while SQLite
-and MySQL have no boolean of their own to keep the two apart once an element is read back as SQL:
-SQLite's `json_extract` returns `1` for a JSON `true`, and MySQL's `TRUE` is the integer `1`. A
-comparison that dropped the type would return those rows.
+- Supported: `==` / `!=` against a scalar literal (string, finite number, boolean, null), in either
+  operand order, under any logical operator. The index must be a constant non-negative 32-bit
+  integer. Positions are zero-based, including PostgreSQL arrays with a nonstandard lower bound.
+  Values and paths are bound parameters.
+- Throws: dynamic or negative indexes, object-field projection (`get-field`), ordered comparisons,
+  indexes nested inside other value expressions, a mapping with a `transform`, and undeclared
+  storage (a related table does not define list order).
+- Refused array types: numeric, bigint, temporal and custom decoders (their application values can
+  differ from SQL), and floating-point arrays (PostgreSQL serializes NaN/infinity elements as JSON
+  strings).
+- An absent element, NULL collection or non-array JSON value is SQL UNKNOWN, so the row stays
+  excluded under negation. A null **element** is a value: `[null][0] == null` and
+  `[null][0] != "public"` are both true. `nullAttributeRepresentation` does not affect elements.
+- The element's JSON type is checked before comparing, because CEL equality is heterogeneous
+  (`[true][0] == 1` is false) while SQLite and MySQL read a JSON `true` back as `1`.
+- An entry may carry both `column` + `indexable` and a `relation`: indexing reads the column,
+  collection predicates read the relation. Both must hold exactly the list you send to Cerbos,
+  including null elements; do not apply custom decoding that changes the values.
 
 ## NULL attribute representation
 
-`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
-a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
-and has to be told which one you use.
+The planner emits the same `eq(x, null)` node whether your application sends a NULL column to
+`check()` as an explicit `null` or omits the attribute, so you must tell the adapter which you do.
 
 | attributes you send for a NULL column | `check()` on that row | null-matching filter |
 | --- | --- | --- |
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-``nullAttributeRepresentation`` defaults to ``"explicit"``, preserving the historical translation. If your application
-omits attributes for NULL columns, set it to ``"omitted"``: the adapter then rejects every null
-comparison operand instead of emitting a filter that returns rows the PDP denies.
+The call-level `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for
+NULL columns, set it to `"omitted"`: every null comparison operand then throws instead of producing a
+filter that returns rows the PDP denies.
 
 ```ts
 queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
-`!(x == null)` are aligned under both conventions — because negation is applied by wrapping the
-built condition rather than pushing it into the leaf, so a leaf cannot tell whether an enclosing
-`not` will flip a not-null predicate back into a null-selecting one. Rejecting every null operand
-is correct under any nesting. See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+This rejects more than the shapes that actually over-grant (`x != null` is fine either way), because
+a leaf cannot see whether an enclosing `not` will flip it
+([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). The option is scoped to each
+call, including when a mapper starts another translation.
 
 ### Declare the convention per attribute
 
-The option above is a whole-call default, and one policy suite can legitimately use both
-conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it on the mapping instead and the call-level option only covers what
-the mapping does not:
+One policy suite can use both conventions (the same column sent as explicit null under one name,
+omitted under another). Declare it on the mapper entry; the call-level option covers undeclared
+entries:
 
 ```ts
 const mapper = {
@@ -111,108 +251,104 @@ const mapper = {
 };
 ```
 
-Declaring `"explicit"` asserts two things: the column can be NULL, **and** a NULL reaches `check()`
-as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then rendered so
-it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so `null != "x"` is
-TRUE and the row must come back, while UNKNOWN would drop it under *both* polarities. Ordering and
-string operators are left alone: a null receiver raises a no-overload error in CEL, which denies
-exactly as UNKNOWN does.
+Declaring `"explicit"` asserts that the column can be NULL **and** that NULL reaches `check()` as an
+explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it never yields SQL
+UNKNOWN: CEL's `null != "x"` is true and the row must come back. Ordering and string operators are
+unchanged, since CEL errors (and denies) on a null receiver. Declaring `"omitted"` on an entry
+applies the null-operand rejection to that attribute only.
 
-Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
-that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
-it.
+- Undeclared attributes keep the default rendering, so `!=` against a constant under-grants NULL
+  rows until you declare them.
+- **Declare both sides of a field-to-field comparison, or neither.** Mixing conventions in one
+  comparison throws.
 
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+## Database collation requirement
 
-## Behaviour change: guarded parent relations
+> **Every mapped string column must use a byte-exact collation.** CEL compares strings byte for
+> byte. With a case-insensitive collation, a filter can return `"Finance"` for a policy that
+> allowed only `"finance"` — an over-grant.
 
-Negated scalar comparisons, string matches and hierarchy predicates now exclude rows
-whose to-one parent is absent. Previously those leaves could return parentless rows
-that Cerbos denies. This is a consumer-visible authorization fix (#430), covered by
-`rel-not-eq-hop`, `rel-not-contains-hop` and `rel-not-hierarchy-hop` on every supported
-store. Translation also keeps its null-representation option local to each call,
-including when a mapper starts another translation.
+- **MySQL / PlanetScale:** use `utf8mb4_0900_bin` (MySQL 8.0.17+), which is byte-exact and NO PAD.
+  Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­ne' = 'one'`),
+  and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '`). Replaying the corpus on `mysql:8.4`, the default
+  `utf8mb4_0900_ai_ci` makes **61 of the 236 oracle-tested actions** disagree with the PDP, and
+  `utf8mb4_0900_as_cs` makes **16** disagree, all on the soft-hyphen seed `h6`
+  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+- **PostgreSQL:** the default is fine. Do not use nondeterministic ICU collations or `citext` for
+  mapped attributes.
+- **SQLite:** do not apply `COLLATE NOCASE` to mapped columns.
+
+This covers equality, ordering, `in`, intersections and hierarchy comparisons.
+
+`contains` / `startsWith` / `endsWith` do not depend on it: they are lowered to `REPLACE` (so a
+column-valued needle is never read as `LIKE` pattern syntax), which is case-sensitive on all three
+stores. That also avoids SQLite's `LIKE`, which is ASCII case-insensitive regardless of collation.
+
+`string()` over a boolean column produces the literals `'true'` / `'false'`. On MySQL a literal
+compares in the *connection's* collation (mysql2 defaults to `utf8mb4_unicode_ci`), so the adapter
+renders them as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`. That explicit collation also applies to
+the other operand, so `string(R.attr.flag) == R.attr.label` compares `label` byte-exactly. SQLite
+and PostgreSQL literals carry no collation.
+
+## Supported operators
+
+| Kind | Operators |
+| --- | --- |
+| Logical | `and`, `or`, `not` |
+| Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
+| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string |
+| Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
+| Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
+| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean column |
+
+Shapes the adapter cannot express throw an `Error` rather than emit a broader filter. The full list
+is in the fail-closed row below; each message is pinned in `conformance/actions.json`.
 
 ## Conformance contract
-
-Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
-(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
-For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
-corpus with strict evaluation enabled for both planning and the `check()` oracle.
-CI runs both modes for each existing adversarial store and client-version combination.
-
-**Breaking compatibility change for Cerbos 0.55.** Ordered comparisons involving NaN
-now evaluate to false, so their negation can allow a row. The adapter follows that
-behavior; Cerbos 0.54 treated the unordered comparison as an error and denied the row
-even under negation. Use this adapter with Cerbos 0.55 when policies can produce
-NaN in a negated comparison. Missing attributes and null values retain their existing
-handling.
 
 The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 236 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()`, indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), `string()` over a number or text column (no SQL `CAST` target spells it on all three stores: `TEXT` and `VARCHAR` are syntax errors on MySQL, which spells it `CHAR`, while `CHAR` is `character(1)` on PostgreSQL), CEL's `+` over strings (`||` concatenates on SQLite and PostgreSQL but is logical OR on MySQL, and the numeric `+` this adapter emits coerces the operands to 0 rather than failing), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), list equality over a `map()` projection, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself) (63 actions) |
+| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()` (SQL regex dialects do not follow CEL/RE2), indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list), `string()` over a number or text column (no `CAST` target works on all three stores: MySQL rejects `TEXT`/`VARCHAR` and PostgreSQL's `CHAR` is `character(1)`), CEL's `+` over strings (`\|\|` is logical OR on MySQL, and numeric `+` coerces strings to 0), a hierarchy path built by `list()` rather than read from a column, `mod` (reached through the `int()` cast), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the prefix `LIKE` would match the path itself) (63 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `nullAttributeRepresentation: "explicit"` on its mapper entry renders definitely, so a NULL row is included where CEL's null *value* says so. Undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates, relation counts and nested collection macros, null/error propagation, arithmetic and ternaries, hierarchy operations, typed timestamps, multi-hop relations, and `string()` over a boolean column, which needs no cast target: it becomes `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` on every store. The fail-closed shapes throw rather than return a broader SQL filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+Oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
+relation counts, nested collection macros, null/error propagation, arithmetic and ternaries,
+hierarchy operations, typed timestamps, multi-hop relations, and `string()` over a boolean column
+(`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` on every store).
 
-The SQL each of these actions produces is pinned separately, in the translator unit test (`npm test`) — see [Testing](#testing). That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: function mappers, `transform`, `subqueryFilter`, the `nullAttributeRepresentation` boundary, the timestamp literal contract, and malformed input.
-
-### Dialects the contract is proved on
-
-The classification above holds where the corpus is **executed**, not where the emitted SQL merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) the corpus ran on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL support was pinned at the rendered-string level. All three now run end to end:
-
-```bash
-npm run test:adversarial            # SQLite
-npm run test:adversarial:postgres   # PostgreSQL, via testcontainers
-npm run test:adversarial:mysql      # MySQL, via testcontainers
-```
-
-The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value.
-
-The MySQL leg disagrees with both of the others, which is why it found something neither could: **`CAST(… AS TEXT)` is a syntax error on MySQL**, which spells the same conversion `CAST(… AS CHAR)` — and `CHAR` on PostgreSQL is `character(1)`. `string()` used to translate here on the strength of a rendering measured on two stores out of three; it now fails closed over every column but a boolean (see the behaviour changes below). The leg also runs under a pinned byte-exact collation, `utf8mb4_0900_bin`, for the reason the [collation requirement](#database-collation-requirement) sets out.
-
-**PlanetScale is still not executed anywhere.** It is MySQL-compatible and the emitted SQL is the same, but a store the corpus does not run against is a store this contract does not cover.
-> [!WARNING]
-> **Breaking change.** `string()` over a number or text column — `string(R.attr.aDouble) == "-0.6"` and every other spelling — **throws** instead of returning a filter. The filter it used to return was `CAST(… AS TEXT)`, which is correct on SQLite and PostgreSQL and a **syntax error** on MySQL, a store this adapter's peer range and README both claim. A shape that used to return a filter and now throws is a consumer-visible break; emitting SQL that only runs on two of three supported stores is the thing the shared corpus exists to stop ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)). If you need it on one provider, compare the underlying column instead, or pre-render the text into a column of its own.
-
-**Behaviour change.** `string()` over a **boolean** column now translates, where it used to throw ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)). It needs no cast target, so it is not the shape above: it becomes `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's two words on SQLite and MySQL (where a boolean is stored as 1/0 and any `CAST` renders `"1"`) exactly as on PostgreSQL. The `IS NULL` arm is load-bearing: CEL has no `string()` for a missing or null value, so it raises and the PDP denies the row. Without the arm a NULL column would fall through to `'false'`, and `string(R.attr.flag) != "true"` would return a row the PDP denies; with it the result stays NULL and the row is excluded under both polarities. `cast-string-bool` proves it against the oracle on all three stores. A shape that used to throw now returns a filter, which is consumer-visible. On MySQL the two literals carry an explicit collation — see the [collation requirement](#database-collation-requirement).
-
-**Behaviour change.** On a MySQL column, every string length the adapter emits is `CHAR_LENGTH` rather than `LENGTH`: `size()` over a string, and the `SUBSTR` bounds that `startsWith` and `endsWith` compare against, including a hierarchy's descendant prefix. CEL counts code points, as SQLite's and PostgreSQL's `length()` do, but MySQL's `LENGTH` counts bytes. Two corpus seeds caught it. With `h6` (`"o\u00ADne"`, a soft hyphen), `size(R.attr.aString) > 4` returned the 4-character, 5-byte row on MySQL. With `h7` (`"é-x-é"`, whose `aOptionalString` is `"é"`), `SUBSTR` sliced `"é-"` for a 2-byte, 1-character prefix, so `f2f-startswith` and `f2f-endswith` dropped a row CEL allows, and `not-startswith` returned it. That last case is an over-grant ([#473](https://github.com/cerbos/query-plan-adapters/issues/473); the seeds came with [#474](https://github.com/cerbos/query-plan-adapters/issues/474)). SQLite and PostgreSQL render unchanged. A mapping that is not a Drizzle column names no dialect, so it keeps `length()`.
-
-**Behaviour change.** `hasIntersection` now normalizes its operand order, so the value-first spelling — `hasIntersection(["a","b"], R.attr.list)`, which the planner preserves from policy source order — translates instead of silently becoming `FALSE`. The same change makes an operand pair with **no** literal list throw rather than emit that `FALSE`: a shape that returned a filter now raises, which is a consumer-visible break, but the filter it returned selected no rows and the corpus forbids emitting one for a shape the adapter cannot express ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
-
-**Behaviour change.** A hierarchy with an **empty** delimiter — `hierarchy(R.attr.scope, "")` — now throws. Cerbos splits the path on an empty delimiter into one segment per character, so `descendentOf` is a strict string-prefix test; the adapter lowered it as `LIKE prefix || delimiter || '%'`, which with an empty delimiter also matched the path **itself** (never its own descendant): the corpus's `hier-empty-delim` returned `a2` (`dept.eng`) against the constant `dept.eng`, a row the PDP denies. A shape that returned a filter now raises, which is a consumer-visible break, but the filter over-granted.
-
-Bare temporal field comparisons, whole-list equality and list-valued membership needles now
-throw before returning SQL. Timestamp columns discard the strings CEL compares, and relation
-mappings expose element rows rather than ordered list values. Nested division also throws when
-an inner zero divisor could be evaluated before the outer guard. These are breaking changes for
-shapes that previously emitted incorrect filters or failed only when the database ran them.
+The corpus runs on SQLite, PostgreSQL (real `boolean`, `timestamptz`, division-by-zero errors and
+column-typed parameters) and MySQL (under `utf8mb4_0900_bin`). Choose the PDP engine mode with
+`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true`; other values are rejected, and CI runs
+both modes on every store. The SQL each action emits is pinned separately by `npm test` — see
+[Testing](#testing).
 
 ## Mapping hazards
 
-The conformance contract above proves the *plan* side — given a policy shape, does the filter select the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+The conformance contract proves the *plan* side. The *mapping* side is on you: **the rows the
+subquery reads must be the rows your application put into the resource attributes.** The shared
+corpus catalogues six ways that can break.
 
-This adapter builds a **bare-table subquery.** A relation mapping is a table plus a source and a target column; Drizzle has no association metadata for the adapter to consult, so nothing the application applies to its own reads reaches the generated `EXISTS`. Where the application narrows those reads, declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate) on the relation and the adapter reproduces it. Declaring nothing emits exactly the SQL this adapter emitted before the field existed — it cannot detect the omission, so silence is not a warning.
+This adapter builds a **bare-table subquery**: a relation mapping is a table plus two columns, and
+Drizzle has no association metadata, so nothing your own reads apply reaches the `EXISTS`. Declare
+that narrowing as [`subqueryFilter`](#declaring-the-applications-own-predicate). The adapter cannot
+detect a missing one.
 
 | Hazard | Position | Mechanism to check |
 |---|---|---|
-| Filtered association | **Caller-owned**, reproducible with `subqueryFilter` | The `where` you pass to Drizzle's relational query builder (`db.query.<table>.findMany({ with: { rel: { where } } })`), and any repository helper that appends one. Drizzle applies those to the query you call them on; the adapter is given `table`, `sourceColumn` and `targetColumn` and reads the table bare |
-| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt IS NULL`), a tenant column, a `published` flag — anything every application read of that table filters on. Drizzle has no `default_scope` construct, so the convention lives in your own query code and only you can see it |
+| Filtered association | **Caller-owned**, reproducible with `subqueryFilter` | The `where` you pass to Drizzle's relational query builder (`db.query.<table>.findMany({ with: { rel: { where } } })`), and any repository helper that appends one. The adapter reads `table` bare |
+| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt IS NULL`), a tenant column, a `published` flag — anything every read of that table filters on. Drizzle has no `default_scope`, so only you can see it |
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `eq(table.type, "…")` |
-| To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative — the adapter emits the same correlated `EXISTS` for either value — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
-| Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** this previously held only for a chain of two or more relations, and a bare boolean read through a hop bypassed the guard entirely. A negation over a SINGLE to-one hop returned every row whose relation was absent; it now returns fewer rows — an over-grant fix, consumer-visible for any policy with that shape |
+| To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative and emits the same `EXISTS` either way, so add the unique constraint, or accept that the subquery examines every matching row |
+| Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key is a compile error, not a wrong join |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires each to-one hop, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375), [#430](https://github.com/cerbos/query-plan-adapters/issues/430)) |
 
 ### Declaring the application's own predicate
 
@@ -237,294 +373,76 @@ const result = queryPlanToDrizzle({
 });
 ```
 
-`subqueryFilter` is ANDed into the correlated subquery alongside the join, so it narrows the rows the subquery *examines* rather than the rows it returns. That is what makes it right under negation as well: `all()` compiles to a `NOT EXISTS` over a false witness, and restricting the scan turns it into "every visible row satisfies the predicate" instead of "every row in the table does". It applies to every operator reached through the relation — `exists`, `all`, `except`, membership, `hasIntersection`, `size` — and to the hop-existence guard, so an intermediate hop must exist *and* be visible.
+`subqueryFilter` is ANDed into the correlated subquery next to the join, so it narrows the rows the
+subquery examines. That keeps negation correct (`all()` becomes "every *visible* row matches"). It
+applies to every operator reached through the relation — `exists`, `all`, `except`, membership,
+`hasIntersection`, `size` — and to the hop-existence guard.
 
-## How it works
+## Behaviour changes
 
-Cerbos can respond to a `PlanResources` request with one of three plan kinds. The adapter mirrors that API:
-
-- `PlanKind.ALWAYS_ALLOWED`: The user can access the resource without any extra filtering.
-- `PlanKind.ALWAYS_DENIED`: The user cannot access the resource at all.
-- `PlanKind.CONDITIONAL`: Cerbos returns an expression tree that must be applied when reading data. The adapter converts this expression into a Drizzle SQL filter.
-
-`queryPlanToDrizzle` walks the Cerbos expression, resolves every attribute reference through the mapper, and produces a Drizzle `SQL` fragment. That fragment can then be composed with the rest of your query builder chain (`db.select().from(table).where(result.filter)`).
-
-## Installation
-
-```bash
-npm install @cerbos/orm-drizzle @cerbos/core
-```
-
-`@cerbos/core` is a peer dependency: it carries the query plan types, and your application and
-this adapter have to share one copy of them. Installing it yourself is what keeps that true — with
-a second copy in the tree an operand built by your Cerbos client is not the same object the adapter
-inspects. npm 7+ installs missing peers automatically; pnpm and Yarn expect it to be declared.
-
-You also need a Cerbos client to obtain a query plan in the first place — [`@cerbos/grpc`](https://www.npmjs.com/package/@cerbos/grpc)
-or [`@cerbos/http`](https://www.npmjs.com/package/@cerbos/http). Install whichever your deployment
-uses; this adapter deliberately depends on neither, so it does not pull a gRPC stack into an
-application that talks HTTP.
-
-## Usage
-
-```ts
-import { queryPlanToDrizzle, PlanKind } from "@cerbos/orm-drizzle";
-import { eq, and } from "drizzle-orm";
-import { resources } from "./schema";
-
-const plan = await cerbos.planResources({
-  principal,
-  resource,
-  action,
-});
-
-const result = queryPlanToDrizzle({
-  queryPlan: plan,
-  mapper: {
-    "request.resource.attr.status": resources.status,
-    "request.resource.attr.owner": resources.ownerId,
-  },
-});
-
-if (result.kind === PlanKind.CONDITIONAL) {
-  const rows = await db
-    .select()
-    .from(resources)
-    .where(and(eq(resources.deleted, false), result.filter));
-}
-```
-
-### Handling different plan kinds
-
-```ts
-const evaluation = queryPlanToDrizzle({ queryPlan: plan, mapper });
-
-switch (evaluation.kind) {
-  case PlanKind.ALWAYS_ALLOWED:
-    // run the query without extra filters
-    break;
-  case PlanKind.ALWAYS_DENIED:
-    // return an empty result immediately
-    break;
-  case PlanKind.CONDITIONAL:
-    const rows = await db
-      .select()
-      .from(resources)
-      .where(evaluation.filter);
-    break;
-}
-```
-
-Cerbos plans reference both resources (`request.resource.attr.*`) and principals (`request.principal.attr.*`), so include the paths your policies emit in the mapper.
-
-### Database collation requirement
-
-> **Every mapped string column must use a byte-exact collation.** CEL string comparison is
-> byte-exact, while MySQL and PlanetScale commonly default to case-insensitive collations. With a
-> CI collation, a database predicate can return `"Finance"` for a policy that allowed only
-> `"finance"`, silently over-granting access compared with the PDP's `check()` decision.
-
-On MySQL use `utf8mb4_0900_bin` (MySQL 8.0.17+), which is byte-exact and NO PAD. **Case-sensitive
-is not enough.** `utf8mb4_0900_as_cs` is case- and accent-sensitive but still a Unicode collation,
-and Unicode collation gives a default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight,
-so `'o\u00ADne' = 'one'` is TRUE under it; `utf8mb4_bin` is byte-exact but PAD SPACE, so
-`'a' = 'a '` is TRUE under it. Replaying this adapter's own conformance corpus against `mysql:8.4`
-measures what each costs: under the default `utf8mb4_0900_ai_ci`, **61 of the 236
-oracle-tested actions disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that
-allowed `"one"`, and every collection macro over a tag name follows — and under
-`utf8mb4_0900_as_cs`, **16 do**, every one of them on the soft-hyphen seed `h6`, over-granted by
-`==` and `in` and under-granted by `!=` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-PostgreSQL is case-sensitive by default, but nondeterministic ICU collations and `citext` are not
-safe for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns. This
-requirement covers equality and ordering, `in`, intersections, string matching, and hierarchy
-prefix/ancestor comparisons.
-
-**`string()` over a boolean column is compared in a collation the adapter picks, not yours.** The
-`CASE` it becomes yields two literals, `'true'` and `'false'`, and on MySQL a literal compares in
-the *connection's* collation, not a column's or the server's. mysql2's default connection collation
-is `utf8mb4_unicode_ci`, so on a server started case-sensitive `string(R.attr.flag) == "TRUE"` would
-still select every row whose flag is true, and CEL selects none. The adapter therefore renders the
-literals on MySQL as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`: byte-exact and NO PAD, whatever the
-connection's character set and collation — the same collation the section above asks of your
-columns, for the same two reasons: `utf8mb4_bin` would match `"true "` and `utf8mb4_0900_as_cs`
-would match `"tr\u00ADue"`. Two consequences:
-the explicit collation outranks the other operand's, so `string(R.attr.flag) == R.attr.label` also
-compares `label` byte-exactly; and `utf8mb4_0900_bin` needs MySQL 8.0.17 or later, the same floor
-`CAST(… AS FLOAT(53))` already sets. SQLite compares the literals `BINARY` and PostgreSQL in its
-deterministic database collation, so neither carries one.
-
-**`contains`/`startsWith`/`endsWith` are the exception, and in your favour.** This adapter
-lowers them to `REPLACE` rather than `LIKE` — chosen so a column-valued needle cannot be
-reinterpreted as pattern syntax — and `REPLACE` is case-sensitive on SQLite, PostgreSQL and
-MySQL alike. That also sidesteps a hazard `LIKE`-based adapters have to configure around:
-SQLite's `LIKE` is case-insensitive for ASCII *regardless of collation*, so nothing but
-`PRAGMA case_sensitive_like = ON` makes it exact. Here the collation requirement above is
-about equality, ordering, membership and the hierarchy operators; the string operators are
-correct without it. The corpus proves both halves — `cs-eq` for equality, and `cs-contains`,
-`cs-startswith` and `cs-endswith` for string matching, on the SQLite, PostgreSQL and MySQL legs
-alike.
-
-### Mapper options
-
-The mapper associates Cerbos attribute references with Drizzle columns. It can be:
-
-- A plain object where keys are Cerbos attribute references and values are Drizzle columns or SQL expressions.
-- A function receiving the attribute reference and returning the column/expression.
-- An object with a `column` property and optional metadata or a `transform` function to customize how operator/value pairs are converted into SQL.
-
-```ts
-const result = queryPlanToDrizzle({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.custom": {
-      column: sql`lower(${resources.title})`,
-      transform: ({ operator, value }) => {
-        if (operator !== "eq") throw new Error("Unsupported");
-        return eq(sql`lower(${resources.title})`, value.toLowerCase());
-      },
-    },
-  },
-});
-```
-
-### Attribute references and functions
-
-- Plain values: map `request.resource.attr.field` to a column (`resources.field`).
-- Nested attributes: map longer paths such as `request.resource.attr.owner.email`.
-- Principal attributes: map `request.principal.attr.role` or similar paths when policies check the caller.
-- Dynamic resolution: pass a mapper function `(reference) => ...` to compute mappings at runtime.
-
-Every mapper entry can be:
-
-- A column or SQL fragment.
-- An object with `column` and/or `transform` to customize how each operator is translated.
-- A relation mapping (described below) for nested resource structures.
-
-Fields used through CEL's `timestamp()` must opt in with `valueType: "timestamp"`.
-The adapter then validates strict RFC 3339 constants and normalizes them to UTC before comparing them. The instant must fall inside CEL's supported year 0001–9999 range and be exactly representable at millisecond precision: fractional digits after the third must be zero. The mapped column and database must preserve the same precision.
-
-```ts
-"request.resource.attr.createdAt": {
-  column: resources.createdAt,
-  valueType: "timestamp",
-}
-```
-
-### Mapping relations
-
-Relations can be described using the `relation` option, mirroring the structure of the Prisma adapter. The adapter will wrap
-comparisons in `EXISTS` subqueries and automatically infer relation fields when they match the column names on the related table.
-
-```ts
-const result = queryPlanToDrizzle({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.owner": {
-      relation: {
-        type: "one",
-        table: owners,
-        sourceColumn: resources.ownerId,
-        targetColumn: owners.id,
-        fields: {
-          email: owners.email,
-        },
-      },
-    },
-    "request.resource.attr.tags": {
-      relation: {
-        type: "many",
-        table: resourceTags,
-        sourceColumn: resources.id,
-        targetColumn: resourceTags.resourceId,
-        fields: {
-          name: {
-            relation: {
-              type: "one",
-              table: tags,
-              sourceColumn: resourceTags.tagId,
-              targetColumn: tags.id,
-              field: tags.name,
-            },
-          },
-        },
-      },
-    },
-  },
-});
-```
-
-With the above mapper, query plan references such as `request.resource.attr.owner.email` and `request.resource.attr.tags.name`
-are translated into `EXISTS` expressions that join the `owners` and `tags` tables respectively.
-
-Those `EXISTS` expressions read the mapped table bare. If your own reads of that table apply a predicate — a soft-delete flag, a tenant column, a subtype discriminator — declare it as `subqueryFilter` on the relation so the subquery sees the same rows the application serialised. See [Mapping hazards](#mapping-hazards).
-
-### Working with collections
-
-- `hasIntersection`: Use for multi-valued attributes such as tags. When Cerbos emits `hasIntersection(map(resource.tags, lambda t => t.name), ["tag"])`, the mapper looks up the nested field and the adapter converts it into a `column IN (...)` condition.
-- `exists`, `exists_one`, and `all`: When policies reference array attributes (e.g., `request.resource.attr.tags`), mark the mapper entry as a relation. The adapter scopes the lambda variable, generates the `EXISTS` subquery, and correlates it with the parent table automatically.
-- Scalar collections stored through a relation can opt in with `collectionValueType: "scalar"` and set the relation's `field`. This enables direct membership such as `R.attr.owner in R.attr.tagNames`, including explicit `null` elements.
-- `filter`: Supported inside `size(filter(...))`, where the lambda restricts the rows counted. A standalone `filter()` returns a list rather than a boolean and is rejected as a condition.
+- **Breaking** (Cerbos 0.55): ordered comparisons involving NaN evaluate to false, so their negation
+  can allow a row. Cerbos 0.54 denied it. Use Cerbos 0.55 if policies can produce NaN in a negated
+  comparison.
+- **Breaking:** `string()` over a number or text column (e.g. `string(R.attr.aDouble) == "-0.6"`)
+  throws. It used to emit `CAST(… AS TEXT)`, a syntax error on MySQL. Compare the underlying column,
+  or store the text in its own column ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)).
+- `string()` over a **boolean** column now translates instead of throwing, as a `CASE` whose
+  `IS NULL` arm keeps NULL rows excluded under both polarities
+  ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)).
+- **Breaking:** `hasIntersection` normalizes operand order, so the value-first spelling translates
+  instead of becoming `FALSE`; an operand pair with no literal list now throws
+  ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
+- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) throws. Its old
+  filter matched the path itself (`hier-empty-delim` returned a denied row).
+- **Breaking:** bare temporal field comparisons, whole-list equality, list-valued membership
+  needles, and nested division where an inner zero divisor could be evaluated before the outer
+  guard now throw before returning SQL. They previously emitted incorrect filters or failed in the
+  database.
+- On MySQL columns, string lengths use `CHAR_LENGTH` instead of `LENGTH` (`size()` over a string,
+  and the `SUBSTR` bounds for `startsWith`/`endsWith` and hierarchy prefixes). `LENGTH` counts
+  bytes; this fixed an over-grant in `not-startswith`
+  ([#473](https://github.com/cerbos/query-plan-adapters/issues/473),
+  [#474](https://github.com/cerbos/query-plan-adapters/issues/474)). A non-column mapping keeps
+  `length()`.
+- Negated scalar comparisons, string matches and hierarchy predicates through a to-one relation now
+  exclude rows whose parent is absent — an over-grant fix
+  ([#430](https://github.com/cerbos/query-plan-adapters/issues/430)).
+- The absent-parent guard now applies over a **single** to-one hop, including a bare boolean read
+  through it; a negation over one hop used to return every row with no parent — an over-grant fix
+  ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- Indexed scalar equality (and its negated, null, number and boolean variants) is now executed
+  against the corpus oracle on SQLite, PostgreSQL (JSON, JSONB and zero-based native arrays) and
+  MySQL. Each query still runs entirely in the database.
 
 ## Example application
 
-This repository carries a runnable [`example/`](example/), which installs the adapter from the
-artifact `npm publish` would upload and exercises it against a live PDP over the shared
-[demo domain](../demo/README.md):
+[`example/`](example/) installs the packed adapter and runs the shared
+[demo domain](../demo/README.md) against a live PDP, including pagination and the adapter's filter
+composed with an application filter:
 
 ```bash
 # from the repository root
 demo/scripts/run-example.sh drizzle
 ```
 
-Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
-map, `types`, the `files` allowlist, and the peer range — and covers usage shapes past a single
-flat query: pagination, and the adapter's filter composed with an application-owned filter.
-
 ## Testing
 
 | Command | What it proves | What it needs |
 | --- | --- | --- |
-| `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus what the driver is asked to bind, the rendering on each claimed dialect, the mapper forms and the golden asset's own invariants, none of which needs a store | Nothing but Node — no Cerbos sidecar, no database, no Docker |
-| `npm run test:adversarial` | **The rows that SQL returns**, against real SQLite with `check()` as the oracle | Cerbos CLI |
-| `npm run test:adversarial:postgres` | The same corpus against real PostgreSQL | Cerbos CLI, Docker |
-| `npm run test:adversarial:mysql` | The same corpus against real MySQL, under the byte-exact `utf8mb4_0900_bin`. `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` replays it under MySQL's default to see what that costs | Cerbos CLI, Docker |
+| `npm test` | The SQL this adapter emits: every corpus action is either a golden expectation or a pinned throw, plus bound parameters per dialect, mapper forms (functions, `transform`, `subqueryFilter`), the `nullAttributeRepresentation` boundary, the timestamp literal contract and malformed input | Node only — no Cerbos, database or Docker |
+| `npm run test:adversarial` | The rows that SQL returns, on real SQLite, with `check()` as the oracle | Cerbos CLI |
+| `npm run test:adversarial:postgres` | The same corpus on real PostgreSQL | Cerbos CLI, Docker |
+| `npm run test:adversarial:mysql` | The same corpus on real MySQL under `utf8mb4_0900_bin`. Set `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` to measure MySQL's default | Cerbos CLI, Docker |
 | `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
 
-### The golden expectations
+Prefix any adversarial command with `ADAPTER_TEST_STRICT_EVALUATION=true` to run it in strict
+evaluation mode.
 
-`npm test` reads its plans from `../conformance/wire-fixtures/` — the golden `PlanResources`
-responses captured against the pinned Cerbos version — and asserts them against
-`golden/expectations.json`, a **golden expectation** file this adapter owns. One entry per corpus
-action, keyed by action name:
-
-```jsonc
-{
-  "adapter": "drizzle",
-  "regenerate": "npm run golden:update",
-  "expectations": {
-    "in-empty":  { "kind": "KIND_ALWAYS_DENIED" },
-    "arith-add": {
-      "kind": "KIND_CONDITIONAL",
-      "rendered": {
-        // One per store the adversarial suite executes, because what the driver is asked to bind
-        // depends on the column type: a PostgreSQL `boolean` binds `true`, a SQLite one binds 1.
-        "postgresql": { "sql": "\"adversarial_resources\".\"a_number\" + $1 > $2", "params": [1, 2] },
-        "sqlite":     { "sql": "\"adversarial_resources\".\"a_number\" + ? > ?",   "params": [1, 2] },
-        "mysql":      { "sql": "`adversarial_resources`.`a_number` + ? > ?",     "params": [1, 2] }
-      }
-    }
-  }
-}
-```
-
-An action this adapter refuses carries **no entry**: its pinned message is corpus data, in
-`conformance/actions.json`, and duplicating it here would be two places to change one string. A
-wire fixture that is neither in this file nor declared unsupported fails the suite, which is what
-makes a new corpus action land as a failure rather than as silence
-([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md),
-[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md), and the "Golden expectations" section
-of [conformance/README.md](../conformance/README.md)).
-
-Whether those filters return the rows the PDP allows is a separate question, answered by the
-adversarial suite, which does need a Cerbos sidecar and (for the PostgreSQL and MySQL legs)
-Docker.
+`npm test` reads its plans from `../conformance/wire-fixtures/` and compares them with
+`golden/expectations.json`: one entry per corpus action, holding the plan kind and, for a
+conditional plan, the rendered SQL and parameters on each of `postgresql`, `sqlite` and `mysql`. An
+action the adapter refuses has no entry (its message is pinned in `conformance/actions.json`), and a
+fixture in neither place fails the suite. See "Golden expectations" in
+[conformance/README.md](../conformance/README.md),
+[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
+[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md).
