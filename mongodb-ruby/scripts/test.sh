@@ -2,7 +2,7 @@
 # Runs the suites of the MongoDB Ruby adapter.
 #
 #   ./scripts/test.sh                                      # every suite
-#   ./scripts/test.sh spec/translator_spec.rb              # offline: no PDP, no MongoDB
+#   ./scripts/test.sh spec/translator_spec.rb spec/mongoid_spec.rb   # offline: no PDP, no MongoDB
 #   ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE ./scripts/test.sh spec/adversarial_conformance_spec.rb
 #
 # Ruby and Bundler come from the host. Docker starts the two services the adversarial harness

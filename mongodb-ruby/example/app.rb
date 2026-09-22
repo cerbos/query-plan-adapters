@@ -5,8 +5,9 @@
 # It proves PLUMBING, not semantics: that the published gem installs, that
 # `require "cerbos/mongodb"` resolves from it, and that the filter it returns composes with the
 # driver methods a consumer actually reaches for — `find`, `$and` with the application's own
-# predicate, `sort`/`skip`/`limit`. The conformance harness cannot show any of that, because it
-# loads the adapter from source and only ever runs one flat filtered query.
+# predicate, `sort`/`skip`/`limit` — and, through `require "cerbos/mongodb/mongoid"`, with a Mongoid
+# criteria. Every shape is computed both ways and the two must agree. The conformance harness
+# cannot show any of that, because it loads the adapter from source.
 #
 # Every document, every principal and the application's own predicate come from demo/seeds.json.
 # Nothing about the domain is written down twice — see demo/README.md.
@@ -16,7 +17,9 @@ require "logger"
 
 require "cerbos"
 require "cerbos/mongodb"
+require "cerbos/mongodb/mongoid"
 require "mongo"
+require "mongoid"
 
 # stdout carries the JSON document and nothing else, so anything a gem decides to print has to
 # go elsewhere.
@@ -61,6 +64,24 @@ MAPPER = {
 
 CLIENT = Cerbos::Client.new(CERBOS_HOST, tls: false)
 
+# The same collection as a Mongoid model. Typed fields on purpose: Mongoid converts a query
+# constant to its field's type, and Cerbos::MongoDB::Mongoid.criteria is what keeps that out.
+Mongoid.configure do |config|
+  config.clients.default = {uri: MONGODB_URI}
+  config.logger = Logger.new($stderr, level: Logger::WARN)
+end
+
+class Document
+  include Mongoid::Document
+
+  store_in collection: "documents"
+  field :_id, type: String
+  field :owner_id, type: String
+  field :is_public, type: Mongoid::Boolean
+  field :region, type: String
+  field :archived, type: Mongoid::Boolean
+end
+
 # Looked up in the corpus, never restated here.
 def principal(id)
   found = SEEDS.fetch("principals").find { |candidate| candidate.fetch("id") == id }
@@ -76,6 +97,15 @@ end
 
 def ids(filter) = DOCUMENTS.find(filter, projection: {_id: 1}).map { |doc| doc.fetch("_id") }.sort
 
+# Every shape is computed twice — through the driver and through a Mongoid criteria — and the two
+# must agree before anything is printed. The printed document is the driver's.
+def both(driver_ids, mongoid_criteria)
+  mongoid_ids = mongoid_criteria.pluck(:_id).sort
+  raise "Mongoid returned #{mongoid_ids.inspect} where the driver returned #{driver_ids.inspect}" unless mongoid_ids == driver_ids
+
+  driver_ids
+end
+
 # The application's OWN predicate, from the corpus. It is never expressed in policy, which is the
 # whole point of usage shape 5.
 def application_filter
@@ -88,7 +118,7 @@ end
 # 1. A plain filtered list: the adapter's filter IS the query.
 def filtered(principal_id, action)
   result = authorized(principal_id, action)
-  {"kind" => result.kind, "ids" => ids(result.filter)}
+  {"kind" => result.kind, "ids" => both(ids(result.filter), Cerbos::MongoDB::Mongoid.criteria(Document, result))}
 end
 
 # 4. Pagination. The filtered cursor is sorted and walked a page at a time, and what is reported
@@ -109,6 +139,12 @@ def paginated(principal_id, action, page_size)
     offset += page_size
     break if page.size < page_size
   end
+  mongoid_pages = (0...page_sizes.size).map { |index|
+    Cerbos::MongoDB::Mongoid.criteria(Document, result).order(_id: 1).skip(index * page_size).limit(page_size).pluck(:_id)
+  }
+  unless mongoid_pages.map(&:size) == page_sizes && mongoid_pages.flatten.sort == collected.sort
+    raise "Mongoid paginated #{mongoid_pages.inspect} where the driver returned #{collected.inspect}"
+  end
   {"kind" => result.kind, "ids" => collected.sort, "pageSize" => page_size, "pageSizes" => page_sizes}
 end
 
@@ -120,7 +156,9 @@ end
 #    filter cannot resurrect a denied document.
 def composed(principal_id, action)
   result = authorized(principal_id, action)
-  {"kind" => result.kind, "ids" => ids({"$and" => [result.filter, application_filter]})}
+  filter = SEEDS.fetch("applicationFilter")
+  mongoid = Cerbos::MongoDB::Mongoid.criteria(Document, result).where(archived: filter.fetch("archived"), region: filter.fetch("region"))
+  {"kind" => result.kind, "ids" => both(ids({"$and" => [result.filter, application_filter]}), mongoid)}
 end
 
 shapes = {

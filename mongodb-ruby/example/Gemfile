@@ -12,4 +12,7 @@ gem "cerbos-mongodb", path: "vendor/cerbos-mongodb"
 # here is the application's own, exactly as it would be in a consumer's Gemfile. No committed
 # lockfile, so a new driver release reaches this job on the next run.
 gem "mongo", "~> 2.21"
+# The optional Mongoid integration (`require "cerbos/mongodb/mongoid"`) ships in the same gem, so
+# the example exercises it from the packed artifact too.
+gem "mongoid", "~> 9.0"
 gem "cerbos", "~> 0.14"

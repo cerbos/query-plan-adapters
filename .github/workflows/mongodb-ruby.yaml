@@ -61,8 +61,8 @@ jobs:
       # Offline: the translator unit test replays conformance/wire-fixtures/ and the contract
       # suite builds its own plans. scripts/test.sh starts NO PDP and NO MongoDB for them, which
       # is the assertion that neither suite quietly grew a dependency on one.
-      - name: Run the translator unit test and the adapter contract suite
-        run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb
+      - name: Run the translator unit test, the adapter contract suite and the Mongoid selector suite
+        run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb spec/mongoid_spec.rb
 
       # In the SAME job as the tests above, not a job of its own. Gated to the baseline Ruby leg,
       # because the corpus discriminates the translator and the store, not the Ruby runtime; the

@@ -28,8 +28,8 @@ baseline CI leg tests against — on a port Docker picks, and removes it afterwa
 | File | Role |
 | --- | --- |
 | `run.sh` | Starts MongoDB, builds the gem, unpacks it into `vendor/`, installs the dependencies, runs `app.rb`. |
-| `app.rb` | Seeds the `documents` collection from `demo/seeds.json`, then emits the five usage shapes. |
-| `Gemfile` | The driver and the Cerbos SDK, plus the adapter resolved from the unpacked artifact. |
+| `app.rb` | Seeds the `documents` collection from `demo/seeds.json`, then emits the five usage shapes — each computed through the driver and through a Mongoid criteria (`Cerbos::MongoDB::Mongoid.criteria`), which must agree. |
+| `Gemfile` | The driver, Mongoid and the Cerbos SDK, plus the adapter resolved from the unpacked artifact. |
 
 `run.sh` runs `gem build` and `gem unpack`, and the `Gemfile` resolves `cerbos-mongodb` from
 `vendor/` ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)), so a `lib/`
