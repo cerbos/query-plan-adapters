@@ -29,6 +29,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
     - [A constant is what tells the two `+` overloads apart](#a-constant-is-what-tells-the-two--overloads-apart)
   - [Root position and bare operand forms](#root-position-and-bare-operand-forms)
   - [Hazard classes the corpus missed](#hazard-classes-the-corpus-missed)
+  - [Rule composition](#rule-composition)
   - [The degeneracy guard](#the-degeneracy-guard)
   - [Pinned throw messages](#pinned-throw-messages)
   - [Known divergences still need a tripwire](#known-divergences-still-need-a-tripwire)
@@ -64,8 +65,11 @@ rows, and one oracle recipe that every adapter's harness implements against its 
 ## Layout
 
 - `policies/adversarial.yaml` — the hostile policy suite. One resource kind (`adversarial`), one
-  role (`USER`), one action per hostile shape. Pure Cerbos policy YAML — no adapter-specific
-  content. Edit this file to add a new hostile shape; it is the corpus of record.
+  role (`USER`), one action per hostile shape, and one rule per action except the `compose-*`
+  family, which exists to make the planner combine several (see "Rule composition" below). Pure
+  Cerbos policy YAML — no adapter-specific content. Edit this file to add a new hostile shape; it
+  is the corpus of record. `policies/adversarial-compose-roles.yaml` holds the one derived role
+  that family uses.
 - `seeds.json` — the hostile seed rows (NULLs, empty strings/collections, negatives, LIKE
   metacharacters `% _ \`, unicode, duplicate/mirrored names) plus the fixed principal used
   throughout. This is the single source of truth an adapter's harness persists into its own
@@ -823,8 +827,9 @@ store's query language are known to disagree, or where this repository has alrea
 bug to several adapters, and no existing action reaches it:
 
 - **`not-and`** is the De Morgan branch. The corpus negates `eq`, `ne`, `in`, `exists`,
-  `exists_one`, `all`, `gt`, `lt`, `hasIntersection` and `or` — never `and`. It is also, byte for
-  byte, the shape a DENY rule composes to, so the corpus covers that path without a second policy.
+  `exists_one`, `all`, `gt`, `lt`, `hasIntersection` and `or` — never `and`. It is the shape a DENY
+  rule with an `all` condition composes to, but spelled inside one ALLOW's condition; the planner's
+  own composition of DENY rules is the `compose-*` family's job (see "Rule composition").
 - **`not-contains` / `not-startswith`** negate a LIKE, which the corpus never did, against a
   **column** needle so the negation meets the NULL-needle rows. Both hazards live there: three-valued
   logic (a NULL needle must be UNKNOWN, not FALSE, or `NOT` flips it and every such row leaks) and
@@ -891,6 +896,54 @@ attribute: `null != "public"` is true, while reading a missing attribute raises.
 scalar predicates through the real to-one parent. Parentless rows must stay
 excluded, and every harness guards the new actions for non-empty, non-total PDP
 results on its compared or refusal side.
+
+### Rule composition
+
+Until [#487](https://github.com/cerbos/query-plan-adapters/issues/487) every action was one
+`EFFECT_ALLOW` rule for one role with no derived role and no variable, so every plan's root was
+the root of one hand-written condition. Real policies compose, and the planner builds the root
+itself: a conditional DENY beside a conditional ALLOW plans to `and(not(Y), X)`, several
+conditional ALLOWs to `or(...)`, a derived role with a resource condition to a conjunction with
+the rule's own condition. An adapter with special handling at the root — convex's split between
+its filter engine and its post-filter, a root-only guard like the ones `filter-as-conjunct` walked
+around — only ever met the roots the corpus happened to spell. The nine `compose-*` actions make
+the planner assemble them from separate rules instead:
+
+| action | rules | pinned plan root |
+|---|---|---|
+| `compose-allow-deny` | ALLOW + DENY | `and(not(gt), eq)` |
+| `compose-multi-allow` | two ALLOW `all`s | `or(and, and)` |
+| `compose-multi-allow-deny` | two ALLOW `all`s + DENY | `and(not(gt), or(and, and))` |
+| `compose-or-not` | ALLOW + ALLOW `none` | `or(gt, not(eq))` |
+| `compose-deny-only` | unconditional ALLOW + DENY | `not(contains)` |
+| `compose-two-deny` | ALLOW + two DENYs | `and(not(or(eq, gt)), ge)` |
+| `compose-derived-role` | ALLOW on a derived role with a resource condition | `and(lt, eq)` |
+| `compose-derived-deny` | ALLOW + unconditional DENY on that derived role | `and(not(eq), lt)` |
+| `compose-variable` | ALLOW + DENY, each through a policy variable | `and(not(gt), in)` |
+
+Three things are deliberate:
+
+- **They share the `adversarial` resource kind.** The issue proposed a second resource kind, but
+  every harness plans the one `resourceKind` in `seeds.json` against one seed table, so a second
+  kind would have been a second corpus. Composition is a property of the rules for an action, not
+  of the kind, and DENY rules, derived roles and variables only reach the actions that reference
+  them: regenerating the fixtures after adding them moved none of the existing 301.
+  `validate-corpus.sh` still rejects a repeated action outside the `compose-` prefix, where a second
+  rule is a copy-paste that silently ORs another condition into an existing shape.
+- **Every DENY reads a column no seed holds NULL.** A DENY over a NULL-bearing column is the one
+  composition where `check()` disagrees with itself across evaluation modes while the plan does
+  not. `ALLOW aNumber >= 0` plus `DENY aOptionalString == "set"` plans to
+  `and(not(eq(aOptionalString, "set")), ge(aNumber, 0))` in both modes. For a row whose
+  `aOptionalString` is NULL — sent as a missing attribute, the default convention — strict mode
+  lets the erroring DENY deny the row, and the plan agrees; default mode drops the erroring DENY and
+  **allows** the row, which no filter faithful to that plan can return, because the negated
+  comparison errors (and so denies) under CEL. On the pinned PDP that is a4, a8, c2 and e1. It is
+  an under-grant, so it fails safe, but it is a mode-dependent planner/check disagreement rather
+  than an adapter shape, and `knownDivergences` has no per-mode form to hold it, so it is tracked
+  separately rather than parked here.
+- **The derived role reads the resource.** `evaluation-probe`'s derived role reads only the
+  principal, so the planner folds it before it can reach an adapter. `compose_flagged` is
+  `R.attr.aBool == true`, so it survives into the plan — negated, in `compose-derived-deny`.
 
 ### The degeneracy guard
 

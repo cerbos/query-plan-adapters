@@ -8,6 +8,13 @@ apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
   resource: adversarial
+  # Composition probes only (#487): the derived role and the two variables below are referenced by
+  # the `compose-*` actions at the end of this file and by nothing else.
+  importDerivedRoles: ["adversarial_compose"]
+  variables:
+    local:
+      compose_teamed: R.attr.aOptionalString in P.attr.fewTeams
+      compose_large: R.attr.aNumber > 10
   rules:
     # -- value-first comparisons (planner preserves source order) --
     - actions: ["vf-le"]
@@ -3271,3 +3278,179 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aNumberList[0] == true || R.attr.aNumber == 5'
+
+    # -- rule composition (#487) --
+    # Every action above is one EFFECT_ALLOW rule for one role, so the root of every plan was the
+    # root of one condition. Real policies compose: a conditional DENY beside a conditional ALLOW
+    # plans to `and(X, not(Y))`, several conditional ALLOWs to `or(...)`, a derived role with a
+    # resource condition to a conjunction with the rule's own condition, and a variable to whatever
+    # it expands to. These actions make the PLANNER build those roots from separate rules rather
+    # than spelling them in one expression, so an adapter's special-case handling of the root
+    # (convex's filter/post-filter split, a root-only guard) meets the composed shape.
+    #
+    # Every DENY here reads a column no seed holds NULL, deliberately: a DENY over a NULL-bearing
+    # column plans identically in both evaluation modes but check() does not agree with itself
+    # across them — see conformance/README.md, "Rule composition".
+
+    # and(not(gt), eq): conditional ALLOW + conditional DENY. Oracle: aBool true and aNumber <= 10.
+    # c1/d1/e1/f1/h1.. witness the DENY (aBool true, aNumber > 10); a2/a5/b2.. the ALLOW.
+    - actions: ["compose-allow-deny"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aBool == true
+
+    - actions: ["compose-allow-deny"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber > 10
+
+    # or(and, and): two conditional ALLOWs, each an `all`. Oracle a2/a5/b2 from the second branch,
+    # f1/h1..h7 from the first. a1 (true, 5) and b4 (false, 8) each satisfy one conjunct of each.
+    - actions: ["compose-multi-allow"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool == true
+              - expr: R.attr.aNumber > 15
+
+    - actions: ["compose-multi-allow"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool == false
+              - expr: R.attr.aNumber < 7
+
+    # and(not(gt), or(and, and)): the two ALLOWs above plus a DENY, which the planner hoists over
+    # the disjunction. h5/h6/h7 (aNumber 21..23) are allowed by compose-multi-allow and denied here.
+    - actions: ["compose-multi-allow-deny"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool == true
+              - expr: R.attr.aNumber > 15
+
+    - actions: ["compose-multi-allow-deny"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.aBool == false
+              - expr: R.attr.aNumber < 7
+
+    - actions: ["compose-multi-allow-deny"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber > 20
+
+    # or(gt, not(eq)): two ALLOWs, one of them a `none`. Oracle: every aBool false row, plus
+    # h5/h6/h7 (aBool true, aNumber > 20).
+    - actions: ["compose-or-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber > 20
+
+    - actions: ["compose-or-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          none:
+            of:
+              - expr: R.attr.aBool == true
+
+    # not(contains): an UNCONDITIONAL ALLOW with a conditional DENY — the most common real policy
+    # ("everyone may, except ...") — so the root is a bare negation of a literal-needle LIKE.
+    # a2/a4/b2/c2 hold an underscore and are denied.
+    - actions: ["compose-deny-only"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+
+    - actions: ["compose-deny-only"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aString.contains("_")
+
+    # and(not(or(eq, gt)), ge): two DENYs, which the planner joins under ONE negation. Oracle:
+    # aNumber >= 0 and aBool true and aNumber <= 18. b4/b6/g1 witness the first DENY, h2/h3 the
+    # second, a5/b3 the ALLOW.
+    - actions: ["compose-two-deny"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber >= 0
+
+    - actions: ["compose-two-deny"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aBool == false
+
+    - actions: ["compose-two-deny"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber > 18
+
+    # and(lt, eq): a derived role whose condition reads the RESOURCE (compose_flagged, aBool true)
+    # composed with the rule's own condition. evaluation-probe's derived role reads only the
+    # principal, so it always folds; this one reaches the plan. a2/a5 witness the role.
+    - actions: ["compose-derived-role"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["compose_flagged"]
+      condition:
+        match:
+          expr: R.attr.aNumber < 5
+
+    # and(not(eq), lt): an unconditional DENY scoped to that derived role, so the role's resource
+    # condition is what gets negated. Oracle: aBool false and aNumber < 12.
+    - actions: ["compose-derived-deny"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aNumber < 12
+
+    - actions: ["compose-derived-deny"]
+      effect: EFFECT_DENY
+      derivedRoles: ["compose_flagged"]
+
+    # and(not(gt), in): an ALLOW and a DENY each spelled through a variable, one of which mixes a
+    # principal list into a resource comparison. Oracle a1/a6/b2/h4: h1/h2/h3/h5 hold "set" and are
+    # denied by compose_large; rows whose aOptionalString is NULL stay denied through the ALLOW.
+    - actions: ["compose-variable"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: V.compose_teamed
+
+    - actions: ["compose-variable"]
+      effect: EFFECT_DENY
+      roles: ["USER"]
+      condition:
+        match:
+          expr: V.compose_large

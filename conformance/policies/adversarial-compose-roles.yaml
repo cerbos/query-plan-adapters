@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
+#
+# Derived roles for the adversarial suite's rule-composition actions (`compose-*`, #487). The
+# condition reads the RESOURCE, so the role survives into the plan instead of folding away.
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: adversarial_compose
+  definitions:
+    - name: compose_flagged
+      parentRoles: ["USER"]
+      condition:
+        match:
+          expr: R.attr.aBool == true

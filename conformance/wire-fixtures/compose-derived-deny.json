@@ -1,0 +1,47 @@
+{
+  "action": "compose-derived-deny",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "expression": {
+              "operator": "not",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "eq",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": true
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "lt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 12
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
