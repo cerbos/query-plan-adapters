@@ -90,6 +90,406 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "compose-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "gt",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aNumber"
+                    ]
+                  },
+                  10
+                ]
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aBool"
+                ]
+              },
+              true
+            ]
+          }
+        ]
+      }
+    },
+    "compose-deny-only": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "lt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              0
+            ]
+          }
+        ]
+      }
+    },
+    "compose-derived-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  true
+                ]
+              }
+            ]
+          },
+          {
+            "op": "lt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              12
+            ]
+          }
+        ]
+      }
+    },
+    "compose-derived-role": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "lt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              5
+            ]
+          },
+          {
+            "op": "eq",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aBool"
+                ]
+              },
+              true
+            ]
+          }
+        ]
+      }
+    },
+    "compose-multi-allow": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "or",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  true
+                ]
+              },
+              {
+                "op": "gt",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aNumber"
+                    ]
+                  },
+                  15
+                ]
+              }
+            ]
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  false
+                ]
+              },
+              {
+                "op": "lt",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aNumber"
+                    ]
+                  },
+                  7
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "compose-multi-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "gt",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aNumber"
+                    ]
+                  },
+                  20
+                ]
+              }
+            ]
+          },
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": "eq",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aBool"
+                        ]
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    "op": "gt",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aNumber"
+                        ]
+                      },
+                      15
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": "eq",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aBool"
+                        ]
+                      },
+                      false
+                    ]
+                  },
+                  {
+                    "op": "lt",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aNumber"
+                        ]
+                      },
+                      7
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "compose-or-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "or",
+        "args": [
+          {
+            "op": "gt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              20
+            ]
+          },
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "eq",
+                "args": [
+                  {
+                    "op": "field",
+                    "args": [
+                      "aBool"
+                    ]
+                  },
+                  true
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "compose-two-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "db",
+      "filter": {
+        "op": "and",
+        "args": [
+          {
+            "op": "not",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": "eq",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aBool"
+                        ]
+                      },
+                      false
+                    ]
+                  },
+                  {
+                    "op": "gt",
+                    "args": [
+                      {
+                        "op": "field",
+                        "args": [
+                          "aNumber"
+                        ]
+                      },
+                      18
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "gte",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              0
+            ]
+          }
+        ]
+      }
+    },
+    "compose-variable": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "split",
+      "filter": {
+        "op": "not",
+        "args": [
+          {
+            "op": "gt",
+            "args": [
+              {
+                "op": "field",
+                "args": [
+                  "aNumber"
+                ]
+              },
+              10
+            ]
+          }
+        ]
+      }
+    },
     "concat-f2f": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
