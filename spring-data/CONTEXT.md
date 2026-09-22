@@ -76,13 +76,13 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   compared row-by-row against `check()` with attributes mirroring the DB rows
   exactly. DB NULL is a *missing* attribute on the check side. No
   hand-computed expectations; a degeneracy guard prevents vacuous passes.
-- **Degenerate by construction** — an oracle-compared corpus action whose
-  `check()` oracle is empty or total *by the corpus's own design* (no seed
-  holds a chain with zero children; every seed's `aString` is shorter than
-  2^32). The degeneracy guard sweeps every compared action and forbids such
-  an oracle, so each of these is allowlisted with the reason, and the
-  allowlist is asserted in both directions: the entry must still be compared,
-  and must still be degenerate.
+- **Degenerate by construction** — a corpus action whose `check()` oracle is
+  empty or total *by the corpus's own design* (no seed holds a chain with zero
+  children; every seed's `aString` is shorter than 2^32). The degeneracy guard
+  sweeps every compared action and forbids such an oracle, so each of these is
+  allowlisted with the reason in `degenerateOracles` in
+  `conformance/actions.json` — one list every harness shares — and every entry
+  is asserted to have exactly the oracle it declares.
 - **Refusal site** — the `throw` in the translator's walk that a fail-closed
   corpus shape actually reaches, named by mechanism ("computed leaf operand",
   "modulo") rather than by message wording. `actions.json` pins the message

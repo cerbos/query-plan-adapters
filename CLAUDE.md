@@ -383,14 +383,17 @@ So when you add, fix, or change the handling of any shape:
    names the mechanism the `reason` declares; when the two disagree, the reason is usually naming a
    limitation the walk never reaches.
 5. **Bump the per-harness tripwires deliberately** — corpus size, oracle/throwing counts, and the
-   degeneracy-guard action lists. Add the new action to each guard so it cannot pass vacuously,
-   choosing the right list per adapter: the *compared* list where that adapter translates the
-   shape, the *liveness-only* list where it throws. Every entry asserts its own side of that split,
-   so a guard list copied from another harness fails instead of quietly guarding nothing.
-   The exception is an action whose oracle is empty *by construction* (a `nullRepresentationOmitted`
-   probe): the guard asserts a non-empty, non-total oracle, so such an action must stay out of both
-   lists and carry a different anti-vacuity assertion — one pinning *why* its rejection is required,
-   not merely that a rejection happens. See `conformance/README.md`.
+   liveness-only degeneracy probes. Every harness asserts a non-empty, non-total oracle for
+   *every* action it compares, so a translated shape needs no list entry; where an adapter throws
+   on the new action and its group has no compared member there, add it to that harness's
+   *liveness-only* list, which asserts the adapter does not compare it. An oracle that is empty or
+   total *by construction* (a `nullRepresentationOmitted` probe, a type error, a planner fold) is
+   declared once in `conformance/actions.json`'s `degenerateOracles` with its reason — the only
+   exemption from the sweep, and every harness asserts each entry is exactly as degenerate as it
+   says. A degenerate oracle on a new action is usually a missing discriminating seed: fix the seed
+   first. An empty-by-construction probe also carries a different anti-vacuity assertion — one
+   pinning *why* its rejection is required, not merely that a rejection happens. See
+   `conformance/README.md`.
 6. **Update the affected READMEs' `Conformance contract` tables** in the same commit.
 
 ### What a translator unit test may pin

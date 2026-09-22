@@ -38,6 +38,9 @@ if ! jq -e '
   and check("knownDivergences";
     (.knownDivergences | entries(["action", "reason", "adapters"]; ["relatedIssue"]))
     and all(.knownDivergences[]; .adapters | type == "array" and all(.[]; text)))
+  and check("degenerateOracles";
+    (.degenerateOracles | entries(["action", "oracle", "reason"]; []))
+    and all(.degenerateOracles[]; .oracle == "empty" or .oracle == "total"))
 ' actions.json >/dev/null; then
   echo "actions.json entries must use their declared keys and non-empty metadata types" >&2
   exit 1
@@ -67,6 +70,29 @@ fi
 
 if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/classified-actions"; then
   echo "Every policy action must be classified exactly once in actions.json"
+  exit 1
+fi
+
+# `degenerateOracles` is the one way out of every harness's non-degeneracy sweep, so an entry has to
+# name a real, oracle-able action exactly once. A `knownDivergences` action is never oracle-compared,
+# so exempting it would exempt nothing; each harness asserts the declared oracle itself.
+jq -r '.degenerateOracles[].action' actions.json | sort >"${VALIDATION_TMP}/degenerate-actions"
+if duplicates="$(uniq -d "${VALIDATION_TMP}/degenerate-actions")" && [[ -n "${duplicates}" ]]; then
+  echo "Actions listed more than once in degenerateOracles:"
+  echo "${duplicates}"
+  exit 1
+fi
+if unknown="$(comm -23 "${VALIDATION_TMP}/degenerate-actions" "${VALIDATION_TMP}/classified-actions")" \
+  && [[ -n "${unknown}" ]]; then
+  echo "degenerateOracles names actions the corpus does not classify:"
+  echo "${unknown}"
+  exit 1
+fi
+if ! jq -e '
+  ([.knownDivergences[].action] - ([.knownDivergences[].action] - [.degenerateOracles[].action]))
+  | length == 0
+' actions.json >/dev/null; then
+  echo "A knownDivergences action is never oracle-compared and cannot be listed in degenerateOracles"
   exit 1
 fi
 

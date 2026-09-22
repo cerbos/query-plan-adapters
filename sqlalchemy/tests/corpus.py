@@ -127,6 +127,9 @@ class ActionsFile:
         self.known_divergences: List[Dict[str, Any]] = _require_list(
             raw, "knownDivergences"
         )
+        self.degenerate_oracles: Dict[str, str] = _degenerate_oracles(
+            _require_list(raw, "degenerateOracles")
+        )
 
     def manifest_actions(self) -> Set[str]:
         """Every action the corpus classifies, across every group."""
@@ -157,6 +160,33 @@ def _require_dict(raw: Dict[str, Any], key: str) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise AssertionError(f"actions.json {key} must be an object")
     return value
+
+
+DEGENERATE_ORACLE_SHAPES = ("empty", "total")
+
+
+def _degenerate_oracles(entries: List[Any]) -> Dict[str, str]:
+    """``degenerateOracles`` as ``action -> "empty" | "total"``.
+
+    The corpus-level allowlist of actions whose check() oracle is empty or total BY
+    CONSTRUCTION. Every other compared action must have a non-empty, non-total oracle,
+    which the harness sweeps; a shape outside the two values would silently exempt an
+    action from that sweep, so it is a loud failure here instead.
+    """
+    oracles: Dict[str, str] = {}
+    for index, entry in enumerate(entries):
+        label = f"actions.json degenerateOracles[{index}]"
+        if not isinstance(entry, dict) or not isinstance(entry.get("action"), str):
+            raise AssertionError(f"{label} must be an object with a string action")
+        if entry.get("oracle") not in DEGENERATE_ORACLE_SHAPES:
+            raise AssertionError(
+                f"{label} ({entry['action']}) oracle must be one of "
+                f"{DEGENERATE_ORACLE_SHAPES}, got {entry.get('oracle')!r}"
+            )
+        if entry["action"] in oracles:
+            raise AssertionError(f"{label} repeats {entry['action']}")
+        oracles[entry["action"]] = entry["oracle"]
+    return oracles
 
 
 def parse_actions_file(raw: Dict[str, Any]) -> ActionsFile:

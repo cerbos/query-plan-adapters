@@ -58,131 +58,39 @@ RSpec.describe "adversarial conformance" do
 
   # --- the degeneracy guard (conformance/README.md, "The degeneracy guard") ------------------
   #
-  # One action for each group of hostile shapes in policies/adversarial.yaml that this adapter
-  # COMPARES with the oracle. Each one is asserted to be in the oracle set, so moving an action
-  # into adapterUnsupported fails this list instead of emptying it without a word.
+  # If the oracle gave the same result for every row, the differential comparison would agree
+  # and prove nothing: a PDP that denies everything, or a policy that did not load, looks
+  # exactly like a passing adapter. So every oracle-compared action is swept: before its ids are
+  # compared, its oracle is asserted non-empty and short of every seed.
   #
-  # The list belongs to this adapter. Do not copy it from another harness: this adapter compares
-  # 227 of the 288 conformance actions, and a list built for an adapter that compares fewer would
-  # leave most of the groups here with no guard at all (cerbos/query-plan-adapters#324).
-  #
-  # Each entry has an oracle that is not empty and not every seed. Some actions cannot join
-  # either list, because their oracle is degenerate BY CONSTRUCTION and no adapter can change
-  # that: in-empty, p-double-frac, arith-add-eq-frac, nan-ord-le, size-huge-gt,
-  # w1-size-zero-chain and w1-not-size-chain each allow nothing, and size-huge-lt allows every
-  # seed. Their groups are guarded by a sibling here.
-  #
-  # Two more are degenerate for a reason that makes a bare "it threw" worthless, so each carries
-  # its own anti-vacuity test below instead: filter-as-conjunct, and the null-eq-missing probe
-  # under the `omitted` representation. Both pin WHY the refusal is required, not merely that
-  # one happens.
-  DEGENERACY_GUARD_ACTIONS = (%w[
-    cast-not-string-missing cast-not-string-null
-    projection-exists-eq
-    projection-exists-not-eq
-    rel-not-eq-hop
-    rel-not-contains-hop
-    rel-not-hierarchy-hop
-
-    vf-le
-    in-single
-    like-percent
-    cs-eq
-    unicode-eq
-    double-threshold
-    all-on-empty
-    outer-attr-depth2
-    triple-negation
-    optional-ne
-    field-to-field
-    size-threshold
-    ternary-nested
-    f2f-contains
-    arith-add
-    p-deep-nest
-    n-not-all-null
-    cr-contains
-    cr-div-zero-ne
-    cr-div-neg-zero
-    cr-size-frac-ge
-    nan-ord-ternary
-    hier-ancestor-ff
-    hier-meta-like
-    ts-eq
-    null-eq
-    null-ne
-    in-null-elem-mixed
-    in-var-var
-    macro-depth3-all
-    pv-exists
-    pv-all
-    w2-outer-relation
-    w1-all-chain
-    w1-not-exists-chain
-    w1-size-nonneg-chain
-    w1-not-in-chain
-    w1-not-hasint-chain
-    null-value-ne-const
-    null-value-not-eq-const
-    null-value-not-in-const
-    null-value-f2f
-    null-value-pv-not-exists
-    cs-contains
-    rel-eq-hop
-    rel-bool-hop2
-    rel-ne-null-hop
-    rel-hop-and-root
-    id-eq-const
-    id-f2f
-    id-concat
-    concat-f2f
-    cast-string-double
-    hier-list-id
-  ] +
-    # Root position and bare operand forms (#388): one for each hazard — the negation over a
-    # bare ordering, where every other negated ordering in the corpus wraps a size() or a
-    # ternary; the bare boolean at the ROOT of the condition; and the collection subquery
-    # DISJOINED with a scalar predicate rather than conjoined with one, where an adapter that
-    # builds its EXISTS as a join loses the rows the other arm allows.
-    %w[not-lt root-bare-bool or-eq-exists] +
-    # Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction; the
-    # negated LIKE against a COLUMN needle, where a definite-FALSE null guard would leak every
-    # NULL-needle row through the NOT; the value-first hasIntersection, whose operands reach
-    # the wire the other way round; and the BELOW-cliff unroll of a principal collection, the
-    # shape a principal holding three teams produces.
-    %w[not-and not-contains vf-hasint pv-exists-unrolled] +
-    # Direct membership keeps a value list at both principal-list sizes (#411).
-    %w[pv-in pv-in-unrolled] +
-    # CEL `%`, which is integer-only and so arrives under an int() cast. This adapter lowers
-    # both, which is why the entry is here rather than among the probes below: ent, pgx and
-    # spring-data all refuse the shape at the cast.
-    %w[arith-mod] +
-    # string() over a boolean column, the half of the cast pair where a CAST disagrees with CEL
-    # (#418). It goes through a CASE and not through the CAST that cast-string-double proves,
-    # so that sibling cannot speak for it.
-    %w[cast-string-bool] +
-    # The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
-    # membership in a map literal (the planner folds it to its key list), and a double literal
-    # beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and
-    # sits in neither list; its sibling carries the group.
-    %w[string-size-gt0 in-map-keys double-huge-gt] +
-    %w[
-      wildcard-contains wildcard-endswith size-ge-one
-      in-numbers pv-shadow pv-not-exists
-      pv-not-all pv-exists-one root-not-bool
-      lambda-in-literal lambda-in-literal-neg lambda-ternary
-      in-var-var-omitted in-var-var-omitted-neg not-concat-unsolvable
-      not-concat-unsolvable-ne hier-overlaps-list-prefix not-hasint-empty-chain
-      not-nan-ord-le not-ternary-parent not-nan-order-string hasint-null-vf hasint-map-vf
-      hasint-map-null hasint-map-null-vf
-    ]).freeze
+  # The only exemptions are the corpus-level allowlist `degenerateOracles` in
+  # conformance/actions.json — actions whose oracle is empty or total BY CONSTRUCTION, for every
+  # adapter — and there the sweep asserts the declared shape exactly instead. No exemption lives
+  # in this file: an action that newly degenerates is a corpus question, not a local one.
+  def expect_oracle_shape(action, ids)
+    all_ids = ConformanceCorpus::SEEDS.map { |seed| seed.fetch("id") }.sort
+    declared = ConformanceCorpus::DEGENERATE_ORACLES[action]
+    why = "the differential cannot fail against a degenerate oracle; see degenerateOracles in " \
+          "conformance/actions.json"
+    case declared
+    when "empty"
+      expect(ids).to eq([]), "#{action}: degenerateOracles declares an empty oracle, but it " \
+        "allowed #{ids.inspect}; #{why}"
+    when "total"
+      expect(ids).to eq(all_ids), "#{action}: degenerateOracles declares a total oracle, but " \
+        "it allowed #{ids.inspect}; #{why}"
+    else
+      expect(ids).not_to be_empty, "#{action}: oracle allowed nothing — #{why}"
+      expect(ids.size).to be < all_ids.size, "#{action}: oracle allowed every seed — #{why}"
+    end
+  end
 
   # Shapes that this adapter REFUSES, kept because their group has no compared member here and
   # a non-degenerate oracle still proves that the PDP and the policy are live. Each one is
   # asserted NOT to be in the oracle set, so a shape that the adapter later learns to translate
-  # must move up into the list above rather than stay a weaker probe.
+  # leaves this list for the sweep rather than stays a weaker probe.
   #
-  # Two come from the arithmetic edge probes. The guard proper reaches that group through
+  # Two come from the arithmetic edge probes. The sweep reaches that group through
   # cr-div-zero-ne and cr-div-neg-zero, but each of those divides by a column BY ITSELF or by a
   # constant. Two sub-shapes are left with nothing compared: a denominator that is a DIFFERENT
   # column, and arithmetic composed ON a division. cr-div-then-add-ne is the second sub-shape
@@ -225,8 +133,8 @@ RSpec.describe "adversarial conformance" do
       expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(301)
       # Refusals must retain their pinned messages.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(72)
-      # Each new hostile group needs a non-degenerate representative.
-      expect(DEGENERACY_GUARD_ACTIONS.size).to eq(100)
+      # An action joins the corpus allowlist of degenerate oracles only deliberately.
+      expect(ConformanceCorpus::DEGENERATE_ORACLES.size).to eq(41)
     end
 
     # Adding a throwing action without a pinned message must fail the run and must not turn the
@@ -251,37 +159,15 @@ RSpec.describe "adversarial conformance" do
       expect(misclassified).to be_empty
     end
 
-    # This test protects the other tests. If the oracle gave the same result for all the rows,
-    # each comparison below would agree but would prove nothing. A PDP that denies all the rows
-    # is one cause. A policy that does not load is another cause. For these actions, the set of
-    # permitted rows must not be empty, and it must not contain all the rows.
-    it "produces a non-degenerate oracle" do
-      DEGENERACY_GUARD_ACTIONS.each do |action|
-        expect(ConformanceCorpus::ORACLE_ACTIONS).to include(action),
-          "#{action}: in the degeneracy guard but this adapter does not compare it"
-        expect_non_degenerate_oracle(action)
-      end
-    end
-
-    # These are deliberately degenerate: heterogeneous operands cannot allow, empty
-    # macros have CEL identity values, and scalar-vs-map inequality is always true.
-    it "pins the intentional empty and total oracles of the issue 414 probes" do
-      %w[
-        except-root pv-empty-exists pv-empty-not-all
-        pv-structs-null pv-structs-missing type-string-number
-        type-number-string type-columns type-size-bool
-        type-size-number type-hierarchy-number type-number-contains
-        type-needle-contains type-number-startswith type-needle-startswith
-        type-number-endswith type-needle-endswith eq-map
-        eq-map-null in-nested-list in-list-element
-        hasint-map-element
-      ].each do |action|
-        expect(AdversarialOracle.allowed_ids(action)).to be_empty, action
-      end
-      %w[
-        pv-empty-not-exists pv-empty-all ne-map
-      ].each do |action|
-        expect(AdversarialOracle.allowed_ids(action)).to eq(ConformanceCorpus::SEEDS.map { |seed| seed.fetch("id") }.sort), action
+    # The corpus allowlist of degenerate oracles, pinned in full whether or not this adapter
+    # compares the action. The sweep in "matches the check() oracle" reaches only the compared
+    # ones; this reaches the rest, so an entry that stopped being degenerate — or never was —
+    # fails here instead of exempting nothing in silence.
+    it "gives every degenerateOracles entry exactly the oracle it declares" do
+      ConformanceCorpus::DEGENERATE_ORACLES.each_key do |action|
+        expect(ConformanceCorpus::MANIFEST_ACTIONS).to include(action),
+          "#{action}: in degenerateOracles but not classified by the corpus"
+        expect_oracle_shape(action, AdversarialOracle.allowed_ids(action))
       end
     end
 
@@ -343,7 +229,7 @@ RSpec.describe "adversarial conformance" do
     # #387. `filter-as-conjunct` puts a filter() ONE LEVEL BELOW the root, where the guard that
     # refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — CEL
     # gives a list where the conjunction needs a boolean, so the PDP denies every seed — which
-    # is why it belongs to neither guard list above: both assert a non-empty, non-total oracle.
+    # is why degenerateOracles lists it, and why the sweep cannot speak for it.
     #
     # A bare "it raises" would then say nothing about whether refusing it is REQUIRED. This is
     # that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
@@ -368,7 +254,7 @@ RSpec.describe "adversarial conformance" do
     it "produces a non-degenerate oracle for the shapes it refuses" do
       LIVENESS_ONLY_PROBES.each do |action|
         expect(ConformanceCorpus::ORACLE_ACTIONS).not_to include(action),
-          "#{action}: this adapter now translates it, so move it into the guard proper"
+          "#{action}: this adapter now translates it, so the sweep guards it; drop the probe"
         expect_non_degenerate_oracle(action)
       end
     end
@@ -377,7 +263,9 @@ RSpec.describe "adversarial conformance" do
   describe "matches the check() oracle" do
     ConformanceCorpus::ORACLE_ACTIONS.each do |action|
       it action do
-        expect(adapter_filtered_ids(action)).to eq(AdversarialOracle.allowed_ids(action))
+        oracle = AdversarialOracle.allowed_ids(action)
+        expect_oracle_shape(action, oracle)
+        expect(adapter_filtered_ids(action)).to eq(oracle)
       end
     end
   end

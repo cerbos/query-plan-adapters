@@ -20,6 +20,7 @@ import {
   MAPPER,
   MODEL,
   classifyActionsForAdapter,
+  degenerateOraclesOf,
   requireMessage,
   assertPinnedPdp,
   pdpAddress,
@@ -381,115 +382,45 @@ const MANIFEST_ACTIONS = new Set([
 
 // -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
 //
-// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
-// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
-// drift into the other unnoticed.
-//
-// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, the two string-cast actions and
-// filter-as-conjunct are deliberately absent from both lists: their oracles are empty by
-// CONSTRUCTION (no seed holds a to-one parent with zero children, nor one with two or more; every
-// seed's aString raises in int()/double(); a filter() in boolean position is not evaluable at
-// all), so they cannot satisfy a non-empty assertion. filter-as-conjunct carries its own
-// anti-vacuity test instead — see "dropping the untranslatable half over-grants" below.
+// A differential cannot fail when the oracle is empty or total: an adapter returning no rows, or
+// every row, agrees with it. So every action this adapter ORACLE-COMPARES has its oracle's shape
+// asserted before the comparison, reusing the oracle that comparison computes. An action listed in
+// `degenerateOracles` in conformance/actions.json — the corpus-level allowlist of actions whose
+// oracle is empty or total BY CONSTRUCTION, shared by every harness — must have exactly that
+// oracle; every other compared action must have a non-empty, non-total one.
 
-const DEGENERACY_GUARD_ACTIONS = [
-  "not-ternary-parent",
-  "pv-in",
-  "pv-in-unrolled",
-  "vf-le",
-  // Prisma escapes no LIKE metacharacter at all, so every needle-carrying shape in that group is
-  // a liveness probe below. `[` is the one metacharacter it can leave alone — it is literal on
-  // every provider but SQL Server, which Prisma's own guard only rejects for hierarchy prefixes —
-  // so like-bracket is what carries the group's oracle comparison.
-  "like-bracket",
-  "all-on-empty",
-  "pv-exists",
-  "pv-all",
-  "null-eq",
-  "null-ne",
-  // The explicit-null convention against a non-null operand (#308). All five are compared rather
-  // than thrown, because the mapper declares the convention per attribute; every one of them
-  // under-granted by exactly the NULL-column rows before that declaration existed.
-  "null-value-ne-const",
-  "null-value-not-eq-const",
-  "null-value-not-in-const",
-  "null-value-f2f",
-  "null-value-pv-not-exists",
-  // The absent to-one parent (#309/#315/#316/#334): the four discriminating chain shapes Prisma
-  // translates. Its unsupported siblings are liveness probes below.
-  "w1-not-exists-chain",
-  "w1-not-in-chain",
-  "w1-not-hasint-chain",
-  "w1-ternary-chain-cond",
-  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
-  // depth, the root conjunction, and the disjunction, whose failure direction is an under-grant.
-  "projection-exists-eq",
-  "projection-exists-not-eq",
-  "rel-not-eq-hop",
-  "rel-not-contains-hop",
-  "rel-not-hierarchy-hop",
-  "rel-not-bool-hop",
-  "rel-ne-null-hop",
-  "rel-bool-hop2",
-  "rel-hop-and-root",
-  "rel-hop2-or-exists",
-  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
-  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
-  "cs-contains",
-  // The primary key as a filterable attribute (#376): the key against a constant, against a
-  // column under negation — the shape that emitted an invalid `not: { _ref }` before this
-  // change — the value-first concatenation solved back to a key equality, and the key inside a
-  // constructed hierarchy path.
-  "id-eq-const",
-  "id-f2f-ne",
-  "id-concat-vf",
-  "hier-list-id",
-  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
-  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
-  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
-  // predicate rather than conjoined with one.
-  "not-lt",
-  "root-bare-bool",
-  "or-eq-exists",
-  // Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction, the
-  // value-first hasIntersection whose operands are not interchangeable in the emitted query, and
-  // the BELOW-cliff unroll of a principal collection — the shape a principal with three teams
-  // produces, which nothing planned while pv-exists carried only the value-list form.
-  "not-and",
-  "vf-hasint",
-  "pv-exists-unrolled",
-  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
-  // membership in a map literal (the planner folds it to its key list), and a double literal
-  // beyond int64 on a double field. double-huge-lt has an EMPTY oracle by construction and sits
-  // in neither list; its sibling below carries the group.
-  "in-map-keys",
-  "double-huge-gt",
-  // Issue #414: each new non-degenerate shape guards its classified side.
-  "wildcard-contains",
-  "wildcard-endswith",
-  "size-ge-one",
-  "in-numbers",
-  "pv-shadow",
-  "pv-not-exists",
-  "pv-not-all",
-  "root-not-bool",
-  "lambda-in-literal",
-  "lambda-in-literal-neg",
-  "lambda-ternary",
-  "not-concat-unsolvable",
-  "not-concat-unsolvable-ne",
-  "hier-overlaps-list-prefix",
-  "not-hasint-empty-chain",
-  "not-nan-ord-le",
-  "hasint-null-vf",
-  "hasint-map-vf",
-  "hasint-map-null",
-  "hasint-map-null-vf",
-] as const;
+const DEGENERATE_ORACLES = degenerateOraclesOf(actionsFile);
+
+const ALL_SEED_IDS = SEEDS.map((seed) => seed.id).sort();
 
 /**
- * Shapes Prisma refuses to translate: they have no oracle comparison to guard, and stay here as
- * PDP/policy liveness probes for a group Prisma's own list cannot cover. See
+ * The degeneracy guard's per-action assertion over an oracle already computed, labelled so a
+ * failure names the action and says why it matters.
+ */
+function expectOracleShape(action: string, ids: string[]): void {
+  const declared = DEGENERATE_ORACLES.get(action);
+  const shape =
+    ids.length === 0
+      ? "empty"
+      : ids.length === ALL_SEED_IDS.length &&
+          ids.every((id, index) => id === ALL_SEED_IDS[index])
+        ? "total"
+        : "non-degenerate";
+  const expected = declared ?? "non-degenerate";
+  if (shape !== expected) {
+    throw new Error(
+      `${action}: the check() oracle is ${shape} (${ids.length} of ${ALL_SEED_IDS.length} seeds), ` +
+        `but ${declared === undefined ? "the action is not listed in" : `it is declared "${declared}" in`} ` +
+        "degenerateOracles in conformance/actions.json. The differential cannot fail for a degenerate " +
+        "oracle — an adapter returning no rows or every row would agree with it — so an empty or " +
+        "total oracle must be declared there by construction, and a declared one must stay exactly that."
+    );
+  }
+}
+
+/**
+ * Shapes Prisma refuses to translate: they have no oracle comparison for the sweep above to guard,
+ * and stay here as PDP/policy liveness probes for a group the compared actions cannot cover. See
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
@@ -883,7 +814,7 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
-/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+/** The liveness probes' assertion: a refused action's oracle is non-empty and non-total. */
 async function expectNonDegenerateOracle(action: string): Promise<void> {
   const ids = await oracleAllowedIds(action);
   expect({
@@ -1070,6 +1001,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           },
         ],
         nullRepresentationOmitted: [],
+        degenerateOracles: [],
       },
       "prisma"
     );
@@ -1093,6 +1025,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           },
           expectedUnsupported: [],
           nullRepresentationOmitted: [],
+          degenerateOracles: [],
         },
         "prisma"
       );
@@ -1100,43 +1033,19 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(classify).toThrow(/pins no throw message/);
   });
 
-  test("intentional empty and total issue 414 oracles retain their identities", async () => {
-    for (const action of [
-      "except-root",
-      "pv-empty-exists",
-      "pv-empty-not-all",
-      "pv-structs-null",
-      "pv-structs-missing",
-      "type-string-number",
-      "type-number-string",
-      "type-columns",
-      "type-size-bool",
-      "type-size-number",
-      "type-hierarchy-number",
-      "type-number-contains",
-      "type-needle-contains",
-      "type-number-startswith",
-      "type-needle-startswith",
-      "type-number-endswith",
-      "type-needle-endswith",
-      "eq-map",
-      "eq-map-null",
-      "in-nested-list",
-      "in-list-element",
-      "hasint-map-element"
-    ]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids).toEqual([]);
+  // Every action the corpus declares degenerate by construction, whether Prisma compares it or
+  // refuses it, keeps exactly the oracle it is declared with. The sweep in "matches the check()
+  // oracle" only reaches the compared ones; this is what keeps a declaration honest for the rest.
+  // One case per entry, each with its own test budget, since every entry costs a check() per seed.
+  test.each([...DEGENERATE_ORACLES])(
+    "degenerateOracles: %s has exactly its declared %s oracle",
+    async (action, declared) => {
+      expect(MANIFEST_ACTIONS.has(action)).toBe(true);
+      expect(await oracleAllowedIds(action)).toEqual(
+        declared === "empty" ? [] : ALL_SEED_IDS
+      );
     }
-    for (const action of [
-      "pv-empty-not-exists",
-      "pv-empty-all",
-      "ne-map"
-    ]) {
-      const ids = await oracleAllowedIds(action);
-      expect(ids).toEqual(SEEDS.map((seed) => seed.id).sort());
-    }
-  });
+  );
 
   test("manifest assigns all 301 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
@@ -1173,6 +1082,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         oracleAllowedIds(action),
         adapterFilteredIds(action),
       ]);
+      // The degeneracy guard, over the oracle this comparison already computed: an empty or total
+      // oracle makes the assertion below unfalsifiable unless the corpus declares it.
+      expectOracleShape(action, oracle);
       expect(filtered).toEqual(oracle);
     }
   );
@@ -1209,8 +1121,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
 
   // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
   // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
-  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
-  // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
+  // cannot evaluate a non-boolean conjunction — so it is declared in `degenerateOracles` and sits
+  // outside the liveness probes, and a bare "it throws" would say nothing about whether refusing it
+  // is REQUIRED.
   //
   // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
   // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
@@ -1517,21 +1430,9 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(stored).toEqual(expected);
   });
 
-  // Each action gets its own test budget: the combined serial oracle calls grow with the corpus.
-  // Guard the guard: every action must produce a non-empty, non-total oracle set, otherwise the
-  // differential comparison could pass vacuously (e.g. PDP denying all).
-  // Every entry must be an action Prisma actually oracle-compares. Moving one into Prisma's
-  // `adapterUnsupported` set must fail here rather than silently guard nothing (#324).
-  test.each(DEGENERACY_GUARD_ACTIONS)(
-    "%s has a non-degenerate compared oracle",
-    async (action) => {
-      expect(ORACLE_ACTIONS).toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
-  );
-
   // Shapes Prisma refuses to translate carry PDP/policy liveness only. Asserting the complement
-  // keeps the split honest: an action Prisma gains support for must move into the compared list.
+  // keeps the split honest: an action Prisma gains support for leaves this list, since the sweep
+  // over every compared action already guards it.
   test.each(DEGENERACY_LIVENESS_PROBES)(
     "%s has a non-degenerate liveness oracle",
     async (action) => {

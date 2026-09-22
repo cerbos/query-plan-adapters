@@ -350,128 +350,17 @@ def _modern_mapping():
 
 # -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
 #
-# Representative compared actions must have non-empty, non-total oracles. The
-# assertions below keep compared and liveness-only entries in their proper lists.
-# Parent-count probes and string-cast thresholds are excluded because their
-# oracles are empty for the current seeds (including h4's numeric string "0").
-DEGENERACY_GUARD_ACTIONS = (
-    # #396: failed string conversions remain unknown under negation.
-    "cast-not-string-missing",
-    "cast-not-string-null",
-    "projection-exists-eq",
-    "projection-exists-not-eq",
-    "rel-not-eq-hop",
-    "rel-not-contains-hop",
-    "rel-not-hierarchy-hop",
-    "vf-le",
-    "like-percent",
-    "all-on-empty",
-    "pv-in",
-    "pv-in-unrolled",
-    "pv-exists",
-    "pv-all",
-    "null-eq",
-    "null-ne",
-    # The explicit-null convention against a non-null operand (#308). All five are
-    # compared rather than raised, because the attribute map declares the convention
-    # per attribute; every one of them under-granted by exactly the NULL-column rows
-    # before that declaration existed.
-    "null-value-ne-const",
-    "null-value-not-eq-const",
-    "null-value-not-in-const",
-    "null-value-f2f",
-    "null-value-pv-not-exists",
-    # The absent to-one parent (#309/#315/#316/#333/#334).
-    "w1-all-chain",
-    "w1-not-exists-chain",
-    "w1-size-nonneg-chain",
-    "w1-not-in-chain",
-    "w1-not-hasint-chain",
-    "w1-ternary-chain-cond",
-    "w1-size-frac-le-chain",
-    # Column arithmetic under a division (#311); the zero-denominator arm is a
-    # liveness probe below.
-    "cr-div-other-column",
-    "cr-div-then-add",
-    "cr-div-then-add-ne",
-    # The real to-one join (#375): one per hazard — the negated hop, the null
-    # comparison, two-level depth, the root conjunction, and the disjunction,
-    # whose failure direction is an under-grant.
-    "rel-not-bool-hop",
-    "rel-ne-null-hop",
-    "rel-bool-hop2",
-    "rel-hop-and-root",
-    "rel-hop2-or-exists",
-    # Case sensitivity in STRING MATCHING, a different mechanism from cs-eq:
-    # collation governs `=`, and on SQLite only `PRAGMA case_sensitive_like`
-    # governs LIKE.
-    "cs-contains",
-    # The primary key as a filterable attribute (#376): against a constant,
-    # against a column under negation, and inside a concatenation in both
-    # operand orders. SQLAlchemy renders CEL's string `+` as `||` through the
-    # column's own type, so both concatenations compare rather than raise.
-    "id-eq-const",
-    "id-f2f-ne",
-    "id-concat",
-    "id-concat-vf",
-    # string() over a NUMERIC column, which lowers to a CAST, and over a BOOLEAN
-    # one, which lowers to a CASE because CAST renders 1/0 on SQLite (#418).
-    "cast-string-double",
-    "cast-string-bool",
-    # CEL's `+` between two COLUMNS (#391). SQLAlchemy renders it through the
-    # columns' own String type, so it emits `||` (or CONCAT on MySQL) without
-    # needing the plan to say which overload it is.
-    "concat-f2f",
-    # Root position and bare operand forms (#388): one per hazard — the
-    # negation over a bare ordering (every other negated ordering in the
-    # corpus wraps a size() or a ternary), the bare boolean at the ROOT of the
-    # condition, which this adapter refused outright before this change, and
-    # the collection subquery disjoined with a scalar predicate rather than
-    # conjoined with one.
-    "not-lt",
-    "root-bare-bool",
-    "or-eq-exists",
-    # Hazard classes the corpus missed (#387): the De Morgan branch over a
-    # conjunction; the negated LIKE against a COLUMN needle, where a
-    # definite-FALSE null guard would leak every NULL-needle row through the
-    # NOT; the value-first hasIntersection, which used to keep its wire order
-    # and hand the override a literal list where it expected a relation; and
-    # the BELOW-cliff unroll of a principal collection, the shape a principal
-    # with three teams produces.
-    "not-and",
-    "not-contains",
-    "vf-hasint",
-    "pv-exists-unrolled",
-    # The shapes an Elasticsearch audit found unguarded: size(string) as an
-    # emptiness check, membership in a map literal (the planner folds it to its
-    # key list), and a double literal beyond int64 on a double field.
-    # double-huge-lt has an EMPTY oracle by construction and sits in neither
-    # list; its sibling carries the group.
-    "string-size-gt0",
-    "in-map-keys",
-    "double-huge-gt",
-    # A positional read of a scalar list through its declared JSON storage (#227): the
-    # element itself, the negation that must keep an absent element UNKNOWN, the null
-    # element that is a value rather than an index error, and the second position that
-    # most rows do not have at all.
-    "index-scalar-list",
-    "index-scalar-list-not-eq",
-    "index-scalar-list-null",
-    "index-not-oob",
-    # The same read over lists of numbers and booleans, where the element's JSON type
-    # decides: a true element is not 1 and a 1 is not true, though SQLite stores both
-    # as 1 (conformance/README.md, "Number and boolean list elements").
-    "index-number-list",
-    "index-number-list-not-eq",
-    "index-bool-list",
-    "index-bool-list-not-eq",
-    "index-bool-list-vs-number",
-    "index-number-list-vs-bool",
-)
+# Every oracle-compared action is swept: `_assert_oracle_shape` runs on the oracle
+# each differential comparison already computes, and requires it to be non-empty
+# and non-total unless `degenerateOracles` in conformance/actions.json declares it
+# empty or total BY CONSTRUCTION, in which case it must be exactly that. A
+# degenerate oracle is one the differential cannot fail against — a PDP that
+# denies everything would otherwise pass every empty-oracle comparison.
+DEGENERATE_ORACLES: Dict[str, str] = MANIFEST.degenerate_oracles
 
-# Shapes this adapter refuses to translate: they have no oracle comparison to
-# guard, and stay here as PDP/policy liveness probes for a group the list above
-# cannot cover. See cerbos/query-plan-adapters#324.
+# Shapes this adapter refuses to translate: they have no oracle comparison for
+# the sweep to guard, and stay here as PDP/policy liveness probes for a group the
+# sweep cannot reach. See cerbos/query-plan-adapters#324.
 DEGENERACY_LIVENESS_PROBES = (
     # #396: every refused boundary shape retains a discriminating oracle.
     "regex-final-newline",
@@ -513,32 +402,7 @@ DEGENERACY_LIVENESS_PROBES = (
 # machine-readable definition is what makes that impossible.
 
 
-# #414: pin the observed compared/refused split and the intentional identities.
-DEGENERACY_GUARD_ACTIONS += (
-    "wildcard-contains",
-    "wildcard-endswith",
-    "size-ge-one",
-    "in-numbers",
-    "pv-shadow",
-    "pv-not-exists",
-    "pv-not-all",
-    "root-not-bool",
-    "lambda-in-literal",
-    "lambda-in-literal-neg",
-    "lambda-ternary",
-    "in-var-var-omitted",
-    "in-var-var-omitted-neg",
-    "not-concat-unsolvable",
-    "not-concat-unsolvable-ne",
-    "not-hasint-empty-chain",
-    "not-nan-ord-le",
-    "not-ternary-parent",
-    "not-nan-order-string",
-    "hasint-null-vf",
-    "hasint-map-vf",
-    "hasint-map-null",
-    "hasint-map-null-vf",
-)
+# #414: pin the observed refused split.
 DEGENERACY_LIVENESS_PROBES += (
     "regex-digit",
     "regex-case",
@@ -562,35 +426,6 @@ DEGENERACY_LIVENESS_PROBES += (
     "temporal-raw-eq",
     "eq-list",
     "ne-list",
-)
-EMPTY_ORACLE_ACTIONS = (
-    "except-root",
-    "pv-empty-exists",
-    "pv-empty-not-all",
-    "pv-structs-null",
-    "pv-structs-missing",
-    "type-string-number",
-    "type-number-string",
-    "type-columns",
-    "type-size-bool",
-    "type-size-number",
-    "type-hierarchy-number",
-    "type-number-contains",
-    "type-needle-contains",
-    "type-number-startswith",
-    "type-needle-startswith",
-    "type-number-endswith",
-    "type-needle-endswith",
-    "eq-map",
-    "eq-map-null",
-    "in-nested-list",
-    "in-list-element",
-    "hasint-map-element",
-)
-TOTAL_ORACLE_ACTIONS = (
-    "pv-empty-not-exists",
-    "pv-empty-all",
-    "ne-map",
 )
 
 
@@ -1058,6 +893,37 @@ def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
     return set(_ORACLE_CACHE[action])
 
 
+def _assert_oracle_shape(action: str, oracle: Set[str]) -> None:
+    """The sweep: a compared action's oracle must be able to fail the differential.
+
+    Runs on the oracle the comparison already computed, so it costs no PDP round trip.
+    An action declared in ``degenerateOracles`` must be exactly the empty or total set
+    it is declared as; every other one must be non-empty and non-total.
+    """
+    all_ids = {seed["id"] for seed in SEEDS}
+    declared = DEGENERATE_ORACLES.get(action)
+    pointer = (
+        "the differential cannot fail for a degenerate oracle — see "
+        "`degenerateOracles` in conformance/actions.json"
+    )
+    if declared == "empty":
+        assert oracle == set(), (
+            f"{action} is declared empty by construction but its oracle allows "
+            f"{sorted(oracle)}; {pointer}"
+        )
+    elif declared == "total":
+        assert oracle == all_ids, (
+            f"{action} is declared total by construction but its oracle denies "
+            f"{sorted(all_ids - oracle)}; {pointer}"
+        )
+    else:
+        assert 0 < len(oracle) < len(all_ids), (
+            f"{action} has a degenerate oracle ({len(oracle)} of {len(all_ids)} "
+            f"seeds allowed): {pointer}, and declare it there only if it is "
+            "degenerate by construction"
+        )
+
+
 def _plan_carries_null_literal(node) -> bool:
     """Whether any operand anywhere in the plan is a literal null, or a list containing one."""
     if not isinstance(node, dict):
@@ -1140,6 +1006,7 @@ class TestAdversarialConformance:
     )
     def test_matches_check_oracle(self, leg, action, request, adv_cerbos_client):
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
+        _assert_oracle_shape(action, oracle)
         if leg == "async":
             plan = _plan(adv_cerbos_client, action)
             query = get_query(
@@ -1226,6 +1093,7 @@ class TestAdversarialConformance:
         self, storage, action, adv_cerbos_client, pg_conn
     ):
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
+        _assert_oracle_shape(action, oracle)
         filtered = _adapter_filtered_ids(
             adv_cerbos_client,
             pg_conn,
@@ -1328,8 +1196,9 @@ class TestAdversarialConformance:
     # adapter is one of the two where that mattered: the held tuple reached
     # `and_()` and SQLAlchemy raised its own WHERE/HAVING-role ArgumentError,
     # fail-closed but naming a coercion rather than the mechanism. Its oracle is
-    # empty BY CONSTRUCTION, so it belongs to neither degeneracy-guard list and a
-    # bare "it raises" would say nothing about whether refusing it is REQUIRED.
+    # empty BY CONSTRUCTION (declared in `degenerateOracles`), so it cannot be a
+    # liveness probe and a bare "it raises" would say nothing about whether
+    # refusing it is REQUIRED.
     #
     # This is that argument. The other conjunct is `R.attr.aBool`, which the
     # adapter certainly can express and which `root-bare-bool` spells on its own;
@@ -1543,33 +1412,30 @@ class TestAdversarialConformance:
             for seed in SEEDS
         }
 
-    def test_oracle_is_not_degenerate(self, adv_cerbos_client):
-        # Guard the guard: these actions must produce a non-empty, non-total
-        # oracle set, otherwise the differential comparison could pass
-        # vacuously (e.g. a PDP that denies everything).
-        #
-        # Every entry is asserted to be an action this adapter actually
-        # oracle-compares. A list copied from another harness drifts into naming
-        # shapes it never compares, which guard nothing
-        # (cerbos/query-plan-adapters#324); the membership assertion turns moving
-        # an action into adapterUnsupported into a failure here rather than a
-        # silent no-op.
-        def assert_non_degenerate(action: str) -> None:
+    def test_liveness_probes_are_refused_and_not_degenerate(self, adv_cerbos_client):
+        # Every compared action is swept by `_assert_oracle_shape` inside the
+        # differential itself. What the sweep cannot reach is a group this adapter
+        # refuses outright: these probes keep the PDP and policy for that group
+        # proven live. Asserting the complement keeps the split honest — an action
+        # this adapter gains support for must leave this list, and the sweep then
+        # guards it.
+        for action in DEGENERACY_LIVENESS_PROBES:
+            assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
             ids = _oracle_allowed_ids(adv_cerbos_client, action)
             assert 0 < len(ids) < len(SEEDS), f"{action} has a degenerate oracle"
 
-        for action in DEGENERACY_GUARD_ACTIONS:
-            assert action in ORACLE_ACTIONS, f"{action} is not oracle-compared"
-            assert_non_degenerate(action)
-        # Asserting the complement keeps the split honest — an action this
-        # adapter gains support for must move up into the guard proper.
-        for action in DEGENERACY_LIVENESS_PROBES:
-            assert action not in ORACLE_ACTIONS, f"{action} is now oracle-compared"
-            assert_non_degenerate(action)
-
-        for action in EMPTY_ORACLE_ACTIONS:
-            assert _oracle_allowed_ids(adv_cerbos_client, action) == set()
-        for action in TOTAL_ORACLE_ACTIONS:
-            assert sorted(_oracle_allowed_ids(adv_cerbos_client, action)) == sorted(
-                seed["id"] for seed in SEEDS
-            )
+    def test_every_declared_degenerate_oracle_is_exactly_as_declared(
+        self, adv_cerbos_client
+    ):
+        # Every `degenerateOracles` entry, whether this adapter compares it or
+        # refuses it: the allowlist is what exempts an action from the sweep's
+        # non-degeneracy requirement, so an entry that stopped being empty or total
+        # by construction has to fail here rather than keep exempting it.
+        assert DEGENERATE_ORACLES
+        all_ids = {seed["id"] for seed in SEEDS}
+        manifest_actions = MANIFEST.manifest_actions()
+        for action, declared in DEGENERATE_ORACLES.items():
+            assert action in manifest_actions, f"{action} is not a corpus action"
+            oracle = _oracle_allowed_ids(adv_cerbos_client, action)
+            expected = set() if declared == "empty" else all_ids
+            assert oracle == expected, f"{action} is not {declared} by construction"

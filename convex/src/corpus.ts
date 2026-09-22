@@ -183,6 +183,17 @@ export interface KnownDivergence {
   adapters: string[];
 }
 
+/**
+ * A `degenerateOracles` entry: an action whose check() oracle is empty or total BY CONSTRUCTION.
+ * The differential cannot fail for such an oracle, so every other oracle-compared action is
+ * asserted non-empty and non-total, and each listed one is asserted to be exactly this.
+ */
+export interface DegenerateOracle {
+  action: string;
+  oracle: "empty" | "total";
+  reason: string;
+}
+
 export interface ActionsFile {
   conformance: string[];
   adapterUnsupported: Record<string, AdapterOutcome[]>;
@@ -190,6 +201,7 @@ export interface ActionsFile {
   expectedUnsupported: UnsupportedShape[];
   nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences: KnownDivergence[];
+  degenerateOracles: DegenerateOracle[];
 }
 
 const isUnsupportedShape = (value: unknown): value is UnsupportedShape =>
@@ -227,6 +239,12 @@ const isKnownDivergence = (value: unknown): value is KnownDivergence =>
   typeof value["action"] === "string" &&
   isStringArray(value["adapters"]);
 
+const isDegenerateOracle = (value: unknown): value is DegenerateOracle =>
+  isRecord(value) &&
+  typeof value["action"] === "string" &&
+  (value["oracle"] === "empty" || value["oracle"] === "total") &&
+  typeof value["reason"] === "string";
+
 /**
  * `actions.json`, validated rather than cast.
  *
@@ -245,11 +263,33 @@ export function parseActionsFile(value: unknown): ActionsFile {
     !Array.isArray(value["nullRepresentationOmitted"]) ||
     !value["nullRepresentationOmitted"].every(isNullRepresentationOmitted) ||
     !Array.isArray(value["knownDivergences"]) ||
-    !value["knownDivergences"].every(isKnownDivergence)
+    !value["knownDivergences"].every(isKnownDivergence) ||
+    !Array.isArray(value["degenerateOracles"]) ||
+    !value["degenerateOracles"].every(isDegenerateOracle)
   ) {
     throw new Error("Invalid conformance actions");
   }
   return value as unknown as ActionsFile;
+}
+
+/**
+ * `degenerateOracles` as a map from action to the oracle it is declared to have. An action listed
+ * twice is a corpus error rather than a last-one-wins lookup: two entries could disagree, and the
+ * harness would then assert whichever it happened to read last.
+ */
+export function degenerateOraclesOf(
+  manifest: ActionsFile,
+): ReadonlyMap<string, DegenerateOracle["oracle"]> {
+  const byAction = new Map<string, DegenerateOracle["oracle"]>();
+  for (const { action, oracle } of manifest.degenerateOracles) {
+    if (byAction.has(action)) {
+      throw new Error(
+        `actions.json: degenerateOracles lists "${action}" more than once`,
+      );
+    }
+    byAction.set(action, oracle);
+  }
+  return byAction;
 }
 
 /**

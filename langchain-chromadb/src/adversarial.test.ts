@@ -20,6 +20,7 @@ import {
   ADAPTER,
   FIELD_NAME_MAPPER,
   classifyActionsForAdapter,
+  degenerateOracleMap,
   nullRepresentationThrows,
   parseActionsFile,
   parseStringArray,
@@ -447,65 +448,48 @@ const MANIFEST_ACTIONS = new Set([
 
 // -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
 //
-// Chroma's flat scalar metadata leaves it the narrowest oracle set of any adapter, so the guard
-// is derived from that set rather than shared with the relational harnesses: every entry below is
-// asserted to be in `CHROMA_SUPPORTED_ACTIONS` (cerbos/query-plan-adapters#324). This is every
-// action Chroma oracle-compares except `in-empty`, whose oracle is empty by CONSTRUCTION
-// (`x in []` is false for every seed) and so cannot satisfy a non-empty assertion.
+// Every oracle-compared action is swept: the differential cannot fail when the check() oracle is
+// empty or total, because an adapter that returns nothing (or everything) agrees with it. So the
+// comparison test asserts the oracle's shape before it compares, against the corpus allowlist
+// `degenerateOracles` in conformance/actions.json — an action listed there must have exactly the
+// declared empty or total oracle, and every other action a non-empty, non-total one
+// (cerbos/query-plan-adapters#490). The allowlist is corpus data, shared by every harness; this
+// file keeps no exemption list of its own.
 
-const DEGENERACY_GUARD_ACTIONS = [
-  "pv-in",
-  "pv-in-unrolled",
-  "vf-le",
-  "vf-ge",
-  "vf-ne",
-  "nary-and",
-  "double-negation",
-  "triple-negation",
-  "cs-eq",
-  "empty-string-eq",
-  "unicode-eq",
-  "in-single",
-  "neg-number",
-  "p-struct",
-  "p-in-null-single",
-  "p-in-null-multi",
-  // The real to-one join (#375). Chroma translates 9 of the 15 — the positive scalar shapes over
-  // the flattened chain keys — so the guard names the ones it compares: a scalar leaf one hop out
-  // and the same two levels out. Its six negated, string-matching and composite siblings throw,
-  // and are liveness probes below.
-  "rel-eq-hop",
-  "rel-bool-hop2",
-  // The primary key as a filterable attribute (#376). Chroma translates exactly one of the six:
-  // the key against a literal, which is the only id-* shape that reduces to a bare metadata key
-  // on one side and a constant on the other. Its five siblings compare the key against a second
-  // key or wrap it in a computed operand, and are liveness probes below.
-  "id-eq-const",
-  // Root position and bare operand forms (#388). Chroma takes both scalar shapes: a bare
-  // metadata key under a negated ordering, and a bare boolean key as the whole condition. Its
-  // two collection-disjunction siblings throw and are liveness probes below.
-  "not-lt",
-  "root-bare-bool",
-  // Hazard classes the corpus missed (#387). Chroma takes the two scalar shapes: the De Morgan
-  // branch over a conjunction of metadata keys, and the BELOW-cliff unroll of a principal
-  // collection, which folds to a plain disjunction of equalities. Its eight collection-, cast-
-  // and pattern-carrying siblings throw and are liveness probes below.
-  "not-and",
-  "pv-exists-unrolled",
-  // Membership in a map literal (the planner folds it to its key list) and a double literal
-  // beyond int64 on a double field — the first shapes to compare aDouble here, since every other
-  // aDouble action is a nested expression Chroma refuses. double-huge-lt has an EMPTY oracle by
-  // construction and sits in neither list.
-  "in-map-keys",
-  "double-huge-gt",
-  // #414: every newly discriminating shape guards its observed execution side.
-  "in-numbers",
-  "root-not-bool",
-] as const;
+const DEGENERATE_ORACLES = degenerateOracleMap(actionsFile);
+const ALL_SEED_IDS = SEEDS.map(({ id }) => id).sort();
 
 /**
- * Shapes Chroma refuses to translate: they have no oracle comparison to guard, and stay here as
- * PDP/policy liveness probes for the groups Chroma's own list cannot cover — the collection
+ * Why `ids` is the wrong shape of oracle for `action`, or `undefined` when it is right. Returned
+ * rather than thrown so `expect(...).toBeUndefined()` prints the explanation as the diff.
+ */
+function oracleShapeProblem(action: string, ids: string[]): string | undefined {
+  const declared = DEGENERATE_ORACLES.get(action);
+  const pointer =
+    "the differential cannot fail for a degenerate oracle; see `degenerateOracles` in conformance/actions.json";
+  if (declared === "empty") {
+    return ids.length === 0
+      ? undefined
+      : `${action}: declared empty in degenerateOracles but ${ids.length} seed(s) allowed (${pointer})`;
+  }
+  if (declared === "total") {
+    return ids.length === ALL_SEED_IDS.length &&
+      ids.every((id, index) => id === ALL_SEED_IDS[index])
+      ? undefined
+      : `${action}: declared total in degenerateOracles but ${ids.length} of ${ALL_SEED_IDS.length} seeds allowed (${pointer})`;
+  }
+  if (ids.length === 0) {
+    return `${action}: oracle is empty — ${pointer}`;
+  }
+  if (ids.length >= ALL_SEED_IDS.length) {
+    return `${action}: oracle is total — ${pointer}`;
+  }
+  return undefined;
+}
+
+/**
+ * Shapes Chroma refuses to translate: the sweep never sees them, because they have no oracle
+ * comparison to guard, and they stay here as PDP/policy liveness probes for the groups Chroma's own list cannot cover — the collection
  * macros, the null-selecting directions, the chained relation (#309/#315/#316), the column
  * arithmetic (#311) and the numeric cast. See cerbos/query-plan-adapters#324.
  */
@@ -560,7 +544,8 @@ const DEGENERACY_LIVENESS_PROBES = [
   "concat-f2f",
   // The disjoined collection subquery (#388). Chroma's Where model has no nested-expression
   // form, so the exists branch is refused and the whole disjunction with it — the group's only
-  // fail-closed member here, kept as a probe because the compared pair above cannot cover it.
+  // fail-closed member here, kept as a probe because its compared siblings (not-lt,
+  // root-bare-bool) cannot cover it.
   "or-eq-exists",
   // #387, one probe per group Chroma cannot compare: the negated LIKE (no pattern operator to
   // negate), the modulo, the scalar-list index and the list equality over a projection (all
@@ -861,7 +846,7 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
-/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+/** The liveness probes' per-action assertion, labelled so a failure names the action. */
 async function expectNonDegenerateOracle(action: string): Promise<void> {
   const ids = await oracleAllowedIds(action);
   expect({
@@ -921,6 +906,9 @@ describe("adversarial conformance corpus", () => {
         oracleAllowedIds(action),
         adapterFilteredIds(action),
       ]);
+      // The degeneracy sweep: the oracle's shape first, so a comparison that could not fail is
+      // reported as that rather than as a pass.
+      expect(oracleShapeProblem(action, oracle)).toBeUndefined();
       expect(filtered).toEqual(oracle);
     },
   );
@@ -943,7 +931,7 @@ describe("adversarial conformance corpus", () => {
 
   // #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
   // refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
-  // cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+  // cannot evaluate a non-boolean conjunction — so it is a `degenerateOracles` entry, not a probe,
   // and a bare "it throws" would say nothing about whether refusing it is REQUIRED.
   //
   // This is that argument. The other conjunct is `R.attr.aBool`, which Chroma certainly can
@@ -1047,97 +1035,70 @@ describe("adversarial conformance corpus", () => {
     );
   });
 
-  test("oracle is not degenerate", async () => {
-    // Guard the guard: each of these actions must produce a non-empty, non-total oracle set,
-    // otherwise the differential comparison could pass vacuously (e.g. PDP denying all). The
-    // membership assertion is what keeps the list honest — Chroma compares 48 of the corpus's
-    // 288 conformance actions, so a guard list shared with a relational harness would name
-    // shapes it never compares (cerbos/query-plan-adapters#324).
-    for (const action of DEGENERACY_GUARD_ACTIONS) {
-      expect(CHROMA_SUPPORTED_ACTIONS).toContain(action);
-      await expectNonDegenerateOracle(action);
-    }
-    // Asserting the complement keeps the split honest — an action Chroma gains support for must
-    // move up into the guard proper.
+  test("liveness probes are refused and their oracles are not degenerate", async () => {
+    // The compared actions are swept inside the comparison test itself. These are the shapes
+    // Chroma throws on, so the sweep never reaches them: each must stay out of the compared set —
+    // an action Chroma gains support for leaves this list and is swept instead — and must still
+    // produce a non-empty, non-total oracle, so the PDP and policy behind the group stay live.
     for (const action of DEGENERACY_LIVENESS_PROBES) {
       expect(CHROMA_SUPPORTED_ACTIONS).not.toContain(action);
       await expectNonDegenerateOracle(action);
     }
   });
-  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
-  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
-  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
-  test.each([
-    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
-    {
-      action: "pv-empty-not-exists",
-      kind: PlanKind.ALWAYS_ALLOWED,
-      total: true,
-    },
-    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
-    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
-    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
-    {
-      action: "pv-structs-missing",
-      kind: PlanKind.ALWAYS_DENIED,
-      total: false,
-    },
-    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
-    {
-      action: "type-hierarchy-number",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-contains",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-contains",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-startswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-startswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-endswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-endswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
-    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
-  ])(
-    "$action preserves its intentional empty/total oracle and planner shape",
-    async ({ action, kind, total }) => {
+
+  // The planner kind each by-construction degenerate action folds to, for the ones this harness
+  // pinned before the corpus allowlist existed: dropping their inputs must not silently turn a
+  // conditional error probe into a folded plan. The oracle itself comes from the corpus below.
+  const DEGENERATE_PLAN_KINDS: ReadonlyMap<string, PlanKind> = new Map([
+    ["except-root", PlanKind.CONDITIONAL],
+    ["pv-empty-exists", PlanKind.ALWAYS_DENIED],
+    ["pv-empty-not-exists", PlanKind.ALWAYS_ALLOWED],
+    ["pv-empty-all", PlanKind.ALWAYS_ALLOWED],
+    ["pv-empty-not-all", PlanKind.ALWAYS_DENIED],
+    ["pv-structs-null", PlanKind.CONDITIONAL],
+    ["pv-structs-missing", PlanKind.ALWAYS_DENIED],
+    ["type-string-number", PlanKind.CONDITIONAL],
+    ["type-number-string", PlanKind.CONDITIONAL],
+    ["type-columns", PlanKind.CONDITIONAL],
+    ["type-size-bool", PlanKind.CONDITIONAL],
+    ["type-size-number", PlanKind.CONDITIONAL],
+    ["type-hierarchy-number", PlanKind.CONDITIONAL],
+    ["type-number-contains", PlanKind.CONDITIONAL],
+    ["type-needle-contains", PlanKind.CONDITIONAL],
+    ["type-number-startswith", PlanKind.CONDITIONAL],
+    ["type-needle-startswith", PlanKind.CONDITIONAL],
+    ["type-number-endswith", PlanKind.CONDITIONAL],
+    ["type-needle-endswith", PlanKind.CONDITIONAL],
+    ["eq-map", PlanKind.CONDITIONAL],
+    ["ne-map", PlanKind.CONDITIONAL],
+    ["eq-map-null", PlanKind.CONDITIONAL],
+    ["in-nested-list", PlanKind.CONDITIONAL],
+    ["in-list-element", PlanKind.CONDITIONAL],
+    ["hasint-map-element", PlanKind.CONDITIONAL],
+  ]);
+
+  test("every planner-kind pin names a degenerateOracles entry", () => {
+    expect(
+      [...DEGENERATE_PLAN_KINDS.keys()].filter(
+        (action) => !DEGENERATE_ORACLES.has(action),
+      ),
+    ).toEqual([]);
+  });
+
+  // Every `degenerateOracles` entry, compared here or not: its oracle is exactly the declared
+  // empty or total set, so the allowlist cannot drift from what the PDP decides.
+  test.each(actionsFile.degenerateOracles.map(({ action, oracle }) => [action, oracle]))(
+    "%s has the %s oracle degenerateOracles declares",
+    async (action, declared) => {
+      const kind = DEGENERATE_PLAN_KINDS.get(action);
       const [plan, ids] = await Promise.all([
-        planFor(action),
+        kind === undefined ? undefined : planFor(action),
         oracleAllowedIds(action),
       ]);
-      expect(plan.kind).toBe(kind);
-      expect(ids).toEqual(total ? SEEDS.map((seed) => seed.id).sort() : []);
+      if (kind !== undefined) {
+        expect(plan?.kind).toBe(kind);
+      }
+      expect(ids).toEqual(declared === "total" ? ALL_SEED_IDS : []);
     },
   );
 });

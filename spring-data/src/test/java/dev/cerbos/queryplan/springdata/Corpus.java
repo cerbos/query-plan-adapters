@@ -90,6 +90,13 @@ final class Corpus {
     record KnownDivergence(String action, String reason, List<String> adapters) {}
 
     /**
+     * A {@code degenerateOracles} entry: an action whose check() oracle is empty or total BY
+     * CONSTRUCTION. {@code oracle} is {@code "empty"} or {@code "total"}.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record DegenerateOracle(String action, String oracle, String reason) {}
+
+    /**
      * Every group in actions.json must be named here: Jackson silently drops a field this
      * record does not declare, and a dropped group makes its actions vanish from every count
      * and every parameterised case at once — the projection trap conformance/README.md warns
@@ -102,7 +109,8 @@ final class Corpus {
             Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
             List<UnsupportedShape> expectedUnsupported,
             List<NullRepresentationOmitted> nullRepresentationOmitted,
-            List<KnownDivergence> knownDivergences) {
+            List<KnownDivergence> knownDivergences,
+            List<DegenerateOracle> degenerateOracles) {
 
         List<AdapterUnsupported> adapterUnsupportedFor(String adapter) {
             return adapterUnsupported == null
@@ -123,6 +131,33 @@ final class Corpus {
             nullRepresentationOmitted.forEach(n -> manifest.add(n.action()));
             knownDivergences.forEach(d -> manifest.add(d.action()));
             return manifest;
+        }
+
+        /**
+         * The corpus allowlist of degenerate oracles, action to {@code "empty"} or
+         * {@code "total"}. Every harness sweeps each action it oracle-compares against this: a
+         * listed action must have exactly the declared oracle, and any other must have a
+         * non-empty, non-total one.
+         */
+        Map<String, String> degenerateOracleShapes() {
+            if (degenerateOracles == null) {
+                throw new IllegalStateException(
+                        "actions.json declares no degenerateOracles: the degeneracy sweep would"
+                                + " exempt nothing and fail every by-construction oracle");
+            }
+            Map<String, String> shapes = new TreeMap<>();
+            for (DegenerateOracle entry : degenerateOracles) {
+                if (!"empty".equals(entry.oracle()) && !"total".equals(entry.oracle())) {
+                    throw new IllegalStateException("degenerateOracles." + entry.action()
+                            + " declares oracle '" + entry.oracle()
+                            + "': it must be \"empty\" or \"total\"");
+                }
+                if (shapes.put(entry.action(), entry.oracle()) != null) {
+                    throw new IllegalStateException(
+                            "degenerateOracles lists '" + entry.action() + "' twice");
+                }
+            }
+            return shapes;
         }
 
         Set<String> skippedDivergences(String adapter) {

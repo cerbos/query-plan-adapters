@@ -349,7 +349,7 @@ The fix is in the translation, not in the classification: **a chained collection
 intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
 collapsing onto the empty-collection case. `w1-size-zero-chain`, `w1-not-size-chain` and
 `w1-size-frac-chain` have empty oracles by construction (no seed holds a parent with zero children,
-nor one with two or more) and therefore stay out of the degeneracy guard; `w1-all-chain`,
+nor one with two or more) and are therefore declared in `degenerateOracles`; `w1-all-chain`,
 `w1-not-exists-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
 `w1-ternary-chain-cond` and `w1-size-frac-le-chain` all have non-degenerate oracles and carry the
 anti-vacuity assertion for the group.
@@ -504,8 +504,8 @@ still reads a missing attribute, empty intersection through an absent parent, a 
 and raw temporal equality. `type-string-number` uses principal `zero: 0`, so MySQL coercing a
 non-numeric string to zero is observable. The type probes deliberately have empty oracles: their
 purpose is to catch a datastore matching values CEL cannot compare or operate on. Empty macro
-identities and non-scalar literal probes also need explicit empty/total-oracle assertions rather
-than inclusion in the non-degeneracy lists.
+identities and non-scalar literal probes are empty or total too, so every one of these is declared
+in `degenerateOracles` and asserted to be exactly that.
 
 `not-nan-ord-le` distinguishes the ternary arms under the Cerbos 0.55 / CEL 0.30 semantics.
 The boolean-true arm compares `1 <= 2`, so negation denies it. The boolean-false arm compares
@@ -876,8 +876,8 @@ flips to TRUE. Every negated column-needle match returned exactly the rows whose
 which the PDP denies. That is an over-grant in a published package, and no hand-written expectation
 had ever been in a position to notice it.
 
-`filter-as-conjunct`'s oracle is empty by construction, so it stays out of both degeneracy-guard
-lists and carries its own anti-vacuity assertion in every harness: the other conjunct is
+`filter-as-conjunct`'s oracle is empty by construction, so it is declared in `degenerateOracles`
+and carries its own anti-vacuity assertion in every harness: the other conjunct is
 `R.attr.aBool`, which `root-bare-bool` spells on its own and which every adapter can express, so an
 adapter that dropped the untranslatable half would emit that filter and return 14 rows the PDP
 denies. The assertion pins that, not merely that a rejection happens.
@@ -894,35 +894,45 @@ results on its compared or refusal side.
 
 ### The degeneracy guard
 
-The comparison in step 4 can pass vacuously if the oracle itself is trivial (e.g. the PDP denies
-every row, or allows every row, regardless of what the adapter does). Every harness must assert,
-for at least a handful of representative actions, that the oracle result is neither empty nor the
-full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`). This guards the guard: without it, a
-harness whose PDP connection or policy load silently failed would still pass every comparison.
+The comparison in step 4 can pass vacuously if the oracle itself is trivial. An empty oracle still
+catches an over-grant, because an adapter that returns anything disagrees with it; a **total**
+oracle catches nothing, because an adapter returning every row agrees with it. And a harness whose
+PDP connection or policy load silently failed would pass every comparison against an oracle that
+denies everything.
 
-**Derive the list per adapter; never copy another harness's.** The guard protects an oracle
-*comparison*, so an entry naming a shape that adapter never compares — because it sits in that
-adapter's `adapterUnsupported` set, or in the global `expectedUnsupported` — protects nothing. A
-copied list drifts into exactly that as classifications diverge, and the drift is invisible:
-nothing fails, the list simply stops meaning what it says (cerbos/query-plan-adapters#324). Each
-harness therefore keeps two lists and asserts they are complements of its own oracle set:
+So every harness asserts, for **every** action it oracle-compares, that the oracle is neither empty
+nor the full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`). The assertion runs on the
+oracle the comparison already computed, so it costs no extra PDP round trip. It used to cover a
+representative sample per harness, and the sample left every action it did not name free to go
+degenerate unnoticed — on some harnesses fewer than half of the compared actions were guarded
+([#490](https://github.com/cerbos/query-plan-adapters/issues/490)).
 
-- **the guard proper** — a representative sample of the actions the adapter *does* oracle-compare,
-  one per hostile group it can express. Each entry is asserted to be in the adapter's oracle set,
-  so moving an action into `adapterUnsupported` fails the guard instead of quietly emptying it.
-- **liveness-only probes** — shapes the adapter refuses to translate, kept because the group has no
-  compared member for that adapter and the non-degenerate oracle still proves the PDP and policy
-  are live. Each entry is asserted *not* to be in the oracle set, so a shape the adapter later
-  gains support for has to be promoted into the guard proper rather than staying a weaker probe.
+**`degenerateOracles` in `actions.json` is the only way out of that sweep.** It lists every action
+whose oracle is empty or total *by construction*, with `"oracle": "empty"` or `"total"` and a
+reason naming why — a type error, a planner fold, an IEEE identity, a seed set that holds no
+witness. It is corpus data, not a per-harness list, because the oracle is a property of the PDP and
+the corpus and never of an adapter: one list, asserted by every harness, cannot drift the way
+per-harness copies did. Every harness asserts it in both directions:
 
-Both lists still assert the non-empty, non-total oracle. The exclusion for an action whose oracle
-is empty *by construction* is unchanged: it belongs in neither list (see
-`nullRepresentationOmitted` above, and
-`w1-size-zero-chain`/`w1-not-size-chain`/`w1-size-frac-chain`/`in-empty`/the string casts).
+- a listed action's oracle is **exactly** what it declares — `[]`, or every seed id — so an entry
+  whose oracle starts discriminating fails instead of standing as a blanket exemption;
+- every harness asserts every entry, whether or not that adapter compares the action, because an
+  entry is a statement about the PDP rather than about the adapter.
 
-Adapters differ widely in what they can express — `langchain-chromadb` compares 34 of the 187
-conformance actions where `ent` and `pgx` compare all but five — so the lists are expected to look
-different per harness. That is the point.
+`validate-corpus.sh` holds the schema closed and rejects an entry naming an unclassified action, a
+`knownDivergences` action (never compared, so exempting it exempts nothing) or a duplicate. An
+action is listed only after watching its oracle against a live PDP in both evaluation modes; a
+degenerate oracle on a newly added action is far more often a missing discriminating seed than a
+genuine identity, and the fix is the seed.
+
+Each harness keeps one list of its own: **liveness-only probes** — shapes the adapter refuses to
+translate, kept because the group has no compared member for that adapter and the non-degenerate
+oracle still proves the PDP and policy are live. Each entry is asserted *not* to be in the adapter's
+oracle set, so a shape the adapter later gains support for leaves the list for the sweep rather than
+staying a weaker probe, and *not* to be in `degenerateOracles`, since a trivial oracle proves no
+liveness. **Derive it per adapter; never copy another harness's** — a copied list drifts into naming
+shapes that adapter compares, and the drift was invisible until the complement assertion existed
+(cerbos/query-plan-adapters#324).
 
 ### Pinned throw messages
 
@@ -1100,11 +1110,11 @@ the acceptance test for these guards; run it before trusting them.
    counts as the coverage the differential actually buys
    ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)) — a new action lands in one
    of those buckets and has to be named.
-7. Add the action to each harness's degeneracy-guard list so it cannot pass vacuously — to that
-   harness's *compared* list where the adapter translates the shape, and to its liveness-only list
-   where it does not, per "The degeneracy guard" above. Adding it to the compared list of an
-   adapter that throws on it fails immediately, which is the intended feedback rather than an
-   obstacle. Also check that no harness projects the corpus into a narrower local shape.
+7. Confirm the action cannot pass vacuously. Every harness sweeps every compared action for a
+   non-empty, non-total oracle, so a translated shape needs nothing added; where an adapter
+   throws on it and the group has no compared member there, add it to that harness's liveness-only
+   list, per "The degeneracy guard" above. If the oracle is empty or total, add a discriminating
+   seed; declare it in `degenerateOracles` only when it is degenerate *by construction*. Also check that no harness projects the corpus into a narrower local shape.
    `langchain-chromadb` used to
    rebuild the principal from a hardcoded attribute allowlist; when `pv-exists` added
    `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
@@ -1113,9 +1123,8 @@ the acceptance test for these guards; run it before trusting them.
    principal keys it consumes and asserts them, so that particular projection fails loudly — see
    "Seed, principal and derived-field coverage" above.
 
-   The one exception is a `nullRepresentationOmitted` action: its oracle is empty *by
-   construction*, which the degeneracy guard asserts against, so it must stay out of that list.
-   It needs a different anti-vacuity assertion instead — assert why the rejection is required,
+   A `nullRepresentationOmitted` action's oracle is empty *by construction*, so it is declared in
+   `degenerateOracles` like any other. It needs a different anti-vacuity assertion instead — assert why the rejection is required,
    not merely that one happens. See the `nullRepresentationOmitted` section above for the form
    that takes in each adapter. It pins a message like any other rejection (see "Pinned throw
    messages"), so a new one needs a `messages` entry per adapter.
@@ -1316,10 +1325,10 @@ unsupported before you have watched it fail is how a translatable shape gets per
    differential.
 
 4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
-   connection or a newly added action cannot pass vacuously. Derive the guard's compared list from
-   the adapter's own oracle set and assert per-entry membership — a list lifted from the nearest
-   existing harness will name shapes this adapter does not translate, and those entries guard
-   nothing. Pin every `knownDivergences` action the same way (see above): excluded from the oracle
+   connection or a newly added action cannot pass vacuously: sweep every compared action against
+   `degenerateOracles`, assert every entry of that list, and derive the liveness-only list from the
+   adapter's own refusals, asserting per-entry non-membership — a list lifted from the nearest
+   existing harness will name shapes this adapter compares. Pin every `knownDivergences` action the same way (see above): excluded from the oracle
    run means exercised nowhere unless the harness says so explicitly.
 
 5. **Run it and let it fail.** Triage every divergence into exactly one of:

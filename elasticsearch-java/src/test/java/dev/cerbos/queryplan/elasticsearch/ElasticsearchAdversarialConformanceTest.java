@@ -141,7 +141,8 @@ class ElasticsearchAdversarialConformanceTest {
                                Map<String, List<AdapterOutcome>> adapterSupportedExpected,
                                List<UnsupportedShape> expectedUnsupported,
                                List<AdapterOutcome> nullRepresentationOmitted,
-                               List<KnownDivergence> knownDivergences) {}
+                               List<KnownDivergence> knownDivergences,
+                               List<Corpus.DegenerateOracle> degenerateOracles) {}
 
     // -- corpus coverage guards -----------------------------------------------------------------
     //
@@ -193,6 +194,8 @@ class ElasticsearchAdversarialConformanceTest {
 
     private static SeedsFile seedsFile;
     private static ActionsFile actionsFile;
+    /** {@code degenerateOracles} from actions.json: action to {@code "empty"} or {@code "total"}. */
+    private static Map<String, String> degenerateOracles;
     private static DerivedFile derivedFile;
     private static List<Seed> seeds;
     private static List<String> oracleActions;
@@ -237,6 +240,7 @@ class ElasticsearchAdversarialConformanceTest {
         Path conformance = conformanceDir();
         seedsFile = MAPPER.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
         actionsFile = MAPPER.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
+        degenerateOracles = Corpus.degenerateOracleShapes(actionsFile.degenerateOracles());
         derivedFile = MAPPER.readValue(
                 conformance.resolve("derived-fields.json").toFile(), DerivedFile.class);
         seeds = seedsFile.seeds();
@@ -734,7 +738,9 @@ class ElasticsearchAdversarialConformanceTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("oracleActions")
     void adapterMatchesCheckOracle(String action) throws Exception {
-        assertEquals(oracleAllowedIds(action), adapterFilteredIds(action),
+        List<String> oracle = oracleAllowedIds(action);
+        assertOracleShape(action, oracle);
+        assertEquals(oracle, adapterFilteredIds(action),
                 "adapter result diverges from check() oracle for action '" + action + "'");
     }
 
@@ -791,8 +797,8 @@ class ElasticsearchAdversarialConformanceTest {
     /**
      * #387. {@code filter-as-conjunct} puts a filter() one level below the root, where the guard
      * that refuses {@code filter-as-condition} does not look. Its oracle is empty BY CONSTRUCTION
-     * — check() cannot evaluate a non-boolean conjunction — so it belongs to neither
-     * degeneracy-guard list, and the throw suite on its own would say nothing about whether
+     * — check() cannot evaluate a non-boolean conjunction — so it is a {@code degenerateOracles}
+     * entry that this adapter never oracle-compares, and the throw suite on its own would say nothing about whether
      * refusing it is REQUIRED.
      *
      * <p>This is that argument. The other conjunct is {@code R.attr.aBool}, which this adapter
@@ -863,34 +869,9 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     /**
-     * Oracle-compared actions whose oracle is degenerate BY CONSTRUCTION, each with the reason.
-     *
-     * <p>The guard below sweeps EVERY oracle-compared action, so this is the only way out of it,
-     * and each entry is asserted to be degenerate as claimed: an entry whose oracle stopped being
-     * trivial fails, so the list cannot rot into a blanket exemption. Everything else the
-     * corpus's own degeneracy exclusions name ({@code conformance/README.md}, "The degeneracy
-     * guard") — {@code w1-size-zero-chain}, {@code w1-not-size-chain}, {@code w1-size-frac-chain},
-     * the string casts, {@code filter-as-conjunct}, {@code null-eq-missing} — is refused on this
-     * adapter and so never reaches the oracle comparison at all.
-     */
-    private static final Map<String, String> DEGENERATE_BY_CONSTRUCTION = Map.ofEntries(
-            Map.entry("in-empty", "The planner folds empty membership to always denied."),
-            Map.entry("double-huge-lt", "The narrowed int64 threshold would return g1 while the correct oracle is empty."),
-            Map.entry("pv-empty-exists", "PDP oracle is empty: Pinned empty principal collection proves CEL macro identity and planner folding."),
-            Map.entry("pv-empty-not-exists", "PDP oracle is total: Pinned empty principal collection proves CEL macro identity and planner folding."),
-            Map.entry("pv-empty-all", "PDP oracle is total: Pinned empty principal collection proves CEL macro identity and planner folding."),
-            Map.entry("pv-empty-not-all", "PDP oracle is empty: Pinned empty principal collection proves CEL macro identity and planner folding."),
-            Map.entry("pv-structs-missing", "PDP oracle is empty: Eleven principal structs force a value-list lambda; projected members include null or missing variants."),
-            Map.entry("type-string-number", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
-            Map.entry("type-number-string", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
-            Map.entry("type-hierarchy-number", "PDP oracle is empty: Heterogeneous operands deny in CEL; SQL implicit coercion must not over-grant."),
-            Map.entry("type-number-contains", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."),
-            Map.entry("type-number-startswith", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."),
-            Map.entry("type-number-endswith", "PDP oracle is empty: Non-string receiver must not be coerced to text by the datastore."));
-
-    /**
      * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
-     * here as PDP/policy liveness probes for a group the list above cannot cover.
+     * here as PDP/policy liveness probes for a group the sweep in
+     * {@link #adapterMatchesCheckOracle} cannot cover.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
             "cast-not-double", "cast-not-int", "cast-not-string-missing",
@@ -956,50 +937,73 @@ class ElasticsearchAdversarialConformanceTest {
             // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
             // its descendant path is CONSTRUCTED by list() from a constant segment and the primary
             // key, so there is no stored path for a prefix or terms query to run against. It sits
-            // here rather than in the guard proper, and the complement assertion below is what
+            // here rather than in the sweep, and the complement assertion below is what
             // makes that split a statement rather than an omission.
             "hier-list-id");
 
     /**
      * Guard the guard, over the WHOLE oracle set. The comparison in
      * {@link #adapterMatchesCheckOracle} passes vacuously when the oracle is trivial — the PDP
-     * denying every seed, or allowing every seed, whatever the adapter emitted — so every
-     * oracle-compared action must produce a non-empty, non-total oracle, minus the entries
-     * {@link #DEGENERATE_BY_CONSTRUCTION} accounts for. A representative sample used to stand
-     * here; a sample leaves the actions it does not name free to go degenerate unnoticed.
+     * denying every seed, or allowing every seed, whatever the adapter emitted — so that
+     * comparison asserts this shape on the oracle it has already computed, before comparing, for
+     * EVERY oracle-compared action. The only way out is the corpus allowlist,
+     * {@code degenerateOracles} in {@code conformance/actions.json}, which every harness shares:
+     * a listed action must have exactly the declared oracle, and any other must have a non-empty,
+     * non-total one. A representative sample used to stand here (cerbos/query-plan-adapters#490);
+     * a sample leaves the actions it does not name free to go degenerate unnoticed.
+     */
+    private static void assertOracleShape(String action, List<String> oracle) {
+        String declared = degenerateOracles.get(action);
+        if ("empty".equals(declared)) {
+            assertEquals(List.of(), oracle, "'" + action + "' is listed as an empty oracle in"
+                    + " degenerateOracles (conformance/actions.json) but its oracle allows seeds;"
+                    + " it discriminates now, so remove it from that list");
+        } else if ("total".equals(declared)) {
+            assertEquals(allSeedIds(), oracle, "'" + action + "' is listed as a total oracle in"
+                    + " degenerateOracles (conformance/actions.json) but its oracle denies seeds;"
+                    + " it discriminates now, so remove it from that list");
+        } else {
+            assertTrue(!oracle.isEmpty() && oracle.size() < seeds.size(),
+                    "oracle for '" + action + "' is degenerate (" + oracle + "): the differential"
+                            + " cannot fail for a degenerate oracle, so either the corpus lost its"
+                            + " discriminating seed or the action belongs in degenerateOracles in"
+                            + " conformance/actions.json with a reason");
+        }
+    }
+
+    private static List<String> allSeedIds() {
+        return seeds.stream().map(Seed::id).sorted().toList();
+    }
+
+    /**
+     * Every {@code degenerateOracles} entry — whether this adapter oracle-compares it, refuses
+     * it, or rejects it under the omitted null representation — has exactly the oracle the corpus
+     * declares, so the allowlist cannot rot into a blanket exemption: an entry whose oracle became
+     * discriminating is a guard entry wearing an exemption.
      */
     @Test
-    void everyOracleComparedActionHasANonDegenerateOracle() {
-        Set<String> compared = Set.copyOf(oracleActions);
-        List<String> degenerate = new ArrayList<>();
-        for (String action : oracleActions) {
-            if (DEGENERATE_BY_CONSTRUCTION.containsKey(action)) {
-                continue;
-            }
-            List<String> ids = oracleAllowedIds(action);
-            if (ids.isEmpty() || ids.size() >= seeds.size()) {
-                degenerate.add(action + ": " + ids);
+    void everyDegenerateOracleIsExactlyAsDeclared() {
+        List<String> wrong = new ArrayList<>();
+        for (Map.Entry<String, String> entry : degenerateOracles.entrySet()) {
+            List<String> ids = oracleAllowedIds(entry.getKey());
+            List<String> want = "empty".equals(entry.getValue()) ? List.of() : allSeedIds();
+            if (!want.equals(ids)) {
+                wrong.add(entry.getKey() + " (declared " + entry.getValue() + "): " + ids);
             }
         }
-        assertEquals(List.of(), degenerate,
-                "these oracle-compared actions have a degenerate oracle: the differential cannot"
-                        + " fail for them, so either the corpus lost its discriminating seed or"
-                        + " the action belongs in DEGENERATE_BY_CONSTRUCTION with a reason");
+        assertEquals(List.of(), wrong, "these degenerateOracles entries in"
+                + " conformance/actions.json do not have the oracle they declare");
+    }
 
-        // The allowlist is asserted in both directions: each entry is oracle-compared (an entry
-        // this adapter refuses exempts nothing), and each is degenerate as it claims (an entry
-        // whose oracle became discriminating is a guard entry wearing an exemption).
-        for (Map.Entry<String, String> entry : DEGENERATE_BY_CONSTRUCTION.entrySet()) {
-            String action = entry.getKey();
-            assertTrue(compared.contains(action),
-                    "'" + action + "' exempts nothing: this adapter does not oracle-compare it");
-            List<String> ids = oracleAllowedIds(action);
-            assertTrue(ids.isEmpty() || ids.size() >= seeds.size(),
-                    "'" + action + "' is allowlisted as degenerate (" + entry.getValue()
-                            + ") but its oracle discriminates: " + ids);
-        }
-        // Asserting the complement keeps the split honest — an action this adapter gains support
-        // for must move out of the liveness probes and into the total sweep above.
+    /**
+     * The liveness probes are this adapter's refused shapes, so the sweep in
+     * {@link #adapterMatchesCheckOracle} never reaches them. Asserting the complement keeps the
+     * split honest — an action this adapter gains support for must move out of the liveness
+     * probes and into the sweep.
+     */
+    @Test
+    void livenessProbesAreRefusedAndNonDegenerate() {
+        Set<String> compared = Set.copyOf(oracleActions);
         for (String action : DEGENERACY_LIVENESS_PROBES) {
             assertFalse(compared.contains(action),
                     "'" + action + "' is now oracle-compared: remove it from the liveness probes");
