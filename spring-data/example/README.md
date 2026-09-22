@@ -158,8 +158,8 @@ Prerequisites: Docker, curl, jq, Gradle 8.x, and JDK 17+.
 Both example programs use the shared Cerbos client with a 30-second deadline per PDP call.
 A stalled RPC fails instead of hanging the application or smoke test.
 
-`CERBOS_HOST` has **no default**. Cerbos's own 3592/3593 are the ports every adapter's
-`cerbos run` test sidecar binds, so a default would not fail on a mistake — it would quietly plan
+`CERBOS_HOST` has **no default**. Cerbos's own 3592/3593 are its default ports, which any
+other local PDP may be holding, so a default would not fail on a mistake — it would quietly plan
 against the wrong policy suite. This example's PDP is published on 23592/23593 instead, and the
 demo domain's on 13592/13593.
 

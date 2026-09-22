@@ -45,6 +45,46 @@ export const ADAPTER = "langchain-chromadb";
 
 const CONFORMANCE_DIR = path.join(__dirname, "..", "..", "conformance");
 
+// -- the PDP -------------------------------------------------------------------------------------
+
+/**
+ * The gRPC address of the PDP `scripts/run-adversarial.sh` started for THIS run: a Unix socket in a
+ * directory that run created, exported by `cerbos run` as CERBOS_GRPC. There is deliberately no
+ * default and no TCP form. A fixed port is how a suite ends up planning against another run's PDP
+ * (cerbos/query-plan-adapters#476): `cerbos run` does not fail on a port that is already bound, and
+ * whichever PDP answers wins — possibly on another corpus revision or evaluation mode.
+ */
+export function pdpAddress(): string {
+  const address = process.env["CERBOS_GRPC"];
+  if (address === undefined || !address.startsWith("unix:")) {
+    throw new Error(
+      `CERBOS_GRPC is ${JSON.stringify(address)}, expected the unix: socket scripts/run-adversarial.sh ` +
+        "starts the PDP on. Run this suite through `npm run test:adversarial`, not jest directly.",
+    );
+  }
+  return address;
+}
+
+/**
+ * Fails the run unless the PDP reports the version pinned in conformance/CERBOS_VERSION. The wire
+ * fixtures and every classification are recorded against that version, and locally `cerbos run`
+ * is whatever `cerbos` binary is on PATH, so a stale one would otherwise pass or fail the corpus
+ * for reasons the corpus does not describe.
+ */
+export async function assertPinnedPdp(pdp: {
+  serverInfo(): Promise<{ version: string }>;
+}): Promise<void> {
+  const pinned = fs
+    .readFileSync(path.join(CONFORMANCE_DIR, "CERBOS_VERSION"), "utf8")
+    .trim();
+  const { version } = await pdp.serverInfo();
+  if (version !== pinned) {
+    throw new Error(
+      `The PDP at ${pdpAddress()} reports version ${version}, but conformance/CERBOS_VERSION pins ${pinned}.`,
+    );
+  }
+}
+
 const WIRE_FIXTURES_DIR = path.join(CONFORMANCE_DIR, "wire-fixtures");
 
 /** The golden expectations this adapter owns. Never under `conformance/` — see ADR 0007. */

@@ -55,10 +55,10 @@ for i in {1..30}; do
 done
 
 # The PDP address for the app, asked of Compose rather than restated here. docker-compose.yml
-# publishes the PDP well away from Cerbos's default 3593 — that is the port every adapter's
-# `cerbos run` test sidecar binds — and application.yaml reads CERBOS_HOST with no fallback, so
-# this is not a convenience: see the comment on `cerbos.address` there for why a default would be
-# worse than a failure to start. Reading the published port back keeps the number in one place.
+# publishes the PDP well away from Cerbos's default 3593 — the port any other local PDP may be
+# holding — and application.yaml reads CERBOS_HOST with no fallback, so this is not a
+# convenience: see the comment on `cerbos.address` there for why a default would be worse than a
+# failure to start. Reading the published port back keeps the number in one place.
 PUBLISHED_PDP=$(docker compose port cerbos 3593) ||
     fail "docker compose port cerbos 3593 — did the PDP publish its gRPC port?"
 export CERBOS_HOST="localhost:${PUBLISHED_PDP##*:}"

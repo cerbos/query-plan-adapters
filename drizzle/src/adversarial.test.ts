@@ -39,6 +39,8 @@ import {
   readCorpusJson,
   requireMessage,
   sqliteSchema,
+  assertPinnedPdp,
+  pdpAddress,
 } from "./corpus";
 import type { ActionsFile, ThrowingAction } from "./corpus";
 
@@ -63,8 +65,7 @@ import type { ActionsFile, ThrowingAction } from "./corpus";
  * (cerbos/query-plan-adapters#320 for PostgreSQL, #340 for MySQL).
  */
 
-// Dedicated ports (gRPC 3621) so this suite can run alongside other adapters' sidecars.
-const cerbos = new Cerbos(process.env["CERBOS_GRPC_ADDR"] ?? "127.0.0.1:3621", { tls: false });
+const cerbos = new Cerbos(pdpAddress(), { tls: false });
 
 interface Tag {
   id: string;
@@ -1411,6 +1412,7 @@ const MAPPER_WITHOUT_NULL_CONVENTIONS: Record<string, MapperEntry> =
   );
 
 beforeAll(async () => {
+  await assertPinnedPdp(cerbos);
   await store.start();
 }, STORE_STARTUP_TIMEOUT_MS);
 

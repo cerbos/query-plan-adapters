@@ -30,9 +30,11 @@ import {
   parseActionsFile,
   readJson,
   requireMessage,
+  assertPinnedPdp,
+  pdpAddress,
 } from "./corpus";
 
-const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+const cerbos = new Cerbos(pdpAddress(), { tls: false });
 
 interface Tag {
   id: string;
@@ -904,6 +906,7 @@ function asCheckResource(seed: Seed): Resource {
 }
 
 beforeAll(async () => {
+  await assertPinnedPdp(cerbos);
   await mongoose.connect(
     "mongodb://127.0.0.1:27017/cerbos_mongoose_adversarial",
   );

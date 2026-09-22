@@ -19,12 +19,11 @@ services:
       - "--config=/config/cerbos-config.yaml"
     environment:
       CERBOS_NO_TELEMETRY: "1"
-    # Deliberately NOT the default 3592/3593 on the host. Every adapter's test suite starts a
-    # `cerbos run` sidecar on those ports, and a demo PDP still holding them makes that sidecar
-    # fail to bind while the suite happily talks to THIS PDP instead — which serves demo policies,
-    # so the corpus tests fail for a reason nothing in their output names. Different host ports
-    # make that collision impossible; the runner passes the address through $CERBOS_HOST, so no
-    # example hardcodes either number.
+    # Deliberately NOT the default 3592/3593 on the host. They are Cerbos's default ports, which
+    # any other local PDP may be holding, and a client that assumes the defaults would then talk
+    # to THIS PDP — which serves demo policies — or this one's client to that PDP, and fail for a
+    # reason nothing in its output names. Different host ports make that collision impossible;
+    # the runner passes the address through $CERBOS_HOST, so no example hardcodes either number.
     ports:
       - "13592:3592"
       - "13593:3593"

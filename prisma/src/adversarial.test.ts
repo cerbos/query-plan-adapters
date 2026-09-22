@@ -21,6 +21,8 @@ import {
   MODEL,
   classifyActionsForAdapter,
   requireMessage,
+  assertPinnedPdp,
+  pdpAddress,
 } from "./corpus";
 import type {
   ActionClassification,
@@ -53,7 +55,7 @@ import { prisma } from "./test-setup.adversarial";
  * all (#340).
  */
 
-const cerbos = new Cerbos("127.0.0.1:3593", { tls: false });
+const cerbos = new Cerbos(pdpAddress(), { tls: false });
 
 const SCHEMA_DIR = path.join(__dirname, "..", "prisma");
 
@@ -690,6 +692,7 @@ function withoutNullConventions(
 const MAPPER_WITHOUT_NULL_CONVENTIONS = withoutNullConventions(MAPPER);
 
 beforeAll(async () => {
+  await assertPinnedPdp(cerbos);
   // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith
   // to LIKE. On SQLite, LIKE is case-INSENSITIVE for ASCII no matter what collation the column
   // was created with — only this pragma changes it — so without it every string predicate

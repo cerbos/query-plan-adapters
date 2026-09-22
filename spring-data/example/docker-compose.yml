@@ -22,11 +22,11 @@ services:
       CERBOS_NO_TELEMETRY: "1"
       CERBOS_CONFIG: "/config/cerbos-config.yaml"
     # Deliberately NOT the default 3592/3593 on the host, and not demo/docker-compose.yml's
-    # 13592/13593 either. Every adapter's test suite starts a `cerbos run` sidecar on the
-    # defaults, and a PDP left holding them makes that sidecar fail to bind while the suite
-    # happily talks to THIS one — which serves photo/album/workspace policies, so the suite fails
-    # for a reason nothing in its output names. The container side of each mapping is the PDP's
-    # own listen port and stays 3592/3593.
+    # 13592/13593 either. 3592/3593 are Cerbos's default ports, which any other local PDP
+    # may be holding: a client that assumes the defaults would then talk to THIS one — which
+    # serves photo/album/workspace policies — or this one to that, and fail for a reason nothing
+    # in its output names. The container side of each mapping is the PDP's own listen port and
+    # stays 3592/3593.
     ports:
       - "23592:3592"
       - "23593:3593"
