@@ -266,39 +266,36 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         String[] parts = cerbosVar.split("\\.");
         for (int i = parts.length - 1; i > 0; i--) {
             String prefix = String.join(".", Arrays.copyOfRange(parts, 0, i));
-            if (!(mapper.get(prefix) instanceof AttributeMapping.Relation rel)) {
-                continue;
-            }
-            String[] suffixParts = Arrays.copyOfRange(parts, i, parts.length);
-            List<AttributeMapping.Relation> chain = new ArrayList<>();
-            chain.add(rel);
-            AttributeMapping current = rel;
-            boolean ok = true;
-            for (int s = 0; s < suffixParts.length; s++) {
-                if (!(current instanceof AttributeMapping.Relation r)) {
-                    ok = false;
-                    break;
+            if (mapper.get(prefix) instanceof AttributeMapping.Relation head) {
+                RelationChain chain = walkSuffix(head, Arrays.copyOfRange(parts, i, parts.length));
+                if (chain != null) {
+                    return chain;
                 }
-                AttributeMapping next = r.fields().get(suffixParts[s]);
-                if (next == null) {
-                    ok = false;
-                    break;
-                }
-                if (next instanceof AttributeMapping.Relation nextRel) {
-                    chain.add(nextRel);
-                    current = nextRel;
-                } else if (next instanceof AttributeMapping.Field leafField && s == suffixParts.length - 1) {
-                    return new RelationChain(chain, leafField);
-                } else {
-                    ok = false;
-                    break;
-                }
-            }
-            if (ok) {
-                return new RelationChain(chain, null);
             }
         }
         return null;
+    }
+
+    /**
+     * Walk {@code suffix} through {@code head}'s nested {@code fields()} maps: every part must
+     * name a Relation, except that the LAST may name a Field. {@code null} when a part is
+     * unmapped, or a Field appears before the end.
+     */
+    private static RelationChain walkSuffix(AttributeMapping.Relation head, String[] suffix) {
+        List<AttributeMapping.Relation> chain = new ArrayList<>(List.of(head));
+        AttributeMapping.Relation current = head;
+        for (int i = 0; i < suffix.length; i++) {
+            AttributeMapping next = current.fields().get(suffix[i]);
+            if (next instanceof AttributeMapping.Relation relation) {
+                chain.add(relation);
+                current = relation;
+            } else if (next instanceof AttributeMapping.Field field && i == suffix.length - 1) {
+                return new RelationChain(chain, field);
+            } else {
+                return null;
+            }
+        }
+        return new RelationChain(chain, null);
     }
 
     /**

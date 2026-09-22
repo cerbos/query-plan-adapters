@@ -208,10 +208,6 @@ public final class SpringDataQueryPlanAdapter {
         }
         Operand condition = planResult.getCondition()
                 .orElseThrow(() -> Refusals.malformed("Conditional plan has no condition"));
-        // Always: the call-level option is only the fallback now, and an attribute can declare
-        // OMITTED while the call declares EXPLICIT.
-        assertNoNullComparisonOperands(
-                condition, options.mapping(), options.nullAttributeRepresentation());
         return conditional(condition, options);
     }
 
@@ -240,13 +236,10 @@ public final class SpringDataQueryPlanAdapter {
             case KIND_ALWAYS_ALLOWED -> alwaysAllowed();
             case KIND_ALWAYS_DENIED -> alwaysDenied();
             case KIND_CONDITIONAL -> {
-                Operand cond = filter.getCondition();
-                if (cond.getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
+                if (filter.getCondition().getNodeCase() == Operand.NodeCase.NODE_NOT_SET) {
                     throw Refusals.malformed("Conditional plan has no condition");
                 }
-                assertNoNullComparisonOperands(
-                        cond, options.mapping(), options.nullAttributeRepresentation());
-                yield conditional(cond, options);
+                yield conditional(filter.getCondition(), options);
             }
             default -> throw Refusals.malformed("Unknown filter kind: " + filter.getKind());
         };
@@ -466,8 +459,14 @@ public final class SpringDataQueryPlanAdapter {
      * <p>The caller's maps were defensively copied when {@link Options} was built, because of
      * that re-invocation: capturing them by reference would let post-translation mutation
      * silently change which columns the authorization filter resolves.
+     *
+     * <p>The one refusal raised here rather than at evaluation is the
+     * {@link NullAttributeRepresentation#OMITTED} scan. It always runs: the call-level option is
+     * only the fallback, and an attribute can declare OMITTED while the call declares EXPLICIT.
      */
     private static <T> Specification<T> conditional(Operand condition, Options options) {
+        assertNoNullComparisonOperands(
+                condition, options.mapping(), options.nullAttributeRepresentation());
         return (root, query, cb) ->
                 new PlanWalker(cb, options, isSelectInvocation(root, query))
                         .traverse(condition, Scope.root(root, query, options.mapping()));
@@ -514,26 +513,22 @@ public final class SpringDataQueryPlanAdapter {
         // keep using the call-level fallback.
         NullAttributeRepresentation declared =
                 declaredForComparedAttribute(expression.getOperator(), operands, mapper);
-        if (declared != null) {
-            if (declared == NullAttributeRepresentation.OMITTED
-                    && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
-                throw nullOperandUnderOmitted(expression.getOperator());
-            }
-            return;
-        }
-
-        if (fallback == NullAttributeRepresentation.OMITTED
+        NullAttributeRepresentation governing = declared != null ? declared : fallback;
+        if (governing == NullAttributeRepresentation.OMITTED
                 && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
-            throw nullOperandUnderOmitted(expression.getOperator());
+            throw Refusals.nullOperandUnderOmitted(expression.getOperator());
         }
-        operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
+        // A comparison the declaration settled has nothing below it left to scan.
+        if (declared == null) {
+            operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
+        }
     }
 
+    /**
+     * The operators CEL evaluates to a definite boolean over a null value, and so the only ones
+     * an attribute's declared convention can settle.
+     */
     private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
-
-    private static UnsupportedPlanShapeException nullOperandUnderOmitted(String operator) {
-        return Refusals.nullOperandUnderOmitted(operator);
-    }
 
     /**
      * The declared NULL convention of the attribute a binary comparison names, or {@code null}
@@ -541,10 +536,9 @@ public final class SpringDataQueryPlanAdapter {
      */
     private static NullAttributeRepresentation declaredForComparedAttribute(
             String operator, List<Operand> operands, Map<String, AttributeMapping> mapper) {
-        // The operators CEL evaluates to a definite boolean over a null value, and so the only
-        // ones an attribute's declared convention can settle. Anything else — a collection macro,
-        // hasIntersection, a string match — keeps using the call-level fallback, because the
-        // declaration says nothing about what its null means there.
+        // Anything outside the equality family — a collection macro, hasIntersection, a string
+        // match — keeps using the call-level fallback, because the declaration says nothing
+        // about what its null means there.
         if (!EQUALITY_FAMILY.contains(operator) || operands.size() != 2) {
             return null;
         }

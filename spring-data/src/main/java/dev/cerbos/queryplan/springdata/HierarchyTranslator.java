@@ -8,7 +8,6 @@ import jakarta.persistence.criteria.Predicate;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Translates the Cerbos hierarchy operators ({@code overlaps} / {@code ancestorOf} /
@@ -26,9 +25,11 @@ import java.util.regex.Pattern;
 final class HierarchyTranslator {
 
     private final CriteriaBuilder cb;
+    private final TriPredicate tri;
 
-    HierarchyTranslator(CriteriaBuilder cb) {
+    HierarchyTranslator(CriteriaBuilder cb, TriPredicate tri) {
         this.cb = cb;
+        this.tri = tri;
     }
 
     /** A resolved {@code hierarchy(...)} operand: a constant path, a whole-column field, or a list of segments. */
@@ -61,7 +62,7 @@ final class HierarchyTranslator {
                 }
             }
         }
-        return fields.isEmpty() ? result : new TriPredicate(cb).baseUnlessUnknown(result,
+        return fields.isEmpty() ? result : tri.baseUnlessUnknown(result,
                 () -> cb.or(fields.stream().map(cb::isNull).toArray(Predicate[]::new)));
     }
 
@@ -302,7 +303,9 @@ final class HierarchyTranslator {
     }
 
     private Predicate startsWithLiteral(Path<?> path, String prefix) {
-        if (!String.class.equals(path.getJavaType())) return new TriPredicate(cb).unknown();
+        if (!String.class.equals(path.getJavaType())) {
+            return tri.unknown();
+        }
         return cb.like(path.as(String.class), PlanValues.escapeLike(prefix) + "%", '\\');
     }
 
@@ -335,15 +338,11 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Split on a literal delimiter (not a regex), keeping trailing empty segments — the
-     * {@code split(Pattern.quote(delimiter), -1)} semantics without compiling a Pattern per
-     * call ({@code \Q..\E} defeats String.split's single-char fast path).
+     * Split on a literal, non-empty delimiter (not a regex), keeping trailing empty segments —
+     * {@code split(Pattern.quote(delimiter), -1)} without compiling a Pattern per call. An empty
+     * delimiter never reaches here: {@link #resolveHierarchy} refuses it first.
      */
     private static List<String> splitLiteral(String raw, String delimiter) {
-        if (delimiter.isEmpty()) {
-            // Zero-width delimiter: defer to the regex engine's empty-match semantics.
-            return List.of(raw.split(Pattern.quote(delimiter), -1));
-        }
         List<String> parts = new ArrayList<>();
         int start = 0;
         int idx;

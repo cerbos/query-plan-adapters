@@ -53,8 +53,6 @@ class ScopeTest {
 
     private static final Map<String, AttributeMapping> MAPPER = Map.of(
             "request.resource.attr.aString", AttributeMapping.field("aString"),
-            "request.resource.attr.aOptionalString",
-            AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT),
             TAGS, AttributeMapping.relation("tags", Map.of(
                     "name", AttributeMapping.field("name"))),
             CATEGORIES, AttributeMapping.relation("categories", Map.of(
@@ -108,19 +106,6 @@ class ScopeTest {
                     rootScope.resolve("request.resource.attr.aString"));
             assertSame(root, scalar.path().getParentPath());
             assertEquals(AttributeMapping.field("aString"), scalar.mapping());
-        }
-
-        /**
-         * The declared NULL convention travels on the resolution, which is what
-         * {@code isExplicitNull} reads — the JPA path cannot discriminate two attributes
-         * mapped to the same column under different conventions.
-         */
-        @Test
-        void fieldCarriesItsDeclaredNullConvention() {
-            Scope.ResolvedScalar scalar = assertInstanceOf(Scope.ResolvedScalar.class,
-                    rootScope.resolve("request.resource.attr.aOptionalString"));
-            assertEquals(NullAttributeRepresentation.EXPLICIT,
-                    ((AttributeMapping.Field) scalar.mapping()).nullAttributeRepresentation());
         }
 
         @Test

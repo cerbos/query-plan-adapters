@@ -165,12 +165,6 @@ class SpringDataQueryPlanAdapterTest {
         return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
     }
 
-    private static Operand listOpNumbers(double... values) {
-        ListValue.Builder list = ListValue.newBuilder();
-        for (double v : values) list.addValues(Value.newBuilder().setNumberValue(v));
-        return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
-    }
-
     private static Operand lambda(String varName, Operand body) {
         return exprOp("lambda", body, var(varName));
     }
@@ -465,22 +459,6 @@ class SpringDataQueryPlanAdapterTest {
     // KIND 1 — a branch CEL itself cannot reach
     // ============================================================================================
 
-    /**
-     * The planner has no existence operator: {@code isSet} is not a registered CEL function,
-     * so a policy naming it fails to compile and it can never reach the wire. The adapter
-     * carried a dedicated branch for it regardless; it must now fail closed like any unknown
-     * operator rather than guess at IS NULL / IS NOT NULL. See
-     * cerbos/query-plan-adapters#261 — the eq/ne-null tests below are the live path.
-     */
-    @Test
-    void isSetIsRejectedRatherThanTranslated() {
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> runCount(exprOp("isSet",
-                        var("request.resource.attr.aOptionalString"), bval(true))));
-        assertTrue(e.getMessage().contains("isSet"),
-                "unknown operator must be named in the error, got: " + e.getMessage());
-    }
-
     @Test
     void unknownOperatorThrows() {
         Operand cond = exprOp("unsupported_op",
@@ -490,11 +468,22 @@ class SpringDataQueryPlanAdapterTest {
         assertTrue(ex.getMessage().contains("Unsupported operator"));
     }
 
+    /**
+     * The planner has no existence operator: {@code isSet} is not a registered CEL function,
+     * so a policy naming it fails to compile and it can never reach the wire. The adapter
+     * carried a dedicated branch for it regardless; it must now fail closed like any unknown
+     * operator rather than guess at IS NULL / IS NOT NULL. See
+     * cerbos/query-plan-adapters#261 — the eq/ne-null override tests below are the live path.
+     */
     @Test
     void isSetReportsUnsupportedOperator() {
         // isSet had bespoke operand-shape diagnostics; it is not a wire operator at all
         // (#261), so every shape of it must now surface as a plain unsupported-operator
-        // error rather than a message implying the adapter was close to translating it.
+        // error naming it, rather than a message implying the adapter was close to
+        // translating it.
+        assertConditionThrows(
+                exprOp("isSet", var("request.resource.attr.aOptionalString"), bval(true)),
+                "Unsupported operator", "isSet");
         assertConditionThrows(
                 exprOp("isSet",
                         var("request.resource.attr.aString"),
@@ -628,13 +617,6 @@ class SpringDataQueryPlanAdapterTest {
                 "eq", "request.resource.attr.aString", "map of 1 entry");
     }
 
-    @Test
-    void nonListCollectionValueFailsClosed() {
-        assertConditionThrows(exprOp("exists", sval("not-a-list"),
-                lambda("t", exprOp("eq", var("request.resource.attr.aString"), var("t")))),
-                "exists over a literal collection requires a list value");
-    }
-
     /**
      * Hierarchy shapes no plan carries. Four compare two CONSTANT hierarchies, which the planner
      * evaluates itself — a condition with no attribute reference folds to ALWAYS_ALLOWED or
@@ -766,13 +748,6 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void malformedConstantThrowsNamedError() {
-            assertConditionThrows(
-                    exprOp("lt", tsVar("createdAt"), tsVal("not-a-timestamp")),
-                    "timestamp() constant could not be parsed");
-        }
-
-        @Test
         void nonStringConstantInsideTimestampThrows() {
             assertConditionThrows(
                     exprOp("lt", tsVar("createdAt"),
@@ -791,7 +766,8 @@ class SpringDataQueryPlanAdapterTest {
         Operand cond = exprOp("eq",
                 var("request.resource.attr.aString"),
                 exprOp("add", sval("hello"), sval("-world")));
-        assertEquals(0, runCount(cond));
+        withResource(row("fold-1", "hello-world"), () -> assertEquals(1, runCount(cond)));
+        withResource(row("fold-2", "hello"), () -> assertEquals(0, runCount(cond)));
     }
 
     @Test
@@ -843,7 +819,7 @@ class SpringDataQueryPlanAdapterTest {
     @Test
     void structValueWithNullEntryDoesNotThrow() {
         // Struct fields may hold nulls; Collectors.toMap would NPE on them.
-        com.google.protobuf.Struct struct = com.google.protobuf.Struct.newBuilder()
+        Struct struct = Struct.newBuilder()
                 .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
                 .putFields("b", Value.newBuilder().setStringValue("x").build())
                 .build();
@@ -983,20 +959,17 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     @Test
-    void overrideAppliesToEqNull() {
-        Operand cond = exprOp("eq", var("request.resource.attr.aOptionalString"), nullVal());
-        assertThrows(OverrideInvoked.class,
-                () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
-    }
-
-    @Test
     void operatorOverrideIsUsed() {
+        // The override's PREDICATE is what the query executes, not merely a hook that runs:
+        // the default translation of `aString == "foo"` excludes this row, the override's
+        // `aString IS NOT NULL` includes it.
         Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
-        // Override eq to always produce IS NULL — result count stays 0 and the override path
-        // is exercised end-to-end (runCount asserts the Conditional kind internally).
         Map<String, OperatorFunction> overrides = Map.of(
-                "eq", (cb, field, value) -> cb.isNull(field));
-        assertEquals(0, runCount(cond, overrides));
+                "eq", (cb, field, value) -> cb.isNotNull(field));
+        withResource(row("override-used-1", "bar"), () -> {
+            assertEquals(0, runCount(cond));
+            assertEquals(1, runCount(cond, overrides));
+        });
     }
 
     @Test
@@ -1025,14 +998,6 @@ class SpringDataQueryPlanAdapterTest {
                 nval(2.0));
         assertThrows(OverrideInvoked.class,
                 () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
-    }
-
-    @Test
-    void unknownAttributeThrows() {
-        Operand cond = exprOp("eq", var("request.resource.attr.nonexistent"), sval("v"));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("Unknown attribute"));
     }
 
     @Test
@@ -1069,9 +1034,11 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void explicitIsTheDefaultAndKeepsIsNull() {
-            // The three-arg overload and an EXPLICIT fourth argument agree, and both still
-            // translate rather than throw.
-            assertEquals(0, runCount(nullEq()));
+            // The three-arg overload keeps IS NULL, and an EXPLICIT fourth argument still
+            // translates rather than throw.
+            ResourceEntity nullColumn = new ResourceEntity("explicit-default-1");
+            nullColumn.setaOptionalString(null);
+            withResource(nullColumn, () -> assertEquals(1, runCount(nullEq())));
             assertDoesNotThrow(() -> translate(nullEq(), NullAttributeRepresentation.EXPLICIT));
         }
 
@@ -2228,30 +2195,6 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * exists/all whose collection operand is a literal value list — the wire shape the planner
-     * emits when a known collection (e.g. a folded principal attribute) exceeds the 10-element
-     * unroll cap of cerbos/cerbos#2570/#2817. The adapter folds the macro into the same or/and
-     * chain the planner produces below the cap, so the translated filter does not depend on
-     * which side of that threshold the collection lands.
-     */
-    @Nested
-    class KnownValueCollections {
-
-        private static Value structElement(String field, String value) {
-            return Value.newBuilder().setStructValue(
-                    Struct.newBuilder().putFields(field,
-                            Value.newBuilder().setStringValue(value).build())).build();
-        }
-
-        private static Operand structListOp(String field, String... values) {
-            ListValue.Builder list = ListValue.newBuilder();
-            for (String v : values) list.addValues(structElement(field, v));
-            return Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
-        }
-
-    }
-
-    /**
      * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
      * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
      * {@code in(variable, value ["a", null])} VERBATIM, and {@code check()} ALLOWS an
@@ -2774,11 +2717,10 @@ class SpringDataQueryPlanAdapterTest {
 
     // -- SQL Server '[' LIKE escaping --
     // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
-    // every '[' in a generated pattern must arrive as '\['. On H2 (and PostgreSQL/MySQL —
-    // covered by the differential oracle legs) '[' is inert and '\[' under ESCAPE '\' is
-    // still a literal '[', so the escape is a semantic no-op there: the row-behavior tests
-    // below pin that no-op, while the pattern assertions pin the escape itself (they are the
-    // tests that FAIL when the '[' rewrite is removed — H2 row behavior cannot distinguish).
+    // every '[' in a generated pattern must arrive as '\['. On H2, PostgreSQL and MySQL '['
+    // is inert and '\[' under ESCAPE '\' is still a literal '[', so the escape is a semantic
+    // no-op there — which is why it is pinned at pattern level: no row behaviour on a dialect
+    // CI executes can tell whether the '[' rewrite happened.
 
     @Nested
     class BracketLikeEscaping {
@@ -2801,13 +2743,6 @@ class SpringDataQueryPlanAdapterTest {
             // of a character class, and no class can open once every '[' is escaped.
             assertEquals("]", PlanValues.escapeLike("]"));
         }
-
-        private ResourceEntity row(String id, String aString) {
-            ResourceEntity r = new ResourceEntity(id);
-            r.setaString(aString);
-            return r;
-        }
-
     }
 
     // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --

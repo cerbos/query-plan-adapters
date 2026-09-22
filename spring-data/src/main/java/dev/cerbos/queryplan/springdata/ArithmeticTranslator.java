@@ -4,7 +4,10 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+
+import com.google.protobuf.Value;
 
 import java.util.List;
 import java.util.Set;
@@ -234,8 +237,7 @@ final class ArithmeticTranslator {
             right = tmp;
             op = NormalizedBinary.mirror(op);
         }
-        jakarta.persistence.criteria.Expression<Double> lhs =
-                ((NumericOperand.Sql) left).expr();
+        Expression<Double> lhs = sqlOf(left);
         if (right instanceof NumericOperand.Constant rc) {
             // Bind a genuine double parameter: cb.literal would inline an exact NUMERIC
             // literal on H2/Postgres and pull the comparison out of IEEE space.
@@ -245,7 +247,7 @@ final class ArithmeticTranslator {
                 // Cerbos 0.55 compares NaN as unordered even against a present non-number.
                 // Inspect the original column for presence: casting a string to double would
                 // fail in SQL before the constant false result can be negated.
-                jakarta.persistence.criteria.Expression<?> presence =
+                Expression<?> presence =
                         fieldOperand.getNodeCase() == Operand.NodeCase.VARIABLE
                                 ? scope.path(fieldOperand.getVariable()) : lhs;
                 return leaf.withOverride(cmpOp, lhs, v, () -> tri.baseUnlessUnknown(
@@ -262,11 +264,10 @@ final class ArithmeticTranslator {
                         "Unsupported arithmetic comparison operator: " + cmpOp);
             });
         }
-        return comparisons.comparePredicate(op, lhs,
-                ((NumericOperand.Sql) right).expr());
+        return comparisons.comparePredicate(op, lhs, sqlOf(right));
     }
 
-    private jakarta.persistence.criteria.Expression<Double> sqlOf(NumericOperand o) {
+    private static Expression<Double> sqlOf(NumericOperand o) {
         return ((NumericOperand.Sql) o).expr();
     }
 
@@ -277,8 +278,44 @@ final class ArithmeticTranslator {
      */
     private sealed interface NumericOperand {
         record Constant(double value) implements NumericOperand {}
-        record Sql(jakarta.persistence.criteria.Expression<Double> expr)
-                implements NumericOperand {}
+        record Sql(Expression<Double> expr) implements NumericOperand {}
+    }
+
+    /** Whether an operand IS a division that can divide by zero. */
+    private boolean isZeroCapableDivisionOperand(Operand operand, Scope scope) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return false;
+        }
+        PlanResourcesFilter.Expression expr = operand.getExpression();
+        if (!"div".equals(expr.getOperator()) || expr.getOperandsCount() != 2) {
+            return false;
+        }
+        NumericOperand divisor = resolveNumericOperand(expr.getOperands(1), scope);
+        NumericOperand dividend = resolveNumericOperand(expr.getOperands(0), scope);
+        if (divisor instanceof NumericOperand.Constant dc && dc.value() != 0.0) {
+            return false;
+        }
+        return !(divisor instanceof NumericOperand.Constant
+                && dividend instanceof NumericOperand.Constant);
+    }
+
+    /** Whether an arithmetic subtree holds a division that can divide by zero. */
+    private boolean containsZeroCapableDivision(
+            PlanResourcesFilter.Expression expr, Scope scope) {
+        String op = expr.getOperator();
+        if (!ARITHMETIC_OPS.contains(op)) {
+            return false;
+        }
+        for (Operand child : expr.getOperandsList()) {
+            if (isZeroCapableDivisionOperand(child, scope)) {
+                return true;
+            }
+            if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && containsZeroCapableDivision(child.getExpression(), scope)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -322,50 +359,12 @@ final class ArithmeticTranslator {
      * {@link #tryDivisionByZeroComparison}. The guard below survives only as the finite
      * arm of that rewrite, and for value positions no comparison folds.
      */
-    /** Whether an operand IS a division that can divide by zero. */
-    private boolean isZeroCapableDivisionOperand(Operand operand, Scope scope) {
-        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
-            return false;
-        }
-        PlanResourcesFilter.Expression expr = operand.getExpression();
-        if (!"div".equals(expr.getOperator()) || expr.getOperandsCount() != 2) {
-            return false;
-        }
-        NumericOperand divisor = resolveNumericOperand(expr.getOperands(1), scope);
-        NumericOperand dividend = resolveNumericOperand(expr.getOperands(0), scope);
-        if (divisor instanceof NumericOperand.Constant dc && dc.value() != 0.0) {
-            return false;
-        }
-        return !(divisor instanceof NumericOperand.Constant
-                && dividend instanceof NumericOperand.Constant);
-    }
-
-    /** Whether an arithmetic subtree holds a division that can divide by zero. */
-    private boolean containsZeroCapableDivision(
-            PlanResourcesFilter.Expression expr, Scope scope) {
-        String op = expr.getOperator();
-        if (!ARITHMETIC_OPS.contains(op)) {
-            return false;
-        }
-        for (Operand child : expr.getOperandsList()) {
-            if (isZeroCapableDivisionOperand(child, scope)) {
-                return true;
-            }
-            if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
-                    && containsZeroCapableDivision(child.getExpression(), scope)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
         switch (operand.getNodeCase()) {
             case VARIABLE -> {
                 @SuppressWarnings("unchecked")
-                jakarta.persistence.criteria.Expression<? extends Number> path =
-                        (jakarta.persistence.criteria.Expression<? extends Number>)
-                                scope.path(operand.getVariable());
+                Expression<? extends Number> path =
+                        (Expression<? extends Number>) scope.path(operand.getVariable());
                 return new NumericOperand.Sql(toIeeeDouble(path));
             }
             case VALUE -> {
@@ -374,7 +373,7 @@ final class ArithmeticTranslator {
                 // -0.0 — the one thing that decides which infinity `n / -0.0` is
                 // (cerbos/query-plan-adapters#312).
                 if (operand.getValue().getKindCase()
-                        == com.google.protobuf.Value.KindCase.NUMBER_VALUE) {
+                        == Value.KindCase.NUMBER_VALUE) {
                     return new NumericOperand.Constant(operand.getValue().getNumberValue());
                 }
                 Object v = PlanValues.protoValueToJava(operand.getValue());
@@ -383,7 +382,7 @@ final class ArithmeticTranslator {
                     // string ordering); this path lowers to double arithmetic only.
                     throw Refusals.unsupported(
                             "Arithmetic comparison requires numeric operands, got "
-                                    + ComparisonTranslator.typeName(v));
+                                    + PlanValues.typeName(v));
                 }
                 return new NumericOperand.Constant(n.doubleValue());
             }
@@ -461,8 +460,8 @@ final class ArithmeticTranslator {
      * registration (non-Hibernate provider, old MySQL, contributor not discovered)
      * degrades to the previous behavior, never to an unknown-function SQL error.
      */
-    private jakarta.persistence.criteria.Expression<Double> toIeeeDouble(
-            jakarta.persistence.criteria.Expression<? extends Number> path) {
+    private Expression<Double> toIeeeDouble(
+            Expression<? extends Number> path) {
         if (IeeeDoubleCast.isRegistered(cb)) {
             return cb.function(
                     MySqlDoubleCastFunctionContributor.FUNCTION_NAME, Double.class, path);
@@ -475,11 +474,11 @@ final class ArithmeticTranslator {
      * through the plain-{@code Number} overloads (double bind parameters — see
      * {@link #resolveNumericOperand}).
      */
-    private jakarta.persistence.criteria.Expression<Double> arithmeticSql(
+    private Expression<Double> arithmeticSql(
             String op, NumericOperand l, NumericOperand r) {
-        jakarta.persistence.criteria.Expression<Double> le =
+        Expression<Double> le =
                 l instanceof NumericOperand.Sql s ? s.expr() : null;
-        jakarta.persistence.criteria.Expression<Double> re =
+        Expression<Double> re =
                 r instanceof NumericOperand.Sql s ? s.expr() : null;
         Double lc = l instanceof NumericOperand.Constant c ? c.value() : null;
         Double rc = r instanceof NumericOperand.Constant c ? c.value() : null;
@@ -497,9 +496,9 @@ final class ArithmeticTranslator {
     }
 
     /** Division with the NULLIF zero-divisor guard (see {@link #resolveNumericOperand}). */
-    private jakarta.persistence.criteria.Expression<Double> divisionSql(
-            jakarta.persistence.criteria.Expression<Double> le, Double lc,
-            jakarta.persistence.criteria.Expression<Double> re, Double rc) {
+    private Expression<Double> divisionSql(
+            Expression<Double> le, Double lc,
+            Expression<Double> re, Double rc) {
         if (rc != null) {
             // Constant divisor, numerator is a SQL expression (both-constant subtrees
             // fold before reaching here). Zero → UNKNOWN for every row; non-zero → no
@@ -509,7 +508,7 @@ final class ArithmeticTranslator {
             }
             return cb.quot(le, rc).as(Double.class);
         }
-        jakarta.persistence.criteria.Expression<Double> guarded = cb.nullif(re, 0.0);
+        Expression<Double> guarded = cb.nullif(re, 0.0);
         return (lc != null ? cb.quot(lc, guarded) : cb.quot(le, guarded)).as(Double.class);
     }
 }

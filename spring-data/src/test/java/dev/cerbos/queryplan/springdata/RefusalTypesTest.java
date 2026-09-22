@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
 
-import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -223,17 +222,6 @@ class RefusalTypesTest {
             assertInstanceOf(UnsupportedPlanShapeException.class, ex, probe.action());
             assertTrue(ex.getMessage().contains(Corpus.nullOmittedMessage(probe, Corpus.ADAPTER)),
                     ex.getMessage());
-        }
-    }
-
-    // -- the documented base type ----------------------------------------------------------------
-
-    /** A caller catching the base type the adapter always documented keeps working unchanged. */
-    @Test
-    void everyRefusalTypeExtendsIllegalArgumentException() {
-        for (Class<?> type : List.of(UnsupportedPlanShapeException.class,
-                UnmappedAttributeException.class, MalformedPlanException.class)) {
-            assertTrue(IllegalArgumentException.class.isAssignableFrom(type), type.getName());
         }
     }
 

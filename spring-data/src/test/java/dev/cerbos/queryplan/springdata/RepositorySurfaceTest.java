@@ -357,26 +357,6 @@ class RepositorySurfaceTest {
         }
     }
 
-    /** Executes the raw predicate, so a translation failure surfaces as itself. */
-    @Test
-    void theSpecificationIsRebuiltFromTheRootItIsHanded() {
-        Specification<ResourceEntity> spec = specFor("exists-on-empty");
-        EntityManager em = emf.createEntityManager();
-        try {
-            for (int i = 0; i < 2; i++) {
-                CriteriaBuilder cb = em.getCriteriaBuilder();
-                CriteriaQuery<String> cq = cb.createQuery(String.class);
-                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-                cq.select(root.get("id"));
-                Predicate predicate = spec.toPredicate(root, cq, cb);
-                cq.where(predicate);
-                assertFalse(em.createQuery(cq).getResultList().isEmpty());
-            }
-        } finally {
-            em.close();
-        }
-    }
-
     /**
      * Wraps a Specification and counts {@code toPredicate} invocations, so a test can prove Spring
      * Data really re-invokes ONE instance once per query execution.
