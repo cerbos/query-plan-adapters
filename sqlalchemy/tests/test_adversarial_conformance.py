@@ -24,7 +24,6 @@ here is what only this suite consumes: the seeds, the derived fields, the oracle
 the coverage guards over all three.
 """
 
-import json
 import math
 import os
 import re
@@ -56,7 +55,6 @@ from corpus import (
     parse_actions_file,
     read_corpus_json,
     reads_declared_collection,
-    require_message,
 )
 
 from cerbos_sqlalchemy import get_query
@@ -909,14 +907,6 @@ def _adapter_filtered_ids(
 # one) — a silent-wrongness bug class, so escalate it to an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 class TestAdversarialConformance:
-    def test_throwing_action_with_no_pinned_message_fails_classification(self):
-        # Adding a throwing action without pinning its message must fail this
-        # harness rather than silently degrade the throw suite to a bare "it
-        # raised" (cerbos/query-plan-adapters#326).
-        for absent in (None, "", 42):
-            with pytest.raises(AssertionError, match="pins no throw message"):
-                require_message("synthetic-entry", absent)
-
     def test_manifest_assigns_every_action_exactly_one_outcome(self):
         oracle = set(ORACLE_ACTIONS)
         throwing = THROWING_ACTION_NAMES

@@ -40,7 +40,7 @@ expectations" section of ``conformance/README.md``.
 right rows *against the rows it seeds*. Two different queries can agree on all 22 of them and
 disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL passes
 there and shows up here as a diff a reviewer reads. It is also the only place PostgreSQL —
-reasoned about all through ``query.py``, and executed only by the harness's
+reasoned about all through the translator source, and executed only by the harness's
 declared-collection-storage leg — is rendered for every action.
 
 **Adding a corpus action fails this file.** Every wire fixture must be accounted for here

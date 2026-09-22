@@ -10,7 +10,6 @@ pinned and loaded with ``conformance/policies/``
 (``test_adversarial_conformance.py``).
 """
 
-import re
 from importlib.metadata import version
 
 import pytest
@@ -22,23 +21,13 @@ from sqlalchemy import (
     Integer,
     String,
     create_engine,
-    event,
     insert,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
-_IS_SQLA_14 = None
-
-
-def _is_sqla_14() -> bool:
-    global _IS_SQLA_14
-    if _IS_SQLA_14 is not None:
-        return _IS_SQLA_14
-
-    _IS_SQLA_14 = version("sqlalchemy").startswith("1.4")
-    return _IS_SQLA_14
+_IS_SQLA_14 = version("sqlalchemy").startswith("1.4")
 
 
 class User(Base):
@@ -142,10 +131,7 @@ def engine():
     with engine.connect() as conn:
         conn.execute(
             insert(User.__table__),
-            [
-                {"id": "1", "name": "user1", "role": "admin"},
-                {"id": "2", "name": "user2", "role": "user"},
-            ],
+            [{"id": "1"}, {"id": "2"}],
         )
         conn.execute(insert(Resource.__table__), _RESOURCE_ROWS)
 
@@ -156,7 +142,7 @@ def engine():
             )
             conn.execute(insert(ModernResource.__table__), _RESOURCE_ROWS)
 
-        if not _is_sqla_14():
+        if not _IS_SQLA_14:
             conn.commit()
 
     yield engine
@@ -185,7 +171,7 @@ def _require_declarative_base() -> None:
     import result, a rename upstream would turn the whole 2.0 leg into silent
     skips and leave CI green with the models never exercised.
     """
-    if _is_sqla_14():
+    if _IS_SQLA_14:
         pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
     assert HAS_DECLARATIVE_BASE, (
         "SQLAlchemy >= 2.0 is installed but the DeclarativeBase models failed to "

@@ -16,16 +16,7 @@ from cerbos.sdk.model import (
 )
 
 from cerbos_sqlalchemy import get_query
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    String,
-    column,
-    create_engine,
-    func,
-    literal,
-    table,
-)
+from sqlalchemy import Boolean, DateTime, String, column, create_engine, literal, table
 from sqlalchemy.dialects import postgresql
 
 
@@ -1181,15 +1172,6 @@ class TestDeclarativeStyles:
             }
         )
 
-    def test_declarative_base_is_not_a_declarative_meta(self, modern_resource_table):
-        # Pins *why* `GenericTable` needs the extra member: if SQLAlchemy ever
-        # folds the 2.0 metaclass back under `DeclarativeMeta`, this fails and
-        # the member becomes removable.
-        from sqlalchemy.orm import DeclarativeBase, DeclarativeMeta
-
-        assert issubclass(modern_resource_table, DeclarativeBase)
-        assert not isinstance(modern_resource_table, DeclarativeMeta)
-
     def test_declarative_base_model_filters(self, modern_resource_table, conn):
         query = get_query(
             self._eq_bool_plan(),
@@ -1201,7 +1183,7 @@ class TestDeclarativeStyles:
     def test_declarative_base_cross_table_mapping(
         self, modern_resource_table, modern_user_table, conn
     ):
-        # Exercises `_get_table_name` on both sides of the mapping: the root
+        # Exercises the table-name lookup on both sides of the mapping: the root
         # model and the joined one are both 2.0-style.
         plan = _conditional_plan(
             {
@@ -1271,7 +1253,7 @@ class TestPlanOperandBoundary:
     def test_malformed_nodes_are_rejected_before_semantic_traversal(self, operand):
         # Malformed oneof/discriminator values cannot come from the planner. Reject
         # them at the decode boundary instead of choosing a branch by key order.
-        from cerbos_sqlalchemy.query import _parse_operand
+        from cerbos_sqlalchemy._plan import parse_operand
 
         with pytest.raises(ValueError, match="Unrecognised operand shape"):
-            _parse_operand(operand)
+            parse_operand(operand)

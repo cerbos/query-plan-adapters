@@ -196,12 +196,14 @@ def _args(element, compiler, **kw):
     return [compiler.process(clause, **kw) for clause in element.clauses.clauses]
 
 
-def _dialect_type(type_: Any, dialect: Any) -> Any:
-    """The type the dialect actually stores, with variants and decorators unwrapped."""
-    impl = type_.dialect_impl(dialect)
-    while isinstance(impl, sqltypes.TypeDecorator):
-        impl = impl.load_dialect_impl(dialect)
-    return impl
+def _declared_column(element, compiler):
+    """A document construct's column, and the type the dialect actually stores for it, with
+    variants and decorators unwrapped."""
+    column = element.clauses.clauses[0]
+    stored = column.type.dialect_impl(compiler.dialect)
+    while isinstance(stored, sqltypes.TypeDecorator):
+        stored = stored.load_dialect_impl(compiler.dialect)
+    return column, stored
 
 
 # `str(query)` compiles under SQLAlchemy's string dialect, named "default". That is a debugging
@@ -225,8 +227,7 @@ for _construct in _CONSTRUCTS:
 
 @compiles(_JsonDocument, "sqlite")
 def _sqlite_json_document(element, compiler, **kw):
-    column = element.clauses.clauses[0]
-    stored = _dialect_type(column.type, compiler.dialect)
+    column, stored = _declared_column(element, compiler)
     if not isinstance(stored, (sqltypes.JSON, sqltypes.String)):
         raise CompileError(
             'collection_columns storage "json" requires a SQLite JSON text column'
@@ -321,8 +322,7 @@ _PG_ARRAY_REFUSED_ELEMENT_TYPES = (sqltypes.Enum, sqltypes.BigInteger)
 
 @compiles(_JsonDocument, "postgresql")
 def _postgresql_json_document(element, compiler, **kw):
-    column = element.clauses.clauses[0]
-    stored = _dialect_type(column.type, compiler.dialect)
+    column, stored = _declared_column(element, compiler)
     if not isinstance(stored, sqltypes.JSON):
         raise CompileError(
             'collection_columns storage "json" requires a PostgreSQL JSON or JSONB column'
@@ -332,8 +332,7 @@ def _postgresql_json_document(element, compiler, **kw):
 
 @compiles(_PgArrayDocument, "postgresql")
 def _postgresql_pg_array_document(element, compiler, **kw):
-    column = element.clauses.clauses[0]
-    stored = _dialect_type(column.type, compiler.dialect)
+    column, stored = _declared_column(element, compiler)
     item = getattr(stored, "item_type", None)
     if (
         not isinstance(stored, sqltypes.ARRAY)
