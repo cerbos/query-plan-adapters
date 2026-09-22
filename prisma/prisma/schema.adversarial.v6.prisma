@@ -8,7 +8,10 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev-adversarial.db"
+  // One connection: the harness sets `PRAGMA case_sensitive_like = ON`, which is per-connection,
+  // and the v6 query engine pools connections — a query on another pooled connection would run
+  // a case-insensitive LIKE and over-grant the `cs-*` case-variant rows.
+  url      = "file:./dev-adversarial.db?connection_limit=1"
 }
 
 model AdversarialResource {
