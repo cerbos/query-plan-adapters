@@ -60,171 +60,114 @@ export class UnsupportedOperatorError extends Error {
   }
 }
 
-type ChromaLiteral = string | number | boolean;
-
-type BinaryOperands = {
-  variable: PlanExpressionVariable;
-  variableIndex: number;
-  value: PlanExpressionValue;
-};
-
-type ResolvedField = {
-  name: string;
-  numericType?: "integer" | "float";
-  required: boolean;
-};
-
-type FieldResolver = (key: string) => ResolvedField;
-
-// Operands are classified by shape, never with `instanceof`. `instanceof` is nominal, so it
-// answers "was this built by MY copy of @cerbos/core?" rather than "what kind of operand is
-// this?" — and a consumer whose Cerbos client resolves a different copy of core than this
-// adapter does is an ordinary npm outcome, not a misconfiguration. No dependency declaration
-// prevents it: npm resolves a peer to the highest version satisfying it, not the one that
-// dedupes with the rest of the tree, so every range leaves some consumer with two copies
-// (cerbos/query-plan-adapters#419). The three operand types have disjoint shapes, so matching
-// on them is exact and survives however many copies exist. Same trio as every other adapter.
-const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
-  "operator" in e;
-const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
-  "value" in e;
-const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
-  "name" in e;
-
-const NEGATED_OPERATOR: Readonly<Record<string, string>> = {
-  eq: "ne",
-  ne: "eq",
-  lt: "ge",
-  gt: "le",
-  le: "gt",
-  ge: "lt",
-  in: "nin",
-};
-
-const MIRRORED_OPERATOR: Readonly<Record<string, string>> = {
-  eq: "eq",
-  ne: "ne",
-  lt: "gt",
-  le: "ge",
-  gt: "lt",
-  ge: "le",
-};
-
-// The plan operators `whereFor` maps to a Chroma comparison. One of these with the wrong operand
-// count is a malformed plan; any other operator reaching `binaryOperands` with it — a ternary, in
-// the corpus — is a shape the `Where` grammar has no comparison for.
-const COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
-  "eq",
-  "ne",
-  "lt",
-  "le",
-  "gt",
-  "ge",
-  "in",
-]);
-
 export function queryPlanToChromaDB({
   queryPlan,
   fieldNameMapper,
 }: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult {
-  // Fields default to optional: Chroma's $ne/$nin match records where the metadata key is
-  // absent, while Cerbos denies on a missing attribute. Without an explicit
-  // `required: true` assertion from the integrator the adapter cannot know the key is always
-  // present, so those operators are rejected rather than allowed to over-grant.
-  const toField = (key: string): ResolvedField => {
-    const mapped =
-      typeof fieldNameMapper === "function"
-        ? fieldNameMapper(key)
-        : fieldNameMapper[key];
-    if (typeof mapped === "string") {
-      return { name: mapped, required: false };
-    }
-    if (mapped) {
-      return {
-        name: mapped.field,
-        numericType: mapped.numericType,
-        required: mapped.required ?? false,
-      };
-    }
-    return { name: key, required: false };
-  };
-
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
-      return {
-        kind: PlanKind.ALWAYS_ALLOWED,
-        filters: {},
-      };
+      return { kind: PlanKind.ALWAYS_ALLOWED, filters: {} };
     case PlanKind.ALWAYS_DENIED:
-      return {
-        kind: PlanKind.ALWAYS_DENIED,
-      };
+      return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(queryPlan.condition, toField),
+        filters: mapOperand(queryPlan.condition, fieldResolver(fieldNameMapper)),
       };
     default:
       throw Error("Invalid query plan.");
   }
 }
 
-function binaryOperands(
-  operator: string,
-  operands: PlanExpressionOperand[],
-): BinaryOperands {
-  if (operands.length !== 2) {
-    if (COMPARISON_OPERATORS.has(operator)) {
-      throw Error("Expected exactly two operands");
-    }
-    throw new UnsupportedOperatorError(operator, "Expected exactly two operands");
-  }
+// -- the comparisons Chroma can express ------------------------------------------------------------
 
-  let variable: PlanExpressionVariable | undefined;
-  let variableIndex = -1;
-  let value: PlanExpressionValue | undefined;
+type ChromaLiteral = string | number | boolean;
 
-  for (const [index, operand] of operands.entries()) {
-    if (isVariable(operand)) {
-      if (variable) {
-        throw new UnsupportedOperatorError(
-          operator,
-          "Variable-to-variable comparisons are not supported by ChromaDB filters",
-        );
-      }
-      variable = operand;
-      variableIndex = index;
-    } else if (isValue(operand)) {
-      if (value) {
-        throw new UnsupportedOperatorError(
-          operator,
-          "Value-to-value comparisons are not supported by ChromaDB filters",
-        );
-      }
-      value = operand;
-    } else {
-      // Inside a comparison, the computed operand is the part Chroma cannot evaluate. Inside
-      // anything else — a collection macro, whose second operand is always its lambda — the
-      // operator itself is what has no `Where` form, and `lambda` would tell a caller nothing.
-      throw new UnsupportedOperatorError(
-        COMPARISON_OPERATORS.has(operator) ? operand.operator : operator,
-        "Nested expressions are not supported by ChromaDB filters",
-      );
-    }
-  }
+interface Comparison {
+  /** The Chroma operator the comparison is emitted as. */
+  chroma: "$eq" | "$ne" | "$lt" | "$lte" | "$gt" | "$gte" | "$in" | "$nin";
+  /** Validates the literal operand, refusing one Chroma metadata cannot be compared with. */
+  literal: (value: unknown, operator: string) => ChromaLiteral | ChromaLiteral[];
+  /** The operator `not(key <op> literal)` becomes. Absent: the comparison cannot be negated. */
+  negated?: string;
+  /** The operator `literal <op> key` becomes once the key is moved left. Absent: no mirror. */
+  mirrored?: string;
+  /**
+   * Chroma matches a document that is missing the metadata key, where CEL raises a
+   * missing-attribute error and the PDP denies — so it is only sound over a `required` field.
+   */
+  matchesMissingKey?: true;
+  /** An ordered comparison: a fractional threshold needs a field declared `numericType: "float"`. */
+  ordered?: true;
+  /**
+   * Never a plan operator — only ever reached by negating one. A plan node naming it with the
+   * wrong operands is therefore a shape this adapter does not know, not a malformed comparison.
+   */
+  negationOnly?: true;
+}
 
-  if (!variable) {
-    throw Error(`Unexpected variable ${String(operands)}`);
-  }
-  if (!value) {
+/**
+ * Every comparison this adapter emits, keyed by the plan operator it translates. Adding an operator
+ * is adding a row here: operand validation, negation, mirroring and the optional-key and
+ * fractional-threshold guards are all read from it.
+ */
+// prettier-ignore
+const COMPARISONS: ReadonlyMap<string, Comparison> = new Map(
+  Object.entries<Comparison>({
+    eq:  { chroma: "$eq",  literal: requireLiteral,     negated: "ne",  mirrored: "eq" },
+    ne:  { chroma: "$ne",  literal: requireLiteral,     negated: "eq",  mirrored: "ne", matchesMissingKey: true },
+    lt:  { chroma: "$lt",  literal: requireNumber,      negated: "ge",  mirrored: "gt", ordered: true },
+    le:  { chroma: "$lte", literal: requireNumber,      negated: "gt",  mirrored: "ge", ordered: true },
+    gt:  { chroma: "$gt",  literal: requireNumber,      negated: "le",  mirrored: "lt", ordered: true },
+    ge:  { chroma: "$gte", literal: requireNumber,      negated: "lt",  mirrored: "le", ordered: true },
+    in:  { chroma: "$in",  literal: requireLiteralList, negated: "nin" },
+    nin: { chroma: "$nin", literal: requireLiteralList, matchesMissingKey: true, negationOnly: true },
+  }),
+);
+
+/** A comparison the planner emits, as opposed to any other operator or one only negation reaches. */
+function isPlanComparison(operator: string): boolean {
+  const comparison = COMPARISONS.get(operator);
+  return comparison !== undefined && !comparison.negationOnly;
+}
+
+/** `{ field: { $op: literal } }`, once the literal has passed the comparison's validation. */
+function emit(field: string, operator: string, value: unknown): Where {
+  const { chroma, literal } = COMPARISONS.get(operator)!;
+  return { [field]: { [chroma]: literal(value, operator) } } as Where;
+}
+
+function unsupported(operator: string): UnsupportedOperatorError {
+  return new UnsupportedOperatorError(operator, `Unsupported operator ${operator}`);
+}
+
+function negationOf(operator: string): string {
+  const negated = COMPARISONS.get(operator)?.negated;
+  if (negated === undefined) {
     throw new UnsupportedOperatorError(
       operator,
-      "Variable-to-variable comparisons are not supported by ChromaDB filters",
+      `Cannot negate operator ${operator}`,
     );
   }
-
-  return { variable, variableIndex, value };
+  return negated;
 }
+
+/** `literal <op> key` as `key <op'> literal`, the only orientation a `Where` clause has. */
+function mirrorOf(operator: string): string {
+  if (operator === "in") {
+    throw new UnsupportedOperatorError(
+      operator,
+      "ChromaDB filters cannot test whether a literal is contained in a metadata field",
+    );
+  }
+  const mirrored = COMPARISONS.get(operator)?.mirrored;
+  if (mirrored === undefined) {
+    throw unsupported(operator);
+  }
+  return mirrored;
+}
+
+// -- literal operands ------------------------------------------------------------------------------
 
 function isChromaLiteral(value: unknown): value is ChromaLiteral {
   return (
@@ -277,114 +220,68 @@ function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
   return value;
 }
 
-function whereFor(
-  fieldName: string,
-  operator: string,
-  value: unknown,
-): Where {
-  switch (operator) {
-    case "eq":
-      return { [fieldName]: { $eq: requireLiteral(value, operator) } };
-    case "ne":
-      return { [fieldName]: { $ne: requireLiteral(value, operator) } };
-    case "lt":
-      return { [fieldName]: { $lt: requireNumber(value, operator) } };
-    case "le":
-      return { [fieldName]: { $lte: requireNumber(value, operator) } };
-    case "gt":
-      return { [fieldName]: { $gt: requireNumber(value, operator) } };
-    case "ge":
-      return { [fieldName]: { $gte: requireNumber(value, operator) } };
-    case "in":
-      return { [fieldName]: { $in: requireLiteralList(value, operator) } };
-    case "nin":
-      return { [fieldName]: { $nin: requireLiteralList(value, operator) } };
-    default:
-      throw new UnsupportedOperatorError(
-        operator,
-        `Unsupported operator ${operator}`,
-      );
-  }
+// -- metadata fields -------------------------------------------------------------------------------
+
+type ResolvedField = {
+  name: string;
+  numericType?: "integer" | "float";
+  required: boolean;
+};
+
+type FieldResolver = (key: string) => ResolvedField;
+
+// Fields default to optional: Chroma's $ne/$nin match records where the metadata key is absent,
+// while Cerbos denies on a missing attribute. Without an explicit `required: true` assertion from
+// the integrator the adapter cannot know the key is always present, so those operators are
+// rejected rather than allowed to over-grant.
+function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
+  return (key) => {
+    const mapped =
+      typeof fieldNameMapper === "function"
+        ? fieldNameMapper(key)
+        : fieldNameMapper[key];
+    const field: ResolvedField =
+      typeof mapped === "string"
+        ? { name: mapped, required: false }
+        : mapped
+          ? {
+              name: mapped.field,
+              numericType: mapped.numericType,
+              required: mapped.required ?? false,
+            }
+          : { name: key, required: false };
+    if (!field.name) {
+      throw Error("Field name is required");
+    }
+    return field;
+  };
 }
 
-function normalizeOperator(operator: string, variableIndex: number): string {
-  if (variableIndex === 0) {
-    return operator;
-  }
-  if (operator === "in") {
+function requirePresenceFor(field: ResolvedField, operator: string): void {
+  if (!field.required && COMPARISONS.get(operator)?.matchesMissingKey) {
     throw new UnsupportedOperatorError(
       operator,
-      "ChromaDB filters cannot test whether a literal is contained in a metadata field",
+      `${operator} is unsafe for optional Chroma metadata because missing fields match the filter`,
     );
   }
-
-  const mirrored = MIRRORED_OPERATOR[operator];
-  if (!mirrored) {
-    throw new UnsupportedOperatorError(
-      operator,
-      `Unsupported operator ${operator}`,
-    );
-  }
-  return mirrored;
 }
 
-function mapComparison(
-  operator: string,
-  operands: PlanExpressionOperand[],
-  resolveField: FieldResolver,
-  negate: boolean,
-): Where {
-  const { variable, variableIndex, value } = binaryOperands(operator, operands);
-  const normalized = normalizeOperator(operator, variableIndex);
-  const mappedOperator = negate ? NEGATED_OPERATOR[normalized] : normalized;
-  if (!mappedOperator) {
-    throw new UnsupportedOperatorError(
-      normalized,
-      `Cannot negate operator ${normalized}`,
-    );
-  }
+// -- the walk --------------------------------------------------------------------------------------
 
-  const field = resolveField(variable.name);
-  if (!field.name) {
-    throw Error("Field name is required");
-  }
-  if (!field.required && (mappedOperator === "ne" || mappedOperator === "nin")) {
-    throw new UnsupportedOperatorError(
-      mappedOperator,
-      `${mappedOperator} is unsafe for optional Chroma metadata because missing fields match the filter`,
-    );
-  }
-  if (
-    ["lt", "le", "gt", "ge"].includes(mappedOperator) &&
-    typeof value.value === "number" &&
-    !Number.isInteger(value.value) &&
-    field.numericType !== "float"
-  ) {
-    throw new UnsupportedOperatorError(
-      mappedOperator,
-      `${mappedOperator} cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: "float"`,
-    );
-  }
-  return whereFor(field.name, mappedOperator, value.value);
-}
-
-function mapBooleanVariable(
-  variable: PlanExpressionVariable,
-  resolveField: FieldResolver,
-  negate: boolean,
-): Where {
-  const field = resolveField(variable.name);
-  if (!field.name) {
-    throw Error("Field name is required");
-  }
-  if (negate && !field.required) {
-    throw new UnsupportedOperatorError(
-      "ne",
-      "ne is unsafe for optional Chroma metadata because missing fields match the filter",
-    );
-  }
-  return whereFor(field.name, negate ? "ne" : "eq", true);
-}
+// Operands are classified by shape, never with `instanceof`. `instanceof` is nominal, so it
+// answers "was this built by MY copy of @cerbos/core?" rather than "what kind of operand is
+// this?" — and a consumer whose Cerbos client resolves a different copy of core than this
+// adapter does is an ordinary npm outcome, not a misconfiguration. No dependency declaration
+// prevents it: npm resolves a peer to the highest version satisfying it, not the one that
+// dedupes with the rest of the tree, so every range leaves some consumer with two copies
+// (cerbos/query-plan-adapters#419). The three operand types have disjoint shapes, so matching
+// on them is exact and survives however many copies exist. Same trio as every other adapter.
+const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
+  "operator" in e;
+const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
+  "value" in e;
+const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
+  "name" in e;
 
 function mapOperand(
   operand: PlanExpressionOperand,
@@ -404,8 +301,13 @@ function mapOperand(
 
   if (operator === "and" || operator === "or") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
-    const children = operands.map((child) => mapOperand(child, resolveField, negate));
-    return (operator === "and") !== negate ? { $and: children } : { $or: children };
+    const children = operands.map((child) =>
+      mapOperand(child, resolveField, negate),
+    );
+    // De Morgan: under negation a conjunction becomes a disjunction and vice versa.
+    return (operator === "and") !== negate
+      ? { $and: children }
+      : { $or: children };
   }
 
   if (operator === "not") {
@@ -414,13 +316,109 @@ function mapOperand(
     return mapOperand(operands[0], resolveField, !negate);
   }
 
-  // Check the raw operator before resolving operands so unsupported shapes keep
-  // their existing refusal message and refusal site under negation.
-  if (negate && !NEGATED_OPERATOR[operator]) {
+  return mapComparison(operator, operands, resolveField, negate);
+}
+
+/** A bare boolean key as a condition: `key == true`, or `key != true` under negation. */
+function mapBooleanVariable(
+  variable: PlanExpressionVariable,
+  resolveField: FieldResolver,
+  negate: boolean,
+): Where {
+  const field = resolveField(variable.name);
+  const operator = negate ? "ne" : "eq";
+  requirePresenceFor(field, operator);
+  return emit(field.name, operator, true);
+}
+
+function mapComparison(
+  planOperator: string,
+  operands: PlanExpressionOperand[],
+  resolveField: FieldResolver,
+  negate: boolean,
+): Where {
+  // Checked before the operands are read, so a non-negatable shape keeps its refusal site under
+  // negation whatever its operands are.
+  if (negate) {
+    negationOf(planOperator);
+  }
+  const { variable, literalFirst, value } = binaryOperands(
+    planOperator,
+    operands,
+  );
+  const oriented = literalFirst ? mirrorOf(planOperator) : planOperator;
+  const operator = negate ? negationOf(oriented) : oriented;
+
+  const field = resolveField(variable.name);
+  const comparison = COMPARISONS.get(operator);
+  if (!comparison) {
+    throw unsupported(operator);
+  }
+  requirePresenceFor(field, operator);
+  if (
+    comparison.ordered &&
+    typeof value === "number" &&
+    !Number.isInteger(value) &&
+    field.numericType !== "float"
+  ) {
     throw new UnsupportedOperatorError(
       operator,
-      `Cannot negate operator ${operator}`,
+      `${operator} cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: "float"`,
     );
   }
-  return mapComparison(operator, operands, resolveField, negate);
+  return emit(field.name, operator, value);
+}
+
+type KeyOrLiteral =
+  | { variable: PlanExpressionVariable }
+  | { value: PlanExpressionValue["value"] };
+
+/**
+ * The metadata key and the literal a comparison relates, and which side the literal is on. Anything
+ * else — a computed operand, two keys, two literals — is a shape the `Where` grammar cannot hold.
+ */
+function binaryOperands(
+  operator: string,
+  operands: PlanExpressionOperand[],
+): {
+  variable: PlanExpressionVariable;
+  literalFirst: boolean;
+  value: PlanExpressionValue["value"];
+} {
+  if (operands.length !== 2) {
+    // A known comparison short of an operand is a malformed plan; any other operator — a ternary,
+    // in the corpus — is a shape the `Where` grammar has no comparison for.
+    if (isPlanComparison(operator)) {
+      throw Error("Expected exactly two operands");
+    }
+    throw new UnsupportedOperatorError(
+      operator,
+      "Expected exactly two operands",
+    );
+  }
+
+  const [left, right] = operands.map((operand): KeyOrLiteral => {
+    if (isVariable(operand)) return { variable: operand };
+    if (isValue(operand)) return { value: operand.value };
+    // Inside a comparison, the computed operand is the part Chroma cannot evaluate. Inside
+    // anything else — a collection macro, whose second operand is always its lambda — the
+    // operator itself is what has no `Where` form, and `lambda` would tell a caller nothing.
+    throw new UnsupportedOperatorError(
+      isPlanComparison(operator) ? operand.operator : operator,
+      "Nested expressions are not supported by ChromaDB filters",
+    );
+  }) as [KeyOrLiteral, KeyOrLiteral];
+
+  if ("variable" in left && "value" in right) {
+    return { variable: left.variable, literalFirst: false, value: right.value };
+  }
+  if ("value" in left && "variable" in right) {
+    return { variable: right.variable, literalFirst: true, value: left.value };
+  }
+  throw new UnsupportedOperatorError(
+    operator,
+    "variable" in left
+      ? "Variable-to-variable comparisons are not supported by ChromaDB filters"
+      : "Value-to-value comparisons are not supported by ChromaDB filters",
+  );
 }

@@ -272,16 +272,16 @@ describe("the rejection sites the corpus reaches", () => {
     ["computed operand", /^Nested expressions are not supported/],
     // `binaryOperands`: both sides are metadata keys, and a Where clause compares one to a literal.
     ["field-to-field", /^Variable-to-variable comparisons are not supported/],
-    // `mapComparison` / `mapBooleanVariable`: $ne and $nin match a document missing the key.
+    // `requirePresenceFor`: $ne and $nin match a document missing the key.
     [
       "inequality over an optional key",
       / is unsafe for optional Chroma metadata/,
     ],
-    // `whereFor`: the operator has no Chroma equivalent at all.
+    // `mirrorOf` / `mapComparison`: the operator has no row in COMPARISONS at all.
     ["no such operator", /^Unsupported operator /],
-    // `negateOperand`: the operator is not in NEGATED_OPERATOR, so there is nothing to invert.
+    // `negationOf`: the operator's COMPARISONS row has no negation, so there is nothing to invert.
     ["not negatable", /^Cannot negate operator /],
-    // `normalizeOperator`: value-first `in` asks whether a literal is inside a metadata field.
+    // `mirrorOf`: value-first `in` asks whether a literal is inside a metadata field.
     [
       "mirrored membership",
       /^ChromaDB filters cannot test whether a literal is contained/,
@@ -586,11 +586,11 @@ describe("mapper forms", () => {
 
   /**
    * `vf-ne` is the discriminating action for the two tests below: under the corpus mapper, where
-   * `aString` is declared `required: true`, it translates. The pinned filter is read from the asset
-   * rather than restated — expectations are data in this file, including here.
+   * `aString` is declared `required: true`, it translates to an inequality over that key. Whether it
+   * still emits its golden expectation is the corpus-shapes suite's job; this pins that the asset
+   * entry is the `$ne` the tests below need, so they cannot pass against some other shape.
    */
-  test("the discriminating action translates under the corpus mapper", () => {
-    expect(translate("vf-ne")).toEqual(RECORDED.get("vf-ne")!.expectation);
+  test("the discriminating action is an inequality over a required key", () => {
     expect(literalsOf(recordedFilters("vf-ne"))).toEqual([
       { field: "aString", operator: "$ne", value: "one" },
     ]);
