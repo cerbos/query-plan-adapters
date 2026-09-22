@@ -1873,16 +1873,8 @@ describe("nullAttributeRepresentation", () => {
   // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
   // attribute the caller OMITS when the column is NULL. The two conventions are indistinguishable
   // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
-  // be told, and the whole behaviour is a translator property with no store in it.
-  test("explicit: a null operand becomes an IS NULL filter", () => {
-    expect(
-      translate("null-eq-missing", { nullAttributeRepresentation: "explicit" })
-    ).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: { aOptionalString: { equals: null } },
-    });
-  });
-
+  // be told, and the whole behaviour is a translator property with no store in it. Under the
+  // default (`"explicit"`) it becomes the IS NULL filter EXPECTED_FILTERS pins above.
   test("omitted: the same plan is refused rather than translated", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
     // filter above would return exactly those rows (#302).
