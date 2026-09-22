@@ -8,6 +8,7 @@ import { Types } from "mongoose";
 import { PlanKind, queryPlanToMongoose } from ".";
 import type {
   Mapper,
+  MapperConfig,
   MongooseFilter,
   NullAttributeRepresentation,
   QueryPlanToMongooseResult,
@@ -7516,6 +7517,57 @@ describe("the mapper contract", () => {
     expect(translate("rel-eq-hop", { mapper: relation() })).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { "parent.aString": { $eq: "One" } },
+    });
+  });
+});
+
+describe("an unmapped reference", () => {
+  // A caller shape, like the rest of the mapper contract: the corpus fixes one mapper that maps
+  // every reference its policies reach, so no corpus action can ask what happens to a name the
+  // mapper does not declare. Before cerbos/query-plan-adapters#492 it was used verbatim as a
+  // document path, and `$ne`/`$nor` over a path no document stores matched every document.
+  const without = (reference: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER as Record<string, MapperConfig>).filter(
+        ([key]) => key !== reference,
+      ),
+    );
+
+  test.each([
+    ["optional-ne", "request.resource.attr.aOptionalString"],
+    ["not-gt", "request.resource.attr.aNumber"],
+  ])("%s is refused when %s has no entry", (action, reference) => {
+    expect(() => translate(action, { mapper: without(reference) })).toThrow(
+      `No mapper entry for ${reference}: an unmapped reference is not used verbatim`,
+    );
+  });
+
+  test("is refused when a function mapper returns no entry for it", () => {
+    const mapper = ((key: string) =>
+      key === "request.resource.attr.aOptionalString"
+        ? undefined
+        : (MAPPER as Record<string, MapperConfig>)[key]) as Mapper;
+    expect(() => translate("optional-ne", { mapper })).toThrow(
+      "No mapper entry for request.resource.attr.aOptionalString",
+    );
+  });
+
+  test("is refused under the default mapper", () => {
+    expect(() =>
+      queryPlanToMongoose({ queryPlan: planFromWireFixture("optional-ne") }),
+    ).toThrow("No mapper entry for request.resource.attr.aOptionalString");
+  });
+
+  // The opt-in: an entry that names neither a field nor a relation keeps the plan path, for a
+  // caller whose documents really are shaped like it.
+  test("keeps the plan path when an empty entry declares it", () => {
+    expect(
+      translate("optional-ne", {
+        mapper: { "request.resource.attr.aOptionalString": {} },
+      }),
+    ).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { "request.resource.attr.aOptionalString": { $ne: "x" } },
     });
   });
 });

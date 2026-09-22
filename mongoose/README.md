@@ -207,7 +207,9 @@ export type Mapper =
 - `relation` describes embedded documents (`type: "one"`) or arrays (`type: "many"`). When `field` is provided on a relation it identifies the property inside that relation that should be used for comparisons (for example, matching `createdBy.id` without an `$elemMatch`).
 - `fields` supplies nested overrides so lambda expressions such as `tag.name` can be mapped to the correct property.
 
-If you omit the mapper the adapter will use the query plan paths verbatim, which only works when your Mongo documents follow the Cerbos naming convention.
+Every attribute a plan references must have a mapper entry — its own, or one for the relation it is reached through — or translation throws `No mapper entry for <reference>`.
+
+**Behaviour change.** An unmapped reference used to be taken verbatim as a document path, and since no document stores a path like `request.resource.attr.status`, MongoDB's `$ne` and `$nor` matched every document: a missing entry turned `R.attr.status != "x"` into a filter returning the whole collection ([#492](https://github.com/cerbos/query-plan-adapters/issues/492)). It now throws, which is a consumer-visible break for a caller relying on the fallback, including one who passed no mapper at all. If your documents really are shaped like the plan paths, opt in per reference with an entry that names no `field` (`{}`, or `{ nullable: true }`), or with a function mapper that returns one.
 
 #### Direct fields
 
@@ -414,6 +416,7 @@ pagination, and the adapter's filter composed with an application-owned filter.
 - A conditional plan omits the `operator`/`operands` structure (`Invalid Cerbos expression structure`).
 - An operator listed in the plan is not implemented (`Unsupported operator: <name>`).
 - Collection-oriented operators (`map`, `filter`, `exists`, `all`, etc.) are used without a `relation` mapper, or with a mapper that declares `type: "one"` where `type: "many"` is required (errors such as `map operator requires a relation mapping`).
+- A plan references an attribute the mapper has no entry for (`No mapper entry for <reference>`).
 - Lambda expressions in the plan are malformed (for example, missing a variable operand results in `Lambda variable must have a name`).
 - Value operands do not match the expected type, e.g., `hasIntersection` supplies a non-array value.
 

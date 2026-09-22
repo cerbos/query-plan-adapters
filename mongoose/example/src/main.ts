@@ -66,9 +66,10 @@ const seeds = JSON.parse(
 
 /**
  * Cerbos attribute names are not document paths, so a consumer always writes one of these. This
- * is the one piece of configuration a Mongoose consumer must not skip: an unmapped reference
- * resolves to itself, so the adapter would filter on a path literally named
- * `request.resource.attr.ownerId`, which matches no document and returns nothing.
+ * is the one piece of configuration a Mongoose consumer must not skip: the adapter refuses a plan
+ * that references an attribute with no entry, because a path literally named
+ * `request.resource.attr.ownerId` is absent from every document and `$ne`/`$nor` over it match
+ * them all (cerbos/query-plan-adapters#492).
  */
 const MAPPER: Mapper = {
   "request.resource.attr.ownerId": { field: "ownerId" },
