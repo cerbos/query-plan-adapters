@@ -9,9 +9,24 @@ you can pass straight to a `JpaSpecificationExecutor`.
 
 ## Install
 
+The adapter is **not published to Maven Central yet**. Build it and install it into your local
+Maven repository first, from a checkout of this repository:
+
+```bash
+cd spring-data
+gradle publishToMavenLocal   # needs JDK 17+ and a local Gradle 8.x
+```
+
+Then depend on it, with `mavenLocal()` among your Gradle repositories.
+
 Gradle:
 
 ```kotlin
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
 dependencies {
     implementation("dev.cerbos:cerbos-spring-data:0.1.0-alpha.1")
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1") // to call the PDP
