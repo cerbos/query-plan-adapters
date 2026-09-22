@@ -14,6 +14,10 @@ Cerbos's own evaluation for any row, the mismatch surfaces mechanically. See
 ``conformance/README.md`` for the oracle recipe (NULL-as-missing-attribute, the
 degeneracy guard).
 
+The oracle comparison runs on four legs (#321), each varying ONE caller-side
+dimension away from the baseline — the plan's transport, the model style handed to
+``get_query``, and how the returned ``Select`` is executed. See ``LEGS``.
+
 The SQLAlchemy-specific translation configuration — the schema, the attribute map,
 and the operator overrides that express relation traversals as correlated subqueries
 with CEL-faithful three-valued logic (an element whose column is NULL is a CEL
@@ -24,6 +28,7 @@ here is what only this suite consumes: the seeds, the derived fields, the oracle
 the coverage guards over all three.
 """
 
+import asyncio
 import math
 import os
 import re
@@ -31,8 +36,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Set, Union
 
 import pytest
+from cerbos.engine.v1 import engine_pb2
+from cerbos.response.v1 import response_pb2
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.container import CerbosContainer
+from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
 from cerbos.sdk.model import PlanResourcesFilterKind, Principal, Resource, ResourceDesc
 from cerbos_image import CERBOS_IMAGE, CONFORMANCE_DIR
 from corpus import (
@@ -40,6 +48,7 @@ from corpus import (
     ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
     COLLECTION_COLUMNS,
+    INSTALLED_SQLALCHEMY_MAJOR,
     OPERATOR_OVERRIDES,
     PG_ARRAY_COLLECTION_COLUMNS,
     AdvBase,
@@ -56,10 +65,14 @@ from corpus import (
     read_corpus_json,
     reads_declared_collection,
 )
+from google.protobuf.json_format import ParseDict
+from google.protobuf.struct_pb2 import Value
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import CollectionColumn, get_query
 from sqlalchemy import create_engine, event, insert, select, text
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import DeclarativeMeta
+from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 SEEDS_FILE = read_corpus_json("seeds.json")
 DERIVED_FILE = read_corpus_json("derived-fields.json")
@@ -237,6 +250,103 @@ NULL_OMITTED_MESSAGE = NULL_REPRESENTATION_OMITTED[0][2]
 # projection trap conformance/README.md warns about).
 MANIFEST_ACTIONS = MANIFEST.manifest_actions()
 SQLALCHEMY_SKIPPED_DIVERGENCES = MANIFEST.skipped_divergences(ADAPTER)
+
+# -- the legs (#321) ---------------------------------------------------------
+#
+# `get_query` is handed things the CALLER chose, and the corpus can vary none of them:
+# which SDK client produced the plan, which declarative style the models use, and how
+# the returned `Select` is executed. Each leg varies exactly one of those away from the
+# baseline, and every leg runs every oracle action — the cost is a plan and a query per
+# action, because the oracle is memoized (see `_oracle_allowed_ids`).
+#
+# - `grpc`: the plan arrives as a protobuf `PlanResourcesResponse`, which `get_query`
+#   walks through `MessageToDict` rather than the HTTP model's `to_dict()`. It is not a
+#   relabelling: a protobuf double keeps the sign of a zero, where the HTTP JSON body
+#   renders `-0.0` as `-0` and `json.loads` hands back the INTEGER 0. That is why
+#   `GRPC_ONLY_ORACLE_ACTIONS` below exist.
+# - `declarative-base`: the SQLAlchemy 2.0 `DeclarativeBase` arm of `GenericTable`, whose
+#   metaclass sits outside `DeclarativeMeta`. The models are mapped onto the SAME tables,
+#   so they read the same seeded rows and the same correlated subqueries correlate
+#   against them. Skipped on 1.4, which has no `DeclarativeBase`.
+# - `async`: the returned `Select` executed through an `AsyncSession` over aiosqlite,
+#   against a file-backed copy of the same seeds.
+LEGS = ("http", "grpc", "declarative-base", "async")
+_IS_SQLA_14 = INSTALLED_SQLALCHEMY_MAJOR == "1.4"
+
+# The adapterUnsupported entries whose refusal is an artefact of the HTTP transport, not
+# of SQL: a CONSTANT zero denominator whose sign the JSON decoding drops. Over gRPC the
+# sign survives, the adapter translates the shape, and this leg compares it against the
+# oracle — so the classification stays in `adapterUnsupported` (HTTP is the one mapping
+# the manifest classifies) while the gRPC leg proves the other transport is supported.
+# `test_the_grpc_leg_promotes_exactly_the_http_zero_sign_refusals` pins why each is here.
+GRPC_ONLY_ORACLE_ACTIONS = ("cr-div-neg-zero", "nan-ord-inf")
+HTTP_ZERO_SIGN_MESSAGE = (
+    "division by a constant zero whose sign is indeterminate: the HTTP transport"
+)
+
+
+def _require_declarative_base() -> None:
+    """Skip on 1.4, but fail loudly if 2.0 could not build the models.
+
+    Keyed on the installed version, not on the import result: keyed on the import, a
+    rename upstream would turn the whole leg into silent skips.
+    """
+    if _IS_SQLA_14:
+        pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")
+    assert MODERN_MODELS, (
+        "SQLAlchemy >= 2.0 is installed but the DeclarativeBase models failed to "
+        "build — the declarative-base leg would otherwise skip silently"
+    )
+
+
+# Legacy model -> its DeclarativeBase twin, mapped onto the same `Table`.
+MODERN_MODELS: Dict[Any, Any] = {}
+try:
+    from sqlalchemy.orm import DeclarativeBase
+except ImportError:  # SQLAlchemy 1.4
+    pass
+else:
+
+    class _ModernAdvBase(DeclarativeBase):
+        pass
+
+    for _legacy in (
+        AdvResource,
+        AdvTag,
+        AdvCategory,
+        AdvSubCategory,
+        AdvLabel,
+        AdvParent,
+        AdvInner,
+    ):
+        MODERN_MODELS[_legacy] = type(
+            f"Modern{_legacy.__name__}",
+            (_ModernAdvBase,),
+            {"__table__": _legacy.__table__},
+        )
+
+
+def _modern_attribute(value: Any) -> Any:
+    """The twin's attribute for a legacy model's mapped column; anything else unchanged.
+
+    Only direct column attributes are swapped. Relation markers and the correlated
+    scalar subqueries are Core over the shared tables, which a caller migrating to
+    `DeclarativeBase` writes exactly the same way.
+    """
+    if isinstance(value, InstrumentedAttribute) and value.class_ in MODERN_MODELS:
+        return getattr(MODERN_MODELS[value.class_], value.key)
+    return value
+
+
+def _modern_mapping():
+    """``(table, attr_map, collection_columns)`` spelled against the 2.0 twins."""
+    attr_map = {name: _modern_attribute(value) for name, value in ATTR_MAP.items()}
+    collection_columns = {
+        name: CollectionColumn(_modern_attribute(declared.column), declared.storage)
+        for name, declared in COLLECTION_COLUMNS.items()
+    }
+    return MODERN_MODELS[AdvResource], attr_map, collection_columns
+
 
 # -- the degeneracy guard (conformance/README.md, "The degeneracy guard") ----
 #
@@ -748,7 +858,7 @@ def pg_conn(pg_engine):
 
 
 @pytest.fixture(scope="module")
-def adv_cerbos_client():
+def adv_cerbos_container():
     strict = os.environ.get("ADAPTER_TEST_STRICT_EVALUATION", "false")
     if strict not in ("false", "true"):
         raise ValueError("ADAPTER_TEST_STRICT_EVALUATION must be false or true")
@@ -761,15 +871,93 @@ def adv_cerbos_client():
     container.start()
     container.wait_until_ready()
     try:
-        with CerbosClient(container.http_host(), tls_verify=False) as client:
-            yield client
+        yield container
     finally:
         container.stop()
+
+
+# The HTTP client plans the baseline legs and answers every check() — the oracle is the
+# PDP's decision, and which transport asked for it does not change it.
+@pytest.fixture(scope="module")
+def adv_cerbos_client(adv_cerbos_container):
+    with CerbosClient(adv_cerbos_container.http_host(), tls_verify=False) as client:
+        yield client
+
+
+# The same PDP over gRPC, which only the `grpc` leg plans through.
+@pytest.fixture(scope="module")
+def adv_grpc_client(adv_cerbos_container):
+    with GrpcCerbosClient(adv_cerbos_container.grpc_host(), tls_verify=False) as client:
+        yield client
+
+
+# The same seeds in a file the async driver can open: an in-memory SQLite database is
+# private to the connection that created it, so the async engine could not see rows a
+# sync engine seeded. Seeded synchronously, read asynchronously — what is under test is
+# executing the returned `Select`, not seeding.
+@pytest.fixture(scope="module")
+def adv_async_url(tmp_path_factory):
+    path = tmp_path_factory.mktemp("adversarial-async") / "seeds.sqlite"
+    engine = create_engine(f"sqlite:///{path}")
+    _seed(engine)
+    engine.dispose()
+    return f"sqlite+aiosqlite:///{path}"
+
+
+def _async_filtered_ids(url: str, query) -> Set[str]:
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    async def run() -> Set[str]:
+        engine = create_async_engine(url)
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _configure(dbapi_conn, _):
+            # The same pragma the sync engine sets, through a cursor because the async
+            # driver's adapted connection has no `execute` of its own.
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA case_sensitive_like = ON")
+            cursor.close()
+
+        try:
+            async with AsyncSession(engine) as session:
+                result = await session.execute(query)
+                return {row.id for row in result.scalars()}
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
 
 
 def _principal() -> Principal:
     p = SEEDS_FILE["principal"]
     return Principal(id=p["id"], roles=set(p["roles"]), attr=p["attr"])
+
+
+def _grpc_principal() -> engine_pb2.Principal:
+    # The same corpus principal, verbatim: the gRPC client takes
+    # `map<string, google.protobuf.Value>`, so each attribute is parsed rather than
+    # projected — the key guards above hold for this spelling too.
+    p = SEEDS_FILE["principal"]
+    return engine_pb2.Principal(
+        id=p["id"],
+        roles=p["roles"],
+        attr={key: ParseDict(value, Value()) for key, value in p["attr"].items()},
+    )
+
+
+def _plan(client, action: str):
+    """Plan ``action`` through whichever SDK client is given, in that client's own types."""
+    if isinstance(client, GrpcCerbosClient):
+        plan = client.plan_resources(
+            action,
+            _grpc_principal(),
+            engine_pb2.PlanResourcesInput.Resource(kind=RESOURCE_KIND),
+        )
+        # Anti-vacuity for the leg: `get_query` must see the protobuf response, or the
+        # `MessageToDict` arm is not what ran.
+        assert isinstance(plan, response_pb2.PlanResourcesResponse)
+        return plan
+    return client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
 
 
 def _tag_attr(tag: Dict[str, Any]) -> Dict[str, Any]:
@@ -854,12 +1042,20 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
 # -- oracle: ask the PDP itself, row by row --
 
 
+# One PDP per module and one principal, so an action's decisions cannot change between
+# calls: memoizing them is what lets every leg compare every action for the price of a
+# plan and a query rather than a check() per seed row.
+_ORACLE_CACHE: Dict[str, Set[str]] = {}
+
+
 def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
-    return {
-        seed["id"]
-        for seed in SEEDS
-        if client.is_allowed(action, _principal(), _check_resource(seed))
-    }
+    if action not in _ORACLE_CACHE:
+        _ORACLE_CACHE[action] = {
+            seed["id"]
+            for seed in SEEDS
+            if client.is_allowed(action, _principal(), _check_resource(seed))
+        }
+    return set(_ORACLE_CACHE[action])
 
 
 def _plan_carries_null_literal(node) -> bool:
@@ -888,12 +1084,14 @@ def _adapter_filtered_ids(
     null_attribute_representation: str = "explicit",
     attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
     collection_columns=COLLECTION_COLUMNS,
+    table=AdvResource,
+    attr_map=ATTR_MAP,
 ) -> Set[str]:
-    plan = client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
+    plan = _plan(client, action)
     query = get_query(
         plan,
-        AdvResource,
-        ATTR_MAP,
+        table,
+        attr_map,
         operator_override_fns=OPERATOR_OVERRIDES,
         null_attribute_representation=null_attribute_representation,
         attribute_null_representation=attribute_null_representation,
@@ -935,11 +1133,83 @@ class TestAdversarialConformance:
             entry["action"] for entry in MANIFEST.expected_unsupported
         }
 
-    @pytest.mark.parametrize("action", ORACLE_ACTIONS)
-    def test_matches_check_oracle(self, action, adv_cerbos_client, adv_conn):
+    @pytest.mark.parametrize(
+        "leg,action",
+        [(leg, action) for leg in LEGS for action in ORACLE_ACTIONS]
+        + [("grpc", action) for action in GRPC_ONLY_ORACLE_ACTIONS],
+    )
+    def test_matches_check_oracle(self, leg, action, request, adv_cerbos_client):
         oracle = _oracle_allowed_ids(adv_cerbos_client, action)
-        filtered = _adapter_filtered_ids(adv_cerbos_client, adv_conn, action)
+        if leg == "async":
+            plan = _plan(adv_cerbos_client, action)
+            query = get_query(
+                plan,
+                AdvResource,
+                ATTR_MAP,
+                operator_override_fns=OPERATOR_OVERRIDES,
+                null_attribute_representation="explicit",
+                attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
+                collection_columns=COLLECTION_COLUMNS,
+            )
+            filtered = _async_filtered_ids(
+                request.getfixturevalue("adv_async_url"), query
+            )
+        else:
+            client = (
+                request.getfixturevalue("adv_grpc_client")
+                if leg == "grpc"
+                else adv_cerbos_client
+            )
+            conn = request.getfixturevalue("adv_conn")
+            if leg == "declarative-base":
+                _require_declarative_base()
+                table, attr_map, collection_columns = _modern_mapping()
+                filtered = _adapter_filtered_ids(
+                    client,
+                    conn,
+                    action,
+                    table=table,
+                    attr_map=attr_map,
+                    collection_columns=collection_columns,
+                )
+            else:
+                filtered = _adapter_filtered_ids(client, conn, action)
         assert sorted(filtered) == sorted(oracle)
+
+    def test_the_grpc_leg_promotes_exactly_the_http_zero_sign_refusals(self):
+        # Each promotion is an adapterUnsupported entry for THIS adapter, refused over
+        # HTTP with the signed-zero message — so it is the transport, not SQL, that
+        # refuses it — and it is the whole set: any other entry carrying that message
+        # would be a shape the gRPC leg should be comparing and is not.
+        refused_for_sign = sorted(
+            action
+            for action, message in THROWING_ACTIONS
+            if message.startswith(HTTP_ZERO_SIGN_MESSAGE)
+        )
+        assert refused_for_sign == sorted(GRPC_ONLY_ORACLE_ACTIONS)
+        adapter_unsupported = {
+            entry["action"] for entry in MANIFEST.adapter_unsupported[ADAPTER]
+        }
+        assert set(GRPC_ONLY_ORACLE_ACTIONS) <= adapter_unsupported
+
+    def test_the_declarative_base_leg_uses_the_2_0_models(self):
+        _require_declarative_base()
+        table, attr_map, collection_columns = _modern_mapping()
+        # The arm under test: a 2.0 model's metaclass is NOT a DeclarativeMeta.
+        assert not isinstance(table, DeclarativeMeta)
+        assert isinstance(AdvResource, DeclarativeMeta)
+        assert table.__table__ is AdvResource.__table__
+        # No direct column attribute of a legacy model survives the remap, and every
+        # remapped one belongs to a twin — a leg that quietly kept the legacy
+        # attributes would be the baseline run twice.
+        remapped = [
+            value
+            for value in list(attr_map.values())
+            + [declared.column for declared in collection_columns.values()]
+            if isinstance(value, InstrumentedAttribute)
+        ]
+        assert remapped
+        assert {value.class_ for value in remapped} <= set(MODERN_MODELS.values())
 
     # #227. The declared collection storage, executed on the one store where both of its
     # storage shapes exist. The same oracle, the same seeds, and every action that reads a
@@ -1008,16 +1278,28 @@ class TestAdversarialConformance:
             }
             assert lower_bounds == {0}, column
 
-    @pytest.mark.parametrize("action,message", THROWING_ACTIONS)
-    def test_fails_loudly(self, action, message, adv_cerbos_client):
+    # Both transports: a refusal is a translation decision, and the two decodings reach
+    # the translator through different code (`to_dict()` versus `MessageToDict`). The
+    # signed-zero refusals are the exception, compared on the gRPC leg instead.
+    @pytest.mark.parametrize(
+        "transport,action,message",
+        [
+            (transport, action, message)
+            for transport in ("http", "grpc")
+            for action, message in THROWING_ACTIONS
+            if not (transport == "grpc" and action in GRPC_ONLY_ORACLE_ACTIONS)
+        ],
+    )
+    def test_fails_loudly(self, transport, action, message, request):
+        client = request.getfixturevalue(
+            "adv_grpc_client" if transport == "grpc" else "adv_cerbos_client"
+        )
         # The plan is fetched OUTSIDE the assertion so a PDP failure fails the
         # test instead of passing it, and nothing executes — the invariant is
         # that the shape throws during translation, BEFORE a filter exists, so
         # the database rejecting a wrongly emitted query afterwards cannot
         # masquerade as the adapter refusing to translate.
-        plan = adv_cerbos_client.plan_resources(
-            action, _principal(), ResourceDesc(RESOURCE_KIND)
-        )
+        plan = _plan(client, action)
         # The adapter's translation-time refusals: ValueError (unsupported
         # operator/cast/timestamp shapes), KeyError (attribute missing from the
         # map), TypeError (attribute needs an operator override to be
@@ -1170,7 +1452,8 @@ class TestAdversarialConformance:
     # denominator, and over the HTTP transport that arrives as the integer 0 with the
     # sign bit already gone, so the adapter now rejects the shape rather than guess
     # which infinity CEL produced. It is declared in adapterUnsupported[sqlalchemy]
-    # and asserted as a throw by test_fails_loudly (cerbos/query-plan-adapters#312).
+    # and asserted as a throw by test_fails_loudly (cerbos/query-plan-adapters#312);
+    # over gRPC it translates, and the grpc leg compares it against the oracle (#321).
     @pytest.mark.parametrize(
         "action",
         (

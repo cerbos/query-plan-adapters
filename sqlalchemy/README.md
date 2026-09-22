@@ -235,9 +235,12 @@ each plan with `check()` decisions from a PDP configured with that same mode.
 
 The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 27 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
+The oracle comparison runs on four legs, each varying one caller-side choice the corpus cannot: the baseline (the HTTP client, legacy `declarative_base()` models, a synchronous `Connection`), then the **gRPC** client, SQLAlchemy 2.0 **`DeclarativeBase`** models (skipped on 1.4, which has none), and the returned `Select` executed through an **`AsyncSession`** over aiosqlite. Every oracle action runs on every leg, and every fail-closed shape is asserted as a throw over both transports ([#321](https://github.com/cerbos/query-plan-adapters/issues/321)).
+
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 242 reference conformance actions, of which the 21 that read a declared collection also run on PostgreSQL under both storage shapes |
+| Transport-dependent | `cr-div-neg-zero` and `nan-ord-inf` — a constant zero divisor. Refused over HTTP, whose JSON body renders `-0.0` as `-0` and decodes it to the integer `0`, so the sign that picks CEL's infinity is gone; **translated over gRPC**, where the protobuf double keeps it, and compared against the oracle there. Both stay among the 57 fail-closed actions below, which classify the HTTP transport |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, a negative or fractional index and an indexed object projection (`get-field`), `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself), two-list `except` with resource-list and principal-list receivers, constructor expressions and structured membership needles, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (57 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -324,6 +327,30 @@ It is **optional**, and calling it is not enforced: a caller wiring a join chain
 Passing an ORM model returns `Select[Tuple[Model]]` and passing a Core `Table`
 returns `Select[Any]`, so the row type reaches the caller instead of being erased
 to a bare `Select`.
+
+### Transports
+
+`get_query` accepts the plan from either SDK client: the HTTP `CerbosClient`'s
+`PlanResourcesResponse` or the gRPC client's protobuf one. They are equivalent
+except for one shape — a constant zero divisor such as `x / -0.0` — which only the
+gRPC client can translate, because only its plan keeps the sign of the zero (see
+the transport-dependent row under [Conformance contract](#conformance-contract)).
+Over HTTP that shape raises rather than guessing which infinity CEL produced.
+
+### Async
+
+`get_query` does no I/O: it returns a plain `Select`, which you execute however
+your application already does, including through `AsyncSession` or an
+`AsyncConnection`:
+
+```python
+async with AsyncSession(async_engine) as session:
+    rows = (await session.execute(get_query(plan, Resource, attr_map))).scalars()
+```
+
+Plan with the SDK's async client, or with the sync one off the event loop. The
+conformance harness executes every oracle action this way on aiosqlite, on both
+SQLAlchemy majors.
 
 ### Database collation requirements
 
