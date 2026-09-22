@@ -313,6 +313,261 @@
         }
       }
     },
+    "compose-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > ? and \"adversarial_resources\".\"a_bool\" = ?)",
+          "params": [
+            10,
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > $1 and \"adversarial_resources\".\"a_bool\" = $2)",
+          "params": [
+            10,
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_number` > ? and `adversarial_resources`.`a_bool` = ?)",
+          "params": [
+            10,
+            true
+          ]
+        }
+      }
+    },
+    "compose-deny-only": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not \"adversarial_resources\".\"a_number\" < ?",
+          "params": [
+            0
+          ]
+        },
+        "postgresql": {
+          "sql": "not \"adversarial_resources\".\"a_number\" < $1",
+          "params": [
+            0
+          ]
+        },
+        "mysql": {
+          "sql": "not `adversarial_resources`.`a_number` < ?",
+          "params": [
+            0
+          ]
+        }
+      }
+    },
+    "compose-derived-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_bool\" = ? and \"adversarial_resources\".\"a_number\" < ?)",
+          "params": [
+            1,
+            12
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_bool\" = $1 and \"adversarial_resources\".\"a_number\" < $2)",
+          "params": [
+            true,
+            12
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_bool` = ? and `adversarial_resources`.`a_number` < ?)",
+          "params": [
+            true,
+            12
+          ]
+        }
+      }
+    },
+    "compose-derived-role": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(\"adversarial_resources\".\"a_number\" < ? and \"adversarial_resources\".\"a_bool\" = ?)",
+          "params": [
+            5,
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "(\"adversarial_resources\".\"a_number\" < $1 and \"adversarial_resources\".\"a_bool\" = $2)",
+          "params": [
+            5,
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "(`adversarial_resources`.`a_number` < ? and `adversarial_resources`.`a_bool` = ?)",
+          "params": [
+            5,
+            true
+          ]
+        }
+      }
+    },
+    "compose-multi-allow": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = ? and \"adversarial_resources\".\"a_number\" > ?) or (\"adversarial_resources\".\"a_bool\" = ? and \"adversarial_resources\".\"a_number\" < ?))",
+          "params": [
+            1,
+            15,
+            0,
+            7
+          ]
+        },
+        "postgresql": {
+          "sql": "((\"adversarial_resources\".\"a_bool\" = $1 and \"adversarial_resources\".\"a_number\" > $2) or (\"adversarial_resources\".\"a_bool\" = $3 and \"adversarial_resources\".\"a_number\" < $4))",
+          "params": [
+            true,
+            15,
+            false,
+            7
+          ]
+        },
+        "mysql": {
+          "sql": "((`adversarial_resources`.`a_bool` = ? and `adversarial_resources`.`a_number` > ?) or (`adversarial_resources`.`a_bool` = ? and `adversarial_resources`.`a_number` < ?))",
+          "params": [
+            true,
+            15,
+            false,
+            7
+          ]
+        }
+      }
+    },
+    "compose-multi-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > ? and ((\"adversarial_resources\".\"a_bool\" = ? and \"adversarial_resources\".\"a_number\" > ?) or (\"adversarial_resources\".\"a_bool\" = ? and \"adversarial_resources\".\"a_number\" < ?)))",
+          "params": [
+            20,
+            1,
+            15,
+            0,
+            7
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > $1 and ((\"adversarial_resources\".\"a_bool\" = $2 and \"adversarial_resources\".\"a_number\" > $3) or (\"adversarial_resources\".\"a_bool\" = $4 and \"adversarial_resources\".\"a_number\" < $5)))",
+          "params": [
+            20,
+            true,
+            15,
+            false,
+            7
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_number` > ? and ((`adversarial_resources`.`a_bool` = ? and `adversarial_resources`.`a_number` > ?) or (`adversarial_resources`.`a_bool` = ? and `adversarial_resources`.`a_number` < ?)))",
+          "params": [
+            20,
+            true,
+            15,
+            false,
+            7
+          ]
+        }
+      }
+    },
+    "compose-or-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(\"adversarial_resources\".\"a_number\" > ? or not \"adversarial_resources\".\"a_bool\" = ?)",
+          "params": [
+            20,
+            1
+          ]
+        },
+        "postgresql": {
+          "sql": "(\"adversarial_resources\".\"a_number\" > $1 or not \"adversarial_resources\".\"a_bool\" = $2)",
+          "params": [
+            20,
+            true
+          ]
+        },
+        "mysql": {
+          "sql": "(`adversarial_resources`.`a_number` > ? or not `adversarial_resources`.`a_bool` = ?)",
+          "params": [
+            20,
+            true
+          ]
+        }
+      }
+    },
+    "compose-two-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((not \"adversarial_resources\".\"a_bool\" = ? and not \"adversarial_resources\".\"a_number\" > ?) and \"adversarial_resources\".\"a_number\" >= ?)",
+          "params": [
+            0,
+            18,
+            0
+          ]
+        },
+        "postgresql": {
+          "sql": "((not \"adversarial_resources\".\"a_bool\" = $1 and not \"adversarial_resources\".\"a_number\" > $2) and \"adversarial_resources\".\"a_number\" >= $3)",
+          "params": [
+            false,
+            18,
+            0
+          ]
+        },
+        "mysql": {
+          "sql": "((not `adversarial_resources`.`a_bool` = ? and not `adversarial_resources`.`a_number` > ?) and `adversarial_resources`.`a_number` >= ?)",
+          "params": [
+            false,
+            18,
+            0
+          ]
+        }
+      }
+    },
+    "compose-variable": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > ? and \"adversarial_resources\".\"a_optional_string\" in (?, ?, ?))",
+          "params": [
+            10,
+            "set",
+            "",
+            "%_o"
+          ]
+        },
+        "postgresql": {
+          "sql": "(not \"adversarial_resources\".\"a_number\" > $1 and \"adversarial_resources\".\"a_optional_string\" in ($2, $3, $4))",
+          "params": [
+            10,
+            "set",
+            "",
+            "%_o"
+          ]
+        },
+        "mysql": {
+          "sql": "(not `adversarial_resources`.`a_number` > ? and `adversarial_resources`.`a_optional_string` in (?, ?, ?))",
+          "params": [
+            10,
+            "set",
+            "",
+            "%_o"
+          ]
+        }
+      }
+    },
     "cr-contains": {
       "note": "A constant receiver with a column needle: `K.contains(aString)` cannot become a LIKE, so the adapter enumerates every substring of the constant and tests membership. Pinning the enumeration verbatim is the point — an off-by-one at either end of the window is invisible in a row comparison over 21 seeds and obvious in this list.",
       "kind": "KIND_CONDITIONAL",
