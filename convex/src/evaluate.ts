@@ -140,7 +140,7 @@ const looksLikeLambdaVariable = (
   isVariable(operand) && !operand.name.includes(".");
 
 /** The planner does not fix the order of a lambda's operands: the variable is the bare name. */
-const lambdaComponents = (
+export const lambdaComponents = (
   lambda: PlanExpressionOperand,
 ): { body: PlanExpressionOperand; variable: PlanExpressionVariable } => {
   if (!isExpression(lambda) || lambda.operator !== "lambda") {

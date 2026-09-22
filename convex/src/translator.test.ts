@@ -351,11 +351,10 @@ describe("what the adapter asks Convex to do", () => {
   test.each(PUSHED_ACTIONS)(
     "%s names only fields the mapper declares",
     (action) => {
-      // The corpus mapper declares every reference the corpus uses, and an unresolved reference
-      // does NOT fail here — it falls through to the plan path verbatim (see "mapper forms"). So
-      // a `request.resource.attr.…` name in a pushed-down filter means resolution silently missed
-      // a reference the caller DID map, which is a filter that matches nothing rather than one
-      // that answers the policy.
+      // The corpus mapper declares every reference the corpus uses, and a reference with no
+      // entry is refused before translation (see "mapper forms"). So a `request.resource.attr.…`
+      // name in a pushed-down filter means resolution silently missed a reference the caller DID
+      // map — a path no document stores, which a negation reads as a match on every document.
       const undeclared = fieldsNamedBy(pushedFilter(action)).filter(
         (field) => !declaredFields.has(field),
       );
@@ -471,21 +470,65 @@ describe("mapper forms", () => {
   });
 
   /**
-   * The identity fallback, which the README states as a feature: "If you omit the mapper the
-   * adapter will use the query plan paths verbatim." So an unmapped reference is not an error
-   * here — it is a document path, and a caller whose documents are not shaped that way gets a
-   * filter that matches nothing rather than one that matches too much.
+   * A reference with no entry is refused rather than read verbatim as a document path. It used to
+   * fall through — the README stated it as a feature — on the belief that a caller whose documents
+   * are not shaped like the plan paths gets a filter that matches nothing. That holds for `eq` and
+   * fails under negation: the path is absent from every document, Convex reads an absent field as
+   * `undefined`, and `undefined != "x"` is true, so `R.attr.status != "x"` with a missing entry
+   * matched every document (cerbos/query-plan-adapters#492).
    *
-   * Pinned rather than assumed because it is the one place this adapter answers an unresolved
-   * reference at all: the SQL adapters throw, and a reader coming from one of those would expect
-   * the same. The direction of the failure is what makes it defensible — an under-grant is a bug
-   * the caller sees, not rows the PDP denies.
+   * A caller shape rather than a policy shape: the corpus fixes one mapper that declares every
+   * reference its policies reach, so no corpus action can ask about a name it leaves out.
    */
-  test("an unmapped reference falls back to the plan path verbatim", () => {
-    const { filter } = translate("cs-eq", { mapper: {} });
+  const without = (reference: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER).filter(([key]) => key !== reference),
+    );
+
+  test.each([
+    // `ne` pushed down, `not` pushed down, and a comparison answered by the post-filter: the
+    // refusal is made over the plan, before either half of the output exists.
+    ["cs-eq", "request.resource.attr.aString"],
+    ["not-gt", "request.resource.attr.aNumber"],
+    ["optional-ne", "request.resource.attr.aOptionalString"],
+  ])("%s is refused when %s has no entry", (action, reference) => {
+    expect(() => translate(action, { mapper: without(reference) })).toThrow(
+      `No mapper entry for ${reference}: an unmapped reference is not used verbatim`,
+    );
+  });
+
+  test("an unmapped reference is refused when a function mapper returns no entry", () => {
+    const mapper = ((reference: string) =>
+      reference === "request.resource.attr.aNumber"
+        ? undefined
+        : MAPPER[reference]) as Mapper;
+    expect(() => translate("not-gt", { mapper })).toThrow(
+      "No mapper entry for request.resource.attr.aNumber",
+    );
+  });
+
+  test("an unmapped reference is refused under the default mapper", () => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: planFromWireFixture("cs-eq"),
+        allowPostFilter: true,
+      }),
+    ).toThrow("No mapper entry for request.resource.attr.aString");
+  });
+
+  // A lambda's own variable is bound by the macro, not by the mapper, and must not be refused.
+  test("a lambda variable needs no entry", () => {
+    expect(() => translate(DEEP_ACTION)).not.toThrow();
+  });
+
+  // The opt-in: an entry that names no `field` keeps the plan path.
+  test("an empty entry keeps the plan path verbatim", () => {
+    const { filter } = translate("cs-eq", {
+      mapper: { "request.resource.attr.aString": {} },
+    });
     if (!filter)
-      throw new Error("cs-eq emitted no filter under an empty mapper");
-    expect(recordFilter("cs-eq (empty mapper)", filter)).toEqual({
+      throw new Error("cs-eq emitted no filter under an empty-entry mapper");
+    expect(recordFilter("cs-eq (empty entry)", filter)).toEqual({
       op: "eq",
       args: [{ op: "field", args: ["request.resource.attr.aString"] }, "one"],
     });
@@ -764,8 +807,12 @@ test("result types require the payload declared by each execution path", () => {
   type Result = QueryPlanToConvexResult<Recorder, unknown>;
   type Rejects<T> = T extends Result ? false : true;
   const bareConditional: Rejects<{ kind: PlanKind.CONDITIONAL }> = true;
-  const missingDbFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "db" }> = true;
-  const missingPostFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "post" }> = true;
+  const missingDbFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "db" }> =
+    true;
+  const missingPostFilter: Rejects<{
+    kind: PlanKind.CONDITIONAL;
+    path: "post";
+  }> = true;
   const missingSplitPostFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "split";
