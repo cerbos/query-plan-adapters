@@ -209,6 +209,22 @@ map at all.
 referenced by [`demo/policies/document.yaml`](../../demo/policies/document.yaml), and composing them
 with the adapter's clause is shape 5.
 
+## The scalar types
+
+The field map is not enough on its own. Every comparison the adapter lowers is a term-level query,
+and Elasticsearch coerces a query term onto the field's mapped type — `{"term": {"isPublic": "true"}}`
+matches the boolean `true`, while CEL's `R.attr.public == "true"` is false. The adapter never sees
+the mapping, so it refuses a comparison against a field whose CEL type the caller has not declared:
+
+```java
+private static final Options OPTIONS = Options.of(DOCUMENT_FIELDS)
+        .withScalarTypes(Map.of(
+                "ownerId", ScalarType.STRING,
+                "isPublic", ScalarType.BOOLEAN));
+```
+
+The keys are Elasticsearch field names, and the types are what `DemoIndex` maps each field as.
+
 ## Layout
 
 | Path                   | What it is                                                                              |
@@ -217,7 +233,7 @@ with the adapter's clause is shape 5.
 | `build.gradle.kts`     | The coordinate, the exact dependency versions Renovate manages, and `writeRuntimeClasspath`. |
 | `settings.gradle.kts`  | The file whose *absence* of `includeBuild("..")` is the whole packaging argument.        |
 | `DemoApplication.java` | Entry point: the three inputs it is handed, the provenance check, the emitted document.  |
-| `DemoShapes.java`      | One method per usage shape, plus the field map and the plan call.                        |
+| `DemoShapes.java`      | One method per usage shape, plus the field map, the scalar types and the plan call.      |
 | `DemoIndex.java`       | The store: client wiring, the explicit mapping, and `Map` → `Query`.                     |
 | `DemoSeeds.java`       | `demo/seeds.json`, parsed. The principals are looked up here, never written out.         |
 

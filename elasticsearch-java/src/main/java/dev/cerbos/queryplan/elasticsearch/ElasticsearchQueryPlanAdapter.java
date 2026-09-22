@@ -61,8 +61,12 @@ public class ElasticsearchQueryPlanAdapter {
      *        {@code keyword} array, say). The adapter is handed a plan, never a mapping, so it
      *        cannot tell {@code size(aString)} from {@code size(tagNames)}: a {@code size()} over
      *        a field declared neither here nor in {@code nestedPaths} is refused
-     * @param scalarTypes optional scalar declarations keyed by mapped Elasticsearch field name;
-     *        undeclared fields retain the historical untyped lowering
+     * @param scalarTypes the CEL scalar type of each compared field, keyed by mapped Elasticsearch
+     *        field name (a flat array declares its element type, a nested sub-field its full
+     *        path). Elasticsearch coerces a query term onto the field's mapped type where CEL's
+     *        cross-type equality is false, and the adapter cannot see the mapping, so a comparison
+     *        against a field declared here in no type throws {@link UnmappedAttributeException}
+     *        unless an operator override owns the operator
      * @param explicitNullAttributes plan variables the caller sends to {@code check()} as explicit
      *        nulls when their column is NULL; see
      *        {@link ElasticsearchQueryPlanAdapter#toElasticsearchQuery(PlanResourcesResult, Options)}
@@ -93,7 +97,10 @@ public class ElasticsearchQueryPlanAdapter {
                     Objects.requireNonNull(explicitNullAttributes, "explicitNullAttributes"));
         }
 
-        /** Options holding only a field map; every other declaration is empty. */
+        /**
+         * Options holding only a field map; every other declaration is empty. Add
+         * {@link #withScalarTypes(Map)} before translating a plan that compares a field.
+         */
         public static Options of(Map<String, String> fieldMap) {
             return new Options(fieldMap, Map.of(), Set.of(), Set.of(), Set.of());
         }
@@ -123,7 +130,10 @@ public class ElasticsearchQueryPlanAdapter {
                     fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
 
-        /** Declare the CEL scalar type of each mapped Elasticsearch field. */
+        /**
+         * Declare the CEL scalar type of each mapped Elasticsearch field; required for every field
+         * a plan compares. See {@link Options}.
+         */
         public Options withScalarTypes(Map<String, ScalarType> scalarTypes) {
             return new Options(
                     fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);

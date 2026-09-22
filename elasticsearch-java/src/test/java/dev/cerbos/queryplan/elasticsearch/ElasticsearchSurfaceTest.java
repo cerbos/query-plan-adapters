@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -288,8 +290,19 @@ class ElasticsearchSurfaceTest {
      */
     private static Map<String, Object> clauseFor(String action, Map<String, String> fieldMap) {
         return clauseOf(action, ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                Corpus.planFromWireFixture(action), Corpus.OPTIONS.withFieldMap(fieldMap)));
+                Corpus.planFromWireFixture(action),
+                Corpus.OPTIONS.withFieldMap(fieldMap).withScalarTypes(SCALAR_TYPES)));
     }
+
+    /**
+     * The corpus's declarations plus the one field this suite maps that the corpus index does not
+     * have: the exact sub-field of the analyzed mapping, which holds the same string.
+     */
+    private static final Map<String, ElasticsearchQueryPlanAdapter.ScalarType> SCALAR_TYPES =
+            Stream.concat(Corpus.SCALAR_TYPES.entrySet().stream(),
+                            Stream.of(Map.entry("aString.keyword",
+                                    ElasticsearchQueryPlanAdapter.ScalarType.STRING)))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
     /** The clause a hand-built plan translates to under {@code options}. */
     private static Map<String, Object> clauseFor(Operand condition, Options options) {
@@ -548,6 +561,31 @@ class ElasticsearchSurfaceTest {
         // ...and the presence-selecting one translates, to the only query that is definite here.
         assertEquals(List.of("other-owner"), search(SEMANTIC_SAFETY_INDEX, inScenario("null",
                 clauseFor("null-ne", Map.of("request.resource.attr.owner", "owner")))));
+    }
+
+    /**
+     * Elasticsearch coerces a query term onto the field's MAPPED type: the string {@code "true"}
+     * matches a {@code boolean} field holding {@code true}. CEL's cross-type equality is simply
+     * false, so {@code R.attr.aBool == "true"} denies every row, and the untyped lowering
+     * {@code term(aBool, "true")} returned half the index. The adapter is handed a plan, never a
+     * mapping, so a comparison against a field with no declared scalar type is refused, and a
+     * declared one is answered as CEL answers it (cerbos/query-plan-adapters#496).
+     */
+    @Test
+    void aTermQueryCoercesItsValueOntoTheMappedTypeWhichIsWhyScalarTypesAreRequired()
+            throws Exception {
+        assertEquals(List.of("s1", "s3"), search(SURFACE_INDEX,
+                Map.of("term", Map.of("aBool", Map.of("value", "true")))));
+
+        String aBool = "request.resource.attr.aBool";
+        Operand stringEquality = expression("eq", variable(aBool), string("true"));
+        Options typed = Corpus.OPTIONS.withFieldMap(Map.of(aBool, "aBool"));
+        assertEquals(List.of(), search(SURFACE_INDEX, clauseFor(stringEquality, typed)));
+        assertEquals(List.of("s1", "s2", "s3", "s4"), search(SURFACE_INDEX,
+                clauseFor(expression("ne", variable(aBool), string("true")), typed)));
+
+        assertRefused(stringEquality, typed.withScalarTypes(Map.of()),
+                UnmappedAttributeException.class, "Field 'aBool' has no declared scalar type");
     }
 
     /**

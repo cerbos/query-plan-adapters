@@ -45,7 +45,7 @@ import java.util.stream.Stream;
  *
  * <p>What lives here is what BOTH of this adapter's corpus suites must agree on: the classification
  * in {@code actions.json}, the wire-fixture decoding, and the call arguments the corpus is
- * translated through — {@link #FIELD_MAP}, {@link #NESTED_PATHS}, {@link #COLLECTION_FIELDS} and
+ * translated through — {@link #FIELD_MAP}, {@link #NESTED_PATHS}, {@link #SCALAR_TYPES}, {@link #COLLECTION_FIELDS} and
  * {@link #EXPLICIT_NULL_ATTRIBUTES}, gathered into {@link #OPTIONS}. That last group is the load-bearing part:
  * {@link ElasticsearchTranslatorTest} pins the Query DSL this adapter emits for a corpus action and
  * {@link ElasticsearchAdversarialConformanceTest} proves the documents that same query returns, and
@@ -360,20 +360,60 @@ final class Corpus {
      */
     static final Set<String> COLLECTION_FIELDS = Set.of("tagNames", "aNumberList", "aBoolList");
 
+    /**
+     * The CEL scalar type of every scalar field the corpus index maps, keyed by Elasticsearch
+     * field name — top-level, the to-one chain, the flat arrays (their element type) and every
+     * nested sub-field. The adapter refuses a comparison against a field declared here in no
+     * type, because Elasticsearch coerces a query term onto the field's mapped type where CEL's
+     * cross-type equality is false (cerbos/query-plan-adapters#496); declaring the whole mapping
+     * rather than the fields the corpus happens to compare is what keeps a new action from
+     * reading that refusal as the adapter's answer.
+     */
+    static final Map<String, ElasticsearchQueryPlanAdapter.ScalarType> SCALAR_TYPES = scalarTypes();
+
+    private static Map<String, ElasticsearchQueryPlanAdapter.ScalarType> scalarTypes() {
+        ElasticsearchQueryPlanAdapter.ScalarType string = ElasticsearchQueryPlanAdapter.ScalarType.STRING;
+        ElasticsearchQueryPlanAdapter.ScalarType number = ElasticsearchQueryPlanAdapter.ScalarType.NUMBER;
+        ElasticsearchQueryPlanAdapter.ScalarType bool = ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN;
+        ElasticsearchQueryPlanAdapter.ScalarType timestamp = ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP;
+        Map<String, ElasticsearchQueryPlanAdapter.ScalarType> types = new LinkedHashMap<>();
+        types.put("id", string);
+        types.put("aString", string);
+        types.put("aOptionalString", string);
+        types.put("aNumber", number);
+        types.put("aDouble", number);
+        types.put("aBool", bool);
+        types.put("createdAt", timestamp);
+        types.put("updatedAt", timestamp);
+        types.put("createdBy", string);
+        types.put("scope", string);
+        types.put("owner", string);
+        types.put("coOwner", string);
+        types.put("obj.inner", string);
+        types.put("tagNames", string);
+        types.put("aNumberList", number);
+        types.put("aBoolList", bool);
+        types.put("mainCategory.subNames", string);
+        types.put("mainCategory.subCategories.name", string);
+        types.put("tags.id", string);
+        types.put("tags.name", string);
+        types.put("categories.name", string);
+        types.put("categories.subCategories.name", string);
+        types.put("categories.subCategories.labels.name", string);
+        for (String level : List.of("parent.", "parent.inner.")) {
+            types.put(level + "aBool", bool);
+            types.put(level + "aString", string);
+            types.put(level + "aNumber", number);
+            types.put(level + "aOptionalString", string);
+        }
+        return Map.copyOf(types);
+    }
+
     /** The one set of declarations both corpus suites translate through. */
     static final ElasticsearchQueryPlanAdapter.Options OPTIONS =
             ElasticsearchQueryPlanAdapter.Options.of(FIELD_MAP)
                     .withNestedPaths(NESTED_PATHS)
-                    .withScalarTypes(Map.ofEntries(
-                            Map.entry("aString", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
-                            Map.entry("aOptionalString", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
-                            Map.entry("aNumber", ElasticsearchQueryPlanAdapter.ScalarType.NUMBER),
-                            Map.entry("aDouble", ElasticsearchQueryPlanAdapter.ScalarType.NUMBER),
-                            Map.entry("aBool", ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN),
-                            Map.entry("createdAt", ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP),
-                            Map.entry("updatedAt", ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP),
-                            Map.entry("createdBy", ElasticsearchQueryPlanAdapter.ScalarType.STRING),
-                            Map.entry("scope", ElasticsearchQueryPlanAdapter.ScalarType.STRING)))
+                    .withScalarTypes(SCALAR_TYPES)
                     .withCollectionFields(COLLECTION_FIELDS)
                     .withExplicitNullAttributes(EXPLICIT_NULL_ATTRIBUTES);
 
