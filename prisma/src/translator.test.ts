@@ -10,6 +10,7 @@ import type {
 import { queryPlanToPrisma, PlanKind } from ".";
 import type {
   Mapper,
+  MapperConfig,
   NullAttributeRepresentation,
   PrismaFilter,
   QueryPlanToPrismaResult,
@@ -2010,7 +2011,9 @@ describe("relation subqueryFilter", () => {
       relation: {
         name: "tags",
         type: "many",
-        fields: { name: { field: "name" } },
+        // `nullable: false` keeps the element NULL guard (see "relation element nullability"
+        // below) out of these filters, so they isolate what the declaration changes.
+        fields: { name: { field: "name", nullable: false } },
         ...(subqueryFilter ? { subqueryFilter } : {}),
       },
     },
@@ -2151,6 +2154,61 @@ describe("the mapper contract", () => {
     },
   );
 
+  test("negating an overlaps that folds to an unconditional filter is refused", () => {
+    // `nullable: false` on every segment lets `overlaps(hierarchy("dept"), hierarchy(["dept",
+    // scope]))` fold to `{}` (asserted above). Prisma evaluates `{ NOT: {} }` as true, so the
+    // negation would match every row where CEL's `!true` matches none; the adapter has no
+    // field-free false condition to emit instead (cerbos/query-plan-adapters#495).
+    const fixture = planFromWireFixture("hier-overlaps-list-prefix");
+    if (fixture.kind !== PlanKind.CONDITIONAL) {
+      throw new Error("Expected a conditional hierarchy fixture");
+    }
+    expect(() =>
+      queryPlanToPrisma({
+        queryPlan: {
+          ...fixture,
+          condition: { operator: "not", operands: [fixture.condition] },
+        },
+        mapper: { "request.resource.attr.scope": { field: "scope", nullable: false } },
+      })
+    ).toThrow("Cannot negate an unconditional filter");
+  });
+
+  describe("relation element nullability", () => {
+    // Omitting the element NULL guard is what over-grants — a negated exists(), an all() or a
+    // hasIntersection() over map() would admit rows holding a NULL element that check() denies
+    // — so silence means nullable, and only `nullable: false` drops the guard
+    // (cerbos/query-plan-adapters#495). The corpus maps one element column per nullability, so
+    // it cannot vary the declaration itself.
+    const guarded = {
+      AND: [
+        { tags: { every: { name: { equals: "public" } } } },
+        { tags: { none: { name: null } } },
+      ],
+    };
+    const unguarded = { tags: { every: { name: { equals: "public" } } } };
+    const allFor = (fields?: Record<string, MapperConfig>) =>
+      translate("all-on-empty", {
+        mapper: {
+          "request.resource.attr.tags": {
+            relation: { name: "tags", type: "many", ...(fields ? { fields } : {}) },
+          },
+        },
+      });
+
+    test.each([
+      ["undeclared", { name: { field: "name" } }, guarded],
+      ["nullable: true", { name: { field: "name", nullable: true } }, guarded],
+      ["nullable: false", { name: { field: "name", nullable: false } }, unguarded],
+      ["an element with no field mapping at all", undefined, guarded],
+    ] as const)("%s", (_label, fields, filters) => {
+      expect(allFor(fields as Record<string, MapperConfig> | undefined)).toStrictEqual({
+        kind: PlanKind.CONDITIONAL,
+        filters,
+      });
+    });
+  });
+
   test("size() against a scalar mapping is refused rather than guessed", () => {
     expect(() =>
       translate("not-empty", {
@@ -2289,6 +2347,35 @@ describe("plans the planner cannot produce", () => {
         mapper: MAPPER,
       })
     ).toThrow("exists over a literal collection requires a list value");
+  });
+
+  // An empty conjunction is `{ AND: [] }` in Prisma, which matches every row, and the constant
+  // folder would otherwise reduce it to `true` before the translator saw it
+  // (cerbos/query-plan-adapters#495). The empty disjunction is refused alongside it: neither is
+  // something the planner emits.
+  test.each([
+    ["an empty and", { operator: "and", operands: [] }, "and requires at least one operand"],
+    ["an empty or", { operator: "or", operands: [] }, "or requires at least one operand"],
+    [
+      "an empty and under an or",
+      {
+        operator: "or",
+        operands: [
+          { name: "request.resource.attr.aBool" },
+          { operator: "and", operands: [] },
+        ],
+      },
+      "and requires at least one operand",
+    ],
+    [
+      "an empty and under a not",
+      { operator: "not", operands: [{ operator: "and", operands: [] }] },
+      "and requires at least one operand",
+    ],
+  ])("%s", (_label, condition, message) => {
+    expect(() =>
+      queryPlanToPrisma({ queryPlan: plan(condition), mapper: MAPPER })
+    ).toThrow(message);
   });
 
   test("a constant-false predicate the planner should have folded", () => {

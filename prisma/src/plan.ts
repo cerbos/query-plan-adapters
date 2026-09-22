@@ -46,6 +46,25 @@ export function assertDefined<T>(value: T | undefined, message: string): T {
   return value;
 }
 
+/**
+ * Refuses an `and`/`or` with no operands. The planner never emits one, and neither empty form has
+ * a safe rendering: `{ AND: [] }` is true in Prisma and matches every row, and the constant folder
+ * would reduce an empty `and` to `true` (an unconditional filter) before the translator saw it. A
+ * malformed plan is a bug report, never a filter.
+ */
+export function assertLogicalOperands(
+  operator: string,
+  operands: PlanExpressionOperand[]
+): void {
+  if ((operator === "and" || operator === "or") && operands.length === 0) {
+    throw new Error(
+      `${operator} requires at least one operand: an empty ${operator} is not something the ` +
+        "planner emits, and translating it would produce an unconditional filter " +
+        "({ AND: [] } matches every row)"
+    );
+  }
+}
+
 /** The Prisma scalar filter each Cerbos comparison operator lowers to. */
 export const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
   eq: "equals",
