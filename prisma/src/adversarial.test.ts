@@ -1000,7 +1000,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // Executed against the seeded rows rather than asked of `@@collation_database`, because the
   // requirement is what the comparison DOES, not what the setting is called.
   (STORE_NAME === "mysql" ? test : test.skip)(
-    "the MySQL leg runs under a case- and accent-sensitive collation",
+    "the MySQL leg runs under a byte-exact collation",
     async () => {
       const ids = async (where: object): Promise<string[]> =>
         (
@@ -1013,16 +1013,21 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
           .sort();
 
       expect({
-        // "one" is seed a1; "One" is seed c1.
+        // "one" is seed a1; "One" is seed c1, and "o\u00ADne" is seed h6, which a case-sensitive
+        // UCA collation (utf8mb4_0900_as_cs) still returns because it weighs the soft hyphen as
+        // nothing (#474).
         caseVariant: await ids({ aString: "one" }),
         // "héllo🚀" is seed a6; the accent-folded spelling matches nothing.
         accentFolded: await ids({ aString: "hello🚀" }),
         // `hier-*` reaches the same collation through LIKE rather than through `=`.
         wrongCasePrefix: await ids({ aString: { startsWith: "ON" } }),
+        // NO PAD: utf8mb4_bin would return a1 for a trailing space.
+        trailingSpace: await ids({ aString: "one " }),
       }).toEqual({
         caseVariant: ["a1"],
         accentFolded: [],
         wrongCasePrefix: [],
+        trailingSpace: [],
       });
     }
   );

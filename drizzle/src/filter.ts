@@ -101,6 +101,9 @@ const buildStringMatchFilter = (
     operator,
     operandExpression(receiver.expr, receiverOperand),
     operandExpression(needle.expr, needleOperand),
+    [receiverOperand, needleOperand].map((operand) =>
+      columnForOperand(operand, mapper),
+    ),
   );
   const reference = isNameOperand(receiverOperand)
     ? receiverOperand.name

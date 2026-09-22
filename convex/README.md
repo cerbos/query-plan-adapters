@@ -127,7 +127,7 @@ even under negation. Use this adapter with Cerbos 0.55 when policies can produce
 NaN in a negated comparison. Missing attributes and null values retain their existing
 handling.
 
-The adapter is differentially tested with 27 hostile seed documents against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
+The adapter is differentially tested with 29 hostile seed documents against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes: each query plan is translated by the adapter and executed inside a Convex query function, and the returned document IDs must equal the PDP's per-document decisions. The Spring Data adapter defines the reference semantics for this compatibility snapshot. How much of that execution is Convex's filter engine and how much is the adapter's `postFilter` is set out below.
 
 | Classification | Coverage |
 | --- | --- |

@@ -83,8 +83,9 @@ jobs:
   # backed by a real database via Testcontainers instead of in-memory H2. Guards against
   # dialect divergences H2 cannot surface — most importantly the collation over-grant
   # documented in spring-data/README.md "Database collation requirements": the MySQL leg
-  # creates its schema with utf8mb4_0900_as_cs; the suite's mixed-case seeds fail the
-  # oracle comparison on MySQL's default case-insensitive collation.
+  # creates its schema with utf8mb4_0900_bin; the suite's mixed-case seeds fail the
+  # oracle comparison on MySQL's default case-insensitive collation, and its soft-hyphen
+  # seed (h6) on the case-sensitive but not byte-exact utf8mb4_0900_as_cs.
   #
   # The MySQL leg runs TWICE: once with Connector/J's default client-side prepared
   # statements (pins the adapter's `cast(... as double)` rendering — under the

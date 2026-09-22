@@ -537,7 +537,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(?, length(?) - length(`adversarial_resources`.`a_string`) + 1) = `adversarial_resources`.`a_string`",
+          "sql": "substr(?, char_length(?) - char_length(`adversarial_resources`.`a_string`) + 1) = `adversarial_resources`.`a_string`",
           "params": [
             "prefix-xaXby",
             "prefix-xaXby"
@@ -584,7 +584,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(?, 1, length(`adversarial_resources`.`a_string`)) = `adversarial_resources`.`a_string`",
+          "sql": "substr(?, 1, char_length(`adversarial_resources`.`a_string`)) = `adversarial_resources`.`a_string`",
           "params": [
             "xaXby-tail"
           ]
@@ -607,7 +607,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(?, 1, length(`adversarial_resources`.`a_string`)) = `adversarial_resources`.`a_string`",
+          "sql": "substr(?, 1, char_length(`adversarial_resources`.`a_string`)) = `adversarial_resources`.`a_string`",
           "params": [
             "xaXby-tail"
           ]
@@ -658,7 +658,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, length(`adversarial_resources`.`a_string`) - length(?) + 1) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, char_length(`adversarial_resources`.`a_string`) - char_length(?) + 1) = ?",
           "params": [
             "one",
             "one"
@@ -707,7 +707,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ?",
           "params": [
             "one",
             "one"
@@ -911,7 +911,7 @@
           "params": []
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, length(`adversarial_resources`.`a_string`) - length(`adversarial_resources`.`a_optional_string`) + 1) = `adversarial_resources`.`a_optional_string`",
+          "sql": "substr(`adversarial_resources`.`a_string`, char_length(`adversarial_resources`.`a_string`) - char_length(`adversarial_resources`.`a_optional_string`) + 1) = `adversarial_resources`.`a_optional_string`",
           "params": []
         }
       }
@@ -928,7 +928,7 @@
           "params": []
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, 1, length(`adversarial_resources`.`a_optional_string`)) = `adversarial_resources`.`a_optional_string`",
+          "sql": "substr(`adversarial_resources`.`a_string`, 1, char_length(`adversarial_resources`.`a_optional_string`)) = `adversarial_resources`.`a_optional_string`",
           "params": []
         }
       }
@@ -1086,7 +1086,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`scope`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?",
           "params": [
             "dept.eng.",
             "dept.eng."
@@ -1138,7 +1138,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`scope`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?",
           "params": [
             "[env]:prod:",
             "[env]:prod:"
@@ -1190,7 +1190,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`scope`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?",
           "params": [
             "dept.eng.",
             "dept.eng."
@@ -1242,7 +1242,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`scope`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?",
           "params": [
             "50%:a_b:",
             "50%:a_b:"
@@ -1272,7 +1272,7 @@
           ]
         },
         "mysql": {
-          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, length(?)) = ?)",
+          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?)",
           "params": [
             "dept",
             "dept.eng",
@@ -1304,7 +1304,7 @@
           ]
         },
         "mysql": {
-          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, length(?)) = ?)",
+          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?)",
           "params": [
             "dept",
             "dept.eng",
@@ -1336,7 +1336,7 @@
           ]
         },
         "mysql": {
-          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, length(?)) = ?)",
+          "sql": "(`adversarial_resources`.`scope` in (?) or `adversarial_resources`.`scope` = ? or substr(`adversarial_resources`.`scope`, 1, char_length(?)) = ?)",
           "params": [
             "50%",
             "50%:a_b",
@@ -2200,7 +2200,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, length(`adversarial_resources`.`a_string`) - length(?) + 1) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, char_length(`adversarial_resources`.`a_string`) - char_length(?) + 1) = ?",
           "params": [
             "\\",
             "\\"
@@ -2226,7 +2226,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ?",
           "params": [
             "[SEC]",
             "[SEC]"
@@ -2252,7 +2252,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ?",
           "params": [
             "100%",
             "100%"
@@ -2921,7 +2921,7 @@
           "params": []
         },
         "mysql": {
-          "sql": "not substr(`adversarial_resources`.`a_string`, 1, length(`adversarial_resources`.`a_optional_string`)) = `adversarial_resources`.`a_optional_string`",
+          "sql": "not substr(`adversarial_resources`.`a_string`, 1, char_length(`adversarial_resources`.`a_optional_string`)) = `adversarial_resources`.`a_optional_string`",
           "params": []
         }
       }
@@ -3356,7 +3356,7 @@
           ]
         },
         "mysql": {
-          "sql": "((not `adversarial_resources`.`a_bool` = ? or (not (`adversarial_resources`.`a_number` + ?) > ? and not substr(`adversarial_resources`.`a_string`, 1, length(?)) = ?)) and (`adversarial_resources`.`a_bool` = ? or not (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` = ? or `adversarial_tags`.`name` = `adversarial_resources`.`a_string`)) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` = ? or `adversarial_tags`.`name` = `adversarial_resources`.`a_string`)) is null)) then null else false end)))",
+          "sql": "((not `adversarial_resources`.`a_bool` = ? or (not (`adversarial_resources`.`a_number` + ?) > ? and not substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ?)) and (`adversarial_resources`.`a_bool` = ? or not (case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` = ? or `adversarial_tags`.`name` = `adversarial_resources`.`a_string`)) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((`adversarial_tags`.`name` = ? or `adversarial_tags`.`name` = `adversarial_resources`.`a_string`)) is null)) then null else false end)))",
           "params": [
             true,
             1,
@@ -3610,7 +3610,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, 1, length(?)) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ?",
           "params": [
             "100%",
             "100%"
@@ -4684,7 +4684,7 @@
           ]
         },
         "mysql": {
-          "sql": "not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_parents`.`a_string` = ? or substr(`adversarial_parents`.`a_string`, 1, length(?)) = ?))) end)",
+          "sql": "not (case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and 1 = 1)) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_parents`.`a_string` = ? or substr(`adversarial_parents`.`a_string`, 1, char_length(?)) = ?))) end)",
           "params": [
             "one",
             "one.",
@@ -4737,7 +4737,7 @@
           ]
         },
         "mysql": {
-          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and 1 = 1)))) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and substr(`adversarial_inners`.`a_string`, 1, length(?)) = ?)))) end)",
+          "sql": "(case when exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and 1 = 1)))) then exists (select 1 from `adversarial_parents` where (`adversarial_parents`.`resource_id` = `adversarial_resources`.`id` and exists (select 1 from `adversarial_inners` where (`adversarial_inners`.`parent_id` = `adversarial_parents`.`id` and substr(`adversarial_inners`.`a_string`, 1, char_length(?)) = ?)))) end)",
           "params": [
             "100",
             "100"
@@ -4886,7 +4886,7 @@
           ]
         },
         "mysql": {
-          "sql": "length(`adversarial_resources`.`a_string`) > cast(? as float(53))",
+          "sql": "char_length(`adversarial_resources`.`a_string`) > cast(? as float(53))",
           "params": [
             4294967296
           ]
@@ -4909,7 +4909,7 @@
           ]
         },
         "mysql": {
-          "sql": "length(`adversarial_resources`.`a_string`) < cast(? as float(53))",
+          "sql": "char_length(`adversarial_resources`.`a_string`) < cast(? as float(53))",
           "params": [
             4294967296
           ]
@@ -4955,7 +4955,7 @@
           ]
         },
         "mysql": {
-          "sql": "length(`adversarial_resources`.`a_string`) > ?",
+          "sql": "char_length(`adversarial_resources`.`a_string`) > ?",
           "params": [
             4
           ]
@@ -4978,7 +4978,7 @@
           ]
         },
         "mysql": {
-          "sql": "length(`adversarial_resources`.`a_string`) > ?",
+          "sql": "char_length(`adversarial_resources`.`a_string`) > ?",
           "params": [
             0
           ]
@@ -5070,7 +5070,7 @@
           ]
         },
         "mysql": {
-          "sql": "((substr(`adversarial_resources`.`a_string`, 1, length(?)) = ? and `adversarial_resources`.`a_number` >= ?) or (not substr(`adversarial_resources`.`a_string`, 1, length(?)) = ? and 0 = 1))",
+          "sql": "((substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ? and `adversarial_resources`.`a_number` >= ?) or (not substr(`adversarial_resources`.`a_string`, 1, char_length(?)) = ? and 0 = 1))",
           "params": [
             "100",
             "100",
@@ -6091,7 +6091,7 @@
           ]
         },
         "mysql": {
-          "sql": "substr(`adversarial_resources`.`a_string`, length(`adversarial_resources`.`a_string`) - length(?) + 1) = ?",
+          "sql": "substr(`adversarial_resources`.`a_string`, char_length(`adversarial_resources`.`a_string`) - char_length(?) + 1) = ?",
           "params": [
             "*?b",
             "*?b"

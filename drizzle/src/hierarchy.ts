@@ -139,6 +139,7 @@ const buildFieldHierarchyFilter = (
       "startsWith",
       columnExpression(fieldExpr),
       constantExpression(sql`${constantPath + field.delimiter}`),
+      [fieldColumn],
     );
 
   const fieldIsAncestor =

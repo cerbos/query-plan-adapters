@@ -233,7 +233,7 @@ or `true`, and rejects other values. CI runs both modes against the same corpus,
 each plan with `check()` decisions from a PDP configured with that same mode.
 
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 27 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 29 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 The oracle comparison runs on four legs, each varying one caller-side choice the corpus cannot: the baseline (the HTTP client, legacy `declarative_base()` models, a synchronous `Connection`), then the **gRPC** client, SQLAlchemy 2.0 **`DeclarativeBase`** models (skipped on 1.4, which has none), and the returned `Select` executed through an **`AsyncSession`** over aiosqlite. Every oracle action runs on every leg, and every fail-closed shape is asserted as a throw over both transports ([#321](https://github.com/cerbos/query-plan-adapters/issues/321)).
 
@@ -362,8 +362,11 @@ equality, membership, and the `LIKE` operations emitted by
 This is an authorization invariant: a case-insensitive database collation can
 silently over-grant access (for example, treating `One` as equal to `one`, or
 `Dept.Eng` as overlapping `dept.eng`). MySQL's common default `_ci` collations
-are case-insensitive; configure a case-sensitive or binary collation for mapped
-authorization columns. The adapter cannot enforce one portably because
+are case-insensitive; configure a byte-exact collation for mapped authorization
+columns — `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not byte-exact:
+`utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), so `'o\u00ADne' = 'one'` is
+TRUE under it, and `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE under it
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). The adapter cannot enforce one portably because
 collation selection belongs to the database schema and dialect.
 
 ## Usage

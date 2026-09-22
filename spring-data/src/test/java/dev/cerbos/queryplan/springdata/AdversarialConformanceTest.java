@@ -87,9 +87,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p><strong>Database selection.</strong> By default the suite runs on in-memory H2. Set the
  * {@code adapter.test.db} system property (forwarded from {@code ADAPTER_TEST_DB}) to
  * {@code postgres} or {@code mysql} to run the same oracle against a real Testcontainers
- * database. The MySQL leg defaults to the case-sensitive {@code utf8mb4_0900_as_cs} collation;
+ * database. The MySQL leg defaults to the byte-exact {@code utf8mb4_0900_bin} collation;
  * using {@code -Dadapter.test.mysql.collation=utf8mb4_0900_ai_ci} reproduces the documented
- * case-insensitive authorization over-grant.
+ * case-insensitive authorization over-grant, and {@code utf8mb4_0900_as_cs} the soft-hyphen one
+ * (seed h6, cerbos/query-plan-adapters#474).
  */
 class AdversarialConformanceTest {
 
@@ -513,12 +514,14 @@ class AdversarialConformanceTest {
                         "adversarial-pu", jdbcOverrides(pg, "org.hibernate.dialect.PostgreSQLDialect"));
             }
             case "mysql": {
-                // Case-sensitive server collation by default, per the README's
+                // Byte-exact server collation by default, per the README's
                 // "Database collation requirements" section. Overriding this with MySQL's
                 // default utf8mb4_0900_ai_ci reproduces the collation over-grant: the
-                // mixed-case seeds (c1/c2) then diverge from the check() oracle.
+                // mixed-case seeds (c1/c2) then diverge from the check() oracle. The
+                // case-sensitive utf8mb4_0900_as_cs is not enough either: it ignores the soft
+                // hyphen in seed h6, which then diverges.
                 String collation = System.getProperty(
-                        "adapter.test.mysql.collation", "utf8mb4_0900_as_cs");
+                        "adapter.test.mysql.collation", "utf8mb4_0900_bin");
                 MySQLContainer my = new MySQLContainer(DatabaseTestImages.MYSQL)
                         .withCommand("--character-set-server=utf8mb4",
                                 "--collation-server=" + collation);
@@ -1330,7 +1333,7 @@ class AdversarialConformanceTest {
 
         assertEquals(301, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
-        assertEquals(27, SEEDS.size(), "seed count changed");
+        assertEquals(29, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
         // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
         // @MethodSource streams that feed the throw cases are what resolve those messages, and

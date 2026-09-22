@@ -101,7 +101,8 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
  * a server started case-sensitive — measured against the MySQL 8.4 image the adversarial leg pins
  * (`MYSQL_IMAGE` in `adversarial.test.ts`) through that leg's own client, not inferred.
  * `utf8mb4_0900_bin` is the collation that is byte-exact AND NO PAD: `utf8mb4_bin` is PAD SPACE,
- * and `utf8mb4_0900_as_cs` ignores a soft hyphen, so `'tr­ue' = 'true'` is TRUE under it.
+ * and `utf8mb4_0900_as_cs` ignores a soft hyphen, so `'tr­ue' = 'true'` is TRUE under it. It is
+ * also the collation the adversarial leg's columns use, for the same reason (#474).
  * The `_utf8mb4` introducer fixes the literals' character set, so the COLLATE is valid whatever
  * the connection's is. It needs MySQL 8.0.17, the floor
  * `CAST(… AS FLOAT(53))` already sets. SQLite compares the literals BINARY and PostgreSQL in its
@@ -246,7 +247,12 @@ const buildSizeExpression = (
   // A non-string column has no CEL size(): the comparison is a no-overload error, so UNKNOWN.
   const scalarColumn = columnForOperand(operand, mapper);
   if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
-  return sql`length(${buildColumnExpression(resolved.mapping, operand.name)})`;
+  // CEL's size() counts code points. SQLite's and PostgreSQL's length() do too, but MySQL's
+  // counts BYTES, so `size(x) > 4` admits the 4-character, 5-byte "o­ne" (seed h6) there;
+  // CHAR_LENGTH is MySQL's code-point count. The dialect is read off the column, as for
+  // `buildBooleanString`.
+  const lengthFn = is(scalarColumn, MySqlColumn) ? sql`char_length` : sql`length`;
+  return sql`${lengthFn}(${buildColumnExpression(resolved.mapping, operand.name)})`;
 };
 
 const buildTimestampExpression = (

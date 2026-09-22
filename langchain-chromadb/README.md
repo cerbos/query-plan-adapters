@@ -111,7 +111,7 @@ For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs
 corpus with strict evaluation enabled for both planning and the `check()` oracle.
 CI runs both modes for each existing adversarial store and client-version combination.
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 27 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |

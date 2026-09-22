@@ -84,7 +84,9 @@ resourcePolicy:
     # (aString "One") is DENIED here. A case-insensitive database collation (MySQL default
     # utf8mb4_0900_ai_ci, SQL Server *_CI_*) matches it anyway — the differential oracle
     # turns that into a test failure, proving the over-grant. See the README's
-    # "Database collation requirements" section.
+    # "Database collation requirements" section. h6 (aString "o\u00ADne", a SOFT HYPHEN) is
+    # DENIED too, and a case-sensitive but not byte-exact collation (MySQL utf8mb4_0900_as_cs)
+    # matches it: see the corpus README, "Case-sensitive is not byte-exact" (#474).
     - actions: ["cs-eq"]
       effect: EFFECT_ALLOW
       roles: ["USER"]

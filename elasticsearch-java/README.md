@@ -605,7 +605,7 @@ or `true`, and rejects other values. CI runs both modes against the same corpus,
 each plan with `check()` decisions from a PDP configured with that same mode.
 
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 27 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 29 hostile seed documents and real Elasticsearch queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 The harness applies a 30-second deadline to each PDP call, so a stalled RPC fails the run.
 

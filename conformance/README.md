@@ -14,6 +14,7 @@ heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI ch
 - [Layout](#layout)
 - [The oracle recipe](#the-oracle-recipe)
   - [Case sensitivity is two invariants, not one](#case-sensitivity-is-two-invariants-not-one)
+    - [Case-sensitive is not byte-exact](#case-sensitive-is-not-byte-exact)
   - [NULL conventions](#null-conventions)
     - [`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire](#nullrepresentationomitted-the-two-conventions-are-indistinguishable-on-the-wire)
     - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
@@ -144,7 +145,8 @@ CEL string comparison is exact. The corpus proves that twice, because a store ca
 one operator and not the other:
 
 - **`cs-eq`** proves `=`. Collation governs this one, and the advice every adapter README gives —
-  use a binary or case-sensitive collation — is sufficient for it.
+  use a byte-exact collation — is sufficient for it. *Case-sensitive* is not: see
+  "Case-sensitive is not byte-exact" below.
 - **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string MATCHING, which collation does
   not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII no matter what
   collation the column was created with; only `PRAGMA case_sensitive_like = ON` changes it, and
@@ -152,6 +154,38 @@ one operator and not the other:
 
 `c1` (`aString` "One") is the single witness in all four, and the only seed that differs from
 another by case alone, so a case-insensitive store adds exactly one row and nothing else moves.
+
+#### Case-sensitive is not byte-exact
+
+`h6` carries a SOFT HYPHEN (U+00AD) in both of its strings: `aString` is `"o\u00ADne"` and
+`aOptionalString` is `"s\u00ADet"`. CEL tells them apart from `"one"` and `"set"`; a Unicode
+Collation Algorithm collation does not, because UCA gives a default-ignorable code point no weight
+at all. MySQL's `utf8mb4_0900_as_cs` is case- AND accent-sensitive and still a UCA collation, so it
+passes `c1` and fails `h6`: `cs-eq` and every `in` over the principal's teams (`in-single`,
+`pv-in`, …) over-grant it, and `nary-and`'s `aString != "one"` and `pv-not-exists` under-grant it
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Those existing equality and
+negation actions are its witnesses, so the row needed no new action and moved no plan.
+
+`utf8mb4_bin` is byte-exact but PAD SPACE (`'a' = 'a '`), so the one MySQL collation that matches
+CEL on case, accent, ignorables and trailing spaces is `utf8mb4_0900_bin` (8.0.17+), which every
+MySQL leg pins. Measured on the pinned `mysql:8.4`:
+
+| probe | `_0900_ai_ci` | `_0900_as_cs` | `utf8mb4_bin` | `_0900_bin` |
+|---|---|---|---|---|
+| `'One' = 'one'` | TRUE | FALSE | FALSE | FALSE |
+| `'o\u00ADne' = 'one'` | TRUE | TRUE | FALSE | FALSE |
+| `'one ' = 'one'` | FALSE | FALSE | TRUE | FALSE |
+| `'o\u00ADne' LIKE 'one'` | FALSE | FALSE | FALSE | FALSE |
+
+`LIKE` compares per character, so `h6` never reaches it; the witness is `=` and `IN`.
+
+`h6` also found a bug no collation governs: drizzle rendered CEL `size()` as `length()`, which
+counts BYTES on MySQL, so `string-size`'s `size(aString) > 4` admitted the 4-character, 5-byte
+`"o\u00ADne"`. The same byte count positioned the `substr()` behind drizzle's `startsWith` and
+`endsWith`, which counts CHARACTERS, so any multi-byte needle mis-sliced. `h7` witnesses that:
+its `aOptionalString` `"é"` (2 bytes, 1 character) both starts and ends its `aString` `"é-x-é"`, so
+`f2f-startswith` and `f2f-endswith` under-grant it and `not-startswith` over-grants it under a
+byte-counting slice. drizzle now renders `char_length()` over a MySQL column for all three.
 
 A harness whose store needs configuring to satisfy the invariant must configure it — that is a
 property of the deployment the adapter documents, not of the translation — but the adapter's
@@ -187,7 +221,7 @@ have byte-identical wire fixtures apart from the variable name. Their oracles do
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
 Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 27 seeds. An adapter cannot recover
+`"set" == null` false for every other, so `check()` denies all 29 seeds. An adapter cannot recover
 the caller's convention from the plan, so it has to be told: every adapter that can emit a
 NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
 (the historical translation). See cerbos/query-plan-adapters#302.
@@ -255,7 +289,7 @@ break them.
 
 `coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
 aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 27 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
+is TRUE for all 29 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
 row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
 and it is precisely the row the naive translation loses.
 
@@ -776,7 +810,7 @@ only inside a shape some adapters throw on is not proven for those adapters.
 
 `root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
 specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 27 seeds. A total oracle is exactly what the degeneracy guard below exists
+that spelling allows all 29 seeds. A total oracle is exactly what the degeneracy guard below exists
 to catch, and it would have passed against any filter whatsoever.
 
 ### Hazard classes the corpus missed
@@ -1563,9 +1597,12 @@ the policy suite and classify it like anything else.
     its renderer which target to emit.
 
   The MySQL legs also measured what the collation costs, which is a store fact no classification
-  records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **45 of drizzle's 176 and 42 of
-  prisma's 136 oracle-tested actions disagree with the PDP**, `cs-eq` among them. Both legs pin
-  `utf8mb4_0900_as_cs` instead and both READMEs state the requirement. On prisma the requirement
+  records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **61 of drizzle's 236** oracle-tested
+  actions disagree with the PDP, and under Prisma's `utf8mb4_unicode_ci` **58 of prisma's 172** do,
+  `cs-eq` among them. Both legs pin
+  `utf8mb4_0900_bin` instead and both READMEs state the requirement — not the case-sensitive
+  `utf8mb4_0900_as_cs` they first pinned, which the soft-hyphen seed `h6` showed is not byte-exact
+  (see "Case-sensitive is not byte-exact" above). On prisma the requirement
   is sharper than a server setting: its migration engine writes `COLLATE utf8mb4_unicode_ci` into
   every `CREATE TABLE` and ignores the server default, so the tables have to be converted after
   `db push`.

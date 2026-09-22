@@ -153,7 +153,7 @@ even under negation. Use this adapter with Cerbos 0.55 when policies can produce
 NaN in a negated comparison. Missing attributes and null values retain their existing
 handling.
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 27 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
@@ -179,13 +179,15 @@ npm run test:adversarial:mysql      # MySQL, via testcontainers
 
 The PostgreSQL leg is what proves the typed paths SQLite cannot reach — a real `boolean` where SQLite stores an integer, a real `timestamptz` where SQLite compares text, a hard error on division by zero where SQLite returns NULL, and a parameter typed from the column it is compared with rather than from the value.
 
-The MySQL leg disagrees with both of the others, which is why it found something neither could: **`CAST(… AS TEXT)` is a syntax error on MySQL**, which spells the same conversion `CAST(… AS CHAR)` — and `CHAR` on PostgreSQL is `character(1)`. `string()` used to translate here on the strength of a rendering measured on two stores out of three; it now fails closed over every column but a boolean (see the behaviour changes below). The leg also runs under a pinned case- and accent-sensitive collation, for the reason the [collation requirement](#database-collation-requirement) sets out.
+The MySQL leg disagrees with both of the others, which is why it found something neither could: **`CAST(… AS TEXT)` is a syntax error on MySQL**, which spells the same conversion `CAST(… AS CHAR)` — and `CHAR` on PostgreSQL is `character(1)`. `string()` used to translate here on the strength of a rendering measured on two stores out of three; it now fails closed over every column but a boolean (see the behaviour changes below). The leg also runs under a pinned byte-exact collation, `utf8mb4_0900_bin`, for the reason the [collation requirement](#database-collation-requirement) sets out.
 
 **PlanetScale is still not executed anywhere.** It is MySQL-compatible and the emitted SQL is the same, but a store the corpus does not run against is a store this contract does not cover.
 > [!WARNING]
 > **Breaking change.** `string()` over a number or text column — `string(R.attr.aDouble) == "-0.6"` and every other spelling — **throws** instead of returning a filter. The filter it used to return was `CAST(… AS TEXT)`, which is correct on SQLite and PostgreSQL and a **syntax error** on MySQL, a store this adapter's peer range and README both claim. A shape that used to return a filter and now throws is a consumer-visible break; emitting SQL that only runs on two of three supported stores is the thing the shared corpus exists to stop ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)). If you need it on one provider, compare the underlying column instead, or pre-render the text into a column of its own.
 
 **Behaviour change.** `string()` over a **boolean** column now translates, where it used to throw ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)). It needs no cast target, so it is not the shape above: it becomes `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's two words on SQLite and MySQL (where a boolean is stored as 1/0 and any `CAST` renders `"1"`) exactly as on PostgreSQL. The `IS NULL` arm is load-bearing: CEL has no `string()` for a missing or null value, so it raises and the PDP denies the row. Without the arm a NULL column would fall through to `'false'`, and `string(R.attr.flag) != "true"` would return a row the PDP denies; with it the result stays NULL and the row is excluded under both polarities. `cast-string-bool` proves it against the oracle on all three stores. A shape that used to throw now returns a filter, which is consumer-visible. On MySQL the two literals carry an explicit collation — see the [collation requirement](#database-collation-requirement).
+
+**Behaviour change.** On a MySQL column, every string length the adapter emits is `CHAR_LENGTH` rather than `LENGTH`: `size()` over a string, and the `SUBSTR` bounds that `startsWith` and `endsWith` compare against, including a hierarchy's descendant prefix. CEL counts code points, as SQLite's and PostgreSQL's `length()` do, but MySQL's `LENGTH` counts bytes. Two corpus seeds caught it. With `h6` (`"o\u00ADne"`, a soft hyphen), `size(R.attr.aString) > 4` returned the 4-character, 5-byte row on MySQL. With `h7` (`"é-x-é"`, whose `aOptionalString` is `"é"`), `SUBSTR` sliced `"é-"` for a 2-byte, 1-character prefix, so `f2f-startswith` and `f2f-endswith` dropped a row CEL allows, and `not-startswith` returned it. That last case is an over-grant ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). SQLite and PostgreSQL render unchanged. A mapping that is not a Drizzle column names no dialect, so it keeps `length()`.
 
 **Behaviour change.** `hasIntersection` now normalizes its operand order, so the value-first spelling — `hasIntersection(["a","b"], R.attr.list)`, which the planner preserves from policy source order — translates instead of silently becoming `FALSE`. The same change makes an operand pair with **no** literal list throw rather than emit that `FALSE`: a shape that returned a filter now raises, which is a consumer-visible break, but the filter it returned selected no rows and the corpus forbids emitting one for a shape the adapter cannot express ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
@@ -317,22 +319,25 @@ Cerbos plans reference both resources (`request.resource.attr.*`) and principals
 
 ### Database collation requirement
 
-> **Every mapped string column must use a binary or case-sensitive collation.** CEL
-> string comparison is exact and case-sensitive, while MySQL and PlanetScale commonly
-> default to case-insensitive collations. With a CI collation, a database predicate can
-> return `"Finance"` for a policy that allowed only `"finance"`, silently over-granting
-> access compared with the PDP's `check()` decision.
+> **Every mapped string column must use a byte-exact collation.** CEL string comparison is
+> byte-exact, while MySQL and PlanetScale commonly default to case-insensitive collations. With a
+> CI collation, a database predicate can return `"Finance"` for a policy that allowed only
+> `"finance"`, silently over-granting access compared with the PDP's `check()` decision.
 
-On MySQL use `utf8mb4_0900_as_cs`, which is case-sensitive, accent-sensitive and NO PAD, or
-`utf8mb4_bin`; prefer the former, because `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE
-under it. **The default `utf8mb4_0900_ai_ci` is not a theoretical hazard here**: replaying this
-adapter's own conformance corpus under it, against `mysql:8.4`, makes **45 of the 176 oracle-tested
-actions disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed
-`"one"`, and every collection macro over a tag name follows. PostgreSQL is case-sensitive by
-default, but nondeterministic ICU collations and `citext` are not safe for mapped policy
-attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns. This requirement covers
-equality and ordering, `in`, intersections, string matching, and hierarchy prefix/ancestor
-comparisons.
+On MySQL use `utf8mb4_0900_bin` (MySQL 8.0.17+), which is byte-exact and NO PAD. **Case-sensitive
+is not enough.** `utf8mb4_0900_as_cs` is case- and accent-sensitive but still a Unicode collation,
+and Unicode collation gives a default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight,
+so `'o\u00ADne' = 'one'` is TRUE under it; `utf8mb4_bin` is byte-exact but PAD SPACE, so
+`'a' = 'a '` is TRUE under it. Replaying this adapter's own conformance corpus against `mysql:8.4`
+measures what each costs: under the default `utf8mb4_0900_ai_ci`, **61 of the 236
+oracle-tested actions disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that
+allowed `"one"`, and every collection macro over a tag name follows — and under
+`utf8mb4_0900_as_cs`, **16 do**, every one of them on the soft-hyphen seed `h6`, over-granted by
+`==` and `in` and under-granted by `!=` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+PostgreSQL is case-sensitive by default, but nondeterministic ICU collations and `citext` are not
+safe for mapped policy attributes. On SQLite, do not apply `COLLATE NOCASE` to mapped columns. This
+requirement covers equality and ordering, `in`, intersections, string matching, and hierarchy
+prefix/ancestor comparisons.
 
 **`string()` over a boolean column is compared in a collation the adapter picks, not yours.** The
 `CASE` it becomes yields two literals, `'true'` and `'false'`, and on MySQL a literal compares in
@@ -340,9 +345,9 @@ the *connection's* collation, not a column's or the server's. mysql2's default c
 is `utf8mb4_unicode_ci`, so on a server started case-sensitive `string(R.attr.flag) == "TRUE"` would
 still select every row whose flag is true, and CEL selects none. The adapter therefore renders the
 literals on MySQL as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`: byte-exact and NO PAD, whatever the
-connection's character set and collation. Measured against `mysql:8.4`, neither of the collations
-recommended above would do: `utf8mb4_bin` is PAD SPACE, so it matches `"true "`, and
-`utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), so it matches `"tr\u00ADue"`. Two consequences:
+connection's character set and collation — the same collation the section above asks of your
+columns, for the same two reasons: `utf8mb4_bin` would match `"true "` and `utf8mb4_0900_as_cs`
+would match `"tr\u00ADue"`. Two consequences:
 the explicit collation outranks the other operand's, so `string(R.attr.flag) == R.attr.label` also
 compares `label` byte-exactly; and `utf8mb4_0900_bin` needs MySQL 8.0.17 or later, the same floor
 `CAST(… AS FLOAT(53))` already sets. SQLite compares the literals `BINARY` and PostgreSQL in its
@@ -482,7 +487,7 @@ flat query: pagination, and the adapter's filter composed with an application-ow
 | `npm test` | **The SQL this adapter emits.** The translator unit test: every corpus action, classified exactly once as a golden expectation or as a throw — plus what the driver is asked to bind, the rendering on each claimed dialect, the mapper forms and the golden asset's own invariants, none of which needs a store | Nothing but Node — no Cerbos sidecar, no database, no Docker |
 | `npm run test:adversarial` | **The rows that SQL returns**, against real SQLite with `check()` as the oracle | Cerbos CLI |
 | `npm run test:adversarial:postgres` | The same corpus against real PostgreSQL | Cerbos CLI, Docker |
-| `npm run test:adversarial:mysql` | The same corpus against real MySQL, under a case- and accent-sensitive collation. `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` replays it under MySQL's default to see what that costs | Cerbos CLI, Docker |
+| `npm run test:adversarial:mysql` | The same corpus against real MySQL, under the byte-exact `utf8mb4_0900_bin`. `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` replays it under MySQL's default to see what that costs | Cerbos CLI, Docker |
 | `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
 
 ### The golden expectations

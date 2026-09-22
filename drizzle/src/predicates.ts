@@ -1,6 +1,7 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, isNull, not, or, sql } from "drizzle-orm";
+import { and, is, isNull, not, or, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { Param } from "drizzle-orm/sql";
 
 import { resolveConstantNumber } from "./arithmetic";
@@ -140,14 +141,25 @@ export type StringMatchOperator = "contains" | "startsWith" | "endsWith";
  * UNKNOWN — which excludes the row under both polarities, mirroring the CEL
  * missing-attribute error (deny). The receiver is ALWAYS the haystack and the needle
  * ALWAYS the pattern; operands are never swapped.
+ *
+ * `substr` counts characters on every store, and so must the length that positions it. SQLite's
+ * and PostgreSQL's `length()` do, but MySQL's counts BYTES, so a multi-byte needle mis-slices
+ * there: `substr('\u00e9-x', 1, length('\u00e9'))` is `'\u00e9-'`, and `startsWith` under-grants while
+ * its negation over-grants (seed h7). `columns` are the operands' mapped columns, whose Drizzle
+ * class names the dialect exactly as it does for `size()`; any MySQL column selects
+ * `char_length`.
  */
 export const buildStringMatchCondition = (
   operator: StringMatchOperator,
   receiver: NullableExpression,
   needle: NullableExpression,
+  columns: (AnyColumn | undefined)[],
 ): SQL => {
   const receiverExpr = receiver.expr;
   const needleExpr = needle.expr;
+  const length = columns.some((column) => is(column, MySqlColumn))
+    ? sql`char_length`
+    : sql`length`;
   switch (operator) {
     case "contains": {
       // REPLACE is case-sensitive and treats the needle literally on SQLite,
@@ -162,9 +174,9 @@ export const buildStringMatchCondition = (
         : sql`(case ${body})`;
     }
     case "startsWith":
-      return sql`substr(${receiverExpr}, 1, length(${needleExpr})) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, 1, ${length}(${needleExpr})) = ${needleExpr}`;
     case "endsWith":
-      return sql`substr(${receiverExpr}, length(${receiverExpr}) - length(${needleExpr}) + 1) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, ${length}(${receiverExpr}) - ${length}(${needleExpr}) + 1) = ${needleExpr}`;
   }
 };
 
@@ -382,6 +394,7 @@ const applyColumnComparison = (
         operator,
         columnExpression(sql`${column}`),
         constantExpression(sql`${value}`),
+        [column],
       );
   }
   const ordering = binaryComparison(operator, column, bound);

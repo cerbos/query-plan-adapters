@@ -1111,32 +1111,36 @@ const MYSQL_IMAGE =
  * column's collation, so under the default the following are all TRUE on MySQL 8.4 — measured,
  * not inferred:
  *
- * | probe | `utf8mb4_0900_ai_ci` (default) | `utf8mb4_0900_as_cs` |
- * |---|---|---|
- * | `'One' = 'one'` | TRUE — over-grants `cs-eq` | FALSE |
- * | `'héllo' = 'hello'` | TRUE — over-grants `unicode-eq` | FALSE |
- * | `'one' LIKE 'ON%'` | TRUE — over-grants every `hier-*` prefix probe | FALSE |
+ * | probe | `utf8mb4_0900_ai_ci` (default) | `utf8mb4_0900_as_cs` | `utf8mb4_bin` | `utf8mb4_0900_bin` |
+ * |---|---|---|---|---|
+ * | `'One' = 'one'` | TRUE — over-grants `cs-eq` | FALSE | FALSE | FALSE |
+ * | `'héllo' = 'hello'` | TRUE — over-grants `unicode-eq` | FALSE | FALSE | FALSE |
+ * | `'one' LIKE 'ON%'` | TRUE — over-grants every `hier-*` prefix probe | FALSE | FALSE | FALSE |
+ * | `'o\u00ADne' = 'one'` (soft hyphen) | TRUE | TRUE — over-grants `cs-eq` on seed h6 | FALSE | FALSE |
+ * | `'one ' = 'one'` | FALSE | FALSE | TRUE (PAD SPACE) | FALSE |
  *
- * A collation that makes `=` case-insensitive is a **store misconfiguration**, not a limitation of
- * this adapter: no filter it could emit would restore byte-exact equality, and classifying `cs-eq`
- * as `adapterUnsupported` on that basis would blame the translator for the DDL. So the leg pins a
- * case- and accent-sensitive collation and states the requirement, exactly as `ent` pins
- * `COLLATE utf8mb4_bin` per column and `spring-data` passes `--collation-server`.
+ * A collation that makes `=` match strings CEL tells apart is a **store misconfiguration**, not a
+ * limitation of this adapter: no filter it could emit would restore byte-exact equality, and
+ * classifying `cs-eq` as `adapterUnsupported` on that basis would blame the translator for the
+ * DDL. So the leg pins a byte-exact collation and states the requirement, exactly as `ent` pins
+ * one per column and `spring-data` passes `--collation-server`.
  *
- * `utf8mb4_0900_as_cs` rather than ent's `utf8mb4_bin` because the two differ on a third axis:
- * `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE under it, while both `utf8mb4_0900_as_cs`
- * and the default are NO PAD. No corpus seed carries a trailing space today, so nothing here
- * discriminates them — this picks the one that matches CEL on all three axes rather than two, and
- * it is the collation `spring-data`'s MySQL leg already runs, so the two adapters prove one server
- * configuration between them.
+ * Case-sensitive is not byte-exact. `utf8mb4_0900_as_cs` is a UCA collation, and UCA gives a
+ * default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight at all, so seed h6's
+ * `"o\u00ADne"` equals `"one"` under it — an over-grant on `cs-eq` and every `in` over the
+ * principal's teams, and an under-grant on `nary-and`'s `!=`
+ * (cerbos/query-plan-adapters#474). `utf8mb4_bin` is byte-exact but PAD SPACE. Only
+ * `utf8mb4_0900_bin` (MySQL 8.0.17+) is byte-exact AND NO PAD, which is why it is the collation
+ * the adapter already puts on its own `string()` literals (`buildBooleanString` in `values.ts`),
+ * and the one every MySQL leg in this repository runs.
  *
  * Overridable so the over-grant can be reproduced rather than taken on trust —
  * `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci npm run test:adversarial:mysql` fails on the
- * case and accent probes and nothing else. Same escape hatch as spring-data's
- * `-Dadapter.test.mysql.collation`.
+ * case and accent probes, and `…=utf8mb4_0900_as_cs` on the h6 soft-hyphen probes. Same escape
+ * hatch as spring-data's `-Dadapter.test.mysql.collation`.
  */
 const MYSQL_COLLATION =
-  process.env["ADAPTER_TEST_MYSQL_COLLATION"] ?? "utf8mb4_0900_as_cs";
+  process.env["ADAPTER_TEST_MYSQL_COLLATION"] ?? "utf8mb4_0900_bin";
 
 /**
  * The MySQL leg (cerbos/query-plan-adapters#340).
@@ -1600,20 +1604,25 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // Executed against the seeded rows rather than asked of `@@collation_database`, because the
   // requirement is what the comparison DOES, not what the setting is called.
   (STORE_NAME === "mysql" ? test : test.skip)(
-    "the MySQL leg runs under a case- and accent-sensitive collation",
+    "the MySQL leg runs under a byte-exact collation",
     async () => {
       expect({
-        // "one" is seed a1; "One" is seed c1. Bound, not interpolated, so the comparison is the
-        // one the adapter's own filters make.
+        // "one" is seed a1; "One" is seed c1, and "o\u00ADne" is seed h6, which a case-sensitive
+        // UCA collation (utf8mb4_0900_as_cs) still returns because it weighs the soft hyphen as
+        // nothing. Bound, not interpolated, so the comparison is the one the adapter's own
+        // filters make.
         caseVariant: await store.selectIds(sql`a_string = ${"one"}`),
         // "héllo🚀" is seed a6; the accent-folded spelling matches nothing.
         accentFolded: await store.selectIds(sql`a_string = ${"hello🚀"}`),
         // `hier-*` reaches the same collation through LIKE rather than through `=`.
         wrongCasePrefix: await store.selectIds(sql`a_string like ${"ON%"}`),
+        // NO PAD: utf8mb4_bin would return a1 for a trailing space.
+        trailingSpace: await store.selectIds(sql`a_string = ${"one "}`),
       }).toEqual({
         caseVariant: ["a1"],
         accentFolded: [],
         wrongCasePrefix: [],
+        trailingSpace: [],
       });
     },
   );

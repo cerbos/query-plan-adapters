@@ -43,19 +43,22 @@ const MYSQL_IMAGE =
  * Under either insensitive collation `'One' = 'one'` is TRUE, and `cs-eq`, `unicode-eq` and every
  * `hier-*` prefix probe return rows the PDP denies. That is a store misconfiguration rather than a
  * limitation of this adapter — no Prisma `where` clause could restore byte-exact equality — so the
- * leg pins a case- and accent-sensitive collation and states the requirement, as `spring-data`'s
- * MySQL leg does. `README.md` says the same thing to consumers, who inherit the same default.
+ * leg pins a byte-exact collation and states the requirement, as every other MySQL leg does.
+ * `README.md` says the same thing to consumers, who inherit the same default.
  *
- * `utf8mb4_0900_as_cs` rather than the older `utf8mb4_bin` that `ent`'s DDL names: the latter is
- * PAD SPACE, so `'a' = 'a '` is TRUE under it, while `_0900_as_cs` is NO PAD and so matches CEL on
- * that axis as well. It is also the collation `spring-data`'s MySQL leg already runs.
+ * `utf8mb4_0900_bin`, because it is the one MySQL collation that is byte-exact AND NO PAD.
+ * Case-sensitive is not enough: `utf8mb4_0900_as_cs` weighs a default-ignorable code point such as
+ * SOFT HYPHEN (U+00AD) as nothing, so seed h6's `"o\u00ADne"` equals `"one"` under it
+ * (cerbos/query-plan-adapters#474). The older `utf8mb4_bin` is byte-exact but PAD SPACE, so
+ * `'a' = 'a '` is TRUE under it.
  *
  * Overridable so the over-grant can be reproduced rather than taken on trust:
  * `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci npm run test:adversarial:mysql` fails on the
- * case and accent probes. Same escape hatch as spring-data's `-Dadapter.test.mysql.collation`.
+ * case and accent probes, and `…=utf8mb4_0900_as_cs` on the h6 soft-hyphen probes. Same escape
+ * hatch as spring-data's `-Dadapter.test.mysql.collation`.
  */
 const MYSQL_COLLATION =
-  process.env.ADAPTER_TEST_MYSQL_COLLATION ?? "utf8mb4_0900_as_cs";
+  process.env.ADAPTER_TEST_MYSQL_COLLATION ?? "utf8mb4_0900_bin";
 
 /**
  * Give every table Prisma just created the collation above.

@@ -173,8 +173,8 @@ tasks.test {
     inputs.property("adapterTestOrm", adapterTestOrm)
 
     // Select the database backing AdversarialConformanceTest: h2 (default), postgres, or
-    // mysql. The MySQL leg creates its schema with a case-sensitive collation by default
-    // (utf8mb4_0900_as_cs); override adapter.test.mysql.collation to reproduce the
+    // mysql. The MySQL leg creates its schema with a byte-exact collation by default
+    // (utf8mb4_0900_bin); override adapter.test.mysql.collation to reproduce the
     // over-grant on MySQL's default utf8mb4_0900_ai_ci — see the README
     // "Database collation requirements" section.
     val adapterTestDb = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
