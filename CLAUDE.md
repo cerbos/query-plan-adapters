@@ -13,7 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
-| mongodb-ruby | Ruby | `cerbos-mongodb` | MongoDB Ruby driver (`mongo`) / MongoDB 7–8 |
+| mongodb-ruby | Ruby | `cerbos-mongodb` | MongoDB Ruby driver (`mongo`), optional Mongoid 9 / MongoDB 7–8 |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -135,7 +135,7 @@ minor series for that reason: a floating `~> 7.1` resolves to the newest 7.x, an
 ```bash
 cd mongodb-ruby
 ./scripts/test.sh                                      # all three suites
-./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb   # offline
+./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb spec/mongoid_spec.rb   # offline
 ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE ./scripts/test.sh spec/adversarial_conformance_spec.rb
 ./scripts/golden-update.sh                             # rewrite golden/expectations.json
 ./scripts/lint.sh
@@ -152,7 +152,10 @@ The adapter emits a plain Hash, so its golden entry is the translator's return v
 the plan kind, plus the filter for a conditional plan, with a `Time` written as `{"$date": …}` —
 and the file declares no generator. It shares Mongoose's MongoDB semantics but not its ODM: the
 driver never casts a filter, which is why it translates `p-ternary-vs-ternary` where Mongoose's
-`$expr` caster refuses it.
+`$expr` caster refuses it. Mongoid *does* cast — a bare `Model.where(filter)` turns `flag == 1` into
+`flag == true` on a `Boolean` field — so the optional `cerbos/mongodb/mongoid` helper wraps each
+condition in `Mongoid::RawValue`; `spec/mongoid_spec.rb` (offline) and the "through Mongoid" leg of
+the adversarial suite prove it for every corpus action.
 
 ### Go (Ent, pgx)
 ```bash

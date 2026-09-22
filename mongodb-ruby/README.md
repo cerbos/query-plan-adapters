@@ -62,6 +62,39 @@ documents.count_documents(result.filter)
 documents.aggregate([{"$match" => result.filter}, ...])
 ```
 
+### Mongoid
+
+For a [Mongoid](https://www.mongodb.com/docs/mongoid/current/) model, use the optional helper, which
+returns an ordinary chainable criteria:
+
+```ruby
+require "cerbos/mongodb/mongoid"
+
+result = Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: mapper)
+Cerbos::MongoDB::Mongoid.criteria(Document, result).where(archived: false).order(title: 1).skip(20).limit(10)
+```
+
+It returns `Document.none` for an unconditional deny and the scope unchanged for an unconditional
+allow, and accepts a criteria as well as a model (`criteria(current_user.documents, result)`).
+
+**Do not pass the filter to `Model.where` yourself.** Mongoid converts every constant in a query
+to the declared type of the field it is compared with, before the query is sent; CEL never does.
+Measured against a real MongoDB with typed fields:
+
+| policy | bare `Model.where(filter)` sends | result |
+| --- | --- | --- |
+| `R.attr.flag == 1` (`Boolean` field) | `flag == true` | returns documents the PDP denies |
+| `R.attr.n < "3"` (`Integer` field) | `n < 3` | returns documents the PDP denies |
+| `R.attr.flag != 0` (`Boolean` field) | `flag != false` | drops documents the PDP allows |
+| `R.attr.x > -1e19` (`Float` field) | an Integer too large for BSON | raises |
+
+The helper wraps each top-level condition in `Mongoid::RawValue`, Mongoid's own opt-out from
+that conversion, so the criteria's selector is the adapter's filter verbatim (Mongoid still drops
+a repeated clause from `$and`/`$or`/`$nor`, which changes nothing). Both are asserted for every
+corpus action. Mongoid is not a dependency of the gem: only `cerbos/mongodb/mongoid` loads it, and
+it is tested against Mongoid 9. Mongoid treats `id` as an alias of `_id`, so map a plan variable to
+`"_id"` rather than to `"id"`.
+
 `plan:` accepts a `Cerbos::Output::PlanResources` from the Ruby SDK, the parsed JSON of a
 `PlanResources` response (with the plan at the top level or under `filter`), or any object with
 `kind` and `condition`.
@@ -135,6 +168,7 @@ semantics.
 | Oracle-tested | 199 reference conformance actions plus the 4 reference-unsupported shapes MongoDB can express — regular expressions, positional reads (`$arrayElemAt`/`$getField`), RFC 3339 timestamps, and a field-to-field comparison under mixed null conventions (203 actions) |
 | Fail-closed | 89 reference actions plus the 7 reference-unsupported shapes this adapter does not promote (96 actions) |
 | Representation-dependent | `null-eq-missing` — refused under `:omitted`. Under the default it already returns the empty set the PDP demands, because `nullable: true` declares that a stored null is a missing attribute |
+| Through Mongoid | The same 203 actions, run through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models (embedded relations included), match the oracle too |
 | Known planner divergence | `has()` on a missing attribute is folded by the planner to `ALWAYS_ALLOWED` while `checkResource` denies. Use `R.attr.x != null` instead of `has(R.attr.x)` until the planner is fixed |
 
 The fail-closed set is exact-one cardinality, aggregation expressions or outer-document references
@@ -167,6 +201,8 @@ ADAPTER_TEST_STRICT_EVALUATION=true ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMA
   offline and pins every emitted filter in `golden/expectations.json` — the translator's return
   value verbatim, with a `Time` written as `{"$date": "<ISO 8601>"}`. Regenerate with
   `./scripts/golden-update.sh` and review the diff; CI never regenerates.
+- `spec/mongoid_spec.rb` asserts, offline, that the Mongoid criteria's selector is the emitted
+  filter for every corpus action, and that a bare `where` is not.
 - `spec/adapter_contract_spec.rb` covers what the corpus cannot vary: `value_parser`, callable
   mappers, mapper validation, the per-call null representation and the plan shapes accepted.
 

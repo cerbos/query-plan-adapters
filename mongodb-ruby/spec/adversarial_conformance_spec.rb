@@ -2,6 +2,7 @@
 
 require "cerbos"
 require "mongo"
+require "cerbos/mongodb/mongoid"
 
 # The adversarial differential conformance harness (cerbos/query-plan-adapters#263).
 #
@@ -254,6 +255,47 @@ RSpec.describe "adversarial conformance" do
       it action do
         expect(adapter_filtered_ids(action)).to eq(AdversarialOracle.allowed_ids(action))
       end
+    end
+  end
+
+  # The same corpus through Mongoid, on typed models (spec/support/adversarial_mongoid.rb), via
+  # Cerbos::MongoDB::Mongoid.criteria. A bare `Model.where(filter)` is not safe — Mongoid converts
+  # constants to each field's declared type — and the cast probes below are the proof.
+  describe "through Mongoid" do
+    before(:all) { AdversarialMongoid.configure!(ENV.fetch("MONGODB_URI")) }
+
+    def mongoid_ids(criteria) = criteria.pluck(:resourceId).sort
+
+    ConformanceCorpus::ORACLE_ACTIONS.each do |action|
+      it "#{action} matches the check() oracle" do
+        result = translate(AdversarialOracle.plan(action))
+        criteria = Cerbos::MongoDB::Mongoid.criteria(AdversarialMongoid::Resource, result)
+        expect(mongoid_ids(criteria)).to eq(AdversarialOracle.allowed_ids(action))
+      end
+    end
+
+    # No policy in the corpus compares these fields with a constant of another type WITHOUT a
+    # value_type declaration, so the driver's answer is the reference: the harness above proves
+    # it, and MongoDB's type-strict comparisons are CEL's heterogeneous equality. The helper
+    # agrees with it on every probe. A bare where returns other documents, or cannot encode the
+    # query, on at least one — the over-grant the helper exists to prevent — and
+    # spec/mongoid_spec.rb shows its selector differs on every one.
+    it "keeps Mongoid's type conversions out of the cast probes" do
+      disagreeing = AdversarialMongoid::CAST_PROBES.select do |name, condition|
+        filter = Cerbos::MongoDB.query_plan_to_filter(
+          plan: {"kind" => "KIND_CONDITIONAL", "condition" => condition}, mapper: AdversarialMongoid::UNTYPED_MAPPER
+        ).filter
+        driver = AdversarialStore.ids(filter)
+        expect(mongoid_ids(AdversarialMongoid::Resource.where(Cerbos::MongoDB::Mongoid.raw(filter)))).to eq(driver), name
+
+        bare = begin
+          mongoid_ids(AdversarialMongoid::Resource.where(filter))
+        rescue => e
+          e.class
+        end
+        bare != driver
+      end
+      expect(disagreeing.keys).to include("aBool == 1", "aNumber < \"3\"", "aDouble > -1e19")
     end
   end
 
