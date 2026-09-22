@@ -7,6 +7,7 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import static dev.cerbos.queryplan.elasticsearch.Refusals.exceptUnsupported;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.malformed;
+import static dev.cerbos.queryplan.elasticsearch.Refusals.unmapped;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsafeExplicitNullComparison;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 
@@ -87,6 +88,15 @@ final class LeafTranslator {
         if (typeMismatch != null) {
             return typeMismatch;
         }
+        if ("in".equals(normalizedOperator) && variableFirst && value instanceof List<?> values) {
+            List<?> members = typedMembers(field, values, operands);
+            if (members.isEmpty()) {
+                // No element can equal the field: CEL's `in` is heterogeneous equality against
+                // each element, so it is false wherever the field is present.
+                return whenTrue ? Queries.matchNone() : Queries.exists(field);
+            }
+            value = members;
+        }
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
             rejectNullIntersection(values);
         }
@@ -120,32 +130,28 @@ final class LeafTranslator {
 
     /**
      * The answer for a comparison against a field whose declared {@link ScalarType} the literal
-     * cannot inhabit, or {@code null} when the declaration does not decide it (no declaration, an
-     * override owns the operator, or the types agree).
+     * cannot inhabit, or {@code null} when the declaration does not decide it (an override owns
+     * the operator, or the types agree).
      *
      * <p>CEL raises a no-overload error for a comparison across types, and an error is neither
      * true nor false — so it matches nothing in either polarity. {@code eq} and {@code ne} are the
      * exception: CEL's heterogeneous equality is simply false, so {@code ne} holds wherever the
      * field is present.
+     *
+     * @throws UnmappedAttributeException when the field carries no declaration; see
+     *         {@link #declaredType(String, String)}
      */
     private Map<String, Object> typeMismatchQuery(String operator, String field, Object value,
                                                   List<Operand> operands, boolean whenTrue) {
-        ScalarType type = options.scalarTypes().get(field);
-        if (type == null || options.operatorOverrides().containsKey(operator)
+        if (options.operatorOverrides().containsKey(operator)
                 || !SCALAR_OPERAND_OPERATORS.contains(operator)) {
             return null;
         }
-        boolean timestamp = operands.stream().anyMatch(operand ->
-                operand.getNodeCase() == Operand.NodeCase.EXPRESSION
-                        && "timestamp".equals(operand.getExpression().getOperator()));
-        if (type == ScalarType.TIMESTAMP && !timestamp) {
-            throw unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
+        ScalarType type = declaredType(field, operator);
+        if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
+            throw bareTemporalComparison();
         }
-        boolean compatible = switch (type) {
-            case STRING, TIMESTAMP -> value instanceof String;
-            case NUMBER -> value instanceof Number;
-            case BOOLEAN -> value instanceof Boolean;
-        };
+        boolean compatible = inhabits(type, value);
         if (compatible && !(STRING_OPERATORS.contains(operator) && type != ScalarType.STRING)) {
             return null;
         }
@@ -154,6 +160,64 @@ final class LeafTranslator {
             return matches ? Queries.exists(field) : Queries.matchNone();
         }
         return Queries.matchNone();
+    }
+
+    /**
+     * The elements of a {@code field in [...]} list that can equal the field, or the list
+     * unchanged when an {@code in} override owns the operator. A {@code terms} query coerces each
+     * term onto the field's mapped type exactly as a {@code term} query does, so an element of the
+     * wrong type is dropped here rather than left to match; a {@code null} element is kept for
+     * the null-aware membership lowering to answer.
+     */
+    private List<?> typedMembers(String field, List<?> values, List<Operand> operands) {
+        if (options.operatorOverrides().containsKey("in")) {
+            return values;
+        }
+        ScalarType type = declaredType(field, "in");
+        if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
+            throw bareTemporalComparison();
+        }
+        return values.stream().filter(element -> element == null || inhabits(type, element)).toList();
+    }
+
+    /**
+     * The caller's declared {@link ScalarType} for {@code field}, or a refusal when there is none.
+     *
+     * <p>Every comparison this class lowers without an override is a term-level query, and
+     * Elasticsearch coerces a query term onto the field's MAPPED type: {@code "5"} matches the
+     * number {@code 5}, {@code "true"} matches the boolean {@code true}, and {@code 5} matches the
+     * keyword {@code "5"}. CEL's cross-type equality is {@code false}, so the untyped lowering
+     * returns rows the PDP denies. The adapter is handed a plan, never a mapping, and cannot tell
+     * which type a field holds — so the declaration is required rather than assumed
+     * (<a href="https://github.com/cerbos/query-plan-adapters/issues/496">#496</a>).
+     */
+    private ScalarType declaredType(String field, String operator) {
+        ScalarType type = options.scalarTypes().get(field);
+        if (type == null) {
+            throw unmapped("Field '" + field + "' has no declared scalar type: " + operator
+                    + " lowers to a term or range query, and Elasticsearch coerces the query term "
+                    + "onto the field's mapped type where CEL's cross-type equality is false. "
+                    + "Declare it in Options.withScalarTypes");
+        }
+        return type;
+    }
+
+    private static boolean inhabits(ScalarType type, Object value) {
+        return switch (type) {
+            case STRING, TIMESTAMP -> value instanceof String;
+            case NUMBER -> value instanceof Number;
+            case BOOLEAN -> value instanceof Boolean;
+        };
+    }
+
+    private static boolean hasTimestampWrapper(List<Operand> operands) {
+        return operands.stream().anyMatch(operand ->
+                operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                        && "timestamp".equals(operand.getExpression().getOperator()));
+    }
+
+    private static UnsupportedPlanShapeException bareTemporalComparison() {
+        return unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
     }
 
     /**

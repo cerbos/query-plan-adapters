@@ -23,6 +23,9 @@ An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanRe
 - Supports millisecond-exact `timestamp()` comparisons when the mapped Elasticsearch field uses a
   `date` type and indexed values obey the same precision contract
 - Handles bare boolean variables (e.g. `request.resource.attr.isPublic`)
+- Answers a cross-type comparison as CEL does, from the scalar type the caller declares for each
+  field — and refuses a comparison against a field with no declaration rather than let
+  Elasticsearch coerce the query term onto the field's mapped type
 - Custom operator overrides for full control over query generation
 - One immutable `Options` record for every caller declaration, plus positional convenience overloads
 - Fails closed with three typed exceptions — `UnsupportedPlanShapeException`,
@@ -125,16 +128,23 @@ The adapter recursively walks the Cerbos expression tree, resolves attribute ref
 
 ```java
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.ScalarType;
 
 import java.util.Map;
 
-// Define how Cerbos attributes map to Elasticsearch field names
-Map<String, String> fieldMap = Map.of(
-    "request.resource.attr.department", "department",
-    "request.resource.attr.status", "status",
-    "request.resource.attr.priority", "priority"
-);
+// Define how Cerbos attributes map to Elasticsearch field names, and declare the CEL type each
+// mapped field holds (keyed by Elasticsearch field name). The types are required: see
+// "Declaring scalar types" below.
+Options options = Options.of(Map.of(
+        "request.resource.attr.department", "department",
+        "request.resource.attr.status", "status",
+        "request.resource.attr.priority", "priority"))
+    .withScalarTypes(Map.of(
+        "department", ScalarType.STRING,
+        "status", ScalarType.STRING,
+        "priority", ScalarType.NUMBER));
 
 // Call PlanResources via the Cerbos SDK
 PlanResourcesResult plan = cerbos.plan(
@@ -146,7 +156,7 @@ PlanResourcesResult plan = cerbos.plan(
 );
 
 // Convert the plan to an Elasticsearch query
-Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, fieldMap);
+Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, options);
 
 switch (result) {
     case Result.AlwaysAllowed allowed -> {
@@ -167,15 +177,16 @@ switch (result) {
 
 ### Declaring the index: `Options`
 
-The one-argument call above is the convenience form. Everything the adapter can be told about the
-index lives in one immutable record, `ElasticsearchQueryPlanAdapter.Options`, and the positional
-overloads (`fieldMap`, `operatorOverrides`, `nestedPaths`, `explicitNullAttributes`) are exactly
-that record with the rest left empty:
+Everything the adapter can be told about the index lives in one immutable record,
+`ElasticsearchQueryPlanAdapter.Options`. The positional overloads (`fieldMap`, `operatorOverrides`,
+`nestedPaths`, `explicitNullAttributes`) are exactly that record with the rest left empty — which
+includes the scalar types, so they translate a comparison only where an operator override owns it:
 
 ```java
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 
 Options options = Options.of(fieldMap)
+    .withScalarTypes(scalarTypes)                   // the CEL type of every compared field
     .withNestedPaths(Set.of("tagObjects"))          // arrays of objects mapped as `nested`
     .withCollectionFields(Set.of("tags"))           // flat arrays of scalars (a `keyword` array)
     .withOperatorOverrides(overrides)
@@ -197,7 +208,7 @@ throw is one of three types so a caller can route on it without matching the mes
 | Exception | Meaning | What to do |
 |---|---|---|
 | `UnsupportedPlanShapeException` | The plan is well-formed but the Query DSL cannot express it without scripts | Rewrite the policy, or answer that request another way (a per-row `check()`, a different store) |
-| `UnmappedAttributeException` | The plan names a variable `fieldMap` does not cover, or walks a collection not declared in `nestedPaths` | Add the declaration |
+| `UnmappedAttributeException` | The plan names a variable `fieldMap` does not cover, walks a collection not declared in `nestedPaths`, or compares a field with no entry in `scalarTypes` | Add the declaration |
 | `MalformedPlanException` | The plan violates the planner's wire contract — wrong arity, a lambda without a variable, a literal CEL itself would reject | A hand-built plan, or an upstream bug to report |
 
 All three extend `IllegalArgumentException`, which remains the documented base type; a caller
@@ -212,15 +223,18 @@ Given a Cerbos policy condition like:
 OR request.resource.attr.tags.exists(tag, tag.name == "public")
 ```
 
-With this field map and nested paths:
+With these declarations:
 
 ```java
-Map<String, String> fieldMap = Map.of(
-    "request.resource.attr.aBool", "aBool",
-    "request.resource.attr.aString", "aString",
-    "request.resource.attr.tags", "tags"
-);
-Set<String> nestedPaths = Set.of("tags");
+Options options = Options.of(Map.of(
+        "request.resource.attr.aBool", "aBool",
+        "request.resource.attr.aString", "aString",
+        "request.resource.attr.tags", "tags"))
+    .withNestedPaths(Set.of("tags"))
+    .withScalarTypes(Map.of(
+        "aBool", ScalarType.BOOLEAN,
+        "aString", ScalarType.STRING,
+        "tags.name", ScalarType.STRING));   // a nested sub-field is declared by its full path
 ```
 
 The adapter produces:
@@ -589,9 +603,35 @@ convention is the one Elasticsearch's storage already matches. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
-#Declare scalar field types with `Options.withScalarTypes(Map<String, ScalarType>)`, keyed by the mapped Elasticsearch field name. Supported declarations are `STRING`, `NUMBER`, `BOOLEAN`, and `TIMESTAMP`. Declarations let the translator preserve CEL heterogeneous equality and reject rows where a string operation receives a non-string field, including under negation. A declared timestamp field requires an explicit `timestamp()` wrapper for scalar comparisons because the index no longer retains the original string spelling.
+### Declaring scalar types
 
-The existing five-argument `Options` constructor remains available. Undeclared fields retain historical translation behavior; declare fields used in type-sensitive operations to prevent Elasticsearch coercion or query errors. Operator overrides continue to own their declared operators.
+Declare the CEL type of every field a policy compares with `Options.withScalarTypes(Map<String, ScalarType>)`,
+keyed by the mapped Elasticsearch field name: `STRING`, `NUMBER`, `BOOLEAN` or `TIMESTAMP`. A flat
+array (`collectionFields`) declares its element type, and a sub-field of a `nested` path is declared
+by its full path (`tags.name`).
+
+**The declaration is required, not advisory.** Every comparison the adapter lowers is a term-level
+query — `term`, `terms`, `range`, `prefix`, `wildcard` or `regexp` — and Elasticsearch coerces the
+query term onto the field's *mapped* type: `{"term": {"aNumber": {"value": "5"}}}` matches the
+number `5`, `{"term": {"aBool": {"value": "true"}}}` matches the boolean `true`, and a numeric term
+matches the keyword `"5"`. CEL's cross-type equality is simply `false`, so `R.attr.aNumber == "5"`
+denies every row. The adapter is handed a plan, never a mapping, and cannot tell which type a field
+holds, so a comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `endsWith`,
+`matches`, and `field in [...]`) against a field with no declaration throws
+`UnmappedAttributeException` naming the field, rather than emit a query that returns rows the PDP
+denies ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). An operator override owns
+its operator, so an overridden operator needs no declaration.
+
+With a declaration, a literal the type cannot inhabit is answered as CEL answers it: `==` matches
+nothing, `!=` holds wherever the field is present, a string operator over a non-string field matches
+nothing in either polarity, an element of the wrong type is dropped from a `field in [...]` list (and
+a list with none of the right type is false), and a hierarchy relation over a non-string field
+matches nothing. A declared `TIMESTAMP` field requires an explicit `timestamp()` wrapper for scalar
+comparisons, because the index no longer retains the original string spelling.
+
+A declaration states the CEL type, not the mapping's exactness: `STRING` does not tell the adapter a
+field is a `keyword` rather than an analyzed `text` field, and an analyzed field still over-grants —
+see [Analyzed (`text`) field mapping](#why-an-analyzed-mapping-is-not-something-the-adapter-can-reject).
 
 Positive `exists` over a flat scalar collection can now translate a lambda equality between
 its element and a literal. It emits the existing equality query against the collection field.
@@ -751,7 +791,7 @@ This adapter **builds no subquery.** A collection is a `nested` field on the sam
 | Composite association key | Not applicable — no join, so no key to compose | — |
 | Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `adapterUnsupported` and throw | None — it is the empty-array limitation above, not a mapping choice: Elasticsearch cannot tell a document with no parent from a document whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 | Analyzed (`text`) field mapping | **Caller-owned** | `GET <index>/_mapping`. Every field named in your `fieldMap` must be a type Elasticsearch compares exactly — `keyword`, `boolean`, a numeric type, or `date`. A `text` field is tokenized and lowercased before it is indexed, and the `term`, `terms`, `prefix`, `wildcard` and `regexp` queries this adapter emits then run against those tokens rather than against the stored value. See below |
-| Type-blind term coercion | **Caller-owned** | The attribute's type in the policy must be the field's type in the mapping. Elasticsearch coerces a query term onto the field: `{"term": {"aBool": {"value": "true"}}}` matches a `boolean` field and `{"term": {"aNumber": {"value": "5"}}}` matches a numeric one, while CEL's cross-type equality (`R.attr.aBool == "true"`) is simply `false` and `check()` denies the row. The adapter binds the literal the plan carries and cannot see the mapping, so a policy comparing a string literal against a boolean or numeric attribute — a shape the PDP allows — returns rows here that the PDP denies. Keep the literal's type and the field's type the same, and treat a mapping whose type differs from the attribute's as a bug in the index |
+| Type-blind term coercion | **Rejected** without a declaration, **reproduced** with one | `scalarTypes` must state each field's CEL type, and must agree with the mapping. Elasticsearch coerces a query term onto the field: `{"term": {"aBool": {"value": "true"}}}` matches a `boolean` field and `{"term": {"aNumber": {"value": "5"}}}` matches a numeric one, while CEL's cross-type equality (`R.attr.aBool == "true"`) is simply `false` and `check()` denies the row. The adapter cannot see the mapping, so it refuses a comparison against an undeclared field, and answers a declared field's cross-type comparison as CEL does (see [Declaring scalar types](#declaring-scalar-types)); a declaration that disagrees with the mapping is a caller bug the adapter cannot detect. `ElasticsearchSurfaceTest.aTermQueryCoercesItsValueOntoTheMappedTypeWhichIsWhyScalarTypesAreRequired` measures the coercion against a real server ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)) |
 
 #### Why an analyzed mapping is not something the adapter can reject
 
@@ -816,6 +856,7 @@ If a collection operator references a field not declared in `nestedPaths`, the a
 
 ### Elasticsearch field type considerations
 
+- Every field a policy compares must be declared in `scalarTypes` with the CEL type it holds; an undeclared one is refused — see [Declaring scalar types](#declaring-scalar-types).
 - Every field named in `fieldMap` must be mapped to a type Elasticsearch compares exactly: `keyword` for strings, plus `boolean`, the numeric types and `date`. The `term`, `prefix` and `wildcard` queries this adapter emits are exact and case-sensitive on `keyword`.
 - A field that also has to serve full-text search should be `text` **with a `keyword` sub-field**, and `fieldMap` should name the sub-field. Pointing `fieldMap` at the analyzed parent over-grants, and an operator override that swaps `term` for `match` is not a fix — see [Analyzed (`text`) field mapping](#why-an-analyzed-mapping-is-not-something-the-adapter-can-reject) above.
 

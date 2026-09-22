@@ -2,7 +2,9 @@ package dev.cerbos.example.demo;
 
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.ScalarType;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.Principal;
@@ -57,6 +59,22 @@ final class DemoShapes {
     private static final Map<String, String> DOCUMENT_FIELDS = Map.of(
             "request.resource.attr.ownerId", "ownerId",
             "request.resource.attr.public", "isPublic");
+
+    /**
+     * The adapter's declarations about the index: the field map above, and the CEL type each mapped
+     * field holds, keyed by Elasticsearch field name. The types are what {@link DemoIndex} maps the
+     * fields as — {@code ownerId} a {@code keyword}, {@code isPublic} a {@code boolean}.
+     *
+     * <p>The declaration is required, not advisory. Elasticsearch coerces a query term onto the
+     * field's mapped type, so {@code {"term": {"isPublic": "true"}}} matches a document whose
+     * {@code isPublic} is the boolean {@code true}, while CEL's {@code R.attr.public == "true"} is
+     * false. The adapter cannot see the mapping, so it refuses a comparison against an undeclared
+     * field rather than emit that query.
+     */
+    private static final Options OPTIONS = Options.of(DOCUMENT_FIELDS)
+            .withScalarTypes(Map.of(
+                    "ownerId", ScalarType.STRING,
+                    "isPublic", ScalarType.BOOLEAN));
 
     /**
      * One shape's answer, as {@code demo/expected.json} spells it: the plan kind, and the ids the
@@ -222,7 +240,7 @@ final class DemoShapes {
      */
     private Authorization authorize(String principalId, String action) {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan(principalId, action), DOCUMENT_FIELDS);
+                plan(principalId, action), OPTIONS);
         if (result instanceof Result.Conditional conditional) {
             return new Authorization("KIND_CONDITIONAL", DemoIndex.query(conditional.query()));
         }

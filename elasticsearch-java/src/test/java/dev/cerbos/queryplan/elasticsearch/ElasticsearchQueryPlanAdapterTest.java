@@ -15,6 +15,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
+import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.ScalarType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -80,9 +81,25 @@ class ElasticsearchQueryPlanAdapterTest {
     /** {@code tags} and {@code ownedBy} are flat keyword arrays; {@code aString} is a string. */
     private static final Set<String> COLLECTION_FIELDS = Set.of("tags", "ownedBy");
 
+    /**
+     * The CEL type of every scalar field above, keyed by Elasticsearch field name. A flat array
+     * declares its element type, and a nested document's sub-field is declared by its full path.
+     */
+    private static final Map<String, ScalarType> SCALAR_TYPES = Map.ofEntries(
+            Map.entry("department", ScalarType.STRING),
+            Map.entry("aBool", ScalarType.BOOLEAN),
+            Map.entry("aString", ScalarType.STRING),
+            Map.entry("aNumber", ScalarType.NUMBER),
+            Map.entry("title", ScalarType.STRING),
+            Map.entry("scope", ScalarType.STRING),
+            Map.entry("tags", ScalarType.STRING),
+            Map.entry("ownedBy", ScalarType.STRING),
+            Map.entry("tagObjects.name", ScalarType.STRING));
+
     private static final Options OPTIONS = Options.of(FIELD_MAP)
             .withNestedPaths(NESTED_PATHS)
-            .withCollectionFields(COLLECTION_FIELDS);
+            .withCollectionFields(COLLECTION_FIELDS)
+            .withScalarTypes(SCALAR_TYPES);
 
     private static PlanResourcesResponse conditionalPlan(Operand condition) {
         return PlanResourcesResponse.newBuilder()
@@ -425,7 +442,7 @@ class ElasticsearchQueryPlanAdapterTest {
                         expressionOperand("eq",
                                 variableOperand("request.resource.attr.aString"),
                                 variableOperand("t")))),
-                FIELD_MAP, Set.of());
+                Options.of(FIELD_MAP).withScalarTypes(SCALAR_TYPES));
 
         assertEquals(Map.of("bool", Map.of(
                         "should", List.of(term("aString", "string")),
@@ -487,15 +504,92 @@ class ElasticsearchQueryPlanAdapterTest {
         assertThrows(NullPointerException.class, () -> Options.of(null));
         assertThrows(NullPointerException.class, () -> options.withCollectionFields(null));
 
+        // The positional overloads carry no scalar types, so the comparison goes through an
+        // `eq` override, which owns the operator and needs no declaration.
+        Map<String, OperatorFunction> overrides = Map.of(
+                "eq", (field, value) -> Map.of("custom_eq", Map.of(field, value)));
         Operand condition = expressionOperand("exists",
                 variableOperand("request.resource.attr.tagObjects"),
                 lambdaOperand("t", expressionOperand("eq",
                         variableOperand("t.name"), stringValueOperand("public"))));
         assertEquals(
                 ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                        conditionalPlan(condition), FIELD_MAP, Map.of(), NESTED_PATHS, Set.of()),
+                        conditionalPlan(condition), FIELD_MAP, overrides, NESTED_PATHS, Set.of()),
                 ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                        conditionalPlan(condition), widened));
+                        conditionalPlan(condition), widened.withOperatorOverrides(overrides)));
+    }
+
+    /**
+     * {@code scalarTypes} is a caller argument: the corpus translates through one declaration that
+     * covers its whole mapping, so no corpus action can leave a field undeclared. Undeclared, a
+     * comparison is refused rather than lowered untyped, because Elasticsearch coerces a query
+     * term onto the field's mapped type — {@code "5"} matches the integer {@code 5} — where CEL's
+     * cross-type equality is false and {@code check()} denies the row
+     * (cerbos/query-plan-adapters#496). Every operator whose default lowering is a term, terms,
+     * range, prefix, wildcard or regexp query needs the declaration, at the top level and inside
+     * a lambda; an override owns its operator, so it needs none.
+     */
+    @Test
+    void aComparisonAgainstAnUndeclaredFieldIsRefusedRatherThanCoerced() {
+        Options untyped = OPTIONS.withScalarTypes(Map.of());
+        List<Operand> comparisons = List.of(
+                expressionOperand("eq",
+                        variableOperand("request.resource.attr.aNumber"), stringValueOperand("5")),
+                expressionOperand("not", expressionOperand("ne",
+                        variableOperand("request.resource.attr.aNumber"), stringValueOperand("5"))),
+                expressionOperand("lt",
+                        numberValueOperand(5), variableOperand("request.resource.attr.aString")),
+                expressionOperand("startsWith",
+                        variableOperand("request.resource.attr.aNumber"), stringValueOperand("5")),
+                expressionOperand("in",
+                        variableOperand("request.resource.attr.aBool"), listValueOperand("true")),
+                expressionOperand("exists",
+                        variableOperand("request.resource.attr.tagObjects"),
+                        lambdaOperand("t", expressionOperand("eq",
+                                variableOperand("t.name"), numberValueOperand(5)))));
+        for (Operand comparison : comparisons) {
+            IllegalArgumentException ex = refusal(comparison, untyped);
+            assertInstanceOf(UnmappedAttributeException.class, ex);
+            assertTrue(ex.getMessage().contains("has no declared scalar type"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("Options.withScalarTypes"), ex.getMessage());
+        }
+        assertTrue(refusal(comparisons.get(5), untyped).getMessage()
+                .startsWith("Field 'tagObjects.name' has no declared scalar type"));
+
+        Options overridden = untyped.withOperatorOverrides(Map.of(
+                "eq", (field, value) -> Map.of("custom_eq", Map.of(field, value))));
+        assertEquals(Map.of("custom_eq", Map.of("aNumber", "5")),
+                translate(comparisons.get(0), overridden));
+    }
+
+    /**
+     * What a declaration buys: a literal the declared type cannot inhabit is answered by CEL's
+     * semantics rather than by Elasticsearch's coercion. Cross-type equality is false, so
+     * {@code ==} matches nothing and {@code !=} holds wherever the field is present; membership is
+     * equality against each element, so an element of the wrong type is dropped from the
+     * {@code terms} list, and a list with none of the right type is false.
+     */
+    @Test
+    void aDeclaredTypeAnswersACrossTypeComparisonAsCelDoes() {
+        Map<String, Object> matchNone = Map.of("match_none", Map.of());
+        Operand eqString = expressionOperand("eq",
+                variableOperand("request.resource.attr.aNumber"), stringValueOperand("5"));
+        assertEquals(matchNone, translate(eqString));
+        assertEquals(exists("aNumber"), translate(expressionOperand("not", eqString)));
+        assertEquals(exists("aNumber"), translate(expressionOperand("ne",
+                variableOperand("request.resource.attr.aNumber"), stringValueOperand("5"))));
+
+        Operand mixedMembership = expressionOperand("in",
+                variableOperand("request.resource.attr.aNumber"),
+                valueOperand(list(string("5"), number(6))));
+        assertEquals(Map.of("terms", Map.of("aNumber", List.of(6L))), translate(mixedMembership));
+        assertEquals(definedAndNot("aNumber", Map.of("terms", Map.of("aNumber", List.of(6L)))),
+                translate(expressionOperand("not", mixedMembership)));
+
+        Operand wrongTypeMembership = expressionOperand("in",
+                variableOperand("request.resource.attr.aBool"), listValueOperand("true"));
+        assertEquals(matchNone, translate(wrongTypeMembership));
+        assertEquals(exists("aBool"), translate(expressionOperand("not", wrongTypeMembership)));
     }
 
     /**
