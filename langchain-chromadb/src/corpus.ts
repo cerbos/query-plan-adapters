@@ -184,6 +184,19 @@ export interface KnownDivergence {
   adapters: string[];
 }
 
+/**
+ * A `degenerateOracles` entry: an action whose check() oracle is empty or total BY CONSTRUCTION.
+ * Every other action in the corpus has a non-empty, non-total oracle, and every harness sweeps its
+ * compared actions against that split (cerbos/query-plan-adapters#490).
+ */
+export type DegenerateOracle = "empty" | "total";
+
+export interface DegenerateOracleEntry {
+  action: string;
+  oracle: DegenerateOracle;
+  reason: string;
+}
+
 export interface ActionsFile {
   conformance: string[];
   adapterUnsupported: Record<string, AdapterUnsupportedEntry[]>;
@@ -191,6 +204,7 @@ export interface ActionsFile {
   expectedUnsupported: UnsupportedShape[];
   nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences: KnownDivergence[];
+  degenerateOracles: DegenerateOracleEntry[];
 }
 
 /** The `messages` map of one entry: adapter key -> required substring. */
@@ -291,7 +305,39 @@ export function parseActionsFile(value: unknown): ActionsFile {
         adapters: parseStringArray(record["adapters"], `${label}.adapters`),
       };
     }),
+    degenerateOracles: requireArray(
+      file["degenerateOracles"],
+      "degenerateOracles",
+    ).map((entry, index): DegenerateOracleEntry => {
+      const label = `degenerateOracles[${index}]`;
+      const record = requireRecord(entry, label);
+      const oracle = requireString(record["oracle"], `${label}.oracle`);
+      if (oracle !== "empty" && oracle !== "total") {
+        throw Error(
+          `${label}.oracle must be "empty" or "total", got ${JSON.stringify(oracle)}`,
+        );
+      }
+      return {
+        action: requireString(record["action"], `${label}.action`),
+        oracle,
+        reason: requireString(record["reason"], `${label}.reason`),
+      };
+    }),
   };
+}
+
+/** `degenerateOracles` as a map, rejecting an action listed twice. */
+export function degenerateOracleMap(
+  manifest: ActionsFile,
+): Map<string, DegenerateOracle> {
+  const result = new Map<string, DegenerateOracle>();
+  for (const { action, oracle } of manifest.degenerateOracles) {
+    if (result.has(action)) {
+      throw Error(`degenerateOracles lists "${action}" more than once`);
+    }
+    result.set(action, oracle);
+  }
+  return result;
 }
 
 /**

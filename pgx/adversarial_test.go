@@ -565,6 +565,31 @@ func (h *harness) allSeedIDs() []string {
 	return ids
 }
 
+// requireOracleShape is the degeneracy guard for one oracle-compared action, asserted on the oracle
+// the comparison already computed. A trivial oracle lets the comparison pass vacuously: an empty one
+// still catches an over-grant, but a total one cannot, because an adapter returning every row agrees
+// with it. So every compared action must be non-empty and non-total, unless the corpus declares it
+// degenerate by construction in actions.json's `degenerateOracles` — and then it must be exactly
+// that, so an entry whose oracle starts discriminating cannot stay an exemption
+// (cerbos/query-plan-adapters#490).
+func (h *harness) requireOracleShape(t *testing.T, action string, allowed []string) {
+	t.Helper()
+
+	switch h.corpus.DegenerateOracles[action] {
+	case "empty":
+		require.Empty(t, allowed, "%s: degenerateOracles declares an empty oracle", action)
+	case "total":
+		require.Equal(t, h.allSeedIDs(), allowed, "%s: degenerateOracles declares a total oracle", action)
+	default:
+		require.NotEmpty(t, allowed,
+			"%s: oracle allows nothing, so the differential cannot fail; restore its discriminating "+
+				"seed or declare it in conformance/actions.json degenerateOracles", action)
+		require.Less(t, len(allowed), len(h.corpus.Seeds.Seeds),
+			"%s: oracle allows every seed, so an adapter returning every row passes; restore its "+
+				"discriminating seed or declare it in conformance/actions.json degenerateOracles", action)
+	}
+}
+
 // adapterFilteredIDs plans, translates and executes, returning the ids the filter selects.
 func (h *harness) adapterFilteredIDs(t *testing.T, action string, opts ...cerbospgx.Option) ([]string, error) {
 	t.Helper()
@@ -638,6 +663,7 @@ func TestAdversarialConformance(t *testing.T) {
 			}
 			t.Run(action, func(t *testing.T) {
 				expected := h.oracleAllowedIDs(t, action)
+				h.requireOracleShape(t, action, expected)
 				actual, err := h.adapterFilteredIDs(t, action)
 				require.NoError(t, err, "translating %s", action)
 				require.Equal(t, expected, actual,
@@ -674,7 +700,7 @@ func TestAdversarialConformance(t *testing.T) {
 
 	// #387. `filter-as-conjunct` puts a filter() one level below the root, where the guard that
 	// refuses `filter-as-condition` does not look. Its oracle is empty BY CONSTRUCTION — check()
-	// cannot evaluate a non-boolean conjunction — so it belongs to neither degeneracy-guard list,
+	// cannot evaluate a non-boolean conjunction — so it is declared in degenerateOracles,
 	// and the throw suite above, on its own, would say nothing about whether refusing it is
 	// REQUIRED.
 	//
@@ -816,107 +842,23 @@ func TestAdversarialConformance(t *testing.T) {
 	})
 
 	t.Run("degeneracy guard", func(t *testing.T) {
-		// The comparison above can pass vacuously if the oracle itself is trivial. Assert that a
-		// representative spread of actions has an oracle that is neither empty nor the full seed
-		// set — without this, a silently broken PDP connection would still pass every case.
+		// The oracle subtest above asserts a non-empty, non-total oracle for EVERY action it
+		// compares (requireOracleShape), minus the corpus's degenerateOracles allowlist. A
+		// representative sample used to stand here, and left the actions it did not name free to go
+		// degenerate unnoticed (cerbos/query-plan-adapters#490).
 		//
-		// Every entry is asserted to be an action this adapter actually oracle-compares: a list
-		// copied between harnesses drifts into naming shapes the adapter never compares, which
-		// guard nothing (cerbos/query-plan-adapters#324). The membership assertion turns moving an
-		// action into adapterUnsupported into a failure here rather than a silent no-op.
-		//
-		// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain, cast-int-string and
-		// cast-double-string are deliberately absent: their oracles are empty by CONSTRUCTION (no
-		// seed holds a to-one parent with zero children, nor one with two or more; no aString
-		// converts to a number greater than 50), so they cannot satisfy this guard.
-		compared := []string{
-			// #396: failed conversions stay unknown under negation.
-			"cast-not-string-missing", "cast-not-string-null",
-			// #430: projection macros and negated leaves through a to-one hop.
-			"projection-exists-eq", "projection-exists-not-eq",
-			"rel-not-eq-hop", "rel-not-contains-hop", "rel-not-hierarchy-hop",
-			"vf-le", "in-single", "like-percent", "exists-on-empty", "not-exists",
-			"nary-and", "field-to-field", "ternary-cmp", "arith-add", "size-threshold",
-			"hier-ancestor-cf", "pv-exists", "in-null-elem-mixed", "null-eq", "cs-eq",
-			// The explicit-null convention against a non-null operand (#308). All five are
-			// compared rather than thrown, because the mapper declares the convention per
-			// attribute; every one of them under-granted by exactly the NULL-column rows
-			// before that declaration existed.
-			"null-value-ne-const", "null-value-not-eq-const", "null-value-not-in-const",
-			"null-value-f2f", "null-value-pv-not-exists",
-			"w1-all-chain", "w1-not-exists-chain", "w1-size-nonneg-chain",
-			"w1-not-in-chain", "w1-not-hasint-chain",
-			"w1-ternary-chain-cond", "w1-size-frac-le-chain",
-			"cr-div-neg-zero", "cr-div-other-column", "cr-div-then-add", "cr-div-then-add-ne",
-			// The real to-one join (#375): one per hazard — the negated hop, the null comparison,
-			// two-level depth, the root conjunction, and the disjunction, whose failure
-			// direction is an under-grant.
-			"rel-not-bool-hop", "rel-ne-null-hop", "rel-bool-hop2",
-			"rel-hop-and-root", "rel-hop2-or-exists",
-			// Case sensitivity in STRING MATCHING, a different mechanism from cs-eq: collation
-			// governs `=`, and on SQLite only `PRAGMA case_sensitive_like` governs LIKE.
-			"cs-contains",
-			// The primary key as a filterable attribute (#376): against a constant, against a
-			// column under negation, and inside a concatenation in both operand orders. The
-			// concatenations are the load-bearing pair — rendered as numeric `+` they were a
-			// hard error on PostgreSQL and a silent OVER-grant on MySQL, which coerces both
-			// operands to 0.
-			"id-eq-const", "id-f2f-ne", "id-concat", "id-concat-vf",
-			// string() over both kinds of column. A NUMERIC one lowers to a plain CAST on every
-			// engine; a BOOLEAN one is spelled through a CASE before the cast, because the CAST
-			// alone renders the stored 1 as "1" on SQLite and MySQL where CEL says "true" (#418).
-			"cast-string-double", "cast-string-bool",
-			// CEL's `+` between two COLUMNS (#391), resolved by the caller declaring the
-			// columns ValueString. Rendered as numeric `+` PostgreSQL rejects it outright,
-			// which is loud here but silent on the other two engines the shared translator serves.
-			"concat-f2f",
-			// Root position and bare operand forms (#388): one per hazard — the negation over a
-			// bare ordering (every other negated ordering in the corpus wraps a size() or a
-			// ternary), the bare boolean at the ROOT of the condition, and the collection
-			// subquery disjoined with a scalar predicate rather than conjoined with one.
-			"not-lt", "root-bare-bool", "or-eq-exists",
-			// Hazard classes the corpus missed (#387): the De Morgan branch over a conjunction;
-			// the negated LIKE against a COLUMN needle, where a definite-FALSE null guard would
-			// leak every NULL-needle row through the NOT; the value-first hasIntersection, whose
-			// operands are not interchangeable in the emitted SQL; and the BELOW-cliff unroll of
-			// a principal collection, the shape a principal with three teams produces.
-			"not-and", "not-contains", "vf-hasint", "pv-exists-unrolled",
-			// #411: direct membership keeps a list operand at both principal list sizes.
-			"pv-in", "pv-in-unrolled",
-			// The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
-			// membership in a map literal (the planner folds it to its key list), and a double
-			// literal beyond int64 on a double field. double-huge-lt has an EMPTY oracle by
-			// construction and sits in neither list; its sibling carries the group.
-			"string-size-gt0", "in-map-keys", "double-huge-gt",
-			// #414: the observed classification of every new discriminating action.
-			"wildcard-contains",
-			"wildcard-endswith",
-			"size-ge-one",
-			"in-numbers",
-			"pv-shadow",
-			"pv-not-exists",
-			"pv-not-all",
-			"root-not-bool",
-			"lambda-in-literal",
-			"lambda-in-literal-neg",
-			"lambda-ternary",
-			"in-var-var-omitted",
-			"in-var-var-omitted-neg",
-			"not-concat-unsolvable",
-			"not-concat-unsolvable-ne",
-			"not-hasint-empty-chain",
-			"not-nan-ord-le",
-			"not-ternary-parent",
-			"not-nan-order-string",
-			"hasint-null-vf",
-			"hasint-map-vf",
-			"hasint-map-null",
-			"hasint-map-null-vf",
+		// The allowlist is asserted whether or not this adapter compares the action: it is a
+		// property of the PDP and the corpus, so an entry this adapter refuses still has to hold.
+		for _, entry := range h.corpus.Actions.DegenerateOracles {
+			t.Run(entry.Oracle+" oracle/"+entry.Action, func(t *testing.T) {
+				h.requireOracleShape(t, entry.Action, h.oracleAllowedIDs(t, entry.Action))
+			})
 		}
+
 		// int() over a numeric column is unsupported for every adapter but convex, so there is no
 		// comparison behind it here: it stays as a PDP/policy liveness probe for the cast group.
 		// Asserting the complement keeps the split honest — a shape this adapter gains support for
-		// must move up into the compared list.
+		// must leave this list, because the oracle sweep then covers it.
 		// The constructed hierarchy path has no comparison behind it here either, because `list`
 		// has no translator case at all.
 		// #387 adds three more groups with no comparison behind them: modulo (reached through the
@@ -966,41 +908,14 @@ func TestAdversarialConformance(t *testing.T) {
 			"ne-list",
 		}
 
-		// These oracles are empty by construction: planner identities, type errors,
-		// or heterogeneous equality. Pin that outcome instead of a vacuous comparison.
-		for _, action := range []string{"except-root", "pv-empty-exists", "pv-empty-not-all", "pv-structs-null", "pv-structs-missing", "type-string-number", "type-number-string", "type-columns", "type-size-bool", "type-size-number", "type-hierarchy-number", "type-number-contains", "type-needle-contains", "type-number-startswith", "type-needle-startswith", "type-number-endswith", "type-needle-endswith", "eq-map", "eq-map-null", "in-nested-list", "in-list-element", "hasint-map-element"} {
-			t.Run("empty oracle/"+action, func(t *testing.T) {
-				require.Empty(t, h.oracleAllowedIDs(t, action))
-			})
-		}
-		// These oracles are total by construction: planner identities, type errors,
-		// or heterogeneous equality. Pin that outcome instead of a vacuous comparison.
-		for _, action := range []string{"pv-empty-not-exists", "pv-empty-all", "ne-map"} {
-			t.Run("total oracle/"+action, func(t *testing.T) {
-				require.Equal(t, h.allSeedIDs(), h.oracleAllowedIDs(t, action))
-			})
-		}
-
 		oracleCompared := h.corpus.OracleComparedActions()
-		total := len(h.corpus.Seeds.Seeds)
-		assertNonDegenerate := func(t *testing.T, action string) {
-			t.Helper()
-			allowed := h.oracleAllowedIDs(t, action)
-			require.NotEmpty(t, allowed, "%s: oracle allows nothing", action)
-			require.Less(t, len(allowed), total, "%s: oracle allows every seed", action)
-		}
-		for _, action := range compared {
-			t.Run(action, func(t *testing.T) {
-				require.True(t, oracleCompared[action],
-					"%s guards nothing: this adapter does not oracle-compare it", action)
-				assertNonDegenerate(t, action)
-			})
-		}
 		for _, action := range livenessOnly {
 			t.Run(action, func(t *testing.T) {
 				require.False(t, oracleCompared[action],
-					"%s is now oracle-compared: move it into the compared list", action)
-				assertNonDegenerate(t, action)
+					"%s is now oracle-compared: remove it from the liveness probes, the oracle sweep covers it", action)
+				require.NotContains(t, h.corpus.DegenerateOracles, action,
+					"%s cannot prove liveness: degenerateOracles declares its oracle trivial", action)
+				h.requireOracleShape(t, action, h.oracleAllowedIDs(t, action))
 			})
 		}
 	})

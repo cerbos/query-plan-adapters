@@ -21,6 +21,7 @@ import { PlanKind, queryPlanToConvex } from ".";
 // keys it consumes. The duplication ACROSS adapters stays deliberate (ADR 0007).
 import {
   classifyActionsForAdapter,
+  degenerateOraclesOf,
   isRecord,
   nullRepresentationOmittedFor,
   parseActionsFile,
@@ -91,170 +92,23 @@ const MANIFEST_ACTIONS = new Set([
 
 // -- the degeneracy guard (conformance/README.md, "The degeneracy guard") -----------------------
 //
-// A representative sample of the actions this adapter ORACLE-COMPARES, one per hostile group it
-// can express. The two lists are asserted to be complements of `ORACLE_ACTIONS`, so neither can
-// drift into the other unnoticed.
+// The differential cannot fail for an empty or a total oracle: an adapter that matched nothing, or
+// everything, would agree with it. So EVERY action this adapter oracle-compares has its oracle's
+// shape asserted inside its own comparison, before the ids are compared — reusing the oracle that
+// comparison already computes, so the sweep costs no extra PDP round trip.
 //
-// w1-size-zero-chain, w1-not-size-chain, w1-size-frac-chain and the two string-cast actions are
-// deliberately absent from both lists: their oracles are empty by CONSTRUCTION (no seed holds a
-// to-one parent with zero children, nor one with two or more; every seed's aString raises in
-// int()/double()), so they cannot satisfy a non-empty assertion.
+// The actions whose oracle is empty or total BY CONSTRUCTION (a type error, a conversion error, an
+// empty-list identity, no seed with two children on its to-one parent, ...) are not named here.
+// They are the corpus's `degenerateOracles` list in conformance/actions.json, shared by every
+// harness, and each is asserted to be exactly the oracle declared there; every other compared
+// action must be non-empty and non-total.
 
-const DEGENERACY_GUARD_ACTIONS = [
-  "not-nan-order-string",
-  "not-ternary-parent",
-  // #430: projection macros and negated leaves through a to-one hop.
-  "projection-exists-eq",
-  "projection-exists-not-eq",
-  "rel-not-eq-hop",
-  "rel-not-contains-hop",
-  "rel-not-hierarchy-hop",
-  "pv-in",
-  "pv-in-unrolled",
-  "vf-le",
-  "like-percent",
-  "all-on-empty",
-  "pv-exists",
-  "pv-all",
-  "null-eq",
-  "null-ne",
-  // The explicit-null convention against a non-null operand (#308). Convex stores the value the
-  // caller sends, so a document field holding an explicit null compares as a null VALUE exactly
-  // as CEL does: these five needed no change, and are compared rather than probed.
-  "null-value-ne-const",
-  "null-value-not-eq-const",
-  "null-value-not-in-const",
-  "null-value-f2f",
-  "null-value-pv-not-exists",
-  // The absent to-one parent (#309/#315/#316/#333/#334): the seven discriminating chain shapes
-  // with a non-empty oracle.
-  "w1-all-chain",
-  "w1-not-exists-chain",
-  "w1-size-nonneg-chain",
-  "w1-not-in-chain",
-  "w1-not-hasint-chain",
-  "w1-ternary-chain-cond",
-  "w1-size-frac-le-chain",
-  // Column arithmetic under a division (#311); the zero-denominator arm is a liveness probe.
-  "cr-div-other-column",
-  "cr-div-then-add",
-  "cr-div-then-add-ne",
-  // Convex is the one adapter that promotes the casts in adapterSupportedExpected, so this is
-  // a real comparison here rather than the liveness probe it is everywhere else.
-  "cast-int-double",
-  // The real to-one join (#375): one per hazard — the negated hop, the null comparison, two-level
-  // depth, the root conjunction (the corpus's only SPLIT execution here), and the disjunction,
-  // whose failure direction is an under-grant.
-  "rel-not-bool-hop",
-  "rel-ne-null-hop",
-  "rel-bool-hop2",
-  "rel-hop-and-root",
-  "rel-hop2-or-exists",
-  // Case sensitivity in STRING MATCHING (#375 follow-up), a different mechanism from cs-eq:
-  // collation governs `=`, and on SQLite nothing but `PRAGMA case_sensitive_like` governs LIKE.
-  "cs-contains",
-  // The primary key as a filterable attribute (#376): the one id-* action the filter engine
-  // decides on its own, the negated field-to-field, and the two concatenations — which the
-  // post-filter answered with an evaluation error, and so no rows, before it learned CEL's
-  // string overload of `+`.
-  "id-eq-const",
-  "id-f2f-ne",
-  "id-concat",
-  "id-concat-vf",
-  // string() over a boolean and over a non-integer double, both of which the post-filter denied
-  // outright before this change. Convex renders them in JavaScript rather than in a store, so
-  // unlike the SQL adapters it can and does agree with CEL exactly.
-  "cast-string-bool",
-  "cast-string-double",
-  // CEL's `+` between two COLUMNS (#391). The post-filter concatenates in JavaScript, which is
-  // CEL's own semantics, so convex needs no operand-type declaration to resolve the overload.
-  "concat-f2f",
-  // Root position and bare operand forms (#388): one per hazard — the negation over a bare
-  // ordering (every other negated ordering in the corpus wraps a size() or a ternary), the bare
-  // boolean at the ROOT of the condition, and the collection subquery disjoined with a scalar
-  // predicate rather than conjoined with one.
-  "not-lt",
-  "root-bare-bool",
-  "or-eq-exists",
-  // Hazard classes the corpus missed (#387). Convex translates every compared one: the
-  // post-filter reimplements CEL rather than lowering to a query language, so modulo, a
-  // positional read of a scalar list and list equality all have exact meanings here. It is no
-  // longer alone on the first two — activerecord compares `arith-mod`, and the adapters with a
-  // declared ordered column (drizzle, sqlalchemy) or native arrays (mongoose) compare the
-  // positional reads — but list equality still has no other oracle comparison.
-  "not-and",
-  "not-contains",
-  "arith-mod",
-  "index-scalar-list",
-  "index-scalar-list-not-eq",
-  "index-scalar-list-null",
-  "map-eq-list",
-  "vf-hasint",
-  "pv-exists-unrolled",
-  // The shapes an Elasticsearch audit found unguarded: size(string) as an emptiness check,
-  // membership in a map literal (the planner folds it to its key list), a double literal beyond
-  // int64 on a double field, and a hierarchy with an empty delimiter, which the post-filter
-  // answers as the strict string-prefix test Cerbos makes of it. double-huge-lt has an EMPTY
-  // oracle by construction and sits in neither list; its sibling below carries the group.
-  "string-size-gt0",
-  "in-map-keys",
-  "double-huge-gt",
-  "hier-empty-delim",
-  // #414: every newly discriminating shape guards its observed execution side.
-  "eq-list",
-  "hasint-map-null",
-  "hasint-map-null-vf",
-  "hasint-map-vf",
-  "hasint-null-vf",
-  "in-numbers",
-  "in-var-var-omitted",
-  "in-var-var-omitted-neg",
-  "lambda-in-literal",
-  "lambda-in-literal-neg",
-  "lambda-ternary",
-  "ne-list",
-  "not-concat-unsolvable",
-  "not-concat-unsolvable-ne",
-  "not-hasint-empty-chain",
-  "not-nan-ord-le",
-  "pv-exists-one",
-  "pv-filter",
-  "pv-map",
-  "pv-not-all",
-  "pv-not-exists",
-  "pv-shadow",
-  "regex-unanchored",
-  "root-not-bool",
-  "size-ge-one",
-  "temporal-raw-eq",
-  "wildcard-contains",
-  "wildcard-endswith",
-  // #396: error-bearing branches retain a non-empty oracle under their enclosing expression.
-  "cast-not-double",
-  "cast-not-int",
-  "cast-not-string-missing",
-  "cast-not-string-null",
-  "cast-not-timestamp",
-  "index-fractional",
-  "index-negative",
-  "index-not-oob",
-  "regex-eq-true",
-  "regex-final-newline",
-  // Number and boolean list elements (conformance/README.md, "Number and boolean list elements").
-  // The post-filter reads the stored element with its JSON type intact, so `true` never equals 1,
-  // and a null element is a value that negation admits. The two cross-type probes are compared
-  // rather than probed: their `aNumber == 5` branch keeps a1 in the oracle.
-  "index-number-list",
-  "index-number-list-not-eq",
-  "index-bool-list",
-  "index-bool-list-not-eq",
-  "index-bool-list-vs-number",
-  "index-number-list-vs-bool",
-] as const;
+const DEGENERATE_ORACLES = degenerateOraclesOf(actionsFile);
+const ALL_SEED_IDS = seedsFile.seeds.map((seed) => seed.id).sort();
 
 /**
- * Shapes Convex refuses to translate: they have no oracle comparison to guard, and stay here as
- * PDP/policy liveness probes for a group Convex's own list cannot cover. See
+ * Shapes Convex refuses to translate: they have no oracle comparison for the sweep to guard, and
+ * stay here as PDP/policy liveness probes for a hostile group the compared set cannot cover. See
  * cerbos/query-plan-adapters#324.
  */
 const DEGENERACY_LIVENESS_PROBES = [
@@ -577,13 +431,39 @@ async function oracleAllowedIds(action: string): Promise<string[]> {
   return ids.sort();
 }
 
-/** The degeneracy guard's per-action assertion, labelled so a failure names the action. */
+/**
+ * The degeneracy guard's per-action assertion, over an oracle the caller already computed. An
+ * action `degenerateOracles` lists must have exactly the oracle declared there; any other must be
+ * non-empty and non-total. Labelled so a failure names the action and says why it matters.
+ */
+function expectOracleShape(action: string, ids: readonly string[]): void {
+  const declared = DEGENERATE_ORACLES.get(action);
+  const shape =
+    ids.length === 0
+      ? "empty"
+      : ids.length === ALL_SEED_IDS.length
+        ? "total"
+        : "non-degenerate";
+  const why =
+    declared === undefined
+      ? "the differential cannot fail for a degenerate oracle; if this oracle is empty or total " +
+        "by construction, declare it in `degenerateOracles` in conformance/actions.json"
+      : `conformance/actions.json declares this oracle "${declared}" in \`degenerateOracles\`; ` +
+        "the differential cannot fail for a degenerate oracle, so the declaration must stay exact";
+  expect({ action, oracle: shape, why }).toEqual({
+    action,
+    oracle: declared ?? "non-degenerate",
+    why,
+  });
+}
+
+/** The liveness probes' assertion: a refused shape's oracle is still non-empty and non-total. */
 async function expectNonDegenerateOracle(action: string): Promise<void> {
   const ids = await oracleAllowedIds(action);
   expect({
     action,
     nonEmpty: ids.length > 0,
-    nonTotal: ids.length < seedsFile.seeds.length,
+    nonTotal: ids.length < ALL_SEED_IDS.length,
   }).toEqual({ action, nonEmpty: true, nonTotal: true });
 }
 
@@ -684,6 +564,8 @@ describe("adversarial conformance corpus", () => {
       oracleAllowedIds(action),
       adapterRun(action),
     ]);
+    // The degeneracy sweep, before the comparison it guards: see expectOracleShape.
+    expectOracleShape(action, oracle);
     // The path the backend reports is checked against the pinned split, so the README's coverage
     // table is a claim about what executed rather than about what this harness re-translates.
     const expected = DB_DECIDED_DEFAULT.includes(action)
@@ -791,9 +673,9 @@ describe("adversarial conformance corpus", () => {
   // refuses `filter-as-condition` did not look — and this adapter is where that mattered: the
   // post-filter read the held list through asBoolean(), got an evaluation error, and denied every
   // row, so the emitted filter AGREED with the empty oracle while translating a shape with no
-  // boolean meaning. Its oracle is empty BY CONSTRUCTION, so it belongs to neither
-  // degeneracy-guard list and a bare "it throws" would say nothing about whether refusing it is
-  // REQUIRED.
+  // boolean meaning. Its oracle is empty BY CONSTRUCTION — it is a corpus
+  // `degenerateOracles` entry, not a liveness probe — so a bare "it throws" would say nothing
+  // about whether refusing it is REQUIRED.
   //
   // This is that argument. The other conjunct is `R.attr.aBool`, which the adapter certainly can
   // express and which `root-bare-bool` spells on its own; an adapter that dropped the conjunct it
@@ -925,7 +807,7 @@ describe("adversarial conformance corpus", () => {
     const action = "p-has";
     const queryPlan = await planFor(action);
     const oracle = await oracleAllowedIds(action);
-    const allIds = seedsFile.seeds.map((seed) => seed.id).sort();
+    const allIds = ALL_SEED_IDS;
 
     expect(queryPlan.kind).toBe(PlanKind.ALWAYS_ALLOWED);
     expect(oracle.length).toBeGreaterThan(0);
@@ -968,21 +850,11 @@ describe("adversarial conformance corpus", () => {
     );
   });
 
-  // Each action gets its own test budget: the combined serial oracle calls grow with the corpus.
-  // Guard the guard: every action must produce a non-empty, non-total oracle set, otherwise the
-  // differential comparison could pass vacuously (e.g. PDP denying all).
-  // Every entry must be an action Convex actually oracle-compares. Moving one into Convex's
-  // `adapterUnsupported` set must fail here rather than silently guard nothing (#324).
-  test.each(DEGENERACY_GUARD_ACTIONS)(
-    "%s has a non-degenerate compared oracle",
-    async (action) => {
-      expect(ORACLE_ACTIONS).toContain(action);
-      await expectNonDegenerateOracle(action);
-    },
-  );
-
-  // Asserting the complement keeps the split honest: an action Convex gains support for must
-  // move into the compared list.
+  // Every compared action's oracle is swept inside its own comparison above, so the only guard
+  // left to state here is the complement: each liveness probe is an action Convex REFUSES (an
+  // action Convex gains support for must leave this list, and the sweep then covers it), and its
+  // oracle is still non-empty and non-total, so the PDP and policy are proved live for a hostile
+  // group the compared set cannot reach. Each action gets its own test budget.
   test.each(DEGENERACY_LIVENESS_PROBES)(
     "%s has a non-degenerate liveness oracle",
     async (action) => {
@@ -990,82 +862,58 @@ describe("adversarial conformance corpus", () => {
       await expectNonDegenerateOracle(action);
     },
   );
-  // These shapes intentionally have empty or total oracles: type errors, unequal runtime
-  // types, or empty-list identities. Pin the live planner kind as well as the oracle so
-  // dropping their inputs cannot silently turn a conditional error probe into a folded plan.
-  test.each([
-    { action: "except-root", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "pv-empty-exists", kind: PlanKind.ALWAYS_DENIED, total: false },
-    {
-      action: "pv-empty-not-exists",
-      kind: PlanKind.ALWAYS_ALLOWED,
-      total: true,
-    },
-    { action: "pv-empty-all", kind: PlanKind.ALWAYS_ALLOWED, total: true },
-    { action: "pv-empty-not-all", kind: PlanKind.ALWAYS_DENIED, total: false },
-    { action: "pv-structs-null", kind: PlanKind.CONDITIONAL, total: false },
-    {
-      action: "pv-structs-missing",
-      kind: PlanKind.ALWAYS_DENIED,
-      total: false,
-    },
-    { action: "type-string-number", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-number-string", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-columns", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-size-bool", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "type-size-number", kind: PlanKind.CONDITIONAL, total: false },
-    {
-      action: "type-hierarchy-number",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-contains",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-contains",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-startswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-startswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-number-endswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    {
-      action: "type-needle-endswith",
-      kind: PlanKind.CONDITIONAL,
-      total: false,
-    },
-    { action: "eq-map", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "ne-map", kind: PlanKind.CONDITIONAL, total: true },
-    { action: "eq-map-null", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "in-nested-list", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "in-list-element", kind: PlanKind.CONDITIONAL, total: false },
-    { action: "hasint-map-element", kind: PlanKind.CONDITIONAL, total: false },
-  ])(
-    "$action preserves its intentional empty/total oracle and planner shape",
-    async ({ action, kind, total }) => {
+
+  // Every `degenerateOracles` entry, compared by Convex or not, is asserted to have exactly the
+  // oracle the corpus declares — the sweep only reaches the compared ones, and a declaration that
+  // stopped being true for a refused shape would otherwise go unnoticed. Where a live planner KIND
+  // was pinned for one of these, it still is: dropping a shape's inputs can silently turn a
+  // conditional error probe into a folded plan whose oracle happens to be the same.
+  const DEGENERATE_PLAN_KINDS: Record<string, PlanKind> = {
+    "except-root": PlanKind.CONDITIONAL,
+    "pv-empty-exists": PlanKind.ALWAYS_DENIED,
+    "pv-empty-not-exists": PlanKind.ALWAYS_ALLOWED,
+    "pv-empty-all": PlanKind.ALWAYS_ALLOWED,
+    "pv-empty-not-all": PlanKind.ALWAYS_DENIED,
+    "pv-structs-null": PlanKind.CONDITIONAL,
+    "pv-structs-missing": PlanKind.ALWAYS_DENIED,
+    "type-string-number": PlanKind.CONDITIONAL,
+    "type-number-string": PlanKind.CONDITIONAL,
+    "type-columns": PlanKind.CONDITIONAL,
+    "type-size-bool": PlanKind.CONDITIONAL,
+    "type-size-number": PlanKind.CONDITIONAL,
+    "type-hierarchy-number": PlanKind.CONDITIONAL,
+    "type-number-contains": PlanKind.CONDITIONAL,
+    "type-needle-contains": PlanKind.CONDITIONAL,
+    "type-number-startswith": PlanKind.CONDITIONAL,
+    "type-needle-startswith": PlanKind.CONDITIONAL,
+    "type-number-endswith": PlanKind.CONDITIONAL,
+    "type-needle-endswith": PlanKind.CONDITIONAL,
+    "eq-map": PlanKind.CONDITIONAL,
+    "ne-map": PlanKind.CONDITIONAL,
+    "eq-map-null": PlanKind.CONDITIONAL,
+    "in-nested-list": PlanKind.CONDITIONAL,
+    "in-list-element": PlanKind.CONDITIONAL,
+    "hasint-map-element": PlanKind.CONDITIONAL,
+  };
+
+  test("every pinned planner kind belongs to a declared degenerate oracle", () => {
+    expect(
+      Object.keys(DEGENERATE_PLAN_KINDS).filter(
+        (action) => !DEGENERATE_ORACLES.has(action),
+      ),
+    ).toEqual([]);
+  });
+
+  test.each(actionsFile.degenerateOracles)(
+    "$action has exactly its declared $oracle oracle",
+    async ({ action, oracle }) => {
+      const kind = DEGENERATE_PLAN_KINDS[action];
       const [plan, ids] = await Promise.all([
-        planFor(action),
+        kind === undefined ? undefined : planFor(action),
         oracleAllowedIds(action),
       ]);
-      expect(plan.kind).toBe(kind);
-      expect(ids).toEqual(
-        total ? seedsFile.seeds.map((seed) => seed.id).sort() : [],
-      );
+      if (kind !== undefined) expect(plan?.kind).toBe(kind);
+      expect(ids).toEqual(oracle === "total" ? ALL_SEED_IDS : []);
     },
   );
 });

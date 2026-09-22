@@ -215,6 +215,39 @@ export interface ActionsFile {
   expectedUnsupported: ExpectedUnsupportedEntry[];
   nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences: KnownDivergence[];
+  /**
+   * Actions whose check() oracle is empty or total BY CONSTRUCTION, keyed by action. Every other
+   * action is swept for a non-empty, non-total oracle wherever it is oracle-compared, so this is
+   * the corpus's one way out of that sweep — never a harness-local list.
+   */
+  degenerateOracles: Map<string, DegenerateOracle>;
+}
+
+/** The shape `degenerateOracles` declares for one action's check() oracle. */
+export type DegenerateOracle = "empty" | "total";
+
+function parseDegenerateOracles(
+  value: unknown,
+): Map<string, DegenerateOracle> {
+  if (!Array.isArray(value)) {
+    throw new Error("actions.json degenerateOracles must be an array");
+  }
+  const result = new Map<string, DegenerateOracle>();
+  value.forEach((entry, index) => {
+    const label = `degenerateOracles[${index}]`;
+    const parsed = expectRecord(entry, label);
+    const action = expectString(parsed["action"], `${label}.action`);
+    const oracle = expectString(parsed["oracle"], `${label}.oracle`);
+    expectString(parsed["reason"], `${label}.reason`);
+    if (oracle !== "empty" && oracle !== "total") {
+      throw new Error(`${label}.oracle must be "empty" or "total", got ${oracle}`);
+    }
+    if (result.has(action)) {
+      throw new Error(`${label}.action ${action} is listed more than once`);
+    }
+    result.set(action, oracle);
+  });
+  return result;
 }
 
 function parseAdapterEntry(value: unknown, label: string): AdapterEntry {
@@ -333,6 +366,7 @@ export function parseActionsFile(value: unknown): ActionsFile {
         ),
       };
     }),
+    degenerateOracles: parseDegenerateOracles(record["degenerateOracles"]),
   };
 }
 

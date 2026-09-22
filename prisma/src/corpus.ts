@@ -121,6 +121,46 @@ export interface ActionsFile {
   expectedUnsupported: UnsupportedShape[];
   nullRepresentationOmitted: NullRepresentationOmittedEntry[];
   knownDivergences?: KnownDivergence[];
+  degenerateOracles: DegenerateOracleEntry[];
+}
+
+/** How a `degenerateOracles` entry's check() oracle is degenerate: no seed allowed, or every seed. */
+export type DegenerateOracle = "empty" | "total";
+
+/**
+ * A `degenerateOracles` entry: an action whose check() oracle is empty or total BY CONSTRUCTION.
+ * The differential cannot fail for such an action — an adapter that returned nothing, or
+ * everything, would agree with it — so the corpus lists them once, for every harness, and every
+ * other oracle-compared action must have a non-empty, non-total oracle.
+ */
+export interface DegenerateOracleEntry {
+  action: string;
+  oracle: DegenerateOracle;
+  reason: string;
+}
+
+/** `degenerateOracles` as action -> "empty" | "total", validated. */
+export function degenerateOraclesOf(
+  manifest: ActionsFile
+): Map<string, DegenerateOracle> {
+  if (!Array.isArray(manifest.degenerateOracles)) {
+    throw new Error("actions.json carries no degenerateOracles array");
+  }
+  const oracles = new Map<string, DegenerateOracle>();
+  for (const entry of manifest.degenerateOracles) {
+    if (entry.oracle !== "empty" && entry.oracle !== "total") {
+      throw new Error(
+        `actions.json degenerateOracles.${entry.action} declares oracle ${JSON.stringify(entry.oracle)}, expected "empty" or "total"`
+      );
+    }
+    if (oracles.has(entry.action)) {
+      throw new Error(
+        `actions.json degenerateOracles lists ${entry.action} more than once`
+      );
+    }
+    oracles.set(entry.action, entry.oracle);
+  }
+  return oracles;
 }
 
 /**

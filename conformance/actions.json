@@ -1,5 +1,5 @@
 {
-  "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'nullRepresentationOmitted' lists actions that probe a `== null` comparison against an attribute the oracle OMITS for NULL columns; every adapter must translate these with its null representation set to 'omitted' and reject them. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison. 'adapters' is the canonical adapter roster: every key of 'adapterUnsupported' and 'adapterSupportedExpected', and every key of an 'expectedUnsupported' entry's 'messages' map, must name one of these. Every throwing classification carries the substring that adapter's error must contain — 'message' on an 'adapterUnsupported' entry, 'messages.<adapter>' on an 'expectedUnsupported' one — so a harness proves the throw is the declared mechanism rather than a mapper typo or an unrelated validation.",
+  "description": "Every action defined in policies/adversarial.yaml, grouped against the Spring Data reference harness. 'conformance' actions must match the check() oracle. 'adapterUnsupported' lists conformance actions an adapter cannot express and must reject loudly. 'expectedUnsupported' lists shapes rejected by the reference; 'adapterSupportedExpected' records adapters that intentionally translate one of those shapes. 'nullRepresentationOmitted' lists actions that probe a `== null` comparison against an attribute the oracle OMITS for NULL columns; every adapter must translate these with its null representation set to 'omitted' and reject them. 'knownDivergences' records upstream planner behavior that prevents an oracle comparison. 'adapters' is the canonical adapter roster: every key of 'adapterUnsupported' and 'adapterSupportedExpected', and every key of an 'expectedUnsupported' entry's 'messages' map, must name one of these. Every throwing classification carries the substring that adapter's error must contain — 'message' on an 'adapterUnsupported' entry, 'messages.<adapter>' on an 'expectedUnsupported' one — so a harness proves the throw is the declared mechanism rather than a mapper typo or an unrelated validation. 'degenerateOracles' lists every action whose check() oracle is empty or total BY CONSTRUCTION, with the reason: every harness asserts a non-empty, non-total oracle for each action it oracle-compares that this list does not name, and asserts each listed action's oracle is exactly the one declared.",
   "adapters": ["prisma", "mongoose", "drizzle", "convex", "langchain-chromadb", "sqlalchemy", "ent", "pgx", "elasticsearch-java", "spring-data", "activerecord"],
   "conformance": [
     "not-nan-order-string",
@@ -1362,6 +1362,213 @@
       "action": "p-has",
       "adapters": ["spring-data", "prisma", "drizzle", "sqlalchemy", "mongoose", "langchain-chromadb", "elasticsearch-java", "convex", "ent", "pgx", "activerecord"],
       "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing. Excluded from the oracle run rather than asserted against."
+    }
+  ],
+  "degenerateOracles": [
+    {
+      "action": "arith-add-eq-frac",
+      "oracle": "empty",
+      "reason": "`R.attr.aDouble + 0.7 == 0.1` holds for no double in IEEE arithmetic — a1 holds -0.6, exactly what solving the equation yields, and -0.6 + 0.7 is 0.09999999999999998. An algebraic pre-solve would return a1; `arith-add-ne-frac` is the mirrored half with the discriminating oracle."
+    },
+    {
+      "action": "cast-double-string",
+      "oracle": "empty",
+      "reason": "No seed's aString converts to a number, so `double(R.attr.aString)` is a conversion error for every seed and denies."
+    },
+    {
+      "action": "cast-int-string",
+      "oracle": "empty",
+      "reason": "No seed's aString converts to an integer, so `int(R.attr.aString)` is a conversion error for every seed and denies."
+    },
+    {
+      "action": "double-huge-lt",
+      "oracle": "empty",
+      "reason": "No seed lies below -1e19 (g1, at -9.5e18, is the closest). A translator that narrows the literal to the int64 minimum would return g1; the mirrored `double-huge-gt` carries the discriminating oracle."
+    },
+    {
+      "action": "eq-map",
+      "oracle": "empty",
+      "reason": "A string never equals a map literal: CEL denies every seed."
+    },
+    {
+      "action": "eq-map-null",
+      "oracle": "empty",
+      "reason": "A string never equals a map literal, null-valued entry or not: CEL denies every seed."
+    },
+    {
+      "action": "except-root",
+      "oracle": "empty",
+      "reason": "`except()` returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed."
+    },
+    {
+      "action": "filter-as-condition",
+      "oracle": "empty",
+      "reason": "`filter()` returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed."
+    },
+    {
+      "action": "filter-as-conjunct",
+      "oracle": "empty",
+      "reason": "The `filter()` conjunct returns a list, not a boolean, so the conjunction is not evaluable and CEL denies every seed. Dropping that conjunct leaves `root-bare-bool`, which returns rows: the harnesses pin that over-grant separately."
+    },
+    {
+      "action": "hasint-map-element",
+      "oracle": "empty",
+      "reason": "The literal's only element is a map, which no string in `tagNames` equals: CEL denies every seed."
+    },
+    {
+      "action": "in-empty",
+      "oracle": "empty",
+      "reason": "Nothing is a member of the empty list: the planner folds the plan to ALWAYS_DENIED. An adapter emitting an empty IN list that the store matches against nothing agrees by accident, which is why it stays compared."
+    },
+    {
+      "action": "in-list-element",
+      "oracle": "empty",
+      "reason": "The needle is a list, and `tagNames` holds only strings: CEL denies every seed."
+    },
+    {
+      "action": "in-nested-list",
+      "oracle": "empty",
+      "reason": "The haystack holds only lists, and aString is a string: CEL denies every seed."
+    },
+    {
+      "action": "map-as-condition",
+      "oracle": "empty",
+      "reason": "`map()` returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed."
+    },
+    {
+      "action": "nan-ord-le",
+      "oracle": "empty",
+      "reason": "The true arm compares 1.0 <= 0.5 and the false arm orders against NaN: both are false for every seed. A total-order comparison ranks NaN above every number and would return every aBool=false seed."
+    },
+    {
+      "action": "ne-map",
+      "oracle": "total",
+      "reason": "A string is never equal to a map literal, so `!=` holds for every seed. A store that errors or compares by coercion would drop rows."
+    },
+    {
+      "action": "null-eq-missing",
+      "oracle": "empty",
+      "reason": "`aOptionalString` follows the omitted convention, so `== null` is a missing-attribute error for every NULL row and false for every other: CEL denies every seed. Every adapter rejects it under that representation; see `nullRepresentationOmitted`."
+    },
+    {
+      "action": "p-double-frac",
+      "oracle": "empty",
+      "reason": "`3 * 0.1` is not 0.3 in IEEE double, so the equation holds for no seed. Exact-decimal arithmetic on the store (MySQL) would return the aNumber=3 seeds."
+    },
+    {
+      "action": "pv-empty-all",
+      "oracle": "total",
+      "reason": "`P.attr.emptyTeams` is an empty list: an exists() over it is false and an all() over it is true for every seed, so the planner folds the plan and the oracle is {}. The action pins that macro identity and the fold."
+    },
+    {
+      "action": "pv-empty-exists",
+      "oracle": "empty",
+      "reason": "`P.attr.emptyTeams` is an empty list: an exists() over it is false and an all() over it is true for every seed, so the planner folds the plan and the oracle is {}. The action pins that macro identity and the fold."
+    },
+    {
+      "action": "pv-empty-not-all",
+      "oracle": "empty",
+      "reason": "`P.attr.emptyTeams` is an empty list: an exists() over it is false and an all() over it is true for every seed, so the planner folds the plan and the oracle is {}. The action pins that macro identity and the fold."
+    },
+    {
+      "action": "pv-empty-not-exists",
+      "oracle": "total",
+      "reason": "`P.attr.emptyTeams` is an empty list: an exists() over it is false and an all() over it is true for every seed, so the planner folds the plan and the oracle is {}. The action pins that macro identity and the fold."
+    },
+    {
+      "action": "pv-structs-missing",
+      "oracle": "empty",
+      "reason": "Every element of `P.attr.missingStructs` lacks `name`, so every comparison is a missing-field error: the planner folds the plan to ALWAYS_DENIED."
+    },
+    {
+      "action": "pv-structs-null",
+      "oracle": "empty",
+      "reason": "Every element of `P.attr.nullableStructs` carries a null `name`, which equals no seed's aOptionalString where one is set, and a NULL aOptionalString is a missing attribute: CEL denies every seed."
+    },
+    {
+      "action": "size-huge-gt",
+      "oracle": "empty",
+      "reason": "No string's length exceeds 2^32. An unguarded int narrowing that wraps the threshold to 0 would return every non-empty aString; `size-huge-lt` is the other half."
+    },
+    {
+      "action": "size-huge-lt",
+      "oracle": "total",
+      "reason": "Every seed carries a non-null aString shorter than 2^32. An unguarded int narrowing that wraps the threshold to 0 would return nothing; `size-huge-gt` is the other half."
+    },
+    {
+      "action": "type-columns",
+      "oracle": "empty",
+      "reason": "Heterogeneous operands: CEL has no cross-type equality and denies every seed, where a store's implicit coercion would compare them and return rows."
+    },
+    {
+      "action": "type-hierarchy-number",
+      "oracle": "empty",
+      "reason": "`hierarchy()` over a number is a CEL type error that denies every seed, where a store coercing the number to a path would return rows."
+    },
+    {
+      "action": "type-needle-contains",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-needle-endswith",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-needle-startswith",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-number-contains",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-number-endswith",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-number-startswith",
+      "oracle": "empty",
+      "reason": "A string function over a non-string operand is a CEL type error that denies every seed, where a store coercing the number to text would return rows."
+    },
+    {
+      "action": "type-number-string",
+      "oracle": "empty",
+      "reason": "Heterogeneous operands: CEL has no cross-type equality and denies every seed, where a store's implicit coercion would compare them and return rows."
+    },
+    {
+      "action": "type-size-bool",
+      "oracle": "empty",
+      "reason": "size() is not defined on this type, so every seed is a CEL error and denies, where a store that measures the stored value would return rows."
+    },
+    {
+      "action": "type-size-number",
+      "oracle": "empty",
+      "reason": "size() is not defined on this type, so every seed is a CEL error and denies, where a store that measures the stored value would return rows."
+    },
+    {
+      "action": "type-string-number",
+      "oracle": "empty",
+      "reason": "Heterogeneous operands: CEL has no cross-type equality and denies every seed, where a store's implicit coercion would compare them and return rows."
+    },
+    {
+      "action": "w1-not-size-chain",
+      "oracle": "empty",
+      "reason": "Every seed that holds a mainCategory holds exactly one subCategory, so the negated count is false for it, and every seed without one is a missing-path error. A two-valued absent-parent guard would readmit the parentless rows under the negation; `w1-size-nonneg-chain` carries the discriminating oracle for the same chain."
+    },
+    {
+      "action": "w1-size-frac-chain",
+      "oracle": "empty",
+      "reason": "No seed holds a mainCategory with two or more subCategories, so a count of 1.5 or more holds for none, and every seed without one is a missing-path error. `w1-size-frac-le-chain` carries the discriminating oracle for the same chain."
+    },
+    {
+      "action": "w1-size-zero-chain",
+      "oracle": "empty",
+      "reason": "No seed holds a mainCategory with zero subCategories, and every seed without one is a missing-path error. `w1-size-nonneg-chain` carries the discriminating oracle for the same chain."
     }
   ]
 }

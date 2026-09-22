@@ -123,6 +123,16 @@ type KnownDivergence struct {
 	Adapters []string `json:"adapters"`
 }
 
+// DegenerateOracle is an action whose check() oracle is empty or total BY CONSTRUCTION. The
+// degeneracy guard sweeps every oracle-compared action for a non-empty, non-total oracle, and this
+// corpus-level list is the only way out of that sweep; each entry is asserted to be exactly as
+// degenerate as it declares (cerbos/query-plan-adapters#490).
+type DegenerateOracle struct {
+	Action string `json:"action"`
+	Oracle string `json:"oracle"`
+	Reason string `json:"reason"`
+}
+
 // ActionsFile is conformance/actions.json.
 //
 // Every group is parsed explicitly. A field this struct does not name would be dropped silently,
@@ -135,6 +145,7 @@ type ActionsFile struct {
 	ExpectedUnsupported       []UnsupportedShape        `json:"expectedUnsupported"`
 	NullRepresentationOmitted []AdapterEntry            `json:"nullRepresentationOmitted"`
 	KnownDivergences          []KnownDivergence         `json:"knownDivergences"`
+	DegenerateOracles         []DegenerateOracle        `json:"degenerateOracles"`
 }
 
 // seedKeys is the exact set of seeds.json row keys this harness consumes. `note` is corpus prose
@@ -202,6 +213,9 @@ type Corpus struct {
 	NullOmittedActions []AdapterEntry
 	// SkippedActions are known upstream divergences, excluded from the oracle run.
 	SkippedActions map[string]bool
+	// DegenerateOracles maps each action in actions.json's `degenerateOracles` to the oracle it
+	// declares: "empty" or "total".
+	DegenerateOracles map[string]string
 }
 
 // cerbosImageRepository is the PDP image the corpus pins. The tag comes from CERBOS_VERSION and
@@ -296,6 +310,17 @@ func loadCorpus(tb testing.TB, adapterName string) *Corpus {
 		c.NullOmittedActions = append(c.NullOmittedActions, entry)
 	}
 
+	c.DegenerateOracles = make(map[string]string, len(c.Actions.DegenerateOracles))
+	for _, entry := range c.Actions.DegenerateOracles {
+		if entry.Oracle != "empty" && entry.Oracle != "total" {
+			tb.Fatalf("degenerateOracles.%s declares oracle %q: want empty or total", entry.Action, entry.Oracle)
+		}
+		if _, dup := c.DegenerateOracles[entry.Action]; dup {
+			tb.Fatalf("degenerateOracles lists %s twice", entry.Action)
+		}
+		c.DegenerateOracles[entry.Action] = entry.Oracle
+	}
+
 	return c
 }
 
@@ -345,8 +370,9 @@ func (c *Corpus) AllClassifiedActions() []string {
 // oracle. It applies the same skip the oracle run applies, so the two cannot drift: today no
 // knownDivergences action is also a conformance action, and the subtraction is a no-op — but a
 // divergence registered on one later must drop out of both at once, not just the run. The
-// degeneracy guard asserts membership against this, so a guard entry that guards nothing fails
-// loudly instead of going inert (cerbos/query-plan-adapters#324).
+// degeneracy guard asserts its liveness-only probes are NOT in this set, so a shape this adapter
+// gains support for leaves them for the oracle sweep instead of staying a weaker probe
+// (cerbos/query-plan-adapters#324).
 func (c *Corpus) OracleComparedActions() map[string]bool {
 	compared := make(map[string]bool, len(c.OracleActions))
 	for _, action := range c.OracleActions {

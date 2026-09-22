@@ -157,12 +157,32 @@ module ConformanceCorpus
 
   # Actions that probe `== null` against an attribute whose NULL columns the oracle OMITS.
   # The harness translates these with the null representation of the adapter set to omitted and
-  # asserts the rejection. Their oracle is empty by construction, so they must not join the
-  # degeneracy guard.
+  # asserts the rejection. Their oracle is empty by construction, and degenerateOracles says so.
   NULL_REPRESENTATION_OMITTED = ACTIONS_FILE
     .fetch("nullRepresentationOmitted", [])
     .map { |entry| entry.fetch("action") }
     .freeze
+
+  # Actions whose check() oracle is empty or total BY CONSTRUCTION, whichever adapter compares
+  # them. Every other action the harness compares must have an oracle that is neither, because
+  # the differential cannot fail against a degenerate oracle; conformance/README.md, "The
+  # degeneracy guard". Read into action => "empty" | "total".
+  DEGENERATE_ORACLE_SHAPES = %w[empty total].freeze
+  DEGENERATE_ORACLES = ACTIONS_FILE
+    .fetch("degenerateOracles")
+    .to_h { |entry|
+      action = entry.fetch("action")
+      oracle = entry.fetch("oracle")
+      unless DEGENERATE_ORACLE_SHAPES.include?(oracle)
+        raise "actions.json degenerateOracles.#{action} declares oracle #{oracle.inspect}, " \
+              "which is neither \"empty\" nor \"total\""
+      end
+      [action, oracle]
+    }
+    .freeze
+  if DEGENERATE_ORACLES.size != ACTIONS_FILE.fetch("degenerateOracles").size
+    raise "actions.json degenerateOracles lists an action more than once"
+  end
 
   SKIPPED = ACTIONS_FILE
     .fetch("knownDivergences", [])
