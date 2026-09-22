@@ -30,11 +30,24 @@ final class RegexTranslator {
         String body = anchoredStart ? pattern.substring(1) : pattern;
         boolean anchoredEnd = body.endsWith("$") && !isEscaped(body, body.length() - 1);
         if (anchoredStart && !anchoredEnd && !body.isEmpty() && isPlainRegexLiteral(body)) {
-            return Map.of("prefix", Map.of(field, Map.of("value", body)));
+            return Queries.prefix(field, body);
         }
-        return Map.of("regexp", Map.of(field, Map.of(
-                "value", toLuceneRegex(pattern),
-                "flags", "NONE")));
+        if (anchoredEnd) {
+            body = body.substring(0, body.length() - 1);
+        }
+        // The body is validated before the anchors are, so a pattern that is both unanchored and
+        // outside the subset is refused for its syntax.
+        String luceneBody = validateAndEscapeLuceneRegexBody(body);
+        if (!anchoredStart || !anchoredEnd) {
+            throw unsupported(
+                    "matches regex patterns must be fully anchored unless they are a simple "
+                            + "literal prefix");
+        }
+        if (luceneBody.isEmpty()) {
+            throw unsupported(
+                    "matches regex for only the empty string is not supported by Elasticsearch");
+        }
+        return Map.of("regexp", Map.of(field, Map.of("value", luceneBody, "flags", "NONE")));
     }
 
     private static boolean isPlainRegexLiteral(String pattern) {
@@ -44,31 +57,6 @@ final class RegexTranslator {
             }
         }
         return true;
-    }
-
-    // CEL `matches()` uses RE2 partial-match semantics. Elasticsearch's `regexp`
-    // query uses Lucene regex with whole-field semantics, and Lucene `.` includes
-    // newlines while RE2 `.` does not. Only explicitly whole-field patterns in the
-    // common syntax subset reach Lucene; simple `^literal` prefixes use `prefix`.
-    // Optional Lucene operators are disabled at the query site with flags=NONE.
-    static String toLuceneRegex(String celPattern) {
-        boolean anchoredStart = celPattern.startsWith("^");
-        String body = anchoredStart ? celPattern.substring(1) : celPattern;
-        boolean anchoredEnd = body.endsWith("$") && !isEscaped(body, body.length() - 1);
-        if (anchoredEnd) {
-            body = body.substring(0, body.length() - 1);
-        }
-        body = validateAndEscapeLuceneRegexBody(body);
-        if (!anchoredStart || !anchoredEnd) {
-            throw unsupported(
-                    "matches regex patterns must be fully anchored unless they are a simple "
-                            + "literal prefix");
-        }
-        if (body.isEmpty()) {
-            throw unsupported(
-                    "matches regex for only the empty string is not supported by Elasticsearch");
-        }
-        return body;
     }
 
     private static String validateAndEscapeLuceneRegexBody(String pattern) {

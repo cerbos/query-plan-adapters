@@ -139,7 +139,7 @@ final class SizeTranslator {
     private Map<String, Object> collectionPresentQuery(SizeComparison comparison) {
         String field = comparison.field();
         if (options.nestedPaths().contains(field)) {
-            return Queries.nestedQuery(field, Map.of("match_all", Map.of()));
+            return Queries.nestedQuery(field, Queries.matchAll());
         }
         if (options.collectionFields().contains(field)) {
             return Queries.exists(field);

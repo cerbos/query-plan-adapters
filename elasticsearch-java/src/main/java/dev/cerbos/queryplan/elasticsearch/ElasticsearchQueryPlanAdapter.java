@@ -122,12 +122,12 @@ public class ElasticsearchQueryPlanAdapter {
             return new Options(
                     fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
+
         /** Declare the CEL scalar type of each mapped Elasticsearch field. */
         public Options withScalarTypes(Map<String, ScalarType> scalarTypes) {
-            return new Options(fieldMap, operatorOverrides, nestedPaths, collectionFields,
-                    explicitNullAttributes, scalarTypes);
+            return new Options(
+                    fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, scalarTypes);
         }
-
     }
 
     /**

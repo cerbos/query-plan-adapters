@@ -29,16 +29,6 @@ sealed interface Scope permits Scope.Root, Scope.Lambda {
     String field(String variable);
 
     /** The top-level scope: every variable resolves through the caller's field map. */
-    static Scope root(Map<String, String> fieldMap) {
-        return new Root(fieldMap);
-    }
-
-    /** The scope of a lambda body: {@code <lambdaVariable>.<suffix>} is {@code <nestedPath>.<suffix>}. */
-    static Scope lambda(String nestedPath, String lambdaVariable) {
-        return new Lambda(nestedPath, lambdaVariable);
-    }
-
-    /** The top-level scope. */
     record Root(Map<String, String> fieldMap) implements Scope {
         @Override
         public String field(String variable) {
@@ -50,22 +40,19 @@ sealed interface Scope permits Scope.Root, Scope.Lambda {
         }
     }
 
-    /** The scope inside a collection macro's lambda over a nested path. */
+    /**
+     * The scope of a lambda body over a nested path: {@code <lambdaVariable>.<suffix>} is
+     * {@code <nestedPath>.<suffix>}.
+     */
     record Lambda(String nestedPath, String lambdaVariable) implements Scope {
         @Override
         public String field(String variable) {
-            String suffix = extractLambdaSuffix(variable, lambdaVariable);
-            return nestedPath + "." + suffix;
+            String prefix = lambdaVariable + ".";
+            if (!variable.startsWith(prefix)) {
+                throw Refusals.malformed("Variable '" + variable
+                        + "' does not start with lambda variable '" + lambdaVariable + "'");
+            }
+            return nestedPath + "." + variable.substring(prefix.length());
         }
-    }
-
-    /** The part of {@code variable} after {@code <lambdaVar>.}, or a refusal when it has none. */
-    static String extractLambdaSuffix(String variable, String lambdaVar) {
-        String prefix = lambdaVar + ".";
-        if (!variable.startsWith(prefix)) {
-            throw Refusals.malformed(
-                    "Variable '" + variable + "' does not start with lambda variable '" + lambdaVar + "'");
-        }
-        return variable.substring(prefix.length());
     }
 }
