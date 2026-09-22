@@ -99,11 +99,11 @@ function requiredEnv(name: string): string {
 
 /**
  * The shared runner sets this, and a fallback would be actively harmful. The obvious default —
- * Cerbos's own 3592/3593 — is the address every adapter's `cerbos run` test sidecar binds, so an
- * unset CERBOS_HOST would not fail: it would quietly plan against the conformance corpus that
- * sidecar serves, and produce a diff against demo/expected.json that reads as an adapter bug.
- * demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for
- * exactly that reason.
+ * Cerbos's own 3592/3593 — is where any other local PDP listens (a `cerbos server`, a `docker run`,
+ * another project's), so an unset CERBOS_HOST would not fail: it would quietly plan against
+ * whatever policies that PDP serves, and produce a diff against demo/expected.json that reads as an
+ * adapter bug. demo/README.md requires reaching the PDP at $CERBOS_HOST, "never a hardcoded
+ * address", for exactly that reason.
  */
 const cerbosHost = requiredEnv("CERBOS_HOST");
 

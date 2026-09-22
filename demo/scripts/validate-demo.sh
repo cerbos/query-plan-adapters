@@ -16,8 +16,9 @@
 #      shape 5 differing from both of the two filters it composes.
 #   3. Pin reuse: the demo domain has no PDP version of its own and every example reaches the one
 #      in conformance/ — at $CERBOS_HOST, never at an address of its own. That second half is
-#      not fussiness: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds,
-#      so a hardcoded default does not fail, it silently plans against the wrong policy suite.
+#      not fussiness: 3592/3593 are Cerbos's default ports, which any other local PDP may be
+#      holding, so a hardcoded default does not fail, it silently plans against the wrong policy
+#      suite.
 #   4. Every adapter has a runnable example/run.sh. The roster is `adapters` in
 #      conformance/actions.json — the one already there, never a second list — so registering an
 #      adapter is what demands an example of it, and adding one without an example fails here.
@@ -360,9 +361,9 @@ for adapter in "${ADAPTERS[@]}"; do
 
   # ...and must reach it at the address the runner sets, never one of its own. Both examples that
   # existed when this check was written had shipped `?? "localhost:3593"`, which is not a harmless
-  # default: 3592/3593 are the ports every adapter's `cerbos run` test sidecar binds, and it is
-  # why demo/docker-compose.yml publishes the demo PDP on 13592/13593 instead. An unset
-  # CERBOS_HOST therefore did not fail — the example planned against whichever sidecar held those
+  # default: 3592/3593 are Cerbos's default ports, which any other local PDP may be holding,
+  # and it is why demo/docker-compose.yml publishes the demo PDP on 13592/13593 instead. An unset
+  # CERBOS_HOST therefore did not fail — the example planned against whichever PDP held those
   # ports rather than the one loaded with `demo/policies/`, and the mismatch against expected.json
   # read as an adapter bug. The rule was already in demo/README.md's "What an example must do" and both
   # examples broke it anyway, which is what makes it a check rather than prose.

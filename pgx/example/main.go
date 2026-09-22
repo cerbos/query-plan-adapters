@@ -724,11 +724,11 @@ func (a *app) seed(ctx context.Context) error {
 
 // cerbosHost is the address the shared runner published the demo PDP on.
 //
-// There is deliberately no fallback. The obvious default — Cerbos's own 3592/3593 — is where every
-// adapter's `cerbos run` test sidecar listens, so an unset CERBOS_HOST would not fail: it would
-// quietly plan against whatever policies that sidecar serves and produce a diff against
-// demo/expected.json that reads as an adapter bug. demo/README.md requires reaching the PDP at
-// $CERBOS_HOST, "never a hardcoded address", for exactly that reason.
+// There is deliberately no fallback. The obvious default — Cerbos's own 3592/3593 — is where any
+// other local PDP listens (a `cerbos server`, a `docker run`, another project's), so an unset
+// CERBOS_HOST would not fail: it would quietly plan against whatever policies that PDP serves
+// and produce a diff against demo/expected.json that reads as an adapter bug. demo/README.md
+// requires reaching the PDP at $CERBOS_HOST, "never a hardcoded address", for exactly that reason.
 func cerbosHost() (string, error) {
 	host := os.Getenv("CERBOS_HOST")
 	if host == "" {

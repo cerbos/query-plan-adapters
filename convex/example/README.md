@@ -183,12 +183,12 @@ anything is still a denial and it must not be reachable through that path.
 ## Ports
 
 The Convex backend runs on **13210/13211**, not Convex's default 3210/3211, and the PDP on
-13592/13593. Those defaults are what `npm run convex:up` and every adapter's `cerbos run` test
-sidecar bind, and a demo container holding one of them would not fail — it would let this example
-deploy over the functions a conformance run is using, or plan against the conformance corpus while
-diffing against the demo expectations. Both are reached through the environment (`$CONVEX_URL`,
-`$CERBOS_HOST`) with no fallback, so neither number is written down twice and neither can be
-defaulted into.
+13592/13593. The Convex defaults are what `npm run convex:up` binds, and 3592/3593 are Cerbos's
+defaults, which any other local PDP may be holding. Sharing either would not fail — it would let
+this example deploy over the functions a conformance run is using, or plan against some other policy
+suite while diffing against the demo expectations. Both are reached through the environment
+(`$CONVEX_URL`, `$CERBOS_HOST`) with no fallback, so neither number is written down twice and
+neither can be defaulted into.
 
 The backend is started from [`../docker-compose.yml`](../docker-compose.yml) — the adapter's own
 file, with the ports overridden — rather than a copy, so the image pin stays in one place.
