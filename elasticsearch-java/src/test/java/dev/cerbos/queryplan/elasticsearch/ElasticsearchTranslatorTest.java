@@ -307,7 +307,7 @@ class ElasticsearchTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 114, "unconditional", 7, "throwing", 180),
+                Map.of("conditional", 123, "unconditional", 7, "throwing", 180),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));

@@ -469,7 +469,7 @@ this compatibility snapshot. Each PDP call has a 30-second deadline, so a stalle
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 118 reference conformance actions plus regex and timestamp probes (120 actions) |
+| Oracle-tested | 127 reference conformance actions plus regex and timestamp probes (129 actions) |
 | Fail-closed | 170 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (179 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. An explicitly-null value and a missing field are the same document to every query the DSL can express, so the equality family over attributes in `explicitNullAttributes` throws instead of answering narrowly (cerbos/query-plan-adapters#308) |
@@ -482,7 +482,7 @@ those in [Unsupported shapes](#unsupported-shapes). Every fail-closed message is
 `conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, plus the **distribution of
-refusals over the sites in the walk that raise them**. 180 of the corpus's 301 shapes are refused
+refusals over the sites in the walk that raise them**. 180 of the corpus's 310 shapes are refused
 here — the 179 fail-closed actions plus `null-eq-missing` — across 29 sites, with 82 reaching the
 computed-operand refusal:
 

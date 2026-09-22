@@ -449,7 +449,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 232, "unconditional", 3, "throwing", 66),
+                Map.of("conditional", 241, "unconditional", 3, "throwing", 66),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -510,6 +510,13 @@ class SpringDataTranslatorTest {
      */
     static final List<String> RENDERING_DIFFERS_ON_HIBERNATE_7 = List.of(
             "cast-string-bool",
+            "compose-allow-deny",
+            "compose-derived-deny",
+            "compose-derived-role",
+            "compose-multi-allow",
+            "compose-multi-allow-deny",
+            "compose-or-not",
+            "compose-two-deny",
             "double-negation",
             "lambda-ternary",
             "nan-ord-inf",
