@@ -12,6 +12,7 @@ import { isNameOperand, isOperatorCall, isValueOperand } from "./operands";
 import {
   FALSE_CONDITION,
   buildStringMatchCondition,
+  characterLength,
   columnExpression,
   constantExpression,
 } from "./predicates";
@@ -139,6 +140,7 @@ const buildFieldHierarchyFilter = (
       "startsWith",
       columnExpression(fieldExpr),
       constantExpression(sql`${constantPath + field.delimiter}`),
+      characterLength([fieldColumn]),
     );
 
   const fieldIsAncestor =
