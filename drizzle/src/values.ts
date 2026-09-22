@@ -20,7 +20,7 @@ import {
   isStringConversion,
   isValueOperand,
 } from "./operands";
-import { bindConstant } from "./predicates";
+import { bindConstant, characterLength } from "./predicates";
 import {
   chainCorrelation,
   requireLeadingHops,
@@ -246,7 +246,9 @@ const buildSizeExpression = (
   // A non-string column has no CEL size(): the comparison is a no-overload error, so UNKNOWN.
   const scalarColumn = columnForOperand(operand, mapper);
   if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
-  return sql`length(${buildColumnExpression(resolved.mapping, operand.name)})`;
+  return characterLength([scalarColumn])(
+    buildColumnExpression(resolved.mapping, operand.name),
+  );
 };
 
 const buildTimestampExpression = (

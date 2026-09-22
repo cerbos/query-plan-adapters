@@ -1,6 +1,7 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, isNull, not, or, sql } from "drizzle-orm";
+import { and, is, isNull, not, or, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { Param } from "drizzle-orm/sql";
 
 import { resolveConstantNumber } from "./arithmetic";
@@ -135,6 +136,22 @@ const bindAgainstColumn = (value: Value, column: AnyColumn): SQL | Param =>
 export type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 
 /**
+ * A string's length in CHARACTERS, the unit CEL's `size()` and every dialect's `substr()` count
+ * in. SQLite's and PostgreSQL's `length()` already count characters; MySQL's counts BYTES, so a
+ * multi-byte character (`é` is two bytes in utf8mb4) would offset every `substr()` built on it
+ * and make `size()` disagree with the PDP (#473). MySQL's character count is `char_length()`,
+ * which SQLite does not have — so, as `indexed.ts` does, the dialect is read off the Drizzle
+ * class of whichever operand is a column, and the caller still declares none. With no column
+ * among the operands there is no MySQL-side value to measure.
+ */
+export const characterLength = (
+  columns: readonly (AnyColumn | undefined)[],
+): ((expr: SQL) => SQL) =>
+  columns.some((column) => column !== undefined && is(column, MySqlColumn))
+    ? (expr) => sql`char_length(${expr})`
+    : (expr) => sql`length(${expr})`;
+
+/**
  * CEL-exact string matching: replace/substr are case-sensitive, interpret no LIKE
  * metacharacters (% _ \ in the needle match literally), and propagate NULL as SQL
  * UNKNOWN — which excludes the row under both polarities, mirroring the CEL
@@ -145,6 +162,7 @@ export const buildStringMatchCondition = (
   operator: StringMatchOperator,
   receiver: NullableExpression,
   needle: NullableExpression,
+  length: (expr: SQL) => SQL,
 ): SQL => {
   const receiverExpr = receiver.expr;
   const needleExpr = needle.expr;
@@ -162,9 +180,9 @@ export const buildStringMatchCondition = (
         : sql`(case ${body})`;
     }
     case "startsWith":
-      return sql`substr(${receiverExpr}, 1, length(${needleExpr})) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, 1, ${length(needleExpr)}) = ${needleExpr}`;
     case "endsWith":
-      return sql`substr(${receiverExpr}, length(${receiverExpr}) - length(${needleExpr}) + 1) = ${needleExpr}`;
+      return sql`substr(${receiverExpr}, ${length(receiverExpr)} - ${length(needleExpr)} + 1) = ${needleExpr}`;
   }
 };
 
@@ -382,6 +400,7 @@ const applyColumnComparison = (
         operator,
         columnExpression(sql`${column}`),
         constantExpression(sql`${value}`),
+        characterLength([column]),
       );
   }
   const ordering = binaryComparison(operator, column, bound);

@@ -29,6 +29,7 @@ import {
   applyComparison,
   assertNullOperandTranslatable,
   buildStringMatchCondition,
+  characterLength,
   constantCondition,
   operandExpression,
   withPolarity,
@@ -101,6 +102,10 @@ const buildStringMatchFilter = (
     operator,
     operandExpression(receiver.expr, receiverOperand),
     operandExpression(needle.expr, needleOperand),
+    characterLength([
+      columnForOperand(receiverOperand, mapper),
+      columnForOperand(needleOperand, mapper),
+    ]),
   );
   const reference = isNameOperand(receiverOperand)
     ? receiverOperand.name
