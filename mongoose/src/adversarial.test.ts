@@ -1299,8 +1299,20 @@ describe("adversarial conformance corpus", () => {
 
     // The claim is about the adapter, not about the corpus's mapper: a filter walk alone would
     // pass for a `$lookup` the corpus mapper never triggers. Reading the source is what makes the
-    // guard total over mapper shapes.
-    const source = fs.readFileSync(path.join(__dirname, "index.ts"), "utf8");
+    // guard total over mapper shapes — all of it: every module that reaches lib/, which is every
+    // `.ts` here except the test suites and the test-only corpus loader (tsconfig.json's exclude).
+    const sourceFiles = fs
+      .readdirSync(__dirname)
+      .filter(
+        (file) =>
+          file.endsWith(".ts") &&
+          !file.endsWith(".test.ts") &&
+          file !== "corpus.ts",
+      )
+      .sort();
+    // Guard the guard: a scan that found no files, or lost the entry point, would pass vacuously.
+    expect(sourceFiles).toContain("index.ts");
+    expect(sourceFiles).toContain("filter.ts");
     // Prose about the guard is not a violation of it, so comments come off first — including
     // trailing ones, or this very file's vocabulary would trip the scan the moment someone
     // wrote `// never calls populate()` next to a line of code.
@@ -1308,10 +1320,13 @@ describe("adversarial conformance corpus", () => {
       /^(\/\/|\/\*|\*)/.test(line.trimStart())
         ? ""
         : line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
-    const offendingLines = source
-      .split("\n")
-      .map((line, index) => [index + 1, stripComments(line)] as const)
-      .filter(([, code]) => forbidden.test(code));
+    const offendingLines = sourceFiles.flatMap((file) =>
+      fs
+        .readFileSync(path.join(__dirname, file), "utf8")
+        .split("\n")
+        .map((line, index) => [`${file}:${index + 1}`, stripComments(line)] as const)
+        .filter(([, code]) => forbidden.test(code)),
+    );
     expect(offendingLines).toEqual([]);
 
     // And the emitted filters, so a `$lookup` assembled from string fragments cannot slip past
