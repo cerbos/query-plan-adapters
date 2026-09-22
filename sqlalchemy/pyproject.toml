@@ -45,6 +45,9 @@ test = [
     # The PostgreSQL driver for the harness's declared-collection-storage leg. psycopg2 rather
     # than psycopg 3, whose dialect SQLAlchemy 1.4 does not have.
     "psycopg2-binary>=2.9.10",
+    # The async driver for the harness's AsyncSession leg: `get_query` returns a plain
+    # `Select`, and that leg executes it through `AsyncSession` rather than asserting it could.
+    "aiosqlite>=0.17",
 ]
 lint = [
     "black>=22.6.0",
