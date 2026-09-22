@@ -1,275 +1,233 @@
 # Cerbos + Prisma ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Prisma](https://prisma.io) where clause object. This is designed to work alongside a project using the [Cerbos Javascript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
+Converts a [Cerbos](https://cerbos.dev) query plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan))
+into a [Prisma](https://prisma.io) `where` input, so `findMany` returns only the records a principal
+is allowed to see. Use it with the [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript).
 
-## Features
+## Install
 
-### Supported Operators
+```bash
+npm install @cerbos/orm-prisma @cerbos/core
+npm install @cerbos/grpc   # or @cerbos/http — whichever client your deployment uses
+```
 
-#### Basic Operators
+- **Node.js** 22 or later.
+- **`@prisma/client`** 5, 6 or 7 (peer dependency). CI runs Prisma 6 and 7.
+- **`@cerbos/core`** `^0.32.0 || ^0.33.0` (peer dependency). It carries the query plan types, and
+  your application and the adapter must share one copy. npm 7+ installs peers automatically; pnpm
+  and Yarn expect you to declare it.
+- **A Cerbos client** (`@cerbos/grpc` or `@cerbos/http`). The adapter depends on neither.
+- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.55.0.
+- **A byte-exact database collation** on mapped columns, and on SQLite
+  `PRAGMA case_sensitive_like = ON`. See
+  [Database collation is an authorization invariant](#database-collation-is-an-authorization-invariant).
 
-- Logical operators: `and`, `or`, `not`
-- Comparison operators: `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`
-- String operations: `startsWith`, `endsWith`, `contains`
-- Null checks: `eq`/`ne` against a null value map to `{ equals: null }` / `{ not: null }`. The
-  Cerbos planner emits no existence operator — `R.attr.x != null` arrives as a plain `ne`.
+## Quick start
 
-#### Relation Operators
+```ts
+import { GRPC } from "@cerbos/grpc";
+import { PlanKind, queryPlanToPrisma } from "@cerbos/orm-prisma";
 
-- One-to-one: `is`, `isNot`
-- One-to-many/Many-to-many: `some`, `none`, `every`
-- Collection macros: `exists` and `all`. `exists_one` requires counting matches,
-  which Prisma where-filters cannot express, so it throws. The two-list `except`
-  function is also rejected; `filter` is only supported inside other expressions.
-- Set operations: `hasIntersection`
+import { prisma } from "./db"; // your PrismaClient instance
 
-#### Arithmetic
+const cerbos = new GRPC("localhost:3593", { tls: false });
 
-- `add`, `sub`, `mult`, `div` with a constant side are solved algebraically to a plain column
-  comparison: `R.attr.aNumber + 1 > 2` → `{ aNumber: { gt: 1 } }` (Prisma where-filters cannot
-  express column arithmetic). Multiplying/dividing by a negative constant mirrors directional
-  operators. Arithmetic on both sides of a comparison, division BY a column, and equality or
-  inequality over fractional addition throw. The latter cannot be solved reversibly in IEEE-754
-  arithmetic.
-- String concatenation solving: `P.attr.context == "projects:" + R.attr.id` → `{ id: { equals: "123" } }`
+const queryPlan = await cerbos.planResources({
+  principal: { id: "user1", roles: ["USER"] },
+  resource: { kind: "document" },
+  action: "view",
+});
 
-#### Field-to-field comparisons
+const result = queryPlanToPrisma({
+  queryPlan,
+  mapper: {
+    "request.resource.attr.ownerId": { field: "ownerId" },
+    "request.resource.attr.status": { field: "status" },
+  },
+});
+
+let documents;
+switch (result.kind) {
+  case PlanKind.ALWAYS_DENIED:
+    documents = [];
+    break;
+  case PlanKind.ALWAYS_ALLOWED:
+    documents = await prisma.document.findMany({ where: { archived: false } });
+    break;
+  case PlanKind.CONDITIONAL:
+    documents = await prisma.document.findMany({
+      where: { AND: [result.filters, { archived: false }] },
+    });
+    break;
+}
+```
+
+`queryPlanToPrisma` returns `{ kind }` for `ALWAYS_ALLOWED` / `ALWAYS_DENIED` and
+`{ kind: CONDITIONAL, filters }` otherwise. `filters` is a plain where-input for the model, so you
+can `AND` it with your own predicates, paginate, or add `select`/`orderBy`. Short-circuit
+`ALWAYS_DENIED` instead of querying. A shape the adapter cannot express throws an `Error`; it never
+returns a broader filter.
+
+### Arguments
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `queryPlan` | yes | The `PlanResourcesResponse` from `planResources`. |
+| `mapper` | no | Maps Cerbos attribute paths to Prisma fields and relations. Defaults to `{}`. |
+| `model` | no | Prisma model name of the queried model (e.g. `"Resource"`). Needed only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
+| `nullAttributeRepresentation` | no | `"explicit"` (default) or `"omitted"`. See [NULL attribute representation](#null-attribute-representation). |
+
+Exported types: `QueryPlanToPrismaArgs`, `QueryPlanToPrismaResult`, `Mapper`, `MapperConfig`,
+`NullAttributeRepresentation`, `PrismaFilter`, and `PlanKind` (re-exported from `@cerbos/core`).
+
+## Mapping attributes
+
+Cerbos attribute paths are not column names, so you map them. The mapper is an object keyed by the
+full attribute path, or a function from path to config:
+
+```ts
+// Object
+mapper: {
+  "request.resource.attr.title": { field: "title" },
+  "request.resource.attr.createdAt": { field: "createdAt", valueType: "dateTime" },
+}
+
+// Function
+mapper: (path) => ({ field: path.replace("request.resource.attr.", "") })
+```
+
+An unmapped path is used verbatim as the Prisma field name, which makes the query fail.
+
+### `MapperConfig`
+
+| Key | Description |
+| --- | --- |
+| `field` | Prisma field name. |
+| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter reject incompatible comparisons and string operations before Prisma sees them. Required (`"dateTime"`) for `timestamp()` comparisons. Undeclared keeps the untyped behaviour; the adapter cannot read your schema. |
+| `nullable` | `false` declares the column cannot be NULL, which drops the NULL guards on [relation elements](#relation-element-nullability) and hierarchy segments. |
+| `nullAttributeRepresentation` | Per-attribute NULL convention. See [Declare the convention per attribute](#declare-the-convention-per-attribute). |
+| `relation.name` | Prisma relation field name. |
+| `relation.type` | `"one"` (compiles to `is`/`isNot`) or `"many"` (`some`/`every`/`none`). |
+| `relation.field` | Column to compare when the policy compares the relation itself (e.g. `"x" in R.attr.tags`). |
+| `relation.fields` | Mappings for fields of the related model, recursively (a nested entry can itself have a `relation`). Unmapped fields are inferred from the path. |
+| `relation.model` | Prisma model name of the related model. Needed only for field-to-field comparisons inside a collection expression. |
+| `relation.subqueryFilter` | A where-input over the related model that your application applies to its own reads. See [Declaring the application's own predicate](#declaring-the-applications-own-predicate). |
+
+### Relations
+
+```ts
+mapper: {
+  // to-one; nested fields are inferred from the path (owner.id -> owner.is.id)
+  "request.resource.attr.owner": { relation: { name: "owner", type: "one" } },
+
+  // to-many compared as a list of names: "x" in R.attr.tags
+  "request.resource.attr.tags": { relation: { name: "tags", type: "many", field: "name" } },
+
+  // to-many used in collection macros: R.attr.comments.exists(c, c.status == "approved")
+  "request.resource.attr.comments": {
+    relation: {
+      name: "comments",
+      type: "many",
+      fields: {
+        id: { field: "id", nullable: false },
+        status: { field: "status" },
+        author: { relation: { name: "author", type: "one" } },
+      },
+    },
+  },
+}
+```
+
+A policy like `R.attr.status == "active" && R.attr.owner.id == P.id && "tag1" in R.attr.tags`
+translates to:
+
+```ts
+{
+  AND: [
+    { status: { equals: "active" } },
+    { owner: { is: { id: { equals: "user1" } } } },
+    { tags: { some: { name: { equals: "tag1" } } } },
+  ],
+}
+```
+
+The nested filters read the related model **unfiltered**. If your own reads of that model apply a
+predicate (soft delete, tenant, subtype), declare it as `subqueryFilter`. See
+[Mapping hazards](#mapping-hazards).
+
+### Field-to-field comparisons
 
 Comparisons between two columns of the same model compile to
 [Prisma field references](https://www.prisma.io/docs/orm/reference/prisma-client-reference#compare-columns-in-the-same-table).
-Pass the Prisma model name via the `model` option (root columns) or `relation.model` in the
-mapper (columns of a related model inside a collection expression). Comparisons across models
-throw — Prisma only supports references between fields of the same model.
+Pass `model` for root columns, or `relation.model` for columns of a related model inside a
+collection expression. Comparisons across models throw: Prisma field references are same-model only.
 
-#### Hierarchy Operators
+```ts
+queryPlanToPrisma({ queryPlan, mapper, model: "Resource" });
+```
 
-- `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`
-- `overlaps`: segment-wise prefix comparison between two hierarchies
-- `ancestorOf` / `descendentOf`: strict prefix relationship between hierarchies
+### Timestamps
 
-#### Advanced Features
+Mark `DateTime` columns with `valueType: "dateTime"` and compare them with `timestamp()`.
+`timestamp()` over an untyped or string mapping throws, and so does a bare comparison between two
+mapped `DateTime` columns (use `timestamp()` on both sides). Literals must be strict RFC 3339
+instants in CEL's year 0001–9999 range and exactly representable in milliseconds (digits after the
+third fractional digit must be zero). Your column must preserve millisecond precision.
 
-- Deep nested relations support
-- Automatic field inference
-- Collection mapping and filtering
-- Complex condition combinations
-- Type-safe field mappings
-- Timestamp comparisons against Prisma `DateTime` columns. Mark the field mapping with
-  `valueType: "dateTime"`; applying `timestamp()` to an untyped/string mapping throws.
-  Literals must be strict RFC 3339 instants in CEL's supported year 0001–9999 range and
-  exactly representable at millisecond precision (fractional digits after the third may
-  only be zero). The mapped column/database must preserve that precision.
-- Outer-column references inside collection expressions (e.g.
-  `R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`) are hoisted or case-split so every
-  filter lands on the model it belongs to
-- Three-valued-logic guards for nullable element columns: collection macros (`all`, negated
-  `exists`, `hasIntersection` over `map`) exclude rows whose elements hold `NULL` in a column the
-  lambda reads, matching Cerbos's treatment of a missing attribute as a deny. A relation element
-  column is treated as nullable **unless its mapping says `nullable: false`** — see
-  [Relation element nullability](#relation-element-nullability)
+## NULL attribute representation
 
-#### Known limitations (loud failures, never silently-wrong filters)
+`R.attr.x == null` produces the same plan however your application represents a NULL column in the
+attributes it sends to `check()`, so tell the adapter which convention you use:
 
-- LIKE wildcards: Prisma emits `LIKE` without an `ESCAPE` clause, so `contains`/`startsWith`/
-  `endsWith` with a needle containing `%`, `_` or `\`, or with a column-valued needle, throws.
-  (A constant *receiver* with a column needle — `"a-b".startsWith(R.attr.x)` — is translated
-  exactly by enumerating candidate needles into an `in` filter.)
-- Hierarchy prefixes: `ancestorOf`, `descendentOf` and `overlaps` narrow a column with a
-  `startsWith`, so they throw when the constant hierarchy contains `%`, `_`, `\` or `[`. `[` is
-  rejected as well as the two LIKE wildcards because SQL Server opens a character class on
-  `[` even when an `ESCAPE` clause is declared, so it cannot be matched literally at all.
-- Counting: `exists_one`, `size()` thresholds other than empty/non-empty, and string-length
-  comparisons throw (`_count` is not supported inside Prisma `where`).
-- Cross-model column comparisons throw (Prisma field references are same-model only).
-  This includes membership between an outer scalar column and a related collection column.
-
-#### Operators Prisma `where` cannot express
-
-[#224](https://github.com/cerbos/query-plan-adapters/issues/224) re-audited the filter types that
-Prisma 6.19 and 7.9 generate, for SQLite, PostgreSQL and MySQL. Both majors expose the same
-surface. A scalar filter offers `equals`, `in`/`notIn`, `lt`/`lte`/`gt`/`gte`, `contains`/
-`startsWith`/`endsWith`, `mode` and `not`, and its operand is either a constant or a same-model
-field reference. A scalar list filter offers `has`, `hasSome`, `hasEvery`, `isEmpty` and `equals`.
-A relation filter offers `some`, `every` and `none`. Nothing in `where` takes an expression, so
-the following shapes have no spelling and throw:
-
-| CEL shape | Corpus actions | Why Prisma cannot express it |
-| --- | --- | --- |
-| `a % b` | `arith-mod` | No modulo operator. The adapter solves `add`/`sub`/`mult`/`div` against a constant into a plain column comparison, but `%` is not invertible, so no solved comparison exists. |
-| Arithmetic on both sides | `arith-both` | Field references compare two columns as they are. There is no operand that is an expression over a column. |
-| `matches` | `regex-*`, `p-matches`, `matches-alt` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). The full-text `search` operator matches `tsquery` lexemes, not a pattern. Even raw SQL has no RE2 on these providers: SQLite has no `REGEXP` without a loaded function, and PostgreSQL's and MySQL's dialects differ from RE2 (drizzle refuses `matches` for the same reason). |
-| List index `l[i]` | `index-*` | List filters test membership, emptiness or whole-list equality, never a position. |
-| `int()`, `double()`, `string()` | `cast-*` | No cast operator. A SQL `CAST` also would not reproduce CEL's conversion errors: SQLite, for example, reads `CAST('abc' AS INTEGER)` as `0`. |
-| `size()` of a string, or of a list that isn't a mapped relation | `string-size-gt0`, `type-size-*`, `pv-filter`, `size-filter-count`, `pv-except`, `except-size` | No length filter, and a relation filter has no count (`_count` exists only in `orderBy`, `select` and aggregates, see [prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). Emptiness of a mapped relation is the one size shape the adapter translates. |
-
-Every one of these is pinned as a throw in `conformance/actions.json`, with the message this
-adapter raises. The adapter only ever returns a `where` object, so it has no other honest answer.
-The issue weighed three escape hatches and adopted none of them:
-
-- **A `$queryRaw` fragment.** Prisma 5–7 have no raw predicate inside `where`
-  ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
-  [prisma/prisma#11568](https://github.com/prisma/prisma/issues/11568)), so this means a separate raw query.
-  The adapter would have to write SQL separately for each provider,
-  and its return type would stop being a `where` input the caller can compose with its own filter.
-  Regex and cast semantics would still differ from CEL, as the table says.
-- **Ids from a raw subquery, then `{ id: { in: ids } }`.** Same SQL problems, plus a second round
-  trip that materialises every candidate id in the application.
-- **An in-memory post-filter.** This is the convex adapter's design: push down what the query
-  engine can express, evaluate the rest over the fetched rows, and require
-  `allowPostFilter: true` to opt in. It is the only option that keeps `matches` exact, but a
-  query can then scan rows the caller never paginated over. Revisit it if there is demand.
-
-When a policy needs one of these shapes over a Prisma model, the practical workaround is a
-**derived column**. The application computes the value when it writes the row and the policy reads
-that attribute instead: an `isEven` boolean instead of `R.attr.n % 2 == 0`, a `nameLength` integer
-instead of `size(R.attr.name) > 0`, a `primaryTag` string instead of `R.attr.tags[0]`. All three
-compile to plain Prisma filters.
-
-Prisma 8 (a release candidate as of September 2026) is out of scope. It replaces the
-`findMany({ where })` object this adapter emits with a new client API, and its SQL query builder
-accepts raw `fns.raw` predicates in `where()`, which could express `%`, casts and column
-arithmetic. The adapter supports Prisma 5–7 only.
-
-#### Database collation is an authorization invariant
-
-Cerbos string comparisons are byte-exact. Prisma delegates comparison semantics to the
-database collation, so a case-insensitive or accent-insensitive collation can make a generated
-authorization filter return rows that Cerbos would deny. Treat the database collation used by
-mapped authorization columns as part of the policy contract:
-
-- PostgreSQL: use a deterministic, case-sensitive collation and avoid `citext` or an
-  insensitive Prisma query mode for mapped fields.
-- MySQL: use `utf8mb4_0900_bin` (MySQL 8.0.17+), the one collation that is byte-exact and NO
-  PAD, and the one this adapter's own MySQL conformance leg runs under. Case-sensitive (`_cs`) is
-  not enough: `utf8mb4_0900_as_cs` gives a default-ignorable code point such as SOFT HYPHEN
-  (U+00AD) no weight, so `'o\u00ADne' = 'one'` is TRUE under it
-  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)); `utf8mb4_bin` is PAD SPACE,
-  so `'a' = 'a '` is TRUE under it. MariaDB has no `_0900_` collations; its byte-exact NO PAD
-  equivalent is `utf8mb4_nopad_bin`, which this repository does not execute. **On MySQL this is not something you can leave to the server.**
-  Prisma's migration engine writes `DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-  into every `CREATE TABLE` and ignores the server's configured default, and Prisma's schema
-  language has no collation attribute to override it — so a Prisma-managed MySQL database is
-  case- AND accent-insensitive out of the box, whatever `--collation-server` says. Convert the
-  tables after migrating:
-
-  ```sql
-  ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
-  ```
-
-  Measured, not theoretical: replaying this adapter's conformance corpus under
-  `utf8mb4_unicode_ci` on `mysql:8.4` makes **58 of the 172 oracle-tested actions
-  disagree with the PDP** — `cs-eq` returns the `"One"` row for a policy that allowed `"one"`,
-  and every collection macro over a tag name follows — and replaying it under
-  `utf8mb4_0900_as_cs` makes **17** disagree, every one of them on the soft-hyphen seed `h6`.
-- SQL Server: use a case-sensitive (`_CS_`) collation rather than a case-insensitive (`_CI_`)
-  collation.
-- SQLite: do not apply `COLLATE NOCASE` to mapped fields, and **also set
-  `PRAGMA case_sensitive_like = ON`** — see below.
-
-**On SQLite, collation is not enough.** `contains`, `startsWith` and `endsWith` lower to `LIKE`,
-and SQLite's `LIKE` is case-insensitive for ASCII *regardless of the column's collation*: a
-`COLLATE BINARY` column answers `= 'one'` case-sensitively and `LIKE '%one%'` case-insensitively
-in the same query. Only `PRAGMA case_sensitive_like = ON` changes it, and the pragma is
-per-connection, so it must be set on every connection the application uses — not once at schema
-creation.
-
-That distinction is why this was missed for so long: the corpus's `cs-eq` action proved equality
-was case-sensitive on SQLite, and equality is the one operator collation *does* govern. The
-`cs-contains`, `cs-startswith` and `cs-endswith` actions now prove the string operators
-separately, and without the pragma this adapter over-grants every one of them on SQLite.
-
-The adapter cannot override a column's collation, or set a pragma, from inside a Prisma `where`
-filter. See Prisma's
-[case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity)
-for provider-specific details.
-
-### NULL attribute representation
-
-`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
-a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
-and has to be told which one you use.
-
-| attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
+| Attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
 | --- | --- | --- |
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-`nullAttributeRepresentation` defaults to `"explicit"`, preserving the historical `IS NULL`
-translation. If your application omits attributes for NULL columns, set it to `"omitted"`: the
-adapter then rejects every null comparison operand instead of emitting a filter that returns rows
-the PDP denies.
+The default is `"explicit"` (`IS NULL`). If you omit attributes for NULL columns, set `"omitted"`:
+the adapter then rejects every null comparison operand rather than emit a filter that returns
+denied rows.
 
 ```ts
 queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
-`!(x == null)` are aligned under both conventions — because Prisma applies negation by wrapping
-(`{ NOT: ... }`) rather than pushing it into the leaf, so a leaf cannot tell whether an enclosing
-`not` will flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is
-correct under any nesting. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+The rejection covers every null operand, including `x != null`, which is aligned under both
+conventions: Prisma negates by wrapping in `{ NOT: … }`, so a leaf cannot tell whether an enclosing
+`not` will flip it back. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ### Declare the convention per attribute
 
-The option above is a whole-call default, and one policy suite can legitimately use both
-conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it on the mapping instead and the call-level option only covers what
-the mapping does not:
+One policy suite can use both conventions (the same column mapped under two attribute names). Set
+the convention on the mapper entry; the call-level option covers only undeclared attributes:
 
 ```ts
 const mapper = {
   // sent as an explicit null when the column is NULL
-  "request.resource.attr.owner": {
-    field: "ownerId",
-    nullAttributeRepresentation: "explicit",
-  },
+  "request.resource.attr.owner": { field: "ownerId", nullAttributeRepresentation: "explicit" },
   // omitted when the column is NULL — the call-level default applies
   "request.resource.attr.department": { field: "department" },
 };
 ```
 
-Declaring `"explicit"` asserts two things: the column can be NULL, **and** a NULL reaches `check()`
-as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then rendered so
-it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so `null != "x"` is
-TRUE and the row must come back, while UNKNOWN would drop it under *both* polarities. Ordering and
-string operators are left alone: a null receiver raises a no-overload error in CEL, which denies
-exactly as UNKNOWN does.
+Declaring `"explicit"` asserts the column can be NULL **and** that NULL reaches `check()` as an
+explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it is never SQL UNKNOWN:
+`null != "x"` is true in CEL, so the row is returned. Ordering and string operators are unchanged,
+because CEL denies them on a null receiver anyway. An undeclared attribute keeps the old rendering,
+under which `!=` against a constant under-grants NULL rows.
 
-Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
-that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
-it.
-
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
+Declare both sides of a field-to-field comparison, or neither. Mixed conventions throw. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+## Relation element nullability
 
-Mapper `valueType` also accepts `"string"`, `"number"` and `"boolean"`. Declare the actual
-Prisma scalar type so the adapter can reject incompatible comparisons and string operations
-before handing a filter to the client. An undeclared type keeps the existing behavior; the
-adapter cannot infer your Prisma schema. Hierarchy segments preserve missing-value errors
-even when a constant prefix does not inspect them; `nullable: false` explicitly disables
-that guard for a column that cannot be NULL.
+Collection macros lower to `some`/`every`/`none`, which treat SQL UNKNOWN as false. Without a guard,
+`!R.attr.tags.exists(t, t.name == "x")`, `all()` and `hasIntersection()` over `map()` would return
+rows holding a NULL element that `check()` denies. So a relation element column is treated as
+nullable and guarded **unless its mapping says `nullable: false`**.
 
-The issue #414 changes are breaking for invalid shapes that previously returned a filter:
-non-scalar comparison/membership literals and bare comparisons between mapped DateTime
-columns now throw. Use `timestamp()` on both temporal operands to request instant comparison;
-bare CEL attributes compare RFC-3339 strings whose spelling the database discarded. Negated
-ternary comparisons and unsolvable string concatenation now retain CEL's error behavior.
-
-### Relation element nullability
-
-Inside a collection macro, a relation element column whose mapping does not say `nullable: false`
-is treated as nullable, and the macro carries a guard that keeps a `NULL` element denied. Prisma
-lowers a macro to `some`/`every`/`none`, which collapse SQL's `UNKNOWN` to false at the `EXISTS`
-boundary, so without that guard `!R.attr.tags.exists(t, t.name == "x")`, an `all()` or a
-`hasIntersection()` over `map()` would return rows holding a `NULL` element that `check()`
-denies. Leaving the declaration out is therefore the safe reading, not the fast one.
-
-Declare `nullable: false` on every **required** element column the policies reach through a
-collection macro:
+Declare `nullable: false` on every required element column a policy reaches through a macro:
 
 ```ts
 "request.resource.attr.tags": {
@@ -284,40 +242,111 @@ collection macro:
 },
 ```
 
-Prisma refuses a `null` comparison against a required column (``Argument `id` must not be
-null``), so an undeclared required column makes those queries fail at the client instead of
-returning rows. That failure is closed rather than open, but it is still a failure.
+If you leave a required column undeclared, Prisma rejects the guard's `null` comparison
+(``Argument `id` must not be null``) and the query fails. This fails closed, but it still fails.
+Declarations are read from nested `relation.fields` for chained collections
+(`R.attr.a.b.exists(...)`).
 
-**Breaking change in [#495](https://github.com/cerbos/query-plan-adapters/issues/495):**
-the guard used to be opt-in, with `nullable: true`, so an undeclared element column had none and
-over-granted on a `NULL` element. Mappings that declared `nullable: true` emit the same filter as
-before. A mapping that left a nullable column undeclared now returns fewer rows (an over-grant
-fix). A mapping that left a required column undeclared now needs `nullable: false`. The
-declaration also now reaches chained collections (`R.attr.a.b.exists(...)`): their element
-mappings are read from the nested `relation.fields`, where before they were ignored.
+## Database collation is an authorization invariant
 
-The same issue made two malformed shapes throw instead of returning a filter. An `and`/`or` with
-no operands used to become `{ AND: [] }` or `{ OR: [] }`, and the constant folder reduced an
-empty `and` to an unconditional filter. The planner never emits either, and both now throw.
-Negating a sub-condition that translates to the unconditional filter `{}` also throws: Prisma
-evaluates `{ NOT: {} }` as true and would return every row. A hierarchy relation between two
-constants produces `{}`, and so does an `overlaps` whose segments are all declared
-`nullable: false`.
+Cerbos string comparisons are byte-exact. Prisma leaves comparison semantics to the database
+collation, so a case- or accent-insensitive collation makes the filter return rows Cerbos denies.
+The adapter cannot set a collation or a pragma from inside a `where`.
 
-### Conformance contract
+- **PostgreSQL:** a deterministic, case-sensitive collation. No `citext`, no `mode: "insensitive"`
+  on mapped fields.
+- **MySQL:** `utf8mb4_0900_bin` (MySQL 8.0.17+), the only collation that is byte-exact and NO PAD.
+  `utf8mb4_0900_as_cs` is not enough: it ignores default-ignorable code points, so
+  `'o­ne' = 'one'` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '`. On MariaDB the equivalent is `utf8mb4_nopad_bin`
+  (not executed here).
 
-Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
-(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
-For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
-corpus with strict evaluation enabled for both planning and the `check()` oracle.
-CI runs both modes for each existing adversarial store and client-version combination.
+  **You must convert the tables yourself.** Prisma's migration engine writes
+  `COLLATE utf8mb4_unicode_ci` into every `CREATE TABLE`, ignores the server default, and has no
+  schema attribute to override it, so a Prisma-managed MySQL database is case- and
+  accent-insensitive out of the box. After migrating:
 
-**Breaking compatibility change for Cerbos 0.55.** Ordered comparisons involving NaN
-now evaluate to false, so their negation can allow a row. The adapter follows that
-behavior; Cerbos 0.54 treated the unordered comparison as an error and denied the row
-even under negation. Use this adapter with Cerbos 0.55 when policies can produce
-NaN in a negated comparison. Missing attributes and null values retain their existing
-handling.
+  ```sql
+  ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+  ```
+
+  Measured on `mysql:8.4`: under `utf8mb4_unicode_ci`, **58 of the 172 oracle-tested actions
+  disagree with the PDP** (`cs-eq` returns `"One"` for a policy that allowed `"one"`); under
+  `utf8mb4_0900_as_cs`, **17** disagree, all on the soft-hyphen seed `h6`.
+- **SQL Server:** a case-sensitive (`_CS_`) collation, not `_CI_`.
+- **SQLite:** no `COLLATE NOCASE` on mapped fields, **and** `PRAGMA case_sensitive_like = ON` on
+  every connection. `contains`/`startsWith`/`endsWith` lower to `LIKE`, which is ASCII
+  case-insensitive on SQLite regardless of column collation. The pragma is per connection, not per
+  schema. Without it the adapter over-grants the corpus's `cs-contains`, `cs-startswith` and
+  `cs-endswith` actions.
+
+See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity).
+
+## Supported operators
+
+| Category | Operators |
+| --- | --- |
+| Logical | `and`, `or`, `not` |
+| Comparison | `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in` |
+| Null checks | `== null` / `!= null` → `{ equals: null }` / `{ not: null }` (the planner has no existence operator) |
+| Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles |
+| Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
+| Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
+| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved to a plain comparison (`R.attr.n + 1 > 2` → `{ n: { gt: 1 } }`; negative multipliers flip the direction); string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`) |
+| Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
+| Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
+
+Outer-column references inside a macro (`R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`)
+are hoisted or case-split so each filter lands on its own model.
+
+### What throws
+
+Loud failures, never silently wrong filters:
+
+- **LIKE metacharacters.** Prisma emits `LIKE` without `ESCAPE`, so `contains`/`startsWith`/
+  `endsWith` with a needle containing `%`, `_` or `\`, or a column-valued needle, throws. Hierarchy
+  prefixes (`ancestorOf`, `descendentOf`, `overlaps`) throw on `%`, `_`, `\` or `[` (SQL Server
+  opens a character class on `[` even with `ESCAPE`). If you match on backslashes, compare the
+  whole value with `==`.
+- **Counting.** `exists_one`, `size()` other than empty/non-empty on a mapped relation, and string
+  length.
+- **Cross-model column comparisons**, including membership between an outer scalar column and a
+  related collection column.
+- **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
+  fractional addition (not reversible in IEEE-754).
+- **Other malformed or non-boolean shapes:** the two-list `except` function, `filter()` or `map()`
+  as a standalone condition, `all()` over a multi-hop chain, an empty hierarchy delimiter,
+  sub-millisecond `now()` thresholds, non-scalar comparison literals, empty `and`/`or`, and
+  negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
+
+#### Operators Prisma `where` cannot express
+
+Prisma 6.19 and 7.9 expose the same filter surface on SQLite, PostgreSQL and MySQL
+([#224](https://github.com/cerbos/query-plan-adapters/issues/224)): scalar filters take a constant
+or a same-model field reference, never an expression. These shapes throw:
+
+| CEL shape | Corpus actions | Why Prisma cannot express it |
+| --- | --- | --- |
+| `a % b` | `arith-mod` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
+| Arithmetic on both sides | `arith-both` | Field references compare two columns as they are; no operand is an expression. |
+| `matches` | `regex-*`, `p-matches`, `matches-alt` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
+| List index `l[i]` | `index-*` | List filters test membership, emptiness or equality, never a position. |
+| `int()`, `double()`, `string()` | `cast-*` | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). |
+| `size()` of a string, or of a list that isn't a mapped relation | `string-size-gt0`, `type-size-*`, `pv-filter`, `size-filter-count`, `pv-except`, `except-size` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
+
+Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
+5–7 has no raw predicate inside `where` ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
+[prisma/prisma#11568](https://github.com/prisma/prisma/issues/11568)), and the other two would stop
+the result being a composable where-input.
+
+**Workaround: a derived column.** Compute the value when you write the row and have the policy read
+it: `isEven` instead of `R.attr.n % 2 == 0`, `nameLength` instead of `size(R.attr.name) > 0`,
+`primaryTag` instead of `R.attr.tags[0]`.
+
+Prisma 8 (a release candidate as of September 2026) replaces `findMany({ where })` with a new client
+API and is out of scope.
+
+## Conformance contract
 
 The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
 
@@ -326,63 +355,47 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 | Oracle-tested | 181 reference actions |
 | Fail-closed | 116 reference actions plus the 11 reference-unsupported shapes (127 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `nullAttributeRepresentation: "explicit"` on the mapper entry — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute sent as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare `nullAttributeRepresentation: "explicit"` on the mapper entry, or `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-**Behaviour change.** A hierarchy with an **empty** delimiter — `hierarchy(R.attr.scope, "")` — now throws. Cerbos splits the path on an empty delimiter into one segment per character, so `descendentOf` is a strict string-prefix test; the adapter lowered it as `startsWith(prefix + delimiter)`, which with an empty delimiter also matched the path **itself** (never its own descendant): the corpus's `hier-empty-delim` returned `a2` (`dept.eng`) against the constant `dept.eng`, a row the PDP denies. A shape that returned a filter now raises, which is a consumer-visible break, but the filter over-granted.
+The fail-closed set is: `LIKE` needles Prisma cannot escape, cross-model field references, relation
+counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()`
+thresholds, and the reference probes for regex, ordered indexing, `timestamp()` over a string
+field, `mod`, a positional read of a scalar list, and list equality over a `map()` projection. Each
+one's error message is pinned in [`conformance/actions.json`](../conformance/actions.json) and
+asserted by the conformance run.
 
-The fail-closed set consists of literal `LIKE` cases Prisma cannot escape safely, cross-model field references, arbitrary relation counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()` thresholds, the reference probes for regex, ordered indexing, and `timestamp()` over a string field, `mod`, a positional read of a scalar list (of strings, numbers or booleans alike), and list equality over a `map()` projection. Supported timestamp plans require a mapper entry with `valueType: "dateTime"` and a strict, millisecond-exact RFC 3339 literal in CEL's supported instant range. These shapes throw instead of producing a broader authorization filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
+**Providers.** The corpus is executed on SQLite, PostgreSQL and MySQL, each with Prisma 6 and 7, in
+both evaluation modes (see [Development](#development)). The MySQL legs run under
+`utf8mb4_0900_bin`; `ADAPTER_TEST_MYSQL_COLLATION` replays them under another collation, which is
+how the figures in the collation section were measured. MySQL adds no fail-closed shape. SQL Server
+and CockroachDB are **not** executed: fail-closed reasons naming them are reasoned from documented
+`LIKE` behaviour.
 
-The `where` input each of these actions produces is pinned separately, in the translator unit test (`npm test`) — every corpus action, classified there exactly once as an emitted filter, an unconditional plan kind, or a throw. That is what makes a change to the emitted SQL show up as a diff even when it selects the same rows from the corpus seeds.
+## Mapping hazards
 
-#### Providers the contract is proved on
+The contract above proves the *plan* side. The other half is the *mapping*: **the records the
+nested filter reads must be the records your application put into the resource attributes.** The
+shared corpus catalogues six ways that can break.
 
-The classification above holds where the corpus is **executed**, not where the emitted filter merely looks plausible. Until [#320](https://github.com/cerbos/query-plan-adapters/issues/320) it was executed on SQLite only, and until [#340](https://github.com/cerbos/query-plan-adapters/issues/340) MySQL was unexecuted too. The Prisma 6/7 matrix is an *engine* matrix, not a provider one — it says nothing about how a provider coerces a value, reads a `LIKE` pattern, or collates a string.
-
-The store and the Prisma major are independent dimensions. CI runs all six combinations below in both evaluation modes:
-
-```bash
-npm run test:adversarial:v7            # SQLite,     Prisma 7
-npm run test:adversarial:v6            # SQLite,     Prisma 6
-npm run test:adversarial:postgres:v7   # PostgreSQL, Prisma 7  (testcontainers)
-npm run test:adversarial:postgres:v6   # PostgreSQL, Prisma 6  (testcontainers)
-npm run test:adversarial:mysql:v7      # MySQL,      Prisma 7  (testcontainers)
-npm run test:adversarial:mysql:v6      # MySQL,      Prisma 6  (testcontainers)
-```
-
-The MySQL legs run under `utf8mb4_0900_bin`, applied to the tables after `prisma db push` for the reason the [collation section](#database-collation-is-an-authorization-invariant) gives. `ADAPTER_TEST_MYSQL_COLLATION` replays them under any other collation, which is how the figures quoted there were measured. Every corpus action that translates on SQLite and PostgreSQL translates and agrees on MySQL too, so the classification is unchanged by this leg: it added no fail-closed shape and moved none.
-
-SQL Server and CockroachDB are still **not** executed. Where a fail-closed reason names one of them, it is reasoned from that provider's documented `LIKE` and escaping behaviour rather than observed.
-
-> **Breaking change in this release.** `endsWith`/`contains`/`startsWith` with a needle containing a **backslash**, and hierarchy prefixes containing one, now throw instead of returning a filter. A backslash is the default `LIKE` escape character on PostgreSQL and MySQL and has no meaning at all on SQLite, so one needle meant two different things: `contains("a\\b")` matched `"ab"` on PostgreSQL — a row the PDP denies — and `endsWith("\\")` failed the query outright with `SQLSTATE 22025`. There is no needle spelling that is correct on every provider without an `ESCAPE` clause Prisma does not emit, so the shape is refused. If you match on backslashes, compare the whole value with `==` or move the predicate out of the policy.
-
-Projection relations now resolve the scalar lambda variable to the mapped column before
-building its predicate. Negated equality in `tagNames.exists(name, !(name == "public"))`
-includes null list elements, as CEL does; previously it produced an invalid filter or dropped
-those elements. Function mappers may call `queryPlanToPrisma` recursively without overwriting
-the outer call's model, null convention, or collection scope.
-
-### Mapping hazards
-
-The conformance contract above proves the *plan* side — given a policy shape, does the filter select the rows `check()` allows. The other half is the *mapping*: **the records the nested filter reads must be the records the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
-
-This adapter names a Prisma relation, so the mapping *looks* as though the ORM will apply the application's own narrowing to the nested `some`/`every`/`none`. **It will not.** Prisma has no schema-level filtered relation and no `@Where` equivalent; a `where` injected by a client extension or by `$extends`/middleware rewrites the top-level query and leaves nested relation filters untouched. In corpus terms this adapter is class 1 — a **bare-table subquery** — despite naming a relation.
-
-Where the application narrows its own reads of a related model, declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate) on the relation and the adapter reproduces it. Declaring nothing emits exactly the filter this adapter emitted before the field existed — it cannot detect the omission, so silence is not a warning.
+Prisma has no filtered relation and no `@Where` equivalent, and a `where` injected by a client
+extension or middleware (`$extends`/`$use`) rewrites only the top-level query. So although the
+mapping names a relation, this adapter is corpus class 1 — a **bare-table subquery**. Declare your
+own narrowing as `subqueryFilter`; the adapter cannot detect an omission.
 
 | Hazard | Position | Mechanism to check |
 |---|---|---|
 | Filtered association | **Caller-owned**, reproducible with `subqueryFilter` | A `$extends`/`$use` client extension or middleware that injects a `where` for the related model, or a repository helper that always appends one. None of them rewrite the nested filter this adapter returns |
-| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt: null`), a tenant column, a `published` flag — anything every application read of the related model filters on. Prisma has no default-scope construct, so the convention lives in your own query code and only you can see it |
+| Default scope on the target model | **Caller-owned**, reproducible with `subqueryFilter` | A soft-delete column (`deletedAt: null`), a tenant column, a `published` flag — anything every application read of the related model filters on. Prisma has no default-scope construct |
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one model holds several row kinds. Declare `{ type: "…" }` |
-| To-one relation used as a collection | **Rejected by Prisma** | A `type: "one"` mapping compiles to `is`, an argument Prisma only accepts on a relation its own schema declares to-one, and `@relation(references: …)` must already point at a unique field. Mapping a to-many relation as `type: "one"` is therefore a query-validation error from Prisma, not a silently wider subquery |
-| Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column foreign keys itself from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns, so there is no key for the adapter to get wrong |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** this previously held only for a chain of two or more relations. A negation over a SINGLE to-one hop — `!R.attr.parent.aBool` against a `type: "one"` mapping — returned every row whose relation was absent. It now emits `AND: [{ parent: { is: {} } }, { NOT: … }]` and returns fewer rows: an over-grant fix, and consumer-visible for any policy with that shape |
+| To-one relation used as a collection | **Rejected by Prisma** | `type: "one"` compiles to `is`, which Prisma accepts only on a relation its schema declares to-one. Mapping a to-many relation as `type: "one"` is a Prisma validation error, not a wider subquery |
+| Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column keys from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
-#### Declaring the application's own predicate
+### Declaring the application's own predicate
 
 ```ts
-const result = queryPlanToPrisma({
+queryPlanToPrisma({
   queryPlan,
   mapper: {
     "request.resource.attr.tags": {
@@ -398,473 +411,89 @@ const result = queryPlanToPrisma({
 });
 ```
 
-`subqueryFilter` is a Prisma where-input over the *related* model. It is ANDed into the nested filter, so it narrows the records the subquery *examines* rather than the records it requires, and it applies to every operator reached through the relation — `exists`, `all`, `except`, membership, `hasIntersection`, emptiness checks — and to the hop-existence guard, so an intermediate hop must exist *and* be visible.
-
-`all()` is the one operator that cannot simply absorb the predicate: `every: AND(declared, P)` would *require* every record to satisfy the declaration, which is the opposite of ignoring what the application hides. It is rewritten to `none: AND(declared, NOT P)` — no visible record violates `P`. Note the consequence, which is correct rather than surprising: if the declaration hides every record of a relation, `all()` over it is vacuously true, exactly as it is for the application, which sends `check()` an empty list for the same reason.
-
-## Requirements
-
-- Cerbos > v0.40
-- `@cerbos/http` or `@cerbos/grpc` client
-- Prisma >= v6.0 (v7 supported)
-
-## System Requirements
-
-- Node.js >= 22.0.0
-- Prisma CLI & Client >= 6.0 (v7 supported)
-- A database supported by Prisma (SQLite/PostgreSQL/MySQL/etc.) so the Prisma client can communicate with stored data
-
-## Installation
-
-```bash
-npm install @cerbos/orm-prisma @cerbos/core
-```
-
-`@cerbos/core` is a peer dependency: it carries the query plan types, and your application and
-this adapter have to share one copy of them. Installing it yourself is what keeps that true — with
-a second copy in the tree an operand built by your Cerbos client is not the same object the adapter
-inspects. npm 7+ installs missing peers automatically; pnpm and Yarn expect it to be declared.
-
-You also need a Cerbos client to obtain a query plan in the first place — [`@cerbos/grpc`](https://www.npmjs.com/package/@cerbos/grpc)
-or [`@cerbos/http`](https://www.npmjs.com/package/@cerbos/http). Install whichever your deployment
-uses; this adapter deliberately depends on neither, so it does not pull a gRPC stack into an
-application that talks HTTP.
-
-## Usage
-
-The package exports a function:
-
-```ts
-import { queryPlanToPrisma, PlanKind } from "@cerbos/orm-prisma";
-
-queryPlanToPrisma({
-  queryPlan,                // The Cerbos query plan response
-  mapper,                   // Map Cerbos field names to Prisma field names
-}): {
-  kind: PlanKind,
-  filters?: any             // Prisma where conditions
-}
-```
-
-### Basic Example
-
-1. Create a basic policy file in the `policies` directory:
-
-```yaml
-apiVersion: api.cerbos.dev/v1
-resourcePolicy:
-  resource: resource
-  version: default
-  rules:
-    - actions: ["view"]
-      effect: EFFECT_ALLOW
-      roles: ["USER"]
-      condition:
-        match:
-          expr: request.resource.attr.status == "active"
-```
-
-2. Start Cerbos PDP:
-
-```bash
-docker run --rm -i -p 3592:3592 -v $(pwd)/policies:/policies ghcr.io/cerbos/cerbos:latest
-```
-
-3. Create Prisma schema (`prisma/schema.prisma`):
-
-```prisma
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-model Resource {
-  id     Int     @id @default(autoincrement())
-  title  String
-  status String
-}
-```
-
-4. Implement the mapper
-
-```ts
-import { GRPC as Cerbos } from "@cerbos/grpc";
-import { PrismaClient } from "@prisma/client";
-import { queryPlanToPrisma, PlanKind } from "@cerbos/orm-prisma";
-
-const prisma = new PrismaClient();
-const cerbos = new Cerbos("localhost:3592", { tls: false });
-
-// Fetch query plan from Cerbos
-const queryPlan = await cerbos.planResources({
-  principal: { id: "user1", roles: ["USER"] },
-  resource: { kind: "resource" },
-  action: "view",
-});
-
-// Convert query plan to Prisma filters
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.title": { field: "title" },
-    "request.resource.attr.status": { field: "status" },
-  },
-});
-
-if (result.kind === PlanKind.ALWAYS_DENIED) {
-  return [];
-}
-
-// Use filters in Prisma query
-const records = await prisma.resource.findMany({
-  where: result.filters,
-});
-
-// Use filters in Prisma query with other conditions
-const records = await prisma.resource.findMany({
-  where: {
-    AND: [
-      {
-        status: "DRAFT"
-      },
-      result.filters,
-    ]
-});
-```
-
-### Collection Operators
-
-The adapter understands the full Cerbos collection operator set, including `except`. For example, the configuration below ensures a resource’s categories do not have any sub-category named `finance`:
-
-```ts
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.categories": {
-      relation: {
-        name: "categories",
-        type: "many",
-        fields: {
-          subCategories: {
-            relation: {
-              name: "subCategories",
-              type: "many",
-              fields: {
-                name: { field: "name" },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-});
-```
-
-`queryPlanToPrisma` emits the necessary nested `NOT` structure so Prisma receives a valid filter for the entire relation chain.
-
-### Field Name Mapping
-
-Fields can be mapped using either an object or a function:
-
-```ts
-// Object mapping
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.fieldName": { field: "prismaFieldName" },
-  },
-});
-
-// Function mapping
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: (fieldName) => ({
-    field: fieldName.replace("request.resource.attr.", ""),
-  }),
-});
-```
-
-### Relations Mapping
-
-Relations are mapped with their types and optional field configurations. Fields can be automatically inferred from the path if not explicitly mapped.
-
-The nested filters this produces read the related model unfiltered — Prisma has no schema-level filtered relation, and an injected `where` does not reach them. If your own reads of that model apply a predicate, declare it as `subqueryFilter` on the relation. See [Mapping hazards](#mapping-hazards).
-
-```ts
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    // Simple relation mapping - fields will be inferred
-    "request.resource.attr.owner": {
-      relation: {
-        name: "owner",
-        type: "one", // "one" for one-to-one, "many" for one-to-many
-      },
-    },
-
-    // Relation with explicit field mapping
-    "request.resource.attr.tags": {
-      relation: {
-        name: "tags",
-        type: "many",
-        field: "name", // Optional: specify field for direct comparisons
-      },
-    },
-
-    // Relation with nested field mappings
-    "request.resource.attr.nested": {
-      relation: {
-        name: "nested",
-        type: "one",
-        fields: {
-          // Optional: specify mappings for nested fields
-          aBool: { field: "aBool" },
-          aNumber: { field: "aNumber" },
-        },
-      },
-    },
-  },
-});
-```
-
-### Field Inference Example
-
-When using relations, fields are automatically inferred from the path unless explicitly mapped:
-
-```ts
-// These mappers are equivalent for handling: request.resource.attr.nested.aNumber
-{
-  "request.resource.attr.nested": {
-    relation: {
-      name: "nested",
-      type: "one",
-      fields: {
-        aNumber: { field: "aNumber" }
-      }
-    }
-  }
-}
-
-// Shorter version - aNumber will be inferred from the path
-{
-  "request.resource.attr.nested": {
-    relation: {
-      name: "nested",
-      type: "one"
-    }
-  }
-}
-```
-
-### Handling `in` Operators
-
-`queryPlanToPrisma` normalises Cerbos `in` expressions to match Prisma expectations:
-
-- Single values become equality comparisons (`{ field: "value" }`).
-- Arrays remain `{ field: { in: [...] } }`.
-- Relation-backed fields retain their relation structure while still applying the appropriate equality or `in` operator at the leaf.
-
-### Complex Example with Multiple Relations and Direct Fields
-
-```ts
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.status": { field: "status" },
-    "request.resource.attr.owner": {
-      relation: {
-        name: "owner",
-        type: "one",
-      },
-    },
-    "request.resource.attr.tags": {
-      relation: {
-        name: "tags",
-        type: "many",
-        field: "name",
-      },
-    },
-  },
-});
-
-// Results in Prisma filters like:
-const result = await primsa.resource.findMany({
-  where: {
-    AND: [
-      { status: { equals: "active" } },
-      { owner: { is: { id: { equals: "user1" } } } },
-      { tags: { some: { name: { in: ["tag1", "tag2"] } } } },
-    ];
-  }
-})
-```
-
-### Complex Examples
-
-#### Lambda Expression Examples
-
-```ts
-// Using exists with lambda expressions
-const result = queryPlanToPrisma({
-  queryPlan,
-  mapper: {
-    "request.resource.attr.comments": {
-      relation: {
-        name: "comments",
-        type: "many",
-        fields: {
-          author: {
-            relation: {
-              name: "author",
-              type: "one",
-            },
-          },
-          status: { field: "status" },
-        },
-      },
-    },
-  },
-});
-
-// This can handle complex exists queries like:
-// "Does the resource have any approved comments by specific users?"
-const result = await primsa.resource.findMany({
-  where: {
-    comments: {
-      some: {
-        AND: [
-          { status: { equals: "approved" } },
-          {
-            author: {
-              is: {
-                id: { in: ["user1", "user2"] },
-              },
-            },
-          },
-        ],
-      },
-    },
-  },
-});
-```
-
-## Development
-
-### Running Tests
-
-```bash
-npm test
-```
-
-This is the **translator unit test**: for every action in the shared conformance corpus, the `where` input this adapter emits. It reads its plans from `conformance/wire-fixtures/` — the golden `PlanResources` responses captured against the pinned Cerbos version — so it needs no Cerbos sidecar, no database, and no generated Prisma client, and it is engine-agnostic (there is no v6/v7 split). It also pins the shapes the adapter refuses, with the message `conformance/actions.json` records, and the parts of the mapper contract no policy can reach: the `nullAttributeRepresentation` boundary, `subqueryFilter`, and malformed input.
-
-Every wire fixture must be classified there exactly once, so adding a corpus action fails this suite until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
-
-Whether those filters return the rows the PDP allows is a separate question, answered by the adversarial suite — see [Conformance contract](#conformance-contract) above, which lists the six store/client combinations run in both evaluation modes. That suite does need a Cerbos sidecar, Docker for the PostgreSQL and MySQL legs, and it resets `prisma/dev-adversarial.db` with `prisma db push --force-reset`, so run it only against disposable development databases.
-
-## Types
-
-### Query Plan Response Types
-
-The adapter is fully typed and provides clear type definitions for all responses:
-
-```ts
-import { PlanKind, QueryPlanToPrismaResult } from "@cerbos/orm-prisma";
-
-// The result will be one of these types:
-type QueryPlanToPrismaResult =
-  | {
-      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
-    }
-  | {
-      kind: PlanKind.CONDITIONAL;
-      filters: Record<string, any>;
-    };
-
-// Example usage with type narrowing:
-const result = queryPlanToPrisma({ queryPlan });
-
-if (result.kind === PlanKind.CONDITIONAL) {
-  // TypeScript knows `filters` exists here
-  const records = await prisma.resource.findMany({
-    where: result.filters,
-  });
-} else if (result.kind === PlanKind.ALWAYS_ALLOWED) {
-  // No filters needed
-  const records = await prisma.resource.findMany();
-} else {
-  // Must be ALWAYS_DENIED
-  return [];
-}
-```
-
-### Mapper Types
-
-The mapper configuration is also fully typed:
-
-```ts
-type MapperConfig = {
-  field?: string;
-  valueType?: "dateTime" | "string" | "number" | "boolean";
-  nullable?: boolean;
-  relation?: {
-    name: string;
-    type: "one" | "many";
-    model?: string;
-    field?: string;
-    fields?: {
-      [key: string]: MapperConfig; // Recursive for nested fields
-    };
-  };
-};
-
-type Mapper = { [key: string]: MapperConfig } | ((key: string) => MapperConfig);
-```
-
-## Full Example
-
-A complete example application using this adapter can be found at [https://github.com/cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos)
-
-This repository also carries a runnable [`example/`](example/), which installs the adapter from the
-artifact `npm publish` would upload and exercises it against a live PDP over the shared
-[demo domain](../demo/README.md):
+`subqueryFilter` is a where-input over the related model, ANDed into the nested filter. It narrows
+the records the subquery *examines*, for every operator reached through the relation (`exists`,
+`all`, `except`, membership, `hasIntersection`, emptiness) and for the hop-existence guard.
+`all()` is rewritten from `every: AND(declared, P)` to `none: AND(declared, NOT P)`, so hidden
+records are ignored rather than required. If the declaration hides every record, `all()` is
+vacuously true, matching the empty list your application would send to `check()`.
+
+## Behaviour changes
+
+- **Breaking ([#495](https://github.com/cerbos/query-plan-adapters/issues/495)):** relation element
+  columns are now guarded as nullable unless declared `nullable: false` (previously opt-in with
+  `nullable: true`, which over-granted on NULL elements). Nullable columns left undeclared now return
+  fewer rows; required columns left undeclared need `nullable: false`. `nullable: true` mappings
+  are unchanged. Declarations now reach chained collections via nested `relation.fields`.
+- **Breaking ([#495](https://github.com/cerbos/query-plan-adapters/issues/495)):** an empty
+  `and`/`or` (previously `{ AND: [] }` / `{ OR: [] }`, or folded to an unconditional filter) and a
+  negated sub-condition that translates to `{}` now throw. Two constants related by a hierarchy
+  operator, or an `overlaps` whose segments are all `nullable: false`, produce `{}`.
+- **Breaking ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)):** non-scalar
+  comparison/membership literals and bare comparisons between mapped `DateTime` columns now throw
+  (use `timestamp()` on both operands). Negated ternary comparisons and unsolvable string
+  concatenation now keep CEL's error behaviour.
+- **Breaking:** `contains`/`startsWith`/`endsWith` needles and hierarchy prefixes containing a
+  backslash now throw. A backslash is a `LIKE` escape on PostgreSQL and MySQL and literal on SQLite,
+  so `contains("a\\b")` matched `"ab"` on PostgreSQL and `endsWith("\\")` failed with
+  `SQLSTATE 22025`.
+- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) now throws. It
+  was lowered as a `startsWith` that also matched the path itself (corpus action
+  `hier-empty-delim` over-granted).
+- **Breaking (Cerbos 0.55 compatibility):** ordered comparisons involving NaN evaluate to false, so
+  their negation can allow a row; Cerbos 0.54 denied it. Use Cerbos 0.55 when a policy can negate a
+  NaN comparison. Missing attributes and nulls are unchanged.
+- **[#375](https://github.com/cerbos/query-plan-adapters/issues/375):** a negation over a single
+  to-one hop (`!R.attr.parent.aBool` with `type: "one"`) no longer returns rows whose relation is
+  absent. It emits `AND: [{ parent: { is: {} } }, { NOT: … }]` and returns fewer rows (over-grant
+  fix).
+- Projection relations resolve the scalar lambda variable to the mapped column. Negated equality in
+  `tagNames.exists(name, !(name == "public"))` now includes null list elements, as CEL does.
+  Function mappers may call `queryPlanToPrisma` recursively without clobbering the outer call's
+  model, null convention or collection scope.
+
+## Example application
+
+[`example/`](example/) installs the packed adapter and runs it against a live PDP over the shared
+[demo domain](../demo/README.md), including pagination and composition with an application filter:
 
 ```bash
 # from the repository root
 demo/scripts/run-example.sh prisma
 ```
 
-Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
-map, `types`, the `files` allowlist, and the peer range — and covers usage shapes past a single
-flat query: pagination, and the adapter's filter composed with an application-owned filter.
+A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos).
+
+## Development
+
+| Command | What it runs | Needs |
+| --- | --- | --- |
+| `npm test` | Translator unit test | Nothing |
+| `npm run typecheck` | `tsc` against Prisma 7 and 6 | Nothing |
+| `npm run test:adversarial:v7` / `:v6` | Corpus on SQLite, Prisma 7 / 6 | Cerbos PDP (started by the script) |
+| `npm run test:adversarial:postgres:v7` / `:v6` | Corpus on PostgreSQL | Docker |
+| `npm run test:adversarial:mysql:v7` / `:v6` | Corpus on MySQL | Docker |
+
+`npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. Set
+`ADAPTER_TEST_STRICT_EVALUATION=true` to run the corpus with strict evaluation for both planning and
+the `check()` oracle (`false` is the default; other values are rejected). CI runs all six
+store/Prisma combinations in both modes. The SQLite legs reset `prisma/dev-adversarial.db` with
+`prisma db push --force-reset`, so point them only at disposable databases.
+
+`npm test` reads every plan from `conformance/wire-fixtures/`, so it needs no PDP, database or
+generated client, and has no v6/v7 split. It pins the `where` input for every corpus action
+(classified exactly once as a filter, a plan kind or a throw, with the message
+`conformance/actions.json` records), plus mapper contracts no policy can reach:
+`nullAttributeRepresentation`, `subqueryFilter` and malformed input. Its expectations are still
+inline rather than in a `golden/expectations.json`; see
+[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
+"Golden expectations" in [conformance/README.md](../conformance/README.md).
 
 ## Resources
 
-### Documentation
-
-- [Cerbos Documentation](https://docs.cerbos.dev)
-- [Prisma Documentation](https://www.prisma.io/docs)
-- [Query Plan API Reference](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)
-
-### Examples and Tutorials
-
-- [Express + Prisma + Cerbos Example](https://github.com/cerbos/express-prisma-cerbos)
-- [Cerbos Query Planning Guide](https://docs.cerbos.dev/cerbos/latest/policies/compile.html)
-- [Prisma Filtering Guide](https://www.prisma.io/docs/concepts/components/prisma-client/filtering-and-sorting)
-
-### Related Projects
-
-- [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript)
-
-### Community
-
-- [Cerbos Slack](https://community.cerbos.dev)
-- [Cerbos GitHub Discussions](https://github.com/cerbos/cerbos/discussions)
+- [Cerbos documentation](https://docs.cerbos.dev) and the [query plan API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)
+- [Prisma filtering guide](https://www.prisma.io/docs/concepts/components/prisma-client/filtering-and-sorting)
+- [Cerbos Slack](https://community.cerbos.dev) · [GitHub Discussions](https://github.com/cerbos/cerbos/discussions)
 
 ## License
 

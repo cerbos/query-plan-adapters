@@ -5,275 +5,48 @@
 >
 > - **Not released.** No version of this gem is on RubyGems. Version `0.1.0` is a placeholder.
 > - **No real-world use.** Nobody runs this in production. Every result below comes from the
->   test corpus in this repository, and a corpus is not a deployment: it cannot find the shapes
->   of policy, schema and mapping that real applications have and this one has never seen.
-> - **The interface can change without warning.** Method names, arguments and the shapes that
->   the adapter accepts or refuses can all still change, and there is no deprecation cycle
->   until a first release.
-> - **The mapping is yours to get right.** The conformance results below prove the
->   *translation*. They cannot prove that your attribute map points at the rows your
->   application put into the Cerbos attributes — see [Mapping hazards](#mapping-hazards). A
->   mistake there is an authorization bug that no test in this repository can see.
+>   test corpus in this repository, and a corpus cannot find the shapes of policy, schema and
+>   mapping that real applications have and this one has never seen.
+> - **The interface can change without warning.** Method names, arguments and the shapes the
+>   adapter accepts or refuses can all change, with no deprecation cycle before a first release.
+> - **The mapping is yours to get right.** The conformance results prove the *translation*. They
+>   cannot prove that your attribute map points at the rows your application put into the Cerbos
+>   attributes — see [Mapping hazards](#mapping-hazards). A mistake there is an authorization bug
+>   that no test in this repository can see.
 >
 > Read it, try it, and report what breaks. Do not put it in front of your data yet.
 
-An adapter that changes a [Cerbos](https://cerbos.dev) query plan (`PlanResources`) into an
-`ActiveRecord::Relation`. Thus the database applies the authorization rules from your Cerbos
-policies, and your application code does not.
+Translates a [Cerbos](https://cerbos.dev) query plan (`PlanResources`) into an
+`ActiveRecord::Relation`, so the database applies your Cerbos policies. The result is an ordinary
+relation: add scopes, ordering, pagination and eager loading as usual.
 
-The result is a usual relation. Thus you can add scopes, an order, pagination and eager loading
-to it:
+The adapter is **fail-closed**: a plan shape it cannot translate exactly raises a
+`Cerbos::ActiveRecord::Error`. It never emits an approximate filter, never weakens an operator
+(`exists_one` never becomes `exists`), and never lets an unescaped `LIKE` wildcard through.
 
-```ruby
-documents = Cerbos::ActiveRecord.query_plan_to_relation(
-  plan: plan, model: Document, attributes: MAPPING
-)
+## Install
 
-documents.where(archived: false).order(:created_at).limit(20)
-```
-
-## The adapter is fail-closed
-
-If the adapter cannot translate a shape of plan correctly, it **raises an error**. It does not
-give a filter that is only approximately correct. This is the primary guarantee of the adapter.
-An incorrect filter is an authorization bug, because it gives rows that the PDP denies. An
-error is a bug report.
-
-The adapter never changes an operator into a weaker operator. It never changes `exists_one`
-into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards stay.
-
-The issue #414 probes tighten translation: size and string operations reject numeric or
-boolean columns; raw temporal-column comparisons require `timestamp()` wrappers because
-SQL discards RFC-3339 spelling. Nested list membership is refused before SQL rendering.
-These are breaking changes for shapes that previously emitted an incorrect or invalid filter.
-Negated scalar-list macros, omitted scalar membership, hierarchy prefix shortcuts and NaN
-ordering now preserve CEL's null/error behavior through negation. Comparisons between known
-heterogeneous scalar types preserve CEL equality and missing values instead of allowing SQL
-to coerce a string such as `"0"` into a number; two declared explicit nulls still compare equal.
-
-### Conformance contract
-
-**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
-false, so its negation is true. This differs from Cerbos 0.54, where the comparison was
-an evaluation error and remained denied under negation. Missing attributes and other
-evaluation errors retain their existing behavior.
-
-
-The corpus is verified against Cerbos 0.55.0 with strict evaluation both disabled and enabled.
-
-The live conformance harness accepts `ADAPTER_TEST_STRICT_EVALUATION=false` (the default)
-or `true`, and rejects other values. CI runs both modes against the same corpus, comparing
-each plan with `check()` decisions from a PDP configured with that same mode.
-
-
-The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
-`../conformance/CERBOS_IMAGE_DIGEST`. For each action, the test makes a
-plan with a real PDP, translates the plan, runs the query against 27 difficult rows, and
-compares the ids in the result with the decisions of `checkResource` for each row. The PDP
-gives the results for both sides. No person writes the expected results. The Spring Data
-adapter gives the reference behaviour.
-
-A second suite, `spec/translator_spec.rb`, replays the same corpus OFFLINE from
-`../conformance/wire-fixtures/` and pins the SQL this adapter emits for each action in
-[`golden/expectations.json`](golden/expectations.json). It needs no PDP and no database
-server. Rewrite it with `./scripts/golden-update.sh` and review the diff.
-
-| Classification | Coverage |
-| --- | --- |
-| Tested against the oracle | 236 corpus actions |
-| Fail-closed | 72 actions: 61 that this adapter cannot show, and the 11 that the reference adapter does not support either. Each one must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
-| Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
-| Known difference in the planner | The Cerbos planner changes `has()` on a missing attribute into `ALWAYS_ALLOWED`, but `checkResource` denies the rows in which the attribute is missing. Until the planner has a correction, use `R.attr.x != null` and not `has(R.attr.x)` for the attributes in your database |
-
-The fail-closed set is small, because SQL can show most of the corpus directly. The adapter
-makes `LIKE` with an ESCAPE clause. It makes correlated `COUNT` subqueries for the relation
-counts and for `exists_one`. The database calculates the arithmetic on columns and the lengths
-of the strings. `string()` over a boolean column becomes a `CASE` that spells `'true'` and
-`'false'`, because `CAST(col AS TEXT)` gives `"1"` on SQLite and MySQL. A comparison between two
-models is a usual correlated predicate. These shapes stay:
-
-| Action | Why the adapter raises an error |
-| --- | --- |
-| `ts-window`, `ts-vf` | The planner makes a `now()` literal with nanoseconds. ActiveRecord puts a `Time` into SQL with microseconds. Thus the query would compare with a different instant from the instant in the policy. |
-| `cr-div-other-column` | A division whose denominator is a second column. IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`, because both satisfy `= 0` and no portable function reads the sign bit, so the sign of the Infinity is unknown. A division of a value by ITSELF stays safe — the denominator can only be zero when the numerator is zero too, and that gives NaN, which has no sign — and so does a constant denominator, whose sign the plan carries. Divide by a constant to keep the shape. |
-| `cr-div-then-add`, `cr-div-then-add-ne` | More arithmetic on the result of a division that can give a value which is not finite. The adapter keeps such a division as branches until a comparison resolves them, because SQL has no NaN and no signed Infinity to bind. An addition on those branches has no SQL form: a NULL would go through the sum where CEL takes NaN through it. |
-| `p-matches` | `matches()` uses RE2. No SQL dialect gives the behaviour of RE2, and `LIKE` cannot show a regular expression. |
-| `p-index` | `tags[0]` selects an element of a list by its position. A relation has no order of its own, so `index` has no case in the operator dispatch and the walk falls through to the generic unsupported-operator refusal. A caller whose table has a deterministic ordering column can supply an operator override. |
-| `p-timestamp` | `timestamp()` on a column that holds a timestamp in text. A comparison between that column and a `Time` compares two different text formats. Thus the order of the results comes from the text and not from the instants. Map the attribute to a `datetime` column. |
-| `cast-int-string`, `cast-double-string` | `int()` and `double()` over a text column. CEL reads the WHOLE string or makes an error, and Cerbos then denies the row, but SQL reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. Compare the column directly, or give an operator override. |
-| `cast-int-double` | `int()` over a double column. CEL removes the fraction toward zero. PostgreSQL and MySQL round a `CAST` to the nearest whole number, so the two disagree for every value with a fraction of one half or more. |
-| `filter-as-condition`, `map-as-condition` | A `filter()` or a `map()` that a policy uses as the whole condition. Those operations give a list and not a boolean, and only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning. |
-| `filter-as-conjunct` | The same list-where-a-boolean-belongs, one level BELOW the root: `filter(...) && R.attr.aBool`. The other conjunct is one the adapter can certainly express, so dropping the one it cannot would emit a filter that returns rows the PDP denies for every seed. |
-| `index-scalar-list`, `index-number-list`, `index-number-list-not-eq`, `index-bool-list`, `index-bool-list-not-eq`, `index-bool-list-vs-number`, `index-number-list-vs-bool` | `tagNames[0]`, `aNumberList[0]` and `aBoolList[0]`, positional access into a list of strings, numbers or booleans. The same missing row order as `p-index`, reached through a relation mapped by member field rather than through a principal attribute. The last two compare a boolean element with `1` and a number element with `true`, which CEL answers false for every row. SQLite holds a boolean as the integer 1, so a positional lowering that compared the stored element with the literal would return rows the PDP denies. |
-| `map-eq-list` | A `map()` projection compared with `==` to a literal list. The projection is held until `size()` or `hasIntersection()` gives it a scalar meaning; comparing the ordered projection itself gives it none, and a correlated subquery has no ordering to compare element-wise against. |
-| `hier-empty-delim` | A hierarchy with an empty delimiter. Cerbos splits the path on `""` into one segment per character, so `descendentOf` becomes a test of a string prefix. The adapter makes `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself, and a path is never its own descendant. The adapter refuses the delimiter before it makes the `LIKE`. |
-
-The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any
-operator that carries the wrong number of operands. The planner does not make those shapes, so
-the corpus cannot hold them: it is built from real plans. But this adapter accepts a plan from
-any source, and a plan that lost or gained an operand must not become a wider filter.
-
-### Mapping hazards
-
-The table above is about the **plan**: given a shape of policy, does the filter give the rows
-that `checkResource` allows. The other half of the contract is the **mapping**:
-
-> The rows that a subquery of the adapter sees must be the same rows that your application put
-> into the resource attributes.
-
-When the two differ, the filter gives rows that the PDP denies and no action in the corpus can
-see it, because the oracle reads the attributes while the adapter reads the tables. Each hazard
-below was a real over-grant, found while building this adapter
-([#314](https://github.com/cerbos/query-plan-adapters/issues/314)). This is the position of this
-adapter on each one:
-
-| Hazard | Position | Mechanism to check |
-| --- | --- | --- |
-| A filtered association | **Rejected** | `has_many …, -> { where(…) }`. The adapter cannot put the conditions of the scope onto the alias that it makes for the correlated subquery, so it refuses the mapping. A `through:` chain is opened into its parts first, so a scope on the outer association is also found. |
-| A default scope on the target model | **Rejected** | `default_scope` on the model that the association points at. Every read of the application applies it and the subquery would not. |
-| Subtype discrimination | **Rejected** | Single-table inheritance. An association that points at a subclass also filters on the inheritance column. The adapter does not add that condition itself, because the set of subclasses depends on which of them Ruby has loaded, and a short condition would give the wrong answer in the other direction. Map the attribute onto the base class, or give an operator override. |
-| A to-one relation used as a collection | **Rejected** | `has_one`. Nothing makes the database keep one row, so the application reads one and the subquery would examine all of them. Map a to-one association as a field path with dots. |
-| A composite association key | **Rejected** | ActiveRecord gives an ARRAY for the keys of such an association. The adapter builds one equality for the correlated subquery and refuses the mapping instead of joining on the first column only. |
-| An absent to-one parent | **Proved by the corpus** | Write a path such as `R.attr.parent.children` as a NESTED `relation` mapping and not as one flat `has_many :through`. The nesting is what tells the adapter which hops are the parent, and the adapter then requires them to exist. See [A chain through a parent](#a-chain-through-a-parent). The `w1-*-chain` actions hold it under every polarity. |
-
-Five of the six are rejected rather than reproduced, because this adapter builds the subquery
-from the association itself and can therefore see the hazard in the reflection. "The caller owns
-it" is only honest for a hazard that the adapter cannot detect, and none of these is one.
-
-### The NULL convention of the caller
-
-There are two ways to send a NULL column to Cerbos, and the query plan looks the same for both.
-You must tell the adapter which one your application uses.
-
-| `null_attribute_representation:` | What your application sends for a NULL column | `R.attr.x == null` |
-| --- | --- | --- |
-| `:explicit` (the default) | An attribute whose value is null | Cerbos gives true, and `IS NULL` agrees |
-| `:omitted` | No attribute at all | CEL raises a missing-attribute error, and Cerbos denies the row |
-
-With `:omitted`, a filter that selects NULL would give exactly the rows that the PDP denies.
-The adapter cannot read the convention from the plan, because the planner makes the same
-`eq(attr, null)` node for both. Thus the adapter refuses each null constant in the plan under
-`:omitted`:
+The gem is not on RubyGems yet. Install it from this repository:
 
 ```ruby
-Cerbos::ActiveRecord.query_plan_to_relation(
-  plan: plan, model: Document, attributes: MAPPING,
-  null_attribute_representation: :omitted
-)
-# => Cerbos::ActiveRecord::UnsupportedOperatorError
+# Gemfile
+gem "cerbos" # the official Cerbos Ruby SDK
+gem "cerbos-activerecord",
+  git: "https://github.com/cerbos/query-plan-adapters.git",
+  glob: "activerecord/*.gemspec"
 ```
 
-The refusal is wider than the shapes that give too many rows. `R.attr.x != null` is correct by
-itself, but this adapter puts a negation around a predicate and does not push it into the leaf.
-Thus a leaf cannot know that a `not` above it will make `IS NOT NULL` into a predicate that
-selects NULL again. To refuse each null constant is correct for all the shapes. Refer to
-[cerbos/query-plan-adapters#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+Requirements:
 
-#### Declare the convention on the attribute
+- Ruby 3.2+
+- ActiveRecord `>= 7.1, < 9.0` (CI tests 7.1 and 8.0)
+- Cerbos PDP after v0.40
+- The [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby) (`cerbos` gem) is the expected
+  client but not a runtime dependency, because it pulls in a native `grpc` build. `plan:` also
+  accepts a parsed `PlanResources` JSON Hash (from the REST API or a cache), or any object with
+  `kind` and `condition`.
 
-`null_attribute_representation:` is the fallback for the whole call. Declare the convention on
-each attribute that can be NULL, with `null_representation:` on the mapping:
-
-```ruby
-MAPPING = {
-  # This column sends an attribute whose value is null.
-  "request.resource.attr.owner" => Cerbos::ActiveRecord.field(
-    "owner", null_representation: :explicit
-  ),
-  # This column sends no attribute at all.
-  "request.resource.attr.tag" => Cerbos::ActiveRecord.field(
-    "tag", null_representation: :omitted
-  ),
-  # This column is NOT NULL, so it declares nothing and keeps the value of the call.
-  "request.resource.attr.title" => Cerbos::ActiveRecord.field("title")
-}
-```
-
-One setting for the whole call cannot be correct, because one policy suite can correctly use
-both conventions. The shared corpus does exactly that: `owner` sends an explicit null while
-`aOptionalString` sends no attribute, and the two are the same column.
-
-A declaration says two things at the same time: that the column can be NULL, **and** how that
-NULL goes to `checkResource`. A mapping that declares nothing keeps the behaviour it always
-had, so no filter of an application changes without a change to its mapping.
-
-**What the declaration changes.** Only `eq`, `ne` and `in`. Those are the operators that CEL
-calculates to a definite boolean over a null value, and thus the only ones whose SQL must also
-be definite. With `:explicit`, the adapter writes them out:
-
-```
-eq(col, c)     ->  col IS NOT NULL AND col = c
-ne(col, c)     ->  NOT (col IS NOT NULL AND col = c)
-in(col, [cs])  ->  col IS NOT NULL AND col IN (cs)
-eq(a, b)       ->  (a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)
-```
-
-Without the declaration, `NULL != 'x'` is UNKNOWN in SQL, an UNKNOWN keeps the row out under
-**both** polarities, and the filter is thus narrower than the decision. The direction is safe,
-but the two do not agree, and to agree is the property that the corpus holds.
-
-`lt`, `le`, `gt`, `ge` and the string operators do not change. A null receiver raises a
-no-overload error in CEL, which denies under both polarities — the same result as UNKNOWN. To
-make them definite would break them.
-
-**A comparison between two columns must not mix the conventions.** The declared side needs a
-definite answer for its NULL. The other side needs UNKNOWN for its NULL, because that is a
-missing attribute. No one predicate is both, so the adapter refuses the comparison:
-
-```ruby
-# owner declares :explicit, scope declares nothing
-# R.attr.owner != R.attr.scope
-# => Cerbos::ActiveRecord::UnsupportedOperatorError
-```
-
-Declare the convention on both attributes, or on neither. Refer to
-[cerbos/query-plan-adapters#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
-[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
-
-### The collation is part of the contract
-
-CEL compares strings with attention to the case of the letters. The dialect controls the
-collation of `LIKE`. Thus a collation without attention to the case makes `contains`,
-`startsWith` and `endsWith` select more rows than the policy permits. On SQLite, set
-`PRAGMA case_sensitive_like = ON`. On MySQL, use `utf8mb4_0900_bin` (MySQL 8.0.17+) for the
-columns in your policies. A `_cs` collation is not enough: `utf8mb4_0900_as_cs` ignores a soft
-hyphen (U+00AD), so `'o\u00ADne' = 'one'` is TRUE under it, and `utf8mb4_bin` is PAD SPACE, so
-`'a' = 'a '` is TRUE under it ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `string()` over a boolean column compares two literals and no
-column, so MySQL uses the collation of the connection for it. Make that collation
-byte-exact too: with the default `utf8mb4_0900_ai_ci`, `string(R.attr.flag) == "TRUE"`
-selects the rows where the flag is true, and CEL selects none.
-
-The suites here use SQLite only. This adapter has no test coverage for the other dialects.
-
-## Requirements
-
-- Ruby 3.2 or a later version
-- ActiveRecord 7.0 or a later version, but before 9.0 (CI tests 7.1 and 8.0)
-- Cerbos after v0.40
-- The official [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby)
-  (the [`cerbos`](https://rubygems.org/gems/cerbos) gem)
-
-### Why the SDK is not a hard dependency
-
-This gem has no runtime dependency on `cerbos`. That SDK uses gRPC. Thus a dependency on it
-would install a native `grpc` build in the applications that speak to the PDP with REST.
-
-But the SDK is the expected client, and the adapter is built around its shapes. The `plan:`
-parameter accepts a `Cerbos::Output::PlanResources` directly. The two test suites send real
-responses from `Cerbos::Client#plan_resources` through the adapter. The tests in
-`spec/translator_spec.rb` also use the output types of the SDK by name.
-
-If you get your plans in a different way, from the REST interface or from a cache, give the
-JSON after a parse operation. You can also give an object that has `kind` and `condition`. The
-result of the translation is the same.
-
-## Installation
-
-```bash
-bundle add cerbos-activerecord cerbos
-```
-
-## Usage
+## Quick start
 
 ```ruby
 require "cerbos"
@@ -292,69 +65,66 @@ MAPPING = {
   "request.resource.attr.status" => Cerbos::ActiveRecord.field("status"),
   "request.resource.attr.department" => Cerbos::ActiveRecord.field("owner.department"),
   "request.resource.attr.tags" => Cerbos::ActiveRecord.relation(
-    :tags,
-    member_field: "name",
-    fields: {"name" => Cerbos::ActiveRecord.field("name")}
+    :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
   )
 }
 
-documents = Cerbos::ActiveRecord.query_plan_to_relation(
-  plan: plan, model: Document, attributes: MAPPING
-)
+begin
+  documents = Cerbos::ActiveRecord.query_plan_to_relation(
+    plan: plan, model: Document, attributes: MAPPING
+  )
+rescue Cerbos::ActiveRecord::Error => e
+  # The plan has a shape the adapter cannot translate exactly. Deny, and report it.
+  warn "Cerbos plan not translatable: #{e.message}"
+  documents = Document.none
+end
+
+documents.where(archived: false).order(:created_at).limit(20)
 ```
 
-For a runnable application that uses the published gem, refer to [`example/`](example/).
+You do not need to branch on the plan kind — every kind becomes a relation:
 
-The three kinds of plan become relations directly:
-
-| Kind of plan | Result |
+| Plan kind | Result |
 | --- | --- |
 | `KIND_ALWAYS_ALLOWED` | `model.all` |
 | `KIND_ALWAYS_DENIED` | `model.none` |
-| `KIND_CONDITIONAL` | `model.where(<the condition after the translation>)` |
+| `KIND_CONDITIONAL` | `model.where(<translated condition>)` |
 
-### The attribute map
+If you want to skip the database on a denial, check `plan.kind == :KIND_ALWAYS_DENIED` (the SDK
+returns a symbol) before translating.
 
-The map must contain each plan variable. If it does not, the translation raises an error. The
-adapter does not select a column from the name of an attribute. If it did that, an
-authorization filter could quietly use the wrong data.
+Errors, all subclasses of `Cerbos::ActiveRecord::Error`:
 
-#### `field` for scalar columns
+| Error | Raised when |
+| --- | --- |
+| `UnmappedAttributeError` | A plan variable is missing from the map, or used where its mapping cannot go (e.g. a relation where a column is needed) |
+| `UnsupportedOperatorError` | An operator or operand shape has no exact SQL translation |
+| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, an empty hierarchy delimiter) |
+| `UnsupportedAssociationError` | An attribute maps to an association the adapter cannot turn into a correlated subquery |
 
-```ruby
-Cerbos::ActiveRecord.field("status")            # a column on the model
-Cerbos::ActiveRecord.field("owner.department")  # through a belongs_to or a has_one
-```
+## Mapping attributes
 
-A path with dots goes through to-one associations. The adapter makes a **correlated scalar
-subquery** for it. Thus the path cannot increase the number of rows in the result, but a join
-can do that. If a path with dots contains a collection association, the adapter raises an
-error. A scalar comparison with "one of the elements" is not the request of the policy.
+Every plan variable must be in the map, or translation raises. The adapter never guesses a column
+from an attribute name. The key is the plan variable; the value describes where it lives on your
+model, so policy names and column names are independent.
 
-More than one hop is permitted, and each hop must be to-one:
-
-```ruby
-# R.attr.parent.inner.aString
-"request.resource.attr.parent.inner.aString" =>
-  Cerbos::ActiveRecord.field("parent.inner.a_string")
-```
-
-The KEY is the plan variable, and the PATH is the association chain on your model. The two are
-independent, so the names in your policy do not have to be the names of your columns.
-
-A hop that does not exist gives NULL, and the comparison is then UNKNOWN and the row stays out
-of the result. This agrees with Cerbos: your application sends no `parent` attribute for that
-row, so CEL raises a missing-path error and `checkResource` denies it. The corpus holds this
-under one hop and two (`rel-*-hop`).
-
-The primary key is its own plan variable and not an attribute, so map it by name if a policy
-reads `R.id`:
+### `field` for scalar columns
 
 ```ruby
-"request.resource.id" => Cerbos::ActiveRecord.field("id")
+Cerbos::ActiveRecord.field("status")                 # a column on the model
+Cerbos::ActiveRecord.field("owner.department")       # through belongs_to / has_one
+Cerbos::ActiveRecord.field("parent.inner.a_string")  # several hops, each to-one
 ```
 
-#### `relation` for collections
+- A dotted path becomes a correlated scalar subquery, so it cannot multiply rows. A collection
+  association anywhere in the path raises.
+- A missing hop gives NULL, so the row is excluded — matching Cerbos, which denies on the missing
+  path.
+- `R.id` is its own plan variable. Map it if a policy reads it:
+  `"request.resource.id" => Cerbos::ActiveRecord.field("id")`.
+- `null_representation:` — see [Declare the convention on the attribute](#declare-the-convention-on-the-attribute).
+
+### `relation` for collections
 
 ```ruby
 Cerbos::ActiveRecord.relation(
@@ -365,11 +135,10 @@ Cerbos::ActiveRecord.relation(
 )
 ```
 
-- `member_field` replaces the element when the policy uses the collection as a list of simple
-  values. Thus `"urgent" in R.attr.tags` compares with `tag.name`.
-- `fields` maps the member names in the bodies of the lambdas. Thus
-  `R.attr.tags.exists(t, t.name == "x")` can resolve `t.name`. An entry in `fields` can be a
-  relation. This is how the adapter resolves a chain with more than one hop:
+- `member_field` is the column compared when the policy treats the collection as a list of
+  values: `"urgent" in R.attr.tags` compares `tag.name`.
+- `fields` maps member names used inside macro bodies: `R.attr.tags.exists(t, t.name == "x")`.
+  An entry can itself be a `relation`, for multi-hop chains:
 
 ```ruby
 "request.resource.attr.categories" => Cerbos::ActiveRecord.relation(:categories, fields: {
@@ -379,11 +148,14 @@ Cerbos::ActiveRecord.relation(
 })
 ```
 
-#### A chain through a parent
+A `has_many :through` is allowed and is expanded into joins inside **one** correlated subquery, so
+`size(R.attr.categories.subCategories)` counts the final rows per resource. Each subquery gets
+fresh aliases, so nested macros over the same association correlate correctly.
 
-The same nesting also carries a path that the policy writes with dots, such as
-`R.attr.mainCategory.subCategories`. Map the START of the path, and put each step after it in
-`fields`:
+### A chain through a parent
+
+For a dotted policy path such as `R.attr.mainCategory.subCategories`, map the **start** of the
+path and nest each later step in `fields`:
 
 ```ruby
 "request.resource.attr.mainCategory" => Cerbos::ActiveRecord.relation(:categories, fields: {
@@ -394,69 +166,39 @@ The same nesting also carries a path that the policy writes with dots, such as
 })
 ```
 
-**Write the path this way and do not map the full name onto one flat `has_many :through`.**
-Both give the same joins, but only the nested form says which hops are the parent, and the
-adapter needs that to keep an authorization guarantee.
+**Do not map the full path onto one flat `has_many :through`.** The joins are the same, but only
+the nested form tells the adapter which hops are to-one parents. When a parent is absent, Cerbos
+denies the row (missing path), while a subquery sees "no children" — so `all(...)`,
+`!exists(...)` and `size(...) == 0` would read TRUE and return denied rows. With the nested form
+the adapter requires the parent hops to exist. A directly mapped relation keeps the normal
+empty-collection meaning (`!R.attr.tags.exists(...)` over zero tags is TRUE).
 
-CEL cannot read a field from a list, so every step before the last one is a to-ONE parent. When
-that parent is absent your application sends no attribute at all, CEL makes a missing-path
-error, and Cerbos denies the row. A subquery from the resource row cannot see the difference,
-because an absent parent and a parent with no children both give no rows. Then
-`all(...)` reads TRUE, `!exists(...)` reads TRUE, `size(...) == 0` reads TRUE, and each one of
-those gives back the rows that the PDP denies.
+### Principal-attribute collections need no mapping
 
-With the nested form the adapter requires the parent hops to exist, so a row without a parent
-stays out of the result under **both** polarities. A relation that you map directly keeps the
-usual meaning of an empty collection: `!R.attr.tags.exists(...)` over zero tags is still TRUE.
-That is why the adapter cannot decide this for you — a `has_many :through` is also how a plain
-join table is written, and Cerbos never sees such a table.
+When a macro iterates a principal attribute, the plan carries the values, so
+`P.attr.teams.exists(t, R.attr.owner == t)` becomes `owner = 'team-a' OR owner = 'team-b' ...`
+(AND for `all`).
 
-#### A macro over a principal attribute
+### Associations the adapter refuses
 
-When a collection is a principal attribute, the planner knows its values and sends the list
-itself. The adapter evaluates the body of the lambda one time for each element and joins the
-results with OR for `exists`, or with AND for `all`. SQL gives the correct answer without more
-work, because OR and AND obey the same three-valued logic as the CEL quantifiers.
+These raise `UnsupportedAssociationError`, because the association returns different rows from
+the ones a subquery would read:
 
-```cel
-P.attr.teams.exists(t, R.attr.owner == t)
-```
-
-becomes `owner = 'team-a' OR owner = 'team-b' OR ...`. You need no mapping for such a
-collection, because the values are in the plan.
-
-A `has_many :through` association is permitted. The adapter opens it into joins **in one
-correlated subquery**. It does not make an `EXISTS` inside an `EXISTS`. This difference is
-important for the operators that count. `size(R.attr.categories.subCategories)` must count the
-last rows for each resource and not for each category.
-
-Each subquery gets new table aliases. Thus a macro on an association inside another macro on
-the same association correlates to the outer row.
-
-The adapter refuses an association whose rows it cannot reproduce exactly. In each case the
-association gives a different set of rows from the table itself. Thus the attributes that
-Cerbos evaluates and the rows that a subquery finds would not agree, and the filter would
-select a row that the decision did not.
-
-| Shape | Why the adapter refuses it |
+| Shape | Why |
 | --- | --- |
-| A polymorphic `belongs_to` | The target table is not known until the query reads a row |
-| An association with a scope, including the outer association of a `through` chain | The adapter cannot put the conditions of that scope onto the alias that it makes |
-| A target model with a `default_scope` | The rows that the scope removes are absent from the attributes that Cerbos evaluates |
-| A `has_one` used as a collection | ActiveRecord does not make the database enforce that a `has_one` has only one row, so the association gives one row while a subquery examines every row. Map a to-one association as a field path with dots. |
-| An association that points at a subclass in a single-table hierarchy | Such an association also filters on the inheritance column. The adapter does not add that condition, because the set of subclasses depends on which of them Ruby has loaded. An association that points at the base class needs no condition and is permitted. |
-| An association that joins on more than one column | The adapter builds one equality for the correlated subquery and cannot express a composite key |
+| Polymorphic `belongs_to` | The target table is unknown until a row is read |
+| Association with a scope (including the outer association of a `through:` chain) | The scope's conditions cannot be applied to the subquery's alias |
+| Target model with a `default_scope` | Rows the scope hides are absent from the attributes Cerbos evaluates |
+| `has_one` used as a collection | Nothing enforces one row; map it as a dotted `field` path instead |
+| Association to an STI subclass | It filters on the inheritance column, whose value set depends on which subclasses Ruby has loaded. Point at the base class instead |
+| Composite-key association | The correlated subquery joins on one column only |
 
-Map the attribute to a concrete association without a scope, or give an operator override.
+Map the attribute to a plain, unscoped association, or use an operator override.
 
-The corpus cannot hold these either. It proves the *plan* side — that a filter returns the rows
-`check()` allows — and a mapping is not a policy condition. But the invariant is the same one:
-the rows that the subquery of the adapter sees must equal the rows that the application put
-into the attributes it sent to Cerbos.
-[#314](https://github.com/cerbos/query-plan-adapters/issues/314) proposes a shared way to cover
-them.
+## Operator overrides
 
-#### `operator_overrides` for translations that are specific to your schema
+For a shape your database can express but portable SQL cannot (a dialect regex, JSON containment,
+a full-text index), pass a callable. It receives the resolved operands and returns an Arel node:
 
 ```ruby
 Cerbos::ActiveRecord.query_plan_to_relation(
@@ -467,70 +209,206 @@ Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
-The adapter gives the operands to an override after it resolves them, and the override gives an
-Arel node. Use an override when your database can show a shape correctly but portable SQL
-cannot. A regular expression of a dialect, a JSON containment operator and a full-text index
-are three examples.
+Structural operators cannot be overridden: `and`, `or`, `not`, `if`, `lambda` and the collection
+macros.
 
-You cannot override the structural operators: `and`, `or`, `not`, `if`, `lambda` and the
-collection macros. The adapter does not resolve their operands before they run, and this is
-necessary for their behaviour.
+## The NULL convention of the caller
+
+Your application can send a NULL column to Cerbos in two ways, and the plan looks identical for
+both, so you must tell the adapter which one you use:
+
+| Convention | What you send for a NULL column | `R.attr.x == null` |
+| --- | --- | --- |
+| `:explicit` (default) | An attribute whose value is null | true in Cerbos; `IS NULL` agrees |
+| `:omitted` | No attribute | Missing-attribute error; Cerbos denies the row |
+
+Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` the
+adapter refuses every null constant in the plan (including `!= null`, because a `not` above it
+could flip it back into a NULL-selecting predicate):
+
+```ruby
+Cerbos::ActiveRecord.query_plan_to_relation(
+  plan: plan, model: Document, attributes: MAPPING,
+  null_attribute_representation: :omitted
+)
+# => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan contains a null constant
+```
+
+See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
+### Declare the convention on the attribute
+
+One policy suite can use both conventions, so declare it per nullable attribute:
+
+```ruby
+MAPPING = {
+  "request.resource.attr.owner" => Cerbos::ActiveRecord.field("owner", null_representation: :explicit),
+  "request.resource.attr.tag" => Cerbos::ActiveRecord.field("tag", null_representation: :omitted),
+  "request.resource.attr.title" => Cerbos::ActiveRecord.field("title") # NOT NULL: inherits the call's value
+}
+```
+
+A declaration affects only `eq`, `ne` and `in`, which CEL evaluates to a definite boolean over
+null. With `:explicit` they are written so they are never SQL UNKNOWN:
+
+```
+eq(col, c)     ->  col IS NOT NULL AND col = c
+ne(col, c)     ->  NOT (col IS NOT NULL AND col = c)
+in(col, [cs])  ->  col IS NOT NULL AND col IN (cs)
+eq(a, b)       ->  (a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)
+```
+
+Undeclared, `NULL != 'x'` is UNKNOWN and excludes the row under both polarities — narrower than
+the decision, so safe but not in agreement. Ordering and string operators are unchanged: CEL
+raises no-overload on a null receiver, which denies exactly like UNKNOWN.
+
+**Do not mix conventions in a column-to-column comparison.** If one side declares `:explicit` and
+the other declares nothing, the adapter raises `UnsupportedOperatorError`. Declare both or
+neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
+## The collation is part of the contract
+
+CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
+`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows.
+
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`.
+- **MySQL:** use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every column your policies read. `_cs` is
+  not enough — `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD
+  SPACE (`'a' = 'a '` is TRUE) ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  Make the **connection** collation byte-exact too: `string()` over a boolean column compares two
+  literals, so it uses the connection collation, and under the default `utf8mb4_0900_ai_ci`
+  `string(R.attr.flag) == "TRUE"` matches rows CEL does not.
+
+The suites here run on SQLite only; other dialects have no test coverage.
 
 ## How the adapter keeps the three-valued logic
 
-CEL denies a resource if the evaluation of its condition makes an error. A missing attribute is
-one cause. An element without a field is another cause. The UNKNOWN value of SQL has the same
-behaviour: a predicate does not select it, and the negation of that predicate does not select
-it. Thus `NOT (NULL = x)` stays UNKNOWN and does not become true.
+CEL denies a row whose condition errors (missing attribute, missing field). SQL UNKNOWN behaves
+the same — neither a predicate nor its negation selects it — so the translation preserves UNKNOWN
+instead of collapsing it to a boolean. You will see this in the SQL:
 
-The translation keeps UNKNOWN and does not change it into a boolean. You can see two results of
-this rule in the SQL:
+- A ternary becomes a `CASE` with **no `ELSE`**, so an UNKNOWN condition yields NULL even under a
+  `NOT`.
+- Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
+  element is true, `all` if any element is false, `exists_one` never does.
+- `string()` over a boolean column becomes a `CASE` starting `WHEN col IS NULL THEN NULL`, then
+  spells `'true'`/`'false'` (a plain `CAST` gives `"1"` on SQLite and MySQL).
 
-- **A ternary becomes a `CASE` without an `ELSE` clause.** If the condition is UNKNOWN, the
-  `CASE` gives NULL. Thus the row stays out of the result, and it also stays out when a NOT
-  operator is around the `CASE`. An `ELSE` clause would put those rows into the else branch.
-- **A collection macro becomes a `CASE` expression and not only an `EXISTS` subquery.** The
-  three CEL quantifiers have different behaviour for an element whose body made an error.
-  `exists` ignores the errors if one element gives true. `all` ignores them if one element
-  gives false. `exists_one` never ignores them. Thus each quantifier gets its own guard for the
-  error.
-- **`string()` over a boolean column becomes a `CASE` whose first arm is `IS NULL THEN NULL`.**
-  CEL has no `string()` for a missing or null value, so it makes an error and denies the row.
-  Without that arm, `WHEN col` is UNKNOWN for a NULL column, the `CASE` goes to its `ELSE`, and
-  the result is `'false'`. Then `string(R.attr.x) != "true"` would select a row that the PDP
-  denies.
+## Supported operators
+
+Most of the corpus translates directly: `LIKE … ESCAPE` for string operators, correlated `COUNT`
+subqueries for relation sizes and `exists_one`, arithmetic and string length computed in the
+database, and plain correlated predicates for model-to-model comparisons. What raises:
+
+| Action | Why the adapter raises |
+| --- | --- |
+| `ts-window`, `ts-vf` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
+| `cr-div-other-column` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
+| `cr-div-then-add`, `cr-div-then-add-ne` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
+| `p-matches` | `matches()` is RE2; no SQL dialect matches it. Use an operator override. |
+| `p-index` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
+| `p-timestamp` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
+| `cast-int-string`, `cast-double-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
+| `cast-int-double` | CEL truncates toward zero; PostgreSQL and MySQL round. |
+| `filter-as-condition`, `map-as-condition` | `filter()`/`map()` as the whole condition is a list, not a boolean. Only `size(filter(...))` and `hasIntersection(map(...), [...])` are boolean. |
+| `filter-as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
+| `index-scalar-list`, `index-number-list`, `index-number-list-not-eq`, `index-bool-list`, `index-bool-list-not-eq`, `index-bool-list-vs-number`, `index-number-list-vs-bool` | Positional access into a relation mapped by member field — no row order, as with `p-index`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
+| `map-eq-list` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
+| `hier-empty-delim` | An empty hierarchy delimiter turns `descendentOf` into a prefix test whose `LIKE` would also match the path itself. |
+
+The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
+number of operands. The planner never emits these, but the adapter accepts plans from any source.
+
+## Conformance contract
+
+The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
+`../conformance/CERBOS_IMAGE_DIGEST` (Cerbos 0.55.0), with strict evaluation both disabled and
+enabled. For each action the harness plans against a real PDP, translates the plan, runs it
+against 27 hostile rows, and compares the returned ids with per-row `checkResource` decisions —
+the PDP is the oracle for both sides. The Spring Data adapter is the reference behaviour.
+
+The harness reads `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` and rejects anything
+else; CI runs both, each against a PDP configured with the same mode.
+
+| Classification | Coverage |
+| --- | --- |
+| Tested against the oracle | 236 corpus actions |
+| Fail-closed | 72 actions: 61 that this adapter cannot express, and the 11 that the reference adapter does not support either. Each must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
+| Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
+| Known difference in the planner | The Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED`, but `checkResource` denies rows where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` instead of `has(R.attr.x)` for database attributes |
+
+## Mapping hazards
+
+The conformance table covers the **plan**. The other half of the contract is the **mapping**:
+
+> The rows that a subquery of the adapter sees must be the same rows that your application put
+> into the resource attributes.
+
+If they differ, the filter returns rows the PDP denies, and no corpus action can see it. Each
+hazard below was a real over-grant found while building this adapter
+([#314](https://github.com/cerbos/query-plan-adapters/issues/314)):
+
+| Hazard | Position | Mechanism to check |
+| --- | --- | --- |
+| A filtered association | **Rejected** | `has_many …, -> { where(…) }`. The scope cannot be applied to the subquery's alias. `through:` chains are expanded first, so a scope on the outer association is caught too. |
+| A default scope on the target model | **Rejected** | `default_scope` on the association's target. The application applies it on every read; the subquery would not. |
+| Subtype discrimination | **Rejected** | An association to an STI subclass also filters on the inheritance column, whose value set depends on which subclasses are loaded. Map onto the base class, or use an operator override. |
+| A to-one relation used as a collection | **Rejected** | `has_one`. The application reads one row; the subquery would see all of them. Map it as a dotted field path. |
+| A composite association key | **Rejected** | The adapter builds a single-column equality and refuses rather than join on the first column only. |
+| An absent to-one parent | **Proved by the corpus** | Write `R.attr.parent.children` as a nested `relation` mapping, not one flat `has_many :through`, so the adapter requires the parent hops to exist. See [A chain through a parent](#a-chain-through-a-parent). The `w1-*-chain` actions hold it under every polarity. |
+
+Five of the six are rejected because the adapter builds its subquery from the association
+reflection and can detect them there.
+
+## Behaviour changes
+
+- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): size and string
+  operators reject numeric and boolean columns.
+- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): comparisons on
+  raw temporal columns require a `timestamp()` wrapper, because SQL discards the RFC 3339 spelling.
+- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): nested list
+  membership is refused before SQL rendering.
+- ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)) Negated scalar-list macros,
+  omitted scalar membership, hierarchy prefix shortcuts and NaN ordering now preserve CEL's
+  null/error behaviour through negation.
+- ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)) Comparisons between known
+  different scalar types follow CEL equality and missing-value rules instead of letting SQL coerce
+  (e.g. `"0"` to a number). Two declared explicit nulls still compare equal.
+- Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
+  true. Under Cerbos 0.54 it was an evaluation error and stayed denied under negation. Missing
+  attributes and other evaluation errors are unchanged.
+
+## Example application
+
+[`example/`](example/) runs the shared demo domain against the packed gem:
+`../demo/scripts/run-example.sh activerecord` from this directory. See
+[example/README.md](example/README.md).
 
 ## Development
 
-All the components run in Docker. The version of the PDP comes from
-`conformance/CERBOS_VERSION`. You do not need Ruby on your computer.
+Everything runs in Docker; you do not need Ruby locally. The PDP version comes from
+`conformance/CERBOS_VERSION`.
 
 ```bash
-./scripts/test.sh                                   # all the suites
+./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/translator_spec.rb           # offline: no PDP, no database server
 ./scripts/golden-update.sh                          # rewrite golden/expectations.json
 RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh
 ```
 
-The `tests` service mounts the **root directory of the repository**, because both corpus suites
-read shared data at `../conformance/` (`seeds.json`, `actions.json`, `derived-fields.json`,
-`wire-fixtures/`, `CERBOS_VERSION`, `CERBOS_IMAGE_DIGEST`).
+The `tests` service mounts the repository root, because the suites read `../conformance/`.
 
-There are three suites:
+| Suite | What it covers | Needs |
+| --- | --- | --- |
+| `spec/translator_spec.rb` | Translator unit test: replays every plan in `../conformance/wire-fixtures/` and asserts the SQL against [`golden/expectations.json`](golden/expectations.json), plus corpus-wide rules (every `LIKE` has an `ESCAPE`, no self-join of the resource table, every identifier names a declared table) | Nothing |
+| `spec/adapter_contract_spec.rb` | What a caller supplies: mapper forms, operator overrides, the per-call NULL convention, the four plan transports, refused association shapes | Nothing |
+| `spec/adversarial_conformance_spec.rb` | Differential harness over [`../conformance/`](../conformance/README.md) | Docker (starts a pinned PDP) |
 
-- `spec/translator_spec.rb` is the **translator unit test**. It replays every plan in
-  `../conformance/wire-fixtures/` and asserts the SQL against
-  [`golden/expectations.json`](golden/expectations.json), plus a set of rules stated over the
-  whole corpus that survive a regeneration — every `LIKE` carries an `ESCAPE`, no statement joins
-  the resource table to itself, every identifier names a declared table. Needs no PDP.
-- `spec/adapter_contract_spec.rb` covers what a **caller** supplies and the corpus therefore
-  cannot vary: the mapper forms, operator overrides, the per-call NULL convention, the four
-  transports a plan can arrive over, and the association shapes the adapter refuses to guess at.
-  Needs no PDP.
-- `spec/adversarial_conformance_spec.rb` is the differential harness over the shared corpus
-  (`../conformance/`). It obeys the oracle procedure in
-  [conformance/README.md](../conformance/README.md) and starts a pinned PDP.
-
-The example application in [`example/`](example/) runs the shared demo domain. Start it with
-`../demo/scripts/run-example.sh activerecord` — see [example/README.md](example/README.md).
+**Golden expectations.** `golden/expectations.json` records each action's relation rendered with
+`to_sql` on SQLite, literals inlined. Because ActiveRecord's renderer shapes those bytes, the file
+declares `"activerecord": "8.0"`, `golden-update.sh` refuses to run under another minor series,
+and the 7.1 leg asserts a pinned divergence list. `./scripts/test.sh` never regenerates it: run
+`./scripts/golden-update.sh` and review the diff. See
+[conformance/README.md, "Golden expectations"](../conformance/README.md#golden-expectations).

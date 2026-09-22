@@ -5,79 +5,103 @@ Translates a [Cerbos](https://cerbos.dev) query plan
 into a PostgreSQL `WHERE` fragment and its bound arguments, ready to hand to
 [pgx](https://github.com/jackc/pgx).
 
-```
+## Install
+
+```bash
 go get github.com/cerbos/query-plan-adapters/pgx
 ```
 
-## Usage
+- Go 1.26.4 or later (the module's `go` directive).
+- `github.com/jackc/pgx/v5` and `github.com/cerbos/cerbos-sdk-go` v0.4 (the versions `go.mod`
+  requires). The fragment is plain SQL text with `$n` placeholders, so any driver that speaks
+  PostgreSQL's ordinal parameters can run it.
+- PostgreSQL. The tested server is pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE).
+- The module is standalone: it vendors its own translator and depends on nothing else in this
+  repository.
+
+## Quick start
 
 ```go
 import (
+    "context"
+    "fmt"
+
     "github.com/cerbos/cerbos-sdk-go/cerbos"
     cerbospgx "github.com/cerbos/query-plan-adapters/pgx"
+    "github.com/jackc/pgx/v5"
+    "github.com/jackc/pgx/v5/pgxpool"
 )
 
-plan, err := client.PlanResources(ctx, principal, cerbos.NewResource("contact", ""), "read")
-if err != nil {
-    return err
-}
-
-mapper := cerbospgx.MapperMap{
+var mapper = cerbospgx.MapperMap{
     "request.resource.attr.ownerId": {Column: "owner_id"},
     "request.resource.attr.status":  {Column: "status"},
 }
 
-result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper)
-if err != nil {
-    return err
-}
+func listContacts(ctx context.Context, c *cerbos.GRPCClient, pool *pgxpool.Pool, principal *cerbos.Principal) (pgx.Rows, error) {
+    plan, err := c.PlanResources(ctx, principal, cerbos.NewResource("contact", ""), "read")
+    if err != nil {
+        return nil, err
+    }
 
-switch result.Kind {
-case cerbospgx.KindAlwaysDenied:
-    return nil // no rows are accessible; skip the query entirely
-case cerbospgx.KindAlwaysAllowed:
-    rows, err = pool.Query(ctx, `SELECT * FROM contact`)
-case cerbospgx.KindConditional:
-    rows, err = pool.Query(ctx, `SELECT * FROM contact WHERE `+result.Where, result.Args...)
+    result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper)
+    if err != nil {
+        return nil, err // wraps cerbospgx.ErrUnsupported for a shape PostgreSQL cannot express
+    }
+
+    switch result.Kind {
+    case cerbospgx.KindAlwaysDenied:
+        return nil, nil // no row is accessible: skip the query
+    case cerbospgx.KindAlwaysAllowed:
+        return pool.Query(ctx, `SELECT * FROM contact`)
+    case cerbospgx.KindConditional:
+        return pool.Query(ctx, `SELECT * FROM contact WHERE `+result.Where, result.Args...)
+    }
+    return nil, fmt.Errorf("unexpected plan kind %d", result.Kind) // fail closed
 }
 ```
 
-`Where` is a bare boolean expression — it carries no `WHERE` keyword — so it composes with your own
-predicates. Every value from the plan is bound as a parameter; nothing from the policy is ever
-interpolated into SQL text.
+`Translate` takes the resource's table name and a mapper. `Result.Where` is a bare boolean
+expression (no `WHERE` keyword) with placeholders numbered from `$1`, and `Result.Args` binds them
+in order; both are set only for `KindConditional`. Every value from the plan is a bound parameter
+with an explicit cast (`$1::text`), and every identifier is double-quoted.
+
+Every shape the adapter refuses returns an error wrapping `cerbospgx.ErrUnsupported` — never a broader
+filter. Use `errors.Is(err, cerbospgx.ErrUnsupported)` to tell "the policy asks for something PostgreSQL
+cannot express" from a mapping or configuration error. The refused shapes are listed under
+[Conformance contract](#conformance-contract); each message is pinned in
+[`conformance/actions.json`](../conformance/actions.json).
 
 ## Composing the fragment with your own predicates
 
-PostgreSQL placeholders are **ordinal**: `$1` means "the first argument sent with this statement", not
-"the first argument in this fragment". So the moment the fragment goes anywhere other than immediately
-after `WHERE`, you own the numbering, and getting it wrong is not a compile error. There are two
-directions and they need different things.
+PostgreSQL placeholders are **ordinal**: `$1` is the first argument sent with the statement, not
+the first in the fragment. Once the fragment goes anywhere but straight after `WHERE`, you own the
+numbering, and a mistake is not a compile error.
 
-**Your predicate first.** Tell the adapter how many arguments precede its own, and send its arguments
-after yours:
+**Your predicate first:** pass `WithPlaceholderOffset(len(yourArgs))` and send the fragment's
+arguments after yours.
 
 ```go
 where, args := `archived = $1 AND region = $2`, []any{false, "emea"}
 
 result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper,
-    cerbospgx.WithPlaceholderOffset(len(args)))          // the fragment now starts at $3
+    cerbospgx.WithPlaceholderOffset(len(args))) // the fragment now starts at $3
 if err != nil {
     return err
 }
 
 if result.Kind == cerbospgx.KindAlwaysDenied {
-    return nil // no rows are accessible; do not run the application-only query
+    return nil // don't run the application-only query
 }
 if result.Kind == cerbospgx.KindConditional {
     where += " AND (" + result.Where + ")"
-    args = append(args, result.Args...)                  // …so Result.Args must follow yours
+    args = append(args, result.Args...) // Result.Args must follow yours
 }
 rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
 ```
 
-**The fragment first**, with your parameters after it — pagination is the usual case. There is no
-option for this side: the fragment keeps its own numbering from `$1`, and you number yours from
-`len(result.Args)+1`. This example assumes you have handled the unconditional plan kinds above:
+**The fragment first** (pagination is the usual case): there is no option for this side. The
+fragment keeps `$1…`, and you number your parameters from `len(result.Args)+1`. This assumes you
+have already handled the unconditional kinds:
 
 ```go
 stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
@@ -85,103 +109,120 @@ stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSE
 rows, err := pool.Query(ctx, stmt, append(slices.Clone(result.Args), limit, offset)...)
 ```
 
-Two things the offset does **not** do, both of which have bitten real code:
+Two things the offset does **not** do:
 
-- **It does not move your arguments.** `WithPlaceholderOffset(n)` renumbers the fragment's
-  placeholders; placing `Result.Args` at positions `n+1..n+len(Result.Args)` of the slice you send is
-  still yours to get right. Swap two same-typed parameters and PostgreSQL cannot tell — the statement
-  binds, the types fit, and the query answers the wrong question. A count or type mismatch, by
-  contrast, is refused by pgx or by the server.
+- **It does not move your arguments.** It renumbers the fragment's placeholders; putting
+  `Result.Args` at positions `n+1…` of the slice you send is up to you. Two swapped same-typed
+  arguments bind without error and answer the wrong question. (A count or type mismatch is refused
+  by pgx or the server.)
 - **It does not apply to a non-conditional plan.** `Where` is empty and `Args` is nil for
-  `KindAlwaysAllowed` and `KindAlwaysDenied`, so branch on `Kind` before splicing. Concatenating an
-  empty `Where` produces `… AND ` and PostgreSQL rejects the statement, which fails safe — but it
-  fails at run time, where the `switch` above would not have compiled without the case.
+  `KindAlwaysAllowed` and `KindAlwaysDenied`, so branch on `Kind` before splicing. An empty `Where`
+  spliced after `AND` is a syntax error at run time.
 
-[`example/`](example) runs both directions against a real PostgreSQL server, checks every statement's
-numbering before executing it, and proves the check is load-bearing by composing one statement the
-wrong way on purpose.
+[`example/`](example/) runs both directions against a real PostgreSQL server.
 
 ## Mapping attributes
 
-`Mapper` resolves the plan's attribute references onto storage. Resolution is **fail-closed**: an
-unmapped reference is an error, never a guessed column name.
+A `Mapper` resolves each attribute reference in the plan to storage. Use `MapperMap` for a static
+table or `MapperFunc` for a function. Resolution is **fail-closed**: an unmapped reference is an
+error, never a guessed column name.
+
+`Entry` fields:
+
+| Field | Use |
+| --- | --- |
+| `Column` | Column on the row being read (the resource row, or the element row inside a collection). |
+| `ValueType` | `ValueTimestamp`, `ValueBool`, `ValueString`, `ValueNumber`, or `ValueDefault`. The plan carries no types; declare them where storage needs it (see [Declaring value types](#declaring-value-types)). |
+| `NullConvention` | Per-attribute NULL convention. See [NULL representation](#null-representation). |
+| `Relation` | A collection- or object-valued attribute stored in another table. |
+| `ScalarRelation` | A scalar read through a **to-one** relation (`R.attr.parent.name`), rendered as a correlated scalar subquery. Declaring it asserts your schema makes the match unique. |
+| `Qualifier` | Table or alias to read `Column` from. Normally left empty; the translator fills it in. |
 
 ```go
 tags := &cerbospgx.Relation{
     Table:        "contact_tag",
     SourceColumn: "id",         // column on the parent row
     TargetColumn: "contact_id", // matching column on contact_tag
-    Field:        &cerbospgx.Entry{Column: "name"},               // scalar projection
-    Fields:       map[string]cerbospgx.Entry{"name": {Column: "name"}}, // object fields
+    Field:        &cerbospgx.Entry{Column: "name"},                     // scalar elements
+    Fields:       map[string]cerbospgx.Entry{"name": {Column: "name"}}, // object elements (t.name)
 }
 
 mapper := cerbospgx.MapperMap{
     "request.resource.attr.tags":      {Relation: tags},
     "request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbospgx.ValueTimestamp},
+    "request.resource.attr.company": {
+        Column:         "name",
+        ScalarRelation: &cerbospgx.Relation{Table: "company", SourceColumn: "company_id", TargetColumn: "id"},
+    },
 }
 ```
 
-Collection attributes lower into correlated subqueries. A relation may reach through intermediate
-tables with `Via`, so a flattened chain such as `R.attr.mainCategory.subCategories` joins its
-intermediate table inside the subquery while only the resource row correlates outwards.
+Collection attributes lower into correlated subqueries. A relation can reach through intermediate
+tables with `Via []Hop` (innermost first; each `Hop` has `Table`, `ChildColumn`, `JoinColumn`), so a
+flattened chain such as `R.attr.mainCategory.subCategories` joins its intermediate table inside the
+subquery while only the resource row correlates outwards. Those subqueries read the mapped table
+bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
+[Mapping hazards](#mapping-hazards)).
 
-Those subqueries read the mapped table bare. If your own reads of it apply a predicate — a
-soft-delete flag, a tenant column, a subtype discriminator — declare it as `SubqueryFilter` on the
-relation so the subquery sees the same rows the application serialised. See
-[Mapping hazards](#mapping-hazards).
+### Declaring value types
 
-### NULL representation
+- `ValueTimestamp` on every timestamp column.
+- `ValueString` on text columns used in `+`: between two columns, `R.attr.a + R.attr.b` is refused
+  unless one side is declared `ValueString`
+  ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
+- `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
+  comparisons and string operations. Undeclared columns keep the historical rendering.
+- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`.
 
-The planner emits the same `eq(attr, null)` node whether the caller sends a NULL column as an
-explicit `null` attribute or omits it, so the plan cannot reveal which convention is in use and the
-adapter has to be told.
+## NULL representation
 
-- `NullExplicit` (default) — a NULL column is sent to `check()` as an explicit null. `IS NULL`
-  then selects exactly the rows `check()` allows.
-- `NullOmitted` — a NULL column sends no attribute, so CEL raises a missing-attribute error (a
-  deny) and a NULL-selecting filter would return rows the PDP refuses. Null operands are rejected
-  rather than translated.
+The planner emits the same `eq(attr, null)` node whether a NULL column is sent to `check()` as an
+explicit `null` or omitted, so you have to tell the adapter which you do
+([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
 
-Pass `cerbospgx.WithNullRepresentation(cerbospgx.NullOmitted)` if your attributes omit NULL columns.
+| Call option | When a column is NULL, your attributes… | Effect |
+| --- | --- | --- |
+| `NullExplicit` (default) | send an explicit `null` | `== null` translates to `IS NULL`. |
+| `NullOmitted` | omit the attribute | Null operands are rejected: CEL raises a missing-attribute error (a deny), so an `IS NULL` filter would over-grant. |
+
+```go
+cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper,
+    cerbospgx.WithNullRepresentation(cerbospgx.NullOmitted))
+```
 
 ### Declare the convention per attribute
 
-The option above is a whole-call default, and one policy suite can legitimately use both
-conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it per attribute instead and the call-level option only covers what
-the mapping does not:
+One policy can use both conventions, so you can declare it per attribute on the `Entry`; the call
+option then covers only undeclared attributes
+([#308](https://github.com/cerbos/query-plan-adapters/issues/308),
+[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)):
 
 ```go
 mapper := cerbospgx.MapperMap{
-    // sent as an explicit null when the column is NULL
-    "request.resource.attr.owner": {
-        Column:         "owner_id",
-        NullConvention: cerbospgx.NullConventionExplicit,
-    },
-    // omitted when the column is NULL — the call-level default applies
+    // NULL is sent as an explicit null
+    "request.resource.attr.owner": {Column: "owner_id", NullConvention: cerbospgx.NullConventionExplicit},
+    // NULL is omitted, whatever the call option says
+    "request.resource.attr.team": {Column: "team", NullConvention: cerbospgx.NullConventionOmitted},
+    // undeclared (NullConventionUnset): treated as NOT NULL; the call option governs null operands
     "request.resource.attr.department": {Column: "department"},
 }
 ```
 
-Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
-`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
-rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
-`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
-polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
-in CEL, which denies exactly as UNKNOWN does.
+- `NullConventionExplicit` asserts the column can be NULL **and** a NULL reaches `check()` as
+  `null`. The equality family (`eq`, `ne`, `in`) then never renders SQL UNKNOWN, so
+  `null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
+  receiver is a CEL error, which denies like UNKNOWN).
+- Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
+  the NULL rows.
+- **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
+  of the same or undeclared scalar type is rejected.
 
-Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
-that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
-it.
+## Collation
 
-**Declare both sides of a field-to-field equality, or neither.** For operands with the same or
-undeclared scalar types, mixing conventions is rejected: the explicit-null side needs a definite
-answer for its NULL, while the omitted side needs UNKNOWN. Incompatible declared scalar types can
-be compared through their NULL states without comparing the stored values. See
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
-[ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
-
-See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow the column's
+collation. A case-insensitive collation is an **over-grant the adapter cannot detect**, so treat
+collation as part of your policy contract: use a deterministic collation (the PostgreSQL default)
+on every column policies compare. Nondeterministic ICU collations and `citext` are not safe.
 
 ## Conformance contract
 
@@ -192,71 +233,49 @@ semantics for this compatibility snapshot.
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 245 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list, whether its elements are strings, numbers or booleans (row order in a SQL relation is not defined), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the vendored translator refuses it: a path cannot be split on an empty string, and the prefix `LIKE` would match the path itself), two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
-| Operand types the plan does not carry | CEL overloads `+` on strings, and a query plan names no operand types. One string operand settles it, so `R.attr.a + "x"` and `"x" + R.attr.a` translate on their own. Between **two columns** neither does: declare the string column with `ValueType: cerbospgx.ValueString` and the adapter emits concatenation, or it fails closed rather than emitting a numeric `+` — which is a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
+| Fail-closed corpus shapes | Regex `matches()` (SQL regex dialects do not guarantee RE2 semantics), ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list of strings, numbers or booleans (SQL row order is undefined), list equality over a `map()` projection, a hierarchy with an empty delimiter, two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
+| Operand types the plan does not carry | `R.attr.a + "x"` and `"x" + R.attr.a` translate. Between **two columns**, declare the string column `ValueType: cerbospgx.ValueString` to get concatenation; otherwise it fails closed rather than emit a numeric `+` — a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `NullConvention: NullConventionExplicit` on the mapper `Entry` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `NullConvention: NullConventionExplicit` renders definitely, so a NULL row is included where CEL's null *value* says it should be. Undeclared, the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
+Oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
 relation counts and nested collection macros, null/error propagation, arithmetic and ternaries,
-hierarchy operations, typed timestamps, and multi-hop relations. Unlike the Python and TypeScript
-adapters, sub-millisecond `now()` thresholds (`ts-window`, `ts-vf`) are **not** fail-closed here:
-Go's `time.Time` carries nanoseconds, so those instants survive translation exactly.
+hierarchy operations, typed timestamps, and multi-hop relations. Sub-millisecond `now()` thresholds
+(`ts-window`, `ts-vf`) translate exactly here, because Go's `time.Time` carries nanoseconds.
 
-**Behavior change (Cerbos 0.55).** Folded NaN ordered comparisons now return false,
-so their negation returns true, matching the updated CEL evaluator. Missing attributes still
-propagate errors. These NaN semantics differ from Cerbos 0.54.
+### Known gaps
 
-**Behavior changes (#414).** Membership preserves the needle's per-attribute NULL convention even when the collection is
-empty. Declare numeric fields with `ValueNumber`, text fields with `ValueString`, and booleans
-with `ValueBool` to prevent database coercion in heterogeneous comparisons and string operations.
-Undeclared field types retain historical behavior; the plan carries no type information.
-Bare comparisons between declared temporal columns now fail closed because timestamp storage
-loses the original RFC 3339 spelling. Use `timestamp()` on both policy operands to compare instants.
-Two-list `except`, structured list operands and constructor expressions are refused at translation.
+Real but unfixed; each needs a corpus action first. Treat them as constraints on your policies.
 
-**Behavior change (#418).** `string()` over a column declared `ValueBool` now translates
-instead of failing closed. PostgreSQL's own `CAST(bool AS text)` already says `"true"`, but the
-vendored translator also serves SQLite and MySQL, where the same `CAST` says `"1"`. So the
-column is spelled through `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`
-and that is cast to text. A NULL column stays NULL rather than becoming `'false'`, so the row is
-excluded under both polarities, as CEL's error excludes it.
+| Gap | Effect |
+| --- | --- |
+| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering, not CEL's IEEE semantics. Only NaNs the adapter folds itself are exact. |
+| Division by a stored negative zero | The sign of the resulting infinity comes from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
+| Timestamp literals finer than a microsecond | PostgreSQL stores microseconds, so a sub-microsecond bound is truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
+| `!=` / `not in` against an explicit null, on an attribute not declared `NullConventionExplicit` | CEL says `null != "x"` is true; SQL leaves it UNKNOWN and excludes the row. Under-grants (fails closed). See cerbos/query-plan-adapters#308. |
 
-**Breaking change (#391).** `R.attr.a + R.attr.b` between two columns now returns an error unless one column is declared `ValueString`. It previously emitted a numeric `+`; on PostgreSQL that is a hard `operator does not exist: text + text` for text columns, so the change turns a runtime failure into a translation-time one and refuses the shape the shared translator cannot type.
+## Mapping hazards
 
-Fail-closed shapes return an error wrapping `ErrUnsupported` rather than a broader SQL
-filter. `matches()` is rejected because SQL regex dialects do not guarantee CEL/RE2 semantics.
+The conformance contract proves the *plan* side. The *mapping* side is yours: **the rows a subquery
+reads must be the rows your application put into the resource attributes.** The shared corpus
+catalogues six ways that breaks.
 
-Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
-
-**Behaviour change.** A `filter()`/`map()` result reaching a plain **value** position — `map(R.attr.tags, t.id) == [...]` — now fails at translation with a named error. It used to be bound as a query parameter, so the translator emitted SQL for a shape it cannot express and only the driver's encoder refused it, at execution time ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). Both were errors; this one arrives before a query is built and says why.
-
-### Mapping hazards
-
-The conformance contract above proves the *plan* side — given a policy shape, does the filter select
-the rows `check()` allows. The other half is the *mapping*: **the rows the subquery reads must be
-the rows the application put into the resource attributes.** Six ways that can break are catalogued
-in the shared corpus, and every adapter has to record a position on each of them.
-
-This adapter builds a **bare-table subquery.** A `Relation` is a table name plus a source and a
-target column; there is no association metadata for the translator to consult, so nothing the
-application applies to its own reads reaches the generated subquery. Where the application narrows
-those reads, declare the same predicate as `SubqueryFilter` on the relation (or on the `Hop`, for an
-intermediate table) and the translator reproduces it. Declaring nothing emits exactly the SQL this
-adapter emitted before the field existed — it cannot detect the omission, so silence is not a
-warning.
+A `Relation` is a table name and two columns, with no association metadata, so the adapter builds
+a **bare-table subquery**: nothing your application applies to its own reads reaches it, and the
+adapter cannot detect the omission. Where your reads narrow a table, declare the same predicate as
+`SubqueryFilter` on the `Relation` (or on a `Hop`).
 
 | Hazard | Position | Mechanism to check |
 |---|---|---|
-| Filtered association | **Caller-owned**, reproducible with `SubqueryFilter` | The `WHERE` clause of the query your application runs to load the relation when it builds the resource attributes. There is no ORM here to consult, so that clause exists only in your own code — the translator is given `Table`, `SourceColumn` and `TargetColumn` and reads the table bare |
-| Default scope on the target model | **Caller-owned**, reproducible with `SubqueryFilter` | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag — anything every application read of that table filters on. Go has no default-scope construct here, so the convention lives in your own query code and only you can see it |
-| Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
-| To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality at all — every relation lowers to the same correlated subquery — so nothing makes the database enforce the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
-| Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`, so a two-column key cannot be expressed. This is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops separately, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). Declaring `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*, which for this purpose is equally absent. A SCALAR read through a to-one hop is `Entry.ScalarRelation`, new in [#375](https://github.com/cerbos/query-plan-adapters/issues/375): it renders a correlated scalar subquery, which is NULL when no row correlates and so needs no separate hop guard |
+| Filtered association | **Caller-owned**, reproducible with `SubqueryFilter` | The `WHERE` clause of the query your application runs to load the relation when it builds the resource attributes. There is no ORM to consult, so it exists only in your code |
+| Default scope on the target model | **Caller-owned**, reproducible with `SubqueryFilter` | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag — anything every read of that table filters on. Go has no default-scope construct, so it lives in your query code |
+| Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
+| To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality, so nothing enforces the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
+| Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`; a two-column key is a compile error, not a wrong join |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*. A scalar read through a to-one hop is `Entry.ScalarRelation` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)), which is NULL when no row correlates and needs no hop guard |
 
-#### Declaring the application's own predicate
+### Declaring the application's own predicate
 
 ```go
 tags := &cerbospgx.Relation{
@@ -267,84 +286,63 @@ tags := &cerbospgx.Relation{
     // Exactly the predicate your own reads of contact_tag apply.
     SubqueryFilter: []cerbospgx.Restriction{
         {Column: "deleted_at", Op: cerbospgx.RestrictIsNull},
-        {Column: "kind", Value: "label"},
+        {Column: "kind", Value: "label"}, // Op defaults to RestrictEq
     },
 }
 ```
 
-The vocabulary is deliberately narrow — `RestrictEq`, `RestrictNe`, `RestrictIsNull`,
-`RestrictIsNotNull`, `RestrictIn`, `RestrictNotIn` over a single column — because that is what these
-hazards look like in practice. A predicate that does not fit is a signal that the mapping cannot
-faithfully reproduce the application's read, and the honest response is to not map that relation
-rather than to declare an approximation.
+- Operators: `RestrictEq`, `RestrictNe`, `RestrictIsNull`, `RestrictIsNotNull`, `RestrictIn`,
+  `RestrictNotIn` (with `Values`), each over one column. If your read does not fit, don't map that
+  relation rather than declaring an approximation.
+- Restrictions are ANDed into the correlation predicate, so they narrow the rows the subquery
+  *examines*. That keeps negation right (`all` means "every visible row", not "every row in the
+  table") and applies to every shape built on the relation, including counts and hop guards.
+- Values are bound parameters. An empty `Values` reads as CEL does: `RestrictIn` hides every row,
+  `RestrictNotIn` hides none.
 
-Restrictions are ANDed into the subquery's correlation predicate, so they narrow the rows the
-subquery *examines* rather than the rows it returns. That is what keeps them right under negation:
-`all` lowers to a false-witness `EXISTS`, and restricting the scan turns it into "every visible row
-satisfies the body" instead of "every row in the table does". They apply to every shape built on the
-relation — the truth witnesses, the UNKNOWN witness, the counts, and the hop-existence guard.
+## Behaviour changes
 
-Values are bound as query parameters, never interpolated. An empty `Values` list is read as CEL
-reads it: `RestrictIn` then hides every row, `RestrictNotIn` hides none.
-
-### Known gaps
-
-An adversarial review found these. They are real but unfixed here, because each either needs a
-corpus action first (this repository's rule is that translation changes start in the shared corpus,
-not in one adapter) or is shared with the reference adapters and should be fixed across all of them
-at once. Treat them as constraints on the policies you write.
-
-| Gap | Effect |
-| --- | --- |
-| A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering rather than CEL's IEEE semantics. Only NaNs the adapter folds itself are handled exactly. |
-| Division by a stored negative zero | The sign of the resulting infinity is taken from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
-| Timestamp literals finer than a microsecond | PostgreSQL stores microsecond resolution, so a sub-microsecond bound is silently truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
-| `!=` / `not in` against an explicit null under `NullExplicit` | CEL evaluates `null != "x"` as true; SQL leaves it UNKNOWN and excludes the row. This under-grants — it fails closed — but is not exact equivalence. |
-
-Two gaps listed here previously are now closed and pinned by the corpus rather than documented as
-constraints: an absent to-one parent is no longer indistinguishable from an empty collection (the
-chain requires its intermediate hop, and `w1-all-chain`/`w1-not-exists-chain`/`w1-size-zero-chain`/
-`w1-size-nonneg-chain`/`w1-not-in-chain`/`w1-not-hasint-chain`/`w1-not-size-chain` are
-oracle-compared here — membership and the negated count spelling route through the same guarded
-existence construction as the macros, which is why this adapter needed no change when those holes
-were found elsewhere), and `int()`/`double()` no longer lower to SQL
-`CAST` at all — they fail closed, because CEL reads a whole string or raises where `CAST` reads a
-numeric prefix, and CEL truncates toward zero where PostgreSQL rounds (`cast-int-string`,
-`cast-double-string`, `cast-int-double`).
-
-### Collation
-
-CEL string comparison and matching are case-sensitive and byte-exact. `LIKE` collation is
-controlled by the database, so a case-insensitive column collation will match strings CEL would
-reject — an over-grant the adapter cannot detect. Treat collation as part of your policy contract
-and use a case-sensitive (e.g. `C` or a `_cs_` ICU) collation on columns policies compare.
+- **Breaking ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)):** `R.attr.a + R.attr.b`
+  between two columns returns an error unless one is declared `ValueString`. It used to emit a
+  numeric `+`, which PostgreSQL rejects at run time for text columns (`operator does not exist:
+  text + text`); the error now arrives at translation.
+- **Breaking ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)):** bare comparisons
+  between declared temporal columns fail closed (storage loses the RFC 3339 spelling; wrap both
+  operands in `timestamp()`), and two-list `except`, structured list operands and constructor
+  expressions are refused. Membership now keeps the needle's per-attribute NULL convention even
+  over an empty collection, and `ValueNumber`/`ValueString`/`ValueBool` declarations now prevent
+  database coercion; undeclared columns behave as before.
+- **Breaking:** `int()` and `double()` casts fail closed instead of lowering to SQL `CAST`, which
+  reads a numeric prefix and rounds where CEL reads the whole string and truncates
+  (`cast-int-string`, `cast-double-string`, `cast-int-double`).
+- [#387](https://github.com/cerbos/query-plan-adapters/issues/387): a `filter()`/`map()` result in a
+  value position (`map(R.attr.tags, t.id) == [...]`) fails at translation with a named error instead
+  of at execution in the driver.
+- [#418](https://github.com/cerbos/query-plan-adapters/issues/418): `string()` over a `ValueBool`
+  column translates (it used to fail closed), via
+  `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text. A NULL
+  column stays NULL and the row is excluded.
+- Cerbos 0.55: folded NaN ordered comparisons return false (so their negation returns true),
+  matching the updated CEL evaluator; this differs from Cerbos 0.54. Missing attributes still
+  propagate errors.
 
 ## Example application
 
-This repository carries a runnable [`example/`](example/), which uses the adapter against a live PDP
-and a real PostgreSQL server over the shared [demo domain](../demo/README.md):
+[`example/`](example/) runs the adapter against a live PDP and a real PostgreSQL server over the
+shared [demo domain](../demo/README.md):
 
 ```bash
 # from the repository root
 demo/scripts/run-example.sh pgx
 ```
 
-It is the only place in this repository where the composition above is executed end to end: the suites
-below hand `Result.Where` straight to a `SELECT` of their own, so
-[Composing the fragment](#composing-the-fragment-with-your-own-predicates) — an application predicate
-ahead of the fragment with `WithPlaceholderOffset`, and pagination parameters numbered after it — runs
-there and nowhere else. It also proves the numbering is load-bearing, by composing one statement
-without the offset on purpose and requiring a different answer.
-
-Unlike the examples for the other adapters it proves **usage shapes only, not packaging**: Go has no
-packaging step, so `example/` resolves this module through a `replace` directive rather than
-installing a built artifact. See [`example/README.md`](example/README.md) and
-[ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md).
+It is the only place in this repository where
+[composition](#composing-the-fragment-with-your-own-predicates) runs end to end: an application
+predicate ahead of the fragment with `WithPlaceholderOffset`, and pagination parameters numbered
+after it. It proves usage shapes only, not packaging: it resolves this module through a `replace`
+directive ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
 
 ## Development
-
-The adversarial suite defaults to `ADAPTER_TEST_STRICT_EVALUATION=false`; only `false` and `true`
-are accepted. CI runs both modes against their own matching Check oracle.
 
 ```bash
 go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
@@ -354,19 +352,17 @@ golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-The adversarial suite starts its own PostgreSQL and Cerbos containers, reading the pinned PDP
-version from `conformance/CERBOS_VERSION` and the PostgreSQL image from [`POSTGRES_IMAGE`](POSTGRES_IMAGE) —
-the same file `example/run.sh` reads, so both are proved against the same server build.
+- The adversarial suite starts its own Cerbos container (version from `conformance/CERBOS_VERSION`)
+  and a PostgreSQL container from [`POSTGRES_IMAGE`](POSTGRES_IMAGE), the same file
+  `example/run.sh` reads. `ADAPTER_TEST_STRICT_EVALUATION` accepts only `false` (default) and
+  `true`; CI runs both, each against its matching Check oracle.
+- The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile
+  plans no planner emits. CI runs it as a separate step before the Docker-backed one.
+- `internal/queryplan` is vendored byte-for-byte into the [ent module](../ent);
+  `conformance/scripts/validate-corpus.sh` fails on any difference, so a semantic fix must land in
+  both. Per-engine code belongs in `render.go`, outside the shared tree.
 
-The unit suite is everything else, and needs nothing running. It covers what the corpus structurally
-cannot: malformed and hostile plans no planner emits. CI runs it as its own step before the
-container-backed one, so "these tests need no Docker" stays a checked claim.
-
-The translator under `internal/queryplan` is vendored byte-for-byte into the
-[ent module](../ent) as well, so that a consumer of either pulls in only the one.
-`conformance/scripts/validate-corpus.sh` diffs the two trees and fails on any difference: a semantic
-fix has to land in both copies. Anything genuinely per-engine belongs in `render.go`, which is
-outside the shared tree.
+See [conformance/README.md](../conformance/README.md) before changing how a shape is translated.
 
 ## License
 

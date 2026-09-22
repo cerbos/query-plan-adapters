@@ -1,85 +1,186 @@
 # Cerbos + SQLAlchemy Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [SQLAlchemy](https://docs.sqlalchemy.org/en/14/) Select instance. This is designed to work alongside a project using the [Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
+Converts a [Cerbos](https://cerbos.dev) query plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan))
+into a [SQLAlchemy](https://docs.sqlalchemy.org/) `Select`, for use with the
+[Cerbos Python SDK](https://github.com/cerbos/cerbos-sdk-python).
 
-The adapter supports logical and comparison operators, value-first and field-to-field comparisons, literal-safe string helpers, arithmetic and conditional expressions, scalar casts and sizes, timestamps, and hierarchy comparisons. A collection stored as a JSON document or a PostgreSQL array is declared in `collection_columns`, which gives it `size()` and constant indexing; `operator_override_fns` can provide database- or schema-specific translations for relation-backed collections and other non-portable shapes.
+## Install
 
-## NULL attribute representation
+```bash
+pip install cerbos-sqlalchemy
+```
 
-`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
-a NULL column in the attributes it sends to `check()`, so the adapter cannot infer the convention
-and has to be told which one you use.
+- Python >= 3.8
+- SQLAlchemy >= 1.4 (1.4 and 2.x are both tested)
+- Cerbos Python SDK (`cerbos`) >= 0.10.4; Cerbos PDP > v0.16
+- Either SDK client: the HTTP `CerbosClient` or the gRPC client (see [Transports](#transports))
+
+## Quick start
+
+```python
+from cerbos.sdk.client import CerbosClient
+from cerbos.sdk.model import Principal, ResourceDesc
+from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy.orm import Session, declarative_base
+
+from cerbos_sqlalchemy import get_query
+
+Base = declarative_base()
+
+
+class LeaveRequest(Base):
+    __tablename__ = "leave_request"
+
+    id = Column(Integer, primary_key=True)
+    department = Column(String(225))
+    geography = Column(String(225))
+    priority = Column(Integer)
+
+
+with CerbosClient(host="http://localhost:3592") as c:
+    principal = Principal(
+        "john",
+        roles={"employee"},
+        attr={"department": "marketing", "geography": "GB"},
+    )
+    plan = c.plan_resources("view", principal, ResourceDesc("leave_request"))
+
+attr_map = {
+    "request.resource.attr.department": LeaveRequest.department,
+    "request.resource.attr.geography": LeaveRequest.geography,
+    "request.resource.attr.priority": LeaveRequest.priority,
+}
+
+# ALWAYS_ALLOWED -> select(LeaveRequest)
+# ALWAYS_DENIED  -> select(LeaveRequest).where(False)
+# CONDITIONAL    -> select(LeaveRequest).where(<translated condition>)
+query = get_query(plan, LeaveRequest, attr_map)
+
+# Compose with your own predicates; a denied plan stays denied.
+query = query.where(LeaveRequest.priority < 5).limit(20)
+
+with Session(create_engine("sqlite:///app.db")) as session:
+    rows = session.execute(query).scalars().all()
+```
+
+`get_query` returns a `Select` for all three plan kinds, so you don't need to branch on the kind.
+If you want to skip the round trip on a denial, check
+`plan.filter.kind == PlanResourcesFilterKind.ALWAYS_DENIED` (from `cerbos.sdk.model`) first. Any
+shape the adapter cannot translate raises instead of returning a broader query.
+
+To debug, print the SQL: `print(query.compile(compile_kwargs={"literal_binds": True}))`.
+
+## Mapping attributes
+
+`attr_map` maps each Cerbos attribute reference to a column. Values can be an ORM attribute
+(`LeaveRequest.department`), a Core column (`LeaveRequest.__table__.c.department`), or any SQLAlchemy
+column expression — for example a correlated scalar subquery for a value read through a to-one
+relation.
+
+### Model styles
+
+`table` accepts a Core `Table`, a legacy `declarative_base()` model, or a SQLAlchemy 2.0
+`DeclarativeBase` subclass. An ORM model returns `Select[Tuple[Model]]`; a Core `Table` returns
+`Select[Any]`.
+
+### Columns from more than one table
+
+If `attr_map` references columns from other tables, pass `table_mapping` (4th positional
+argument) — a list of `(table, join_condition)` pairs:
+
+```python
+query = get_query(
+    plan,
+    Table1,
+    {
+        "request.resource.attr.foo": Table1.foo,
+        "request.resource.attr.bar": Table2.bar,
+        "request.resource.attr.bosh": Table3.bosh,
+    },
+    [
+        (Table2, Table1.table2_id == Table2.id),
+        (Table3, Table1.table3_id == Table3.id),
+    ],
+)
+```
+
+Tables may be models or Core `Table`s. A column expression that carries its own correlation (a
+scalar subquery) needs no `table_mapping` entry.
+
+If your models use `relationship()`, consider `query.with_only_columns(...)` to avoid implicit joins.
+
+### Collections and relations
+
+- **A collection stored in one column** (JSON or PostgreSQL array) — declare it in
+  [`collection_columns`](#collection-storage) to get `size()` and constant indexing.
+- **A collection in a related table** — `exists`, `all`, `in`, `size()` and the other macros go
+  through [`operator_override_fns`](#operator-overrides), where you write the correlated subquery.
+  Read [Mapping hazards](#mapping-hazards) before you do.
+- **A collection the PDP already knows** (usually a principal attribute) — translated with no
+  configuration; see [Collection macros over known values](#collection-macros-over-known-values).
+
+## Options
+
+| Option | Default | Use it when |
+| --- | --- | --- |
+| `table_mapping` | `None` | `attr_map` spans more than one table |
+| `operator_override_fns` | `None` | you need a dialect-specific operator, or a collection in a related table |
+| `null_attribute_representation` | `"explicit"` | your app omits attributes for NULL columns (`"omitted"`) |
+| `attribute_null_representation` | `None` | the NULL convention differs per attribute |
+| `collection_columns` | `None` | a policy calls `size()` or indexes a JSON / PostgreSQL array column |
+
+### NULL attribute representation
+
+The planner emits the same `eq(x, null)` node however your application represents a NULL column in
+the attributes it sends to `check()`, so you have to tell the adapter which convention you use.
 
 | attributes you send for a NULL column | `check()` on that row | `IS NULL` filter |
 | --- | --- | --- |
 | `{"x": None}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-`null_attribute_representation` defaults to `"explicit"`, preserving the historical `IS NULL`
-translation. If your application omits attributes for NULL columns, pass `"omitted"`: the adapter
-then raises on every null comparison operand instead of emitting a filter that returns rows the PDP
-denies.
+The default, `"explicit"`, translates `== null` to `IS NULL`. If you omit attributes for NULL
+columns, pass `"omitted"` and the adapter raises on every null comparison operand instead:
+
+```python
+get_query(plan, Resource, attr_map, null_attribute_representation="omitted")
+```
+
+The rejection is wider than strictly needed (`x != null` and `!(x == null)` are aligned under both
+conventions), because a leaf cannot see whether an enclosing `not` will flip it. It also fires
+before `operator_override_fns`. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+
+#### Declare the convention per attribute
+
+One policy suite can mix both conventions (the same column mapped under two attribute names). Declare
+it per attribute; the call-level option covers everything undeclared:
 
 ```python
 get_query(
     plan,
     Resource,
     attr_map,
-    null_attribute_representation="omitted",
-)
-```
-
-The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
-`!(x == null)` are aligned under both conventions — because negation is applied around the built
-predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing `not` will
-flip `IS NOT NULL` back into a NULL-selecting predicate. Rejecting every null operand is correct
-under any nesting. It also fires ahead of `operator_override_fns`, since an override cannot
-recover a representation the plan never carried. See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
-
-### Declare the convention per attribute
-
-The option above is a whole-call default, and one policy suite can legitimately use both
-conventions: the same column mapped twice, sent as an explicit null under one attribute name and
-omitted under another. Declare it per attribute instead and the call-level option only covers what
-the mapping does not:
-
-```python
-get_query(
-    query_plan,
-    Resource,
-    attr_map,
     attribute_null_representation={
-        # sent as an explicit null when the column is NULL
         "request.resource.attr.owner": "explicit",
-        # `request.resource.attr.department` is omitted for a NULL column, so it is
-        # left undeclared and the call-level default applies
+        # department is omitted when NULL, so leave it undeclared
     },
 )
 ```
 
-Declaring the explicit convention asserts two things: the column can be NULL, **and** a NULL reaches
-`check()` as an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute is then
-rendered so it can never be SQL UNKNOWN — CEL holds a null *value* under this convention, so
-`null != "x"` is TRUE and the row must come back, while UNKNOWN would drop it under *both*
-polarities. Ordering and string operators are left alone: a null receiver raises a no-overload error
-in CEL, which denies exactly as UNKNOWN does.
+Declaring `"explicit"` asserts that the column can be NULL **and** that a NULL reaches `check()` as
+an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute then renders so it is
+never SQL UNKNOWN: CEL's `null != "x"` is TRUE, so the NULL row comes back. Ordering and string
+operators are unchanged (CEL raises on a null receiver, which denies like UNKNOWN does). An
+undeclared attribute keeps the old rendering, where `!=` against a constant under-grants NULL rows.
 
-Leaving an attribute undeclared keeps the historical rendering — so nothing changes for a mapping
-that says nothing, and `!=` against a constant keeps under-granting the NULL rows until you declare
-it.
-
-**Declare both sides of a field-to-field comparison, or neither.** Mixing the conventions across one
-comparison has no faithful rendering — the declared side needs a definite answer for its NULL, the
-undeclared side needs UNKNOWN — so the adapter throws rather than picking a direction. See
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+**Declare both sides of a field-to-field comparison, or neither** — mixing conventions in one
+comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
-## Collection storage
+### Collection storage
 
-`size(R.attr.tags)` and `R.attr.tags[0]` have no portable translation until you say how the
-collection is stored — a JSON document, a PostgreSQL array and a related table each need different
-SQL, and a related table has no positional order at all. Declare the storage per attribute:
+`size(R.attr.tags)` and `R.attr.tags[0]` need to know how the collection is stored. Declare it per
+attribute:
 
 ```python
 from cerbos_sqlalchemy import CollectionColumn, get_query
@@ -91,37 +192,129 @@ get_query(
     collection_columns={
         # PostgreSQL JSON/JSONB, or a SQLite JSON text column
         "request.resource.attr.tags": CollectionColumn(Resource.tags, "json"),
-        # a PostgreSQL array of text, varchar, boolean, integer or smallint
+        # PostgreSQL array of text, varchar, boolean, integer or smallint
         "request.resource.attr.labels": CollectionColumn(Resource.labels, "pgArray"),
     },
 )
 ```
 
-The storage names are the ones the drizzle adapter uses. The declaration is read in exactly two
-places, and in both it takes precedence over `attr_map` and over any operator override:
+The storage names match the drizzle adapter's. The declaration takes precedence over `attr_map` and
+any override, in exactly two places:
 
-- **`size()`** counts the elements. An empty collection is `0`; an SQL NULL column, or a JSON value
-  that is not an array, is UNKNOWN — CEL raises for a missing attribute, so `size(x) == 0` selects the
-  empty rows and never the missing ones, and `size(x) >= 0` still excludes them.
-- **`x[i] == literal`** and **`x[i] != literal`**, for a string, number, boolean or `null` literal
-  at a constant non-negative position, in either operand order and under logical operators. JSON
-  types are kept, as CEL's equality keeps them: `"1"` is not `1`, and a `true` element is not `1`
-  even though SQLite stores both as 1. Numbers compare as doubles. An absent element is UNKNOWN, so
-  it stays excluded under negation just as CEL's index error denies it. A null *element* is a value: `[null][0] == null` is true, and so is
-  `[null][0] != "public"`. PostgreSQL arrays are read through `to_jsonb`, which addresses positions,
-  so an array whose lower bound is not 1 still reads the element CEL does.
+- **`size()`** counts elements. Empty is `0`; an SQL NULL column or a non-array JSON value is
+  UNKNOWN, so `size(x) == 0` selects empty rows, never missing ones, and `size(x) >= 0` excludes them.
+- **`x[i] == literal`** / **`x[i] != literal`** — string, number, boolean or `null` literal, constant
+  non-negative index, either operand order, under logical operators. JSON types are kept (`"1"` is not
+  `1`; `true` is not `1` even on SQLite); numbers compare as doubles. An absent element is UNKNOWN,
+  so it stays excluded under negation. A null *element* is a value: `[null][0] == null` is true.
+  PostgreSQL arrays are read through `to_jsonb`, so a non-1 lower bound still reads the element CEL does.
 
-Everything else over a declared element raises: a negative or fractional index (CEL raises for both,
-and neither is coerced into a valid read), a dynamic index, an ordering, a projection such as
-`x[0].name`, and a comparison with a list or map literal. Everywhere else the attribute keeps resolving
-through `attr_map`, so a relation marker there goes on serving `exists`, `all`, `in` and the other
-collection macros through your overrides; the column you declare must hold exactly the list you send
-to Cerbos, null elements included.
+Everything else over a declared element raises: a negative, fractional or dynamic index, ordering, a
+projection like `x[0].name`, and comparison with a list or map literal. Elsewhere the attribute
+still resolves through `attr_map`. The column must hold exactly the list you send to Cerbos, null
+elements included.
 
-The SQL is chosen per dialect when the statement is compiled, since `get_query` is never told the
-dialect. It renders on SQLite (JSON1) and PostgreSQL; any other dialect raises `CompileError`.
+The SQL is picked per dialect at compile time. SQLite (JSON1) and PostgreSQL are supported; any
+other dialect raises `CompileError`.
 
-What translates with no override, and what still needs one:
+### Operator overrides
+
+`operator_override_fns` replaces the handler for an operator — for a more idiomatic SQL form, or to
+translate a collection held in a related table:
+
+```python
+from sqlalchemy.sql.expression import any_
+
+query = get_query(
+    plan,
+    Table1,
+    attr_map={"request.resource.attr.foo": Table1.foo},
+    operator_override_fns={
+        "in": lambda c, v: c == any_(v),  # PostgreSQL: = ANY instead of IN
+    },
+)
+```
+
+The type is `dict[str, Callable[[GenericColumn, Any], GenericExpression]]`, where `GenericColumn` is
+`Column | InstrumentedAttribute` and `GenericExpression` is `BinaryExpression | ColumnOperators`.
+
+- An entry whose value is `None` uses the default handler, including inside nested expressions.
+- Without `operator_override_fns`, every `attr_map` entry is validated. With an explicit mapping
+  (even `{}` or only `None` entries), only attributes reached outside active overrides are
+  validated; an override owns the operands it translates.
+- `matches()` fails closed by default, because SQL regex engines don't guarantee CEL/RE2 semantics.
+  Override it only if your database's engine is equivalent.
+- An override's intermediate value reaching a default handler raises.
+
+For a collection reached through a to-one parent, wrap the override's result with
+[`require_hops`](#require_hops-the-one-hazard-with-a-library-helper).
+
+### Collection macros over known values
+
+`exists`/`all` over a collection the PDP resolves at plan time — usually a principal attribute — is
+translated with no override:
+
+```yaml
+condition:
+  match:
+    expr: P.attr.teams.exists(t, R.attr.team == t)
+```
+
+The planner unrolls this into an `or`/`and` chain at 10 elements or fewer, and sends a literal list
+above that (cerbos/cerbos#2570, cerbos/cerbos#2817). The adapter applies the same fold with no cap,
+so the SQL is equivalent either side of the threshold. A bare `t` becomes the element, `t.name`
+drills into it, and each body goes through the normal pipeline (overrides and NULL handling apply).
+An empty list: `exists` matches nothing, `all` matches everything.
+
+`exists_one`, `filter`, `map` and `except` over a literal list raise, as does a `t.path` the element
+doesn't carry. Macros over a column or relation (`R.attr.tags.exists(...)`) need an
+`operator_override_fns` entry.
+
+### Transports
+
+`get_query` accepts the HTTP client's `PlanResourcesResponse` or the gRPC client's protobuf one.
+They behave identically except for a constant zero divisor (`x / -0.0`): only gRPC keeps the sign of
+the zero, so only gRPC translates it; over HTTP it raises (see
+[Conformance contract](#conformance-contract)).
+
+### Async
+
+`get_query` does no I/O. Execute the `Select` however you already do, including `AsyncSession` or
+`AsyncConnection`:
+
+```python
+async with AsyncSession(async_engine) as session:
+    rows = (await session.execute(get_query(plan, Resource, attr_map))).scalars()
+```
+
+Plan with the SDK's async client, or run the sync one off the event loop.
+
+## Correctness requirements
+
+### Database collation requirements
+
+CEL string and hierarchy comparisons are case-sensitive and byte-exact. Columns in `attr_map` must
+use a byte-exact collation for equality, membership, and the `LIKE` emitted by
+`contains`/`startsWith`/`endsWith` and hierarchy-prefix predicates — otherwise the filter can
+**over-grant** (`One` matching `one`, `Dept.Eng` overlapping `dept.eng`). The adapter cannot enforce
+this portably.
+
+On MySQL the default `_ci` collations are case-insensitive. Use `utf8mb4_0900_bin` (MySQL 8.0.17+).
+Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­ne' = 'one'` is
+TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+
+`string()` over a boolean column compares the literals `'true'`/`'false'` in the connection's
+collation on MySQL — make it case-sensitive, or `string(flag) == "TRUE"` selects rows CEL does not.
+
+### Timestamps
+
+Timestamp literals must be strict RFC 3339, within CEL's year 0001–9999 range, and exactly
+representable at microsecond precision (discarded fractional digits must be zero); the mapped column
+and database must preserve microseconds. Bare comparisons of temporal attributes raise — compare
+instants with `timestamp()` on both operands.
+
+## Supported operators
 
 | Shape | Default | Otherwise |
 | --- | --- | --- |
@@ -138,151 +331,71 @@ What translates with no override, and what still needs one:
 | `matches()` | refused | an override, only if your engine matches RE2 |
 | Timestamps, hierarchies | translated | — |
 
-**Behaviour change (#227).** `size()` over a JSON or array column that `collection_columns` does not
-declare now raises. It used to return `LENGTH()` of the column — the length of its text, a number and
-the wrong one. `index` over a collection with no declared storage now raises a message naming the
-missing declaration rather than `Unrecognised operator: index`. Declaring the storage is new, so no
-existing mapping translates differently.
-
-**Behaviour change (#418).** `string()` over a boolean column now translates, to
-`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, where it used to raise:
-`CAST` renders `'1'` on SQLite and MySQL where CEL renders `'true'`, and the `CASE` spells CEL's two
-words on every dialect. The `IS NULL` arm keeps a NULL column UNKNOWN, since CEL has no `string()`
-for a missing or null value. The two words are literals, so on MySQL they compare in the
-*connection's* collation: make it case-sensitive, or `string(flag) == "TRUE"` selects the rows CEL
-does not.
-
-## Example application
-
-This repository carries a runnable [`example/`](example/), which installs the adapter from the
-distribution `pdm publish` would upload and exercises it against a live PDP over the shared
-[demo domain](../demo/README.md):
-
-```bash
-# from the repository root
-demo/scripts/run-example.sh sqlalchemy
-```
-
-Unlike the suites below, it resolves `cerbos_sqlalchemy` through the **published** surface — the
-modules the wheel actually carries, and its `Requires-Dist` resolved against a consumer's own
-pinned SQLAlchemy and Cerbos SDK — and covers usage shapes past a single flat query: `.limit()` and
-`.offset()` on top of the query, and the adapter's `Select` composed with an application-owned
-`.where()` clause across all three plan kinds.
-
-## How this adapter is tested
-
-Three suites, each answering a different question, and only one of them needs anything running.
-
-| suite | question | needs |
-| --- | --- | --- |
-| `tests/test_translator.py` | what SQL does `get_query` emit for a plan? | nothing — plans come from `conformance/wire-fixtures/`, expectations from `golden/expectations.json` |
-| `tests/test_query.py`, `tests/test_relations.py` | what does `get_query` do with a plan the planner cannot produce, or an option no policy can reach? | nothing |
-| `tests/test_adversarial_conformance.py` | do the rows that query returns match `check()`? | Docker: a pinned Cerbos PDP, in-memory SQLite, and a PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) for the declared collection storage |
-
-```bash
-pdm install
-pdm run test            # all three
-pdm run golden:update   # rewrite golden/expectations.json, then review the diff
-pdm run format          # isort + black
-```
-
-`golden/expectations.json` is a **golden expectation** file: for every one of the corpus's actions
-this adapter translates, the `WHERE` clause it emits on SQLite and on PostgreSQL, plus the
-parameters it binds. It is regenerated with the command above and reviewed as a diff — CI never
-regenerates it, so a change to how a shape is translated fails there and shows up as the list of
-statements it moved. The format is shared across adapters and documented under "Golden
-expectations" in [`conformance/README.md`](../conformance/README.md); what an entry *holds* is this
-adapter's own, and three things about the choice made here are worth knowing:
-
-- **The whole `Select` is compiled, not the bare `WHERE` clause.** Correlation is only observable
-  inside the enclosing SELECT: compiled on its own, a correlated subquery renders the outer table
-  into its own `FROM` and silently compares against every row of it. The recorded value is the part
-  after `WHERE`, and the suite asserts the rest of the statement is the same `SELECT … FROM` every
-  time.
-- **Two dialects, because they genuinely differ.** SQLite is what the conformance harness executes;
-  PostgreSQL executes only the actions that read a declared collection — under both storage shapes,
-  with every array rebased to start at 0 — and is the dialect this adapter's own source reasons about
-  most (NaN ordering, `CAST` rounding, `string()` over a boolean). They are not close
-  to identical — SQLite has no boolean type, so a `CASE` in a `WHERE` needs `= 1` and a negation
-  renders as `= 0`, and the two spell float division differently.
-- **The asset declares which SQLAlchemy major compiled it.** SQL text is the adapter's expression
-  tree *plus* SQLAlchemy's compiler, and 1.4 and 2.x do not render every tree the same way: 2.x
-  parenthesises a concatenation used as a comparison operand and adds SQLite's `+ 0.0`
-  float-division coercion. Neither is a translation decision, so the asset is generated under 2.x
-  and the 1.4 leg asserts a pinned list of exactly which shapes render differently — in both
-  directions, so a shape that starts or stops diverging fails. `pdm run golden:update` refuses to
-  run under the other major rather than rewriting the file with a compiler swap dressed up as a
-  translation change.
-
-**Behavior changes (#414).** Numeric `size()` and string operations now preserve CEL type errors
-instead of allowing SQL coercion. NaN ordering is false and its negation is true, matching Cerbos 0.55. Membership also
-preserves the declared NULL convention inside lambda bodies and against stored collections.
-Bare comparisons of temporal attributes now raise: database timestamps discard the RFC 3339
-spelling that CEL compares as a string. Use `timestamp()` on both operands to compare instants.
+Numeric `size()` and string operations keep CEL's type errors rather than allowing SQL coercion.
+Constant NaN ordering is false and its negation true (Cerbos 0.55; under 0.54 it was an evaluation
+error and stayed denied under negation). A bare boolean column is accepted as a whole condition.
 
 ## Conformance contract
 
-**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
-false, so its negation is true. This differs from Cerbos 0.54, where the comparison was
-an evaluation error and remained denied under negation. Missing attributes and other
-evaluation errors retain their existing behavior.
+The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict
+evaluation modes, using 29 hostile seed rows and executed SQLAlchemy queries. The Spring Data adapter
+defines the reference semantics for this compatibility snapshot. The harness takes
+`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` and rejects anything else; CI runs both,
+each against a PDP in the same mode.
 
-
-The live conformance harness accepts `ADAPTER_TEST_STRICT_EVALUATION=false` (the default)
-or `true`, and rejects other values. CI runs both modes against the same corpus, comparing
-each plan with `check()` decisions from a PDP configured with that same mode.
-
-
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict evaluation modes using 29 hostile seed rows and executable SQLAlchemy queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
-
-The oracle comparison runs on four legs, each varying one caller-side choice the corpus cannot: the baseline (the HTTP client, legacy `declarative_base()` models, a synchronous `Connection`), then the **gRPC** client, SQLAlchemy 2.0 **`DeclarativeBase`** models (skipped on 1.4, which has none), and the returned `Select` executed through an **`AsyncSession`** over aiosqlite. Every oracle action runs on every leg, and every fail-closed shape is asserted as a throw over both transports ([#321](https://github.com/cerbos/query-plan-adapters/issues/321)).
+The oracle comparison runs on four legs, each varying one caller-side choice: the baseline (HTTP
+client, `declarative_base()` models, synchronous `Connection`), the **gRPC** client, SQLAlchemy 2.0
+**`DeclarativeBase`** models (skipped on 1.4), and an **`AsyncSession`** over aiosqlite. Every oracle
+action runs on every leg, and every fail-closed shape is asserted as a throw over both transports
+([#321](https://github.com/cerbos/query-plan-adapters/issues/321)).
 
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 251 reference conformance actions, of which the 21 that read a declared collection also run on PostgreSQL under both storage shapes |
-| Transport-dependent | `cr-div-neg-zero` and `nan-ord-inf` — a constant zero divisor. Refused over HTTP, whose JSON body renders `-0.0` as `-0` and decodes it to the integer `0`, so the sign that picks CEL's infinity is gone; **translated over gRPC**, where the protobuf double keeps it, and compared against the oracle there. Both stay among the 57 fail-closed actions below, which classify the HTTP transport |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds, regex `matches()`, a negative or fractional index and an indexed object projection (`get-field`), `timestamp()` over an ambiguous string column, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero) and `filter()`/`map()` used as a condition (both return a list, not a boolean), a constant zero divisor whose sign the HTTP transport discards, a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), and list equality over a `map()` projection, whose deferred intermediate no enclosing override consumes, and a hierarchy with an empty delimiter (Cerbos splits the path per character, and the prefix `LIKE` this adapter emits would match the path itself), two-list `except` with resource-list and principal-list receivers, constructor expressions and structured membership needles, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (57 actions) |
+| Transport-dependent | `cr-div-neg-zero` and `nan-ord-inf` — a constant zero divisor. Refused over HTTP, whose JSON renders `-0.0` as `-0` and decodes it to integer `0`, losing the sign that picks CEL's infinity; **translated over gRPC**, where the protobuf double keeps it, and compared against the oracle there. Both count among the 57 fail-closed actions below, which classify the HTTP transport |
+| Fail-closed corpus shapes | Nanosecond `now()` thresholds; regex `matches()`; a negative or fractional index and an indexed object projection (`get-field`); `timestamp()` over an ambiguous string column; `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero); `filter()`/`map()` used as a condition (both return a list); a constant zero divisor whose sign HTTP discards; a hierarchy path built by `list()` rather than read from a column; `mod` (reached through the `int()` cast); list equality over a `map()` projection, whose deferred intermediate no override consumes; a hierarchy with an empty delimiter (Cerbos splits per character, and the prefix `LIKE` would match the path itself); two-list `except` with resource-list and principal-list receivers; constructor expressions and structured membership needles; unsupported principal-list macros; conditional divisors; bare temporal-column comparisons (57 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute the caller sends as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare it per attribute — `attribute_null_representation={reference: "explicit"}` — or the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
+| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute sent as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says so. Declare it with `attribute_null_representation={reference: "explicit"}`, or the old rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
-The conformance harness supplies the same public `operator_override_fns` mechanism available to applications for schema-specific collection translations. Regex `matches()` fails closed by default because SQL dialect regex engines do not guarantee CEL/RE2 semantics; applications may provide an override only when their database translation is known to be equivalent. Timestamp literals must use strict RFC 3339 grammar, resolve inside CEL's supported year 0001–9999 instant range, and be exactly representable at Python/SQLAlchemy microsecond precision: discarded fractional digits must be zero, and the mapped column/database must preserve microseconds. Unsupported shapes raise instead of producing a broader query. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
-
-The root-condition check that rejects `filter()`/`map()` accepts a bare boolean **column**. A policy whose whole condition is `R.attr.aBool` plans to a condition with no expression wrapper at all, and the ORM attribute it resolves to is a descriptor rather than a Core `ColumnElement` — so it used to be refused at the root while the identical operand was accepted one level down, as an `and`/`or`/`not` child. The position, not the shape, was deciding ([#388](https://github.com/cerbos/query-plan-adapters/issues/388)). This is a widening: a shape that raised now returns a filter, and nothing that previously returned a filter has changed.
-
-**Behaviour change.** A numeric literal outside the 64-bit integer range — `R.attr.aDouble < -1e19` — is now bound as a float. Every plan number is a double on the wire, but the JSON transport renders an integral one without a fraction, so `-1e19` arrived as the Python int `-10000000000000000000`; SQLite cannot bind an integer wider than 64 bits and raised `OverflowError` at execution, while PostgreSQL accepted it. A widening: the SQLite query that failed now runs, the PostgreSQL one is unchanged, and ints inside the int64 range are bound exactly as before.
-
-**Behaviour changes** ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)). Three, all narrowing or widening rather than silent:
-
-- `hasIntersection` joins `eq`/`ne`/`in` as order-insensitive, so the value-first spelling — which the planner preserves from policy source order — reaches an override with the column first instead of handing it a literal list where it expected a relation. A widening.
-- An operator override's intermediate value reaching a **default** handler now raises. Python compared it with `==` and produced a bare `False`, which `where()` accepts as a valid boolean and which filters out every row — an emitted filter for a shape the adapter cannot express.
-- The non-boolean check that refuses `filter()`/`map()` at the root now also runs on every `and`/`or`/`not` operand. A macro one level down used to reach `and_()` and raise SQLAlchemy's own WHERE/HAVING-role error, which is fail-closed but names a coercion rather than the mechanism.
+The harness uses the same public `operator_override_fns` mechanism applications do for
+schema-specific collection translations. Every fail-closed shape's error message is pinned in
+`conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
 
 ## Mapping hazards
 
-The conformance contract above proves the *plan* side — given a policy shape, does the query select the rows `check()` allows. The other half is the *mapping*: **the rows a subquery reads must be the rows the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
+The conformance contract proves the *plan* side. The other half is the *mapping*: **the rows a
+subquery reads must be the rows the application put into the resource attributes.** The shared
+corpus catalogues six ways that breaks, and every adapter records a position on each.
 
-**`get_query` has no relation model.** `attr_map` maps attribute references to columns; a collection-valued attribute reaches its rows entirely through [`operator_override_fns`](#overriding-default-predicates), which means *you* write the correlated subquery. Every hazard below is therefore caller-owned here, and which of them apply depends on how you write it:
+**`get_query` has no relation model.** A collection-valued attribute reaches its rows only through
+[`operator_override_fns`](#operator-overrides), so *you* write the correlated subquery and every
+hazard below is yours. Which ones apply depends on how you write it:
 
-- Through a mapped **`relationship()`** — `Model.rel.any(...)`, `Model.rel.has(...)`, `select(...).join(Model.rel)` — SQLAlchemy applies the relationship's `primaryjoin` and, for a single-table-inheritance target, the discriminator criteria. Those hazards are closed by the ORM.
-- Through a **hand-written correlated `select()`** over columns, which is what the adversarial harness does, none of that applies. You are reading the table bare and the invariant is yours end to end.
+- Through a mapped **`relationship()`** (`Model.rel.any(...)`, `Model.rel.has(...)`,
+  `select(...).join(Model.rel)`), SQLAlchemy applies the `primaryjoin` and, for a
+  single-table-inheritance target, the
+  [discriminator](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings).
+- Through a **hand-written correlated `select()`** over columns (what the adversarial harness does),
+  none of that applies.
 
-The single-table-inheritance half of that is [documented here](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings) — a `select(Subclass)` adds the discriminator to the `WHERE`. Check both against the SQLAlchemy version you actually run before relying on a row below.
+Check both against the SQLAlchemy version you run.
 
 | Hazard | Position | Mechanism to check |
 |---|---|---|
-| Filtered association | **Caller-owned** | `relationship(primaryjoin=…)` and `relationship(secondaryjoin=…)`. Going through `.any()`/`.has()` applies them; a hand-written `select()` over the target's columns does not, and must repeat the predicate in its own `where()` |
-| Default scope on the target model | **Caller-owned** | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag, or a `with_loader_criteria` you register on the session. SQLAlchemy applies none of those to a subquery you build yourself |
-| Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees the sibling subtypes |
-| To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing in the override mechanism makes the database enforce the single row the application saw — add the constraint |
-| Composite association key | **Caller-owned** | A multi-column foreign key. Unlike the adapters that take one source and one target column, an override is arbitrary SQLAlchemy, so a composite key *is* expressible — which also means nothing stops you writing half of it. Conjoin every column pair |
-| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is already SQL NULL, excluded under both polarities because `NOT NULL` is still NULL. `get_query` accepts any SQLAlchemy column expression in the attribute map for exactly this, and such an expression carries its own correlation so it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Filtered association | **Caller-owned** | `relationship(primaryjoin=…)` and `relationship(secondaryjoin=…)`. `.any()`/`.has()` apply them; a hand-written `select()` over the target's columns does not, and must repeat the predicate in its own `where()` |
+| Default scope on the target model | **Caller-owned** | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag, or a `with_loader_criteria` on the session. SQLAlchemy applies none of them to a subquery you build yourself |
+| Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees sibling subtypes |
+| To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing makes the database enforce the single row the application saw — add the constraint |
+| Composite association key | **Caller-owned** | A multi-column foreign key. An override is arbitrary SQLAlchemy, so a composite key *is* expressible — and nothing stops you writing half of it. Conjoin every column pair |
+| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is SQL NULL, excluded under both polarities. `attr_map` accepts any column expression for this, and it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ### `require_hops`: the one hazard with a library helper
 
-CEL cannot dot through a list, so every intermediate segment of `a.b.c` is a to-ONE parent. When it is absent the application sends no attribute at all and CEL raises a missing-path error, which denies — but a subquery rooted at the resource row cannot tell an absent parent from a childless one, so `all` reads TRUE, `!exists` reads TRUE and the count reads 0, each admitting rows the PDP denies ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)).
-
-That requirement is mechanical, identical for every caller, and easy to get subtly wrong, so it ships in the library rather than being left as advice:
+Every intermediate segment of `a.b.c` is a to-one parent (CEL cannot dot through a list). When it is
+absent, the application sends no attribute and CEL denies — but a subquery rooted at the resource
+row can't tell an absent parent from a childless one, so `all` reads TRUE, `!exists` reads TRUE and
+the count reads 0, each admitting denied rows ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)).
 
 ```python
 from cerbos_sqlalchemy import get_query, require_hops
@@ -307,227 +420,74 @@ query = get_query(
 )
 ```
 
-`require_hops` wraps the answer in a `CASE` with **no `ELSE`**: a missing hop yields NULL, and `NOT NULL` is still NULL, so the row stays excluded under both polarities. A direct relation — an empty `hop_correlation` — is returned unchanged, so `!tags.exists(...)` over zero tags is still TRUE.
+`require_hops(expression, hop_correlation, correlate=())` wraps the answer in a `CASE` with **no
+`ELSE`**: a missing hop yields NULL, which stays excluded under both polarities. With an empty
+`hop_correlation` (a direct relation) it returns the expression unchanged, so `!tags.exists(...)`
+over zero tags is still TRUE.
 
-Every operator whose answer comes off a chain has to go through it, not just the collection macros. A bare `EXISTS` is two-valued, so it is FALSE for an absent parent and its negation is TRUE — which is how plain membership and `hasIntersection` kept readmitting every parentless row after the macros alone were fixed ([#315](https://github.com/cerbos/query-plan-adapters/issues/315)), and how `!(size(chain) > 0)` did the same ([#316](https://github.com/cerbos/query-plan-adapters/issues/316)).
+Route **every** operator whose answer comes off a chain through it, not only the macros: a bare
+`EXISTS` is FALSE for an absent parent and its negation TRUE, which is how membership,
+`hasIntersection` ([#315](https://github.com/cerbos/query-plan-adapters/issues/315)) and
+`!(size(chain) > 0)` ([#316](https://github.com/cerbos/query-plan-adapters/issues/316)) over-granted.
 
-It is **optional**, and calling it is not enforced: a caller wiring a join chain today gets exactly the query it got before the helper existed. Making it mandatory would mean raising for every such caller, a consumer-visible break to guard a hazard many of them do not have.
+Calling it is optional and not enforced; enforcing it would break every existing caller with a join
+chain.
 
-## Requirements
-- Cerbos > v0.16
-- SQLAlchemy >= 1.4 / 2.0
+## Behaviour changes
 
-### Model styles
+- **Breaking** ([#227](https://github.com/cerbos/query-plan-adapters/issues/227)): `size()` over a JSON
+  or array column not declared in `collection_columns` now raises; it used to return `LENGTH()` of the
+  column's text. `index` over undeclared storage raises a message naming the missing declaration
+  instead of `Unrecognised operator: index`.
+- [#418](https://github.com/cerbos/query-plan-adapters/issues/418): `string()` over a boolean column now
+  translates (to a `CASE` spelling `'true'`/`'false'`, with NULL kept UNKNOWN) where it used to raise.
+  `CAST` would render `'1'` on SQLite and MySQL.
+- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): numeric `size()` and
+  string operations preserve CEL type errors instead of SQL coercion; NaN ordering is false and its
+  negation true (Cerbos 0.55); membership preserves the declared NULL convention inside lambda bodies
+  and against stored collections; bare temporal-attribute comparisons raise (use `timestamp()`).
+- [#388](https://github.com/cerbos/query-plan-adapters/issues/388): a bare boolean column is accepted as
+  the whole condition (e.g. `R.attr.aBool`), where it used to be refused at the root. A widening.
+- A numeric literal outside the int64 range (`R.attr.aDouble < -1e19`) is bound as a float; SQLite
+  used to raise `OverflowError` at execution. PostgreSQL is unchanged. A widening.
+- [#387](https://github.com/cerbos/query-plan-adapters/issues/387):
+  - `hasIntersection` is order-insensitive like `eq`/`ne`/`in`, so a value-first spelling reaches an
+    override with the column first. A widening.
+  - **Breaking:** an override's intermediate value reaching a default handler raises; it used to
+    compare to a bare `False` and filter out every row.
+  - **Breaking:** the non-boolean check that refuses `filter()`/`map()` at the root also runs on every
+    `and`/`or`/`not` operand, raising the adapter's message instead of SQLAlchemy's WHERE-role error.
 
-`get_query`'s `table` argument accepts a Core `Table`, a legacy
-`declarative_base()` model, or a SQLAlchemy 2.0 `DeclarativeBase` subclass. The
-2.0 style is not a relabelling of the legacy one — its metaclass sits outside the
-`DeclarativeMeta` hierarchy — so both are named explicitly in the accepted type.
+## Example application
 
-Passing an ORM model returns `Select[Tuple[Model]]` and passing a Core `Table`
-returns `Select[Any]`, so the row type reaches the caller instead of being erased
-to a bare `Select`.
+[`example/`](example/) installs the built wheel and runs the shared
+[demo domain](../demo/README.md) against a live PDP, including pagination and the adapter's `Select`
+composed with an application-owned `.where()` across all three plan kinds:
 
-### Transports
-
-`get_query` accepts the plan from either SDK client: the HTTP `CerbosClient`'s
-`PlanResourcesResponse` or the gRPC client's protobuf one. They are equivalent
-except for one shape — a constant zero divisor such as `x / -0.0` — which only the
-gRPC client can translate, because only its plan keeps the sign of the zero (see
-the transport-dependent row under [Conformance contract](#conformance-contract)).
-Over HTTP that shape raises rather than guessing which infinity CEL produced.
-
-### Async
-
-`get_query` does no I/O: it returns a plain `Select`, which you execute however
-your application already does, including through `AsyncSession` or an
-`AsyncConnection`:
-
-```python
-async with AsyncSession(async_engine) as session:
-    rows = (await session.execute(get_query(plan, Resource, attr_map))).scalars()
+```bash
+# from the repository root
+demo/scripts/run-example.sh sqlalchemy
 ```
 
-Plan with the SDK's async client, or with the sync one off the event loop. The
-conformance harness executes every oracle action this way on aiosqlite, on both
-SQLAlchemy majors.
+## Development
 
-### Database collation requirements
+| Suite | Checks | Needs |
+| --- | --- | --- |
+| `tests/test_translator.py` | the SQL `get_query` emits for each corpus plan | nothing — plans from `conformance/wire-fixtures/`, expectations from `golden/expectations.json` |
+| `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
+| `tests/test_adversarial_conformance.py` | returned rows match `check()` | Docker: a pinned Cerbos PDP, in-memory SQLite, and PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) for declared collection storage |
 
-Cerbos CEL string and hierarchy comparisons are case-sensitive. The database
-columns used in `attr_map` must therefore use a case-sensitive collation for
-equality, membership, and the `LIKE` operations emitted by
-`contains`/`startsWith`/`endsWith` and hierarchy-prefix predicates.
-
-This is an authorization invariant: a case-insensitive database collation can
-silently over-grant access (for example, treating `One` as equal to `one`, or
-`Dept.Eng` as overlapping `dept.eng`). MySQL's common default `_ci` collations
-are case-insensitive; configure a byte-exact collation for mapped authorization
-columns — `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not byte-exact:
-`utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), so `'o\u00ADne' = 'one'` is
-TRUE under it, and `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '` is TRUE under it
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). The adapter cannot enforce one portably because
-collation selection belongs to the database schema and dialect.
-
-## Usage
-
-```
-pip install cerbos-sqlalchemy
+```bash
+pdm install
+pdm run test            # all three
+pdm run golden:update   # rewrite golden/expectations.json, then review the diff
+pdm run format          # isort + black
 ```
 
-```python
-from cerbos.sdk.client import CerbosClient
-from cerbos.sdk.model import Principal, ResourceDesc
-
-from cerbos_sqlalchemy import get_query
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.sql import Select
-
-Base = declarative_base()
-
-
-class LeaveRequest(Base):
-    __tablename__ = "leave_request"
-
-    id = Column(Integer, primary_key=True)
-    department = Column(String(225))
-    geography = Column(String(225))
-    team = Column(String(225))
-    priority = Column(Integer)
-
-
-with CerbosClient(host="http://localhost:3592") as c:
-    p = Principal(
-        "john",
-        roles={"employee"},
-        policy_version="20210210",
-        attr={"department": "marketing", "geography": "GB", "team": "design"},
-    )
-
-    # Get the query plan for "view" action
-    rd = ResourceDesc("leave_request", policy_version="20210210")
-    plan = c.plan_resources("view", p, rd)
-
-
-# the attr_map arg of get_query expects a map[string, InstrumentedAttribute | Column], with cerbos attribute strings mapped to the column/attr instances
-attr_map = {
-    "request.resource.attr.department": LeaveRequest.department,  # LeaveRequest.__table__.c.department is also allowed
-    "request.resource.attr.geography": LeaveRequest.geography,
-    "request.resource.attr.team": LeaveRequest.team,
-    "request.resource.attr.priority": LeaveRequest.priority,
-}
-
-
-# `get_query` supports both `Table` instances and ORM entities:
-# ORM entity - honouring object level relationships via the sqlalchemy ORM.
-# Passing a model returns `Select[Tuple[LeaveRequest]]`, so the row type survives
-# into `session.execute(query).scalars()` without a manual annotation.
-query = get_query(plan, LeaveRequest, attr_map)
-# Alternatively it can generate legacy queries by passing the Table instance,
-# which returns `Select[Any]` — a Core table carries no row type.
-query: Select = get_query(plan, LeaveRequest.__table__, attr_map)
-
-
-# NOTE: if columns defined within the attr_map originate from more than one table, we need to define a mapping as the optional 4th positional arg to `get_query`.
-# The argument is in the form:
-#   `list[tuple[Table | DeclarativeMeta | type[DeclarativeBase], BinaryExpression | ColumnOperators]]`
-# e.g.:
-query: Select = get_query(
-    plan,
-    Table1,
-    {
-        "request.resource.attr.foo": Table1.foo,  # or `Table1.__table__.c.foo`
-        "request.resource.attr.bar": Table2.bar,
-        "request.resource.attr.bosh": Table3.bosh,
-    },
-    [
-        (Table2, Table1.table2_id == Table2.id),  # or (Table2.__table__, Table1.__table__.c.table2_id == Table2.__table__.c.id)
-        (Table3, Table1.table3_id == Table3.id),
-    ]
-)
-
-
-# optionally extend the query
-query = query.where(LeaveRequest.priority < 5)
-
-# or return a subset of the selected columns (via a new `select`)
-# NOTE: this is wise to do as standard, to avoid implicit joins generated by sqla `relationship()` usage, if present
-query = query.with_only_columns(
-    LeaveRequest.department,
-    LeaveRequest.geography,
-)
-
-# Print the compiled query (for debug purposes)
-print(query.compile(compile_kwargs={"literal_binds": True}))
-```
-
-### Overriding default predicates
-
-By default, the library provides a base set of operators which are widely supported across a range of SQL dialects. However, in some cases, users may wish to override a particular operator for a more idiomatic/optimised alternative for a given database. An example of this could be postgres users preferring to use `= ANY` over `IN`:
-
-```python
-from sqlalchemy.sql.expression import any_
-
-query = get_query(
-    plan_resource_resp,
-    some_table,
-    attr_map={
-        "request.resource.attr.foo": Table1.foo,
-    },
-    # override handler functions in the map below
-    operator_override_fns={
-        "in": lambda c, v: c == any_(v),
-    },
-)
-```
-
-An entry whose value is `None` uses the default handler, including inside nested expressions.
-Omitting `operator_override_fns` validates every `attr_map` entry. Passing an explicit mapping
-(including `{}` or a map containing only `None` entries) validates the attributes reached outside
-active overrides; an override owns the operands it translates.
-
-The types are as follows:
-
-```python
-from sqlalchemy import Column
-from sqlalchemy.orm import InstrumentedAttribute
-from sqlalchemy.sql.expression import BinaryExpression, ColumnOperators
-
-GenericColumn = Column | InstrumentedAttribute
-GenericExpression = BinaryExpression | ColumnOperators
-# and the actual map arg to `get_query` ⬇️
-OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
-```
-
-### Collection macros over known values
-
-`exists`/`all` over a *known* collection — one whose elements the PDP resolves
-at plan time, typically a principal attribute — is translated without any
-override or relation mapping:
-
-```yaml
-condition:
-  match:
-    expr: P.attr.teams.exists(t, R.attr.team == t)
-```
-
-The Cerbos planner unrolls this into a plain `or`/`and` chain at 10 elements or
-fewer and ships the lambda with a literal value-list collection above that
-(`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
-cerbos/cerbos#2817). The adapter applies the same fold, uncapped, so the
-generated SQL is equivalent on both sides of that threshold rather than
-depending on how many teams a given principal happens to hold. Elements are
-substituted into the lambda body — a bare `t` becomes the element, `t.name`
-drills into it — and each substituted body is translated through the ordinary
-pipeline, so overrides and NULL handling apply exactly as they do to a
-planner-unrolled chain. An empty collection keeps CEL identity semantics:
-`exists` matches nothing, `all` matches everything.
-
-`exists_one`, `filter`, `map` and `except` have no flat equivalent and raise
-over a literal value list, as does a `t.path` reference that the element does
-not carry.
-
-Macros over a collection *column or relation* (`R.attr.tags.exists(...)`) still
-require an `operator_override_fns` entry — the adapter has no portable
-correlated-subquery translation for them.
+`golden/expectations.json` records, for every corpus action this adapter translates, the `WHERE`
+clause it emits on SQLite and on PostgreSQL plus the bound parameters. The whole `Select` is compiled
+(a correlated subquery only renders correctly inside its enclosing SELECT) and the part after
+`WHERE` is recorded. CI never regenerates the file. SQL text depends on SQLAlchemy's compiler, so the
+file is generated under 2.x, `golden:update` refuses to run under 1.4, and the 1.4 leg asserts a
+pinned list of shapes that render differently, in both directions. The format is described under
+"Golden expectations" in [`conformance/README.md`](../conformance/README.md).

@@ -1,31 +1,61 @@
 # Cerbos Query Plan Adapters
 
-These are reference implementations of adapters that take a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and convert it into a filter which can be applied to your data fetching layer to return just the instances of a resource that a user would have access to.
+Turn a [Cerbos](https://cerbos.dev) query plan into a database filter, so a list query returns only
+the records the current user is allowed to see.
 
-Current supported adapters:
+You call Cerbos's [`PlanResources`](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)
+API with a principal, a resource kind and an action. Cerbos answers with one of three plan kinds:
+**always allowed**, **always denied**, or **conditional** with an expression tree. An adapter turns
+that tree into the native filter for your ORM or store (a Prisma `where`, a SQL fragment, a Mongo
+query, an Elasticsearch query, and so on) using a mapping you provide from Cerbos attribute paths
+(`request.resource.attr.status`) to your fields.
 
-- [ActiveRecord (Ruby)](https://github.com/cerbos/query-plan-adapters/tree/main/activerecord) — **work-in-progress prototype. Not ready for production use.**
-- [Convex](https://github.com/cerbos/query-plan-adapters/tree/main/convex)
-- [Drizzle ORM](https://github.com/cerbos/query-plan-adapters/tree/main/drizzle)
-- [Elasticsearch (Java)](https://github.com/cerbos/query-plan-adapters/tree/main/elasticsearch-java)
-- [Ent (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/ent)
-- [LangChain / ChromaDB](https://github.com/cerbos/query-plan-adapters/tree/main/langchain-chromadb)
-- [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
-- [pgx (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/pgx)
-- [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
-- [Spring Data JPA](https://github.com/cerbos/query-plan-adapters/tree/main/spring-data)
-- [SQLAlchemy](https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy)
+## Pick an adapter
+
+| Store / ORM | Language | Install | Docs |
+| --- | --- | --- | --- |
+| Prisma | TypeScript | `npm install @cerbos/orm-prisma @cerbos/core` | [prisma](prisma/) |
+| Drizzle ORM | TypeScript | `npm install @cerbos/orm-drizzle @cerbos/core` | [drizzle](drizzle/) |
+| Mongoose | TypeScript | `npm install @cerbos/orm-mongoose @cerbos/core` | [mongoose](mongoose/) |
+| Convex | TypeScript | `npm install @cerbos/orm-convex @cerbos/core` | [convex](convex/) |
+| LangChain.js / ChromaDB | TypeScript | `npm install @cerbos/langchain-chromadb @cerbos/core` | [langchain-chromadb](langchain-chromadb/) |
+| SQLAlchemy | Python | `pip install cerbos-sqlalchemy` | [sqlalchemy](sqlalchemy/) |
+| Ent | Go | `go get github.com/cerbos/query-plan-adapters/ent` | [ent](ent/) |
+| pgx / PostgreSQL | Go | `go get github.com/cerbos/query-plan-adapters/pgx` | [pgx](pgx/) |
+| Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
+| Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
+| ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
+
+Each adapter's README starts with an install step and a quick-start snippet.
 
 > [!WARNING]
-> **The ActiveRecord adapter is a work-in-progress prototype.** It has not been released, it
-> has not been used in production by anyone, and its public interface can still change without
-> a deprecation. Do not depend on it to enforce access control in a live system yet. See
-> [`activerecord/README.md`](activerecord/README.md) for what it does and does not cover.
+> **The ActiveRecord adapter is a work-in-progress prototype.** It is unreleased, has not been used
+> in production, and its interface may change without deprecation. Do not rely on it to enforce
+> access control in a live system yet.
 
-Every adapter is proved against two shared corpora at the root of this repository:
+## The shape of every integration
 
-- [`conformance/`](conformance/) — deliberately hostile shapes, proving each adapter's filter
-  returns exactly the rows the PDP allows.
-- [`demo/`](demo/) — one realistic domain, proving each adapter's **published package** installs,
-  imports, and composes with its ORM's real query methods. Ent and pgx use local Go module
-  replacements and prove usage shapes only, not packaging.
+1. Ask Cerbos for a plan: `planResources({ principal, resource: { kind }, action })`.
+2. Pass the plan and your attribute mapping to the adapter.
+3. Branch on the result: return nothing for *always denied*, run the query unfiltered for
+   *always allowed*, and apply the returned filter for *conditional*.
+
+If a policy uses a shape the adapter cannot express in your store, the adapter **throws** rather than
+return a filter that might over-grant. Each adapter's `Conformance contract` section lists what it
+supports and what it refuses.
+
+## How the adapters are tested
+
+Every adapter is tested against two shared corpora in this repository:
+
+- [`conformance/`](conformance/): hostile policy shapes and seed rows. Each adapter's filter runs
+  against a real store and must return exactly the rows a real Cerbos PDP allows via `check()`.
+- [`demo/`](demo/): one realistic domain. Each adapter's example app installs the **packaged**
+  adapter and uses it with its ORM's real query methods. The Go adapters use a local `replace`
+  directive, so their examples cover usage but not packaging.
+
+Contributors: start with [CLAUDE.md](CLAUDE.md) and [conformance/README.md](conformance/README.md).
+
+## License
+
+[Apache 2.0](LICENSE)

@@ -1,188 +1,72 @@
 # Cerbos + Mongoose ORM Adapter
 
-An adapter library that takes a [Cerbos](https://cerbos.dev) Query Plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan)) response and converts it into a [Mongoose](https://mongoosejs.com/) filter. It is designed to run alongside a project that is already using the [Cerbos JavaScript SDK](https://github.com/cerbos/cerbos-sdk-javascript) to fetch query plans so that authorization logic can be pushed down to MongoDB.
+Converts a [Cerbos](https://cerbos.dev) query plan ([PlanResources API](https://docs.cerbos.dev/cerbos/latest/api/index.html#resources-query-plan))
+into a [Mongoose](https://mongoosejs.com/) filter, so authorization is pushed down to MongoDB.
 
-## How it works
-
-1. Use a Cerbos client (`@cerbos/http` or `@cerbos/grpc`) to call `planResources` and obtain a `PlanResourcesResponse`.
-2. Provide `queryPlanToMongoose` with that plan and an optional mapper that describes how Cerbos attribute paths relate to your document schema.
-3. The adapter walks the Cerbos expression tree, translates supported operators to MongoDB syntax, and returns `{ kind, filters? }`.
-4. Inspect `result.kind`:
-   - `ALWAYS_ALLOWED`: the caller can query without any additional filters.
-   - `ALWAYS_DENIED`: short-circuit and return an empty result set.
-   - `CONDITIONAL`: execute the query with `result.filters`.
-
-You can merge the adapter output with existing application filters (for example, via `$and`) before issuing the Mongoose query.
-
-## Supported operators
-
-| Category | Operators | Behavior |
-| --- | --- | --- |
-| Logical | `and`, `or`, `not` | Builds `$and`, `$or`, and `$nor` groups. |
-| Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Emits `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` checks against the mapped field. |
-| Membership | `in`, `hasIntersection` | `$in` on simple lists, or `$elemMatch` when targeting array relations; `hasIntersection` supports either a direct array field or a `map` projection inside the plan. |
-| String helpers | `contains`, `startsWith`, `endsWith` | Generates escaped regular expressions that target substrings, prefixes, or suffixes. |
-| Existence helpers | `eq`/`ne` against `null`, `exists` | Null checks arrive as `eq`/`ne` against a null value — the planner emits no existence operator. Uses `$eq: null`/`$ne: null` for scalars and `$elemMatch` for collections. |
-| Collection helpers | `filter`, `lambda`, `map`, `all` | Translates Cerbos collection expressions into scoped `$elemMatch` filters and maps lambda variables to the correct nested paths. `all` requires the stored field to be an array. `exists`/`all` over a *literal* value-list collection (a folded principal attribute above the planner's 10-element unroll cap) fold to `$or`/`$and` of the substituted lambda body instead — no relation mapping needed. |
-| Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Uses document-level MongoDB `$expr` expressions. Division requires a non-zero constant denominator; indexing requires a non-negative integer constant and adds a per-document bounds check. |
-| Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Uses guarded MongoDB conversion and regular-expression expressions. Timestamps accept BSON dates or millisecond-exact RFC 3339 strings in the CEL instant range. Regex matching accepts a validated common RE2/PCRE2 subset. |
-| Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Translates a mapped scalar hierarchy path using literal prefix and ancestor-list filters. |
-
-Any operator not listed above causes `queryPlanToMongoose` to throw `Unsupported operator: <name>`.
-
-`exists_one` fails loudly because a normal match filter cannot preserve exact-match cardinality and CEL error semantics for nullable elements.
-
-Conversions fail closed when the stored BSON type is outside CEL's compatible source types or when parsing fails. `double` and `int` accept strings and numeric BSON values, but not booleans; `int` also rejects BSON dates rather than interpreting them as milliseconds. `string` accepts strings, booleans, and numeric BSON values. A failed conversion remains denied under negation.
-
-Timestamp values must fall in CEL's UTC instant range (`0001-01-01T00:00:00Z` through `9999-12-31T23:59:59.999Z`). Strings must use RFC 3339 syntax with no more than three fractional-second digits, matching BSON Date's millisecond precision. Higher-precision or out-of-range strings and BSON dates fail closed instead of being silently truncated into a different CEL instant.
-
-`matches` supports literals, `.`, the `*`, `+`, and `?` quantifiers, leading `^`, terminal `$`, and escaped regex metacharacters. Other constructs fail closed. A terminal `$` is translated to PCRE2's absolute end-of-text anchor so MongoDB cannot match before a final newline, preserving RE2 semantics.
-
-## NULL attribute representation
-
-`R.attr.x == null` compiles to the same `eq(x, null)` plan node however your application represents
-a NULL field in the attributes it sends to `check()`, so the adapter cannot infer the convention
-and has to be told which one you use.
-
-| attributes you send for a NULL field | `check()` on that document | null-matching filter |
-| --- | --- | --- |
-| `{"x": null}` — explicit null | allow | selects it — aligned |
-| `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
-
-``nullAttributeRepresentation`` defaults to ``"explicit"``, preserving the historical translation. If your application
-omits attributes for NULL fields, set it to ``"omitted"``: the adapter then rejects every null
-comparison operand instead of emitting a filter that returns documents the PDP denies.
-
-```ts
-queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
-```
-
-The rejection is deliberately wider than the shapes that actually over-grant — `x != null` and
-`!(x == null)` are aligned under both conventions — because negation is applied by wrapping the
-built filter rather than pushing it into the leaf, so a leaf cannot tell whether an enclosing
-`not` will flip a not-null predicate back into a null-selecting one. Rejecting every null operand
-is correct under any nesting. See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
-
-Collection predicates reject references outside their lambda scope across all leaf comparison
-operators. This is a breaking change for previously accepted outer references: MongoDB's
-`$elemMatch` cannot evaluate them against the root document. Hierarchy comparisons through
-to-one relations are supported, including negation, with missing-parent guards.
-
-## Conformance contract
-
-Conformance runs select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false`
-(the default) or `ADAPTER_TEST_STRICT_EVALUATION=true`; other values are rejected.
-For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial` runs the
-corpus with strict evaluation enabled for both planning and the `check()` oracle.
-CI runs both modes for each existing adversarial store and client-version combination.
-
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
-
-| Classification | Coverage |
-| --- | --- |
-| Oracle-tested | 207 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (211 actions) |
-| Fail-closed | 90 reference actions plus the 7 reference-unsupported shapes (97 actions total) |
-| Operand types the plan does not carry | CEL overloads `+` on strings and a query plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** neither does, and MongoDB spells the two differently — `$add` takes numeric and date types only — so the shape is refused at translation. It previously reached the server as `$add`, which aborts the whole query (cerbos/query-plan-adapters#391) |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares per-attribute that a stored null is a missing Cerbos attribute; the global option is the backstop for mappings that do not declare it |
-| Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null already compares as a null *value* exactly as CEL does. The four `null-value-*` corpus probes for the explicit convention (cerbos/query-plan-adapters#308) were aligned before that option existed; the fifth is refused by the pre-existing negated-collection-macro limitation, not by the null convention |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
-
-The fail-closed set covers exact-one cardinality, aggregation expressions or outer-document references inside `$elemMatch`, nested collection counts, correlated variable-in-variable membership, unsafe division/non-finite arithmetic, negated nullable collection predicates that cannot preserve CEL's three-valued error semantics — which now covers the negated string match against a nullable *column* needle, where a missing field matches a negated aggregation predicate — and list equality over a `map()` projection. These plans throw instead of silently degrading to a weaker MongoDB filter. Every fail-closed shape's error message is pinned in the shared corpus (`conformance/actions.json`) and asserted by this adapter's conformance run, so a classification proves the throw names its declared mechanism rather than merely that something threw.
-
-The filter each of these actions produces is pinned separately, in the translator unit test (`npm test`) — every corpus action, classified there exactly once as an emitted filter, an unconditional plan kind, or a throw. It reads its plans from `conformance/wire-fixtures/`, the golden `PlanResources` responses captured against the pinned Cerbos version, so it needs no Cerbos sidecar and no MongoDB. That is what makes a change to the emitted query show up as a diff even when it selects the same documents from the corpus seeds, and it is the only place the parts of the mapper contract no policy can reach are asserted at all: `valueParser` (including the `ObjectId` coercion for a collection whose key is `_id`), function mappers, the `nullAttributeRepresentation` boundary, and malformed input. Adding a corpus action fails it until someone records the filter it produces. See [ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md).
-
-Whether those filters return the documents the PDP allows is a separate question, answered by the adversarial suite (`npm run test:adversarial`), which does need a Cerbos sidecar and a MongoDB server.
-
-**Behaviour change.** `hasIntersection` now normalizes its operand order, so the value-first spelling — `hasIntersection(["a","b"], R.attr.list)`, which the planner preserves from policy source order — translates instead of raising "Invalid operands". This is a widening: nothing that previously returned a filter returns a different one ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
-
-## Mapping hazards
-
-The conformance contract above proves the *plan* side — given a policy shape, does the filter select the documents `check()` allows. The other half is the *mapping*: **the documents the filter reads must be the documents the application put into the resource attributes.** Six ways that can break are catalogued in the shared corpus, and every adapter has to record a position on each of them.
-
-This adapter **builds no subquery.** A relation is a path inside the same document, so `find()` reads exactly the document the application serialised. The adapter emits no `$lookup` and no `$graphLookup`, and never calls `populate()` or `aggregate()` — `src/adversarial.test.ts` ("emits no `$lookup` and reaches no second collection") asserts that against both the source and every emitted filter, because five of the six rows below are only "not applicable" for as long as it stays true.
-
-| Hazard | Position | Mechanism to check |
-|---|---|---|
-| Filtered association | Not applicable — no subquery | — |
-| Default scope on the target model | Not applicable — no second collection is read | — |
-| Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter executed against the *base* model matches the other subtypes' documents — the `__t` criterion Mongoose adds for the discriminator model is not in the filter the adapter returns, and cannot be: the plan does not say which model the caller will use |
-| To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
-| Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `relation.requiresParent` for a flattened ARRAY parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration — it is a hop by definition ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)). **Behaviour change in #375:** a `type: "one"` relation now ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation over it no longer matches documents where the subdocument is absent (an over-grant fix, consumer-visible); and a bare boolean read through a to-one hop is now translated instead of throwing "Bare collection variables are unsupported" |
-
-Mapper entries may declare `valueType: "number" | "string" | "boolean" | "dateTime"`.
-Declare numeric and string columns to prevent Mongoose from casting a mismatched CEL equality
-literal into the column's type. A `valueParser` remains an explicit caller override. Declare
-stored `Date` fields as `dateTime`: a bare comparison of two such fields now throws because
-MongoDB has discarded the original strings that CEL compares. Use `timestamp(...)` on both
-operands when the policy compares instants.
-
-Whole-list equality and list-valued membership needles now throw before a filter is returned;
-the relation mapping represents element fields rather than an ordered list. These refusals are
-breaking changes for shapes that previously produced invalid or incorrect filters.
-
-## Requirements
-
-- Cerbos > v0.16 plus either the `@cerbos/http` or `@cerbos/grpc` client
-
-## System Requirements
-
-- Node.js >= 22.0.0
-- Mongoose 9.x
-- MongoDB 7.0 or newer
-
-## Installation
+## Install
 
 ```bash
 npm install @cerbos/orm-mongoose @cerbos/core
+npm install @cerbos/grpc   # or @cerbos/http — whichever client your deployment uses
 ```
 
-`@cerbos/core` is a peer dependency: it carries the query plan types, and your application and
-this adapter have to share one copy of them. Installing it yourself is what keeps that true — with
-a second copy in the tree an operand built by your Cerbos client is not the same object the adapter
-inspects. npm 7+ installs missing peers automatically; pnpm and Yarn expect it to be declared.
+- `@cerbos/core` (`^0.32.0 || ^0.33.0`) is a peer dependency. Install it yourself so your Cerbos
+  client and the adapter share one copy of the query plan types (npm 7+ adds it automatically;
+  pnpm and Yarn need it declared).
+- The adapter depends on no Cerbos client and does not import `mongoose`; it returns a plain filter
+  object.
+- Requirements: Node.js >= 22, Mongoose 9.x, MongoDB 7.0 or newer, Cerbos > v0.16.
 
-You also need a Cerbos client to obtain a query plan in the first place — [`@cerbos/grpc`](https://www.npmjs.com/package/@cerbos/grpc)
-or [`@cerbos/http`](https://www.npmjs.com/package/@cerbos/http). Install whichever your deployment
-uses; this adapter deliberately depends on neither, so it does not pull a gRPC stack into an
-application that talks HTTP.
-
-## API
+## Quick start
 
 ```ts
-import {
-  queryPlanToMongoose,
-  PlanKind,
-  type Mapper,
-} from "@cerbos/orm-mongoose";
+import { GRPC as Cerbos } from "@cerbos/grpc";
+import mongoose from "mongoose";
+import { queryPlanToMongoose, PlanKind, type Mapper } from "@cerbos/orm-mongoose";
 
-const result = queryPlanToMongoose({
-  queryPlan, // PlanResourcesResponse from Cerbos
-  mapper, // optional Mapper - see below
-});
+await mongoose.connect("mongodb://127.0.0.1:27017/test");
+const cerbos = new Cerbos("localhost:3593", { tls: false });
+const Document = mongoose.model("Document", /* ... schema ... */);
 
-if (result.kind === PlanKind.CONDITIONAL) {
-  await MyModel.find(result.filters);
+const mapper: Mapper = {
+  "request.resource.attr.title": { field: "title" },
+  "request.resource.attr.owner": { relation: { name: "owner", type: "one", field: "id" } },
+  "request.resource.attr.tags": {
+    relation: { name: "tags", type: "many", fields: { name: { field: "name" } } },
+  },
+};
+
+async function listDocuments(principalId: string) {
+  const queryPlan = await cerbos.planResources({
+    principal: { id: principalId, roles: ["USER"] },
+    resource: { kind: "document" },
+    action: "view",
+  });
+
+  const result = queryPlanToMongoose({ queryPlan, mapper });
+
+  switch (result.kind) {
+    case PlanKind.ALWAYS_DENIED:
+      return [];
+    case PlanKind.ALWAYS_ALLOWED:
+      return Document.find({ archived: false });
+    case PlanKind.CONDITIONAL:
+      return Document.find({ $and: [result.filters!, { archived: false }] });
+  }
 }
 ```
 
-`PlanKind` is re-exported from `@cerbos/core`:
+`queryPlanToMongoose` returns `{ kind, filters? }`; `filters` is set only for `CONDITIONAL`.
+`PlanKind` is re-exported from `@cerbos/core`. Combine the adapter's filter with your own criteria
+under `$and`, as above. Unsupported shapes throw rather than returning a weaker filter.
+
+## Mapping attributes
+
+The plan names attributes by path (`request.resource.attr.title`). The mapper tells the adapter
+where each lives in your documents.
 
 ```ts
-export enum PlanKind {
-  ALWAYS_ALLOWED = "KIND_ALWAYS_ALLOWED",
-  ALWAYS_DENIED = "KIND_ALWAYS_DENIED",
-  CONDITIONAL = "KIND_CONDITIONAL",
-}
-```
-
-### Mapper configuration
-
-The Cerbos query plan references fields using paths such as `request.resource.attr.title`. Use a mapper to translate those names to the paths in your Mongoose models and to describe relations/collections so the adapter can generate `$elemMatch` filters when needed.
-
-```ts
-export type MapperConfig = {
+type MapperConfig = {
   field?: string;
   nullable?: boolean;
   valueParser?: (value: any) => any;
@@ -196,22 +80,25 @@ export type MapperConfig = {
   };
 };
 
-export type Mapper =
-  | Record<string, MapperConfig>
-  | ((key: string) => MapperConfig);
+type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 ```
 
-- `field` rewrites a single Cerbos path to a different field in MongoDB.
-- `nullable` declares that a stored `null` represents a missing Cerbos attribute. Comparisons add a non-null guard so MongoDB does not turn a CEL evaluation error into an authorized match. Do not set it for fields where `null` is an explicit Cerbos value.
-- `valueParser` transforms leaf values during filter construction. This is useful when the Cerbos plan contains string representations that need to be converted to MongoDB-specific types (for example, converting a string to an `ObjectId`). The parser is applied to each value in `eq`, `ne`, `lt`, `le`, `gt`, `ge`, and `in` operators. It also works on nested relation fields via the `fields` map.
-- `relation` describes embedded documents (`type: "one"`) or arrays (`type: "many"`). When `field` is provided on a relation it identifies the property inside that relation that should be used for comparisons (for example, matching `createdBy.id` without an `$elemMatch`).
-- `fields` supplies nested overrides so lambda expressions such as `tag.name` can be mapped to the correct property.
+| Option | What it does |
+| --- | --- |
+| `field` | Document path for this attribute. |
+| `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. |
+| `valueParser` | Converts plan literals before they reach the filter (for example string → `ObjectId`). Applied to `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `in` values, and inside relation `fields`. |
+| `valueType` | The stored scalar type. Declare numeric and string fields so Mongoose does not cast a mismatched CEL literal into the field's type. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
+| `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). |
+| `relation.fields` | Mappings for properties inside the relation, as referenced by lambda variables (`tag.name`). |
+| `relation.requiresParent` | Document path of an optional to-one parent an array is reached through, so `size(chain)` on a document with no parent yields null instead of 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration. |
 
-Every attribute a plan references must have a mapper entry — its own, or one for the relation it is reached through — or translation throws `No mapper entry for <reference>`.
+**Every attribute a plan references needs a mapper entry** — its own, or the relation it is reached
+through — or translation throws `No mapper entry for <reference>`. If your documents really are
+shaped like the plan paths, opt in per reference with an entry that names no `field` (`{}` or
+`{ nullable: true }`), or a function mapper that returns one.
 
-**Behaviour change.** An unmapped reference used to be taken verbatim as a document path, and since no document stores a path like `request.resource.attr.status`, MongoDB's `$ne` and `$nor` matched every document: a missing entry turned `R.attr.status != "x"` into a filter returning the whole collection ([#492](https://github.com/cerbos/query-plan-adapters/issues/492)). It now throws, which is a consumer-visible break for a caller relying on the fallback, including one who passed no mapper at all. If your documents really are shaped like the plan paths, opt in per reference with an entry that names no `field` (`{}`, or `{ nullable: true }`), or with a function mapper that returns one.
-
-#### Direct fields
+### Direct fields
 
 ```ts
 const mapper: Mapper = {
@@ -221,78 +108,49 @@ const mapper: Mapper = {
 };
 ```
 
-#### Relations and collections
-
-Use `relation` when mapping nested objects or arrays. `type: "one"` maps to embedded/single relations and results in dotted field paths, while `type: "many"` maps to arrays and lets the adapter emit `$elemMatch` conditions. The optional `fields` map lets you rename nested properties referenced in lambda expressions.
+### Relations and collections
 
 ```ts
 const mapper: Mapper = {
   "request.resource.attr.createdBy": {
-    relation: {
-      name: "createdBy",
-      type: "one",
-      field: "id",
-    },
+    relation: { name: "createdBy", type: "one", field: "id" },
   },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
       type: "many",
-      fields: {
-        id: { field: "id" },
-        name: { field: "name" },
-      },
+      fields: { id: { field: "id" }, name: { field: "name", nullable: true } },
     },
   },
 };
 ```
 
-#### Collection operators in practice
+Collection operators (`filter`, `exists`, `hasIntersection`, `map`, `all`) over a *resource*
+collection need a `type: "many"` relation:
 
-Collection-aware operators (`filter`, `exists`, `hasIntersection`, `map`, and `all`) over a *resource* collection require the mapper to declare the relation with `type: "many"`. The adapter automatically scopes lambda variables and uses the `fields` map when translating expressions such as `tag.name`:
+- `exists` and `filter` wrap the condition in `$elemMatch`.
+- `hasIntersection` works on scalar arrays and arrays of objects; `map(lambda(tag.name))` projects to
+  `tags` `$elemMatch` on `name`.
+- `all` becomes a negated `$elemMatch`, and requires the stored field to be an array.
+- A bare `map` checks that the nested path exists in each element.
 
-```ts
-const mapper: Mapper = {
-  "request.resource.attr.tags": {
-    relation: {
-      name: "tags",
-      type: "many",
-      fields: {
-        name: { field: "name", nullable: true },
-      },
-    },
-  },
-};
-```
+Collection predicates cannot reference anything outside their lambda: `$elemMatch` cannot evaluate
+the root document, so such references throw.
 
-- `exists` and `filter` wrap the translated condition in `$elemMatch`.
-- `hasIntersection` works for both scalar arrays and arrays of objects; when the plan uses `map(lambda(tag.name))` the adapter projects `tag.name` to `tags.$elemMatch.name`.
-- `all` converts the lambda condition into a negated `$elemMatch` so that all elements must satisfy the predicate.
-- A bare `map` expression verifies that the referenced nested path exists inside each element.
+### Collection macros over known values
 
-#### Collection macros over known values
+`exists`/`all` over a collection the PDP resolves at plan time (typically a principal attribute,
+`P.attr.teams.exists(t, R.attr.team == t)`) needs no relation mapping. The planner unrolls it into
+an `or`/`and` chain at 10 elements or fewer and ships a literal value-list above that
+(cerbos/cerbos#2570, cerbos/cerbos#2817); the adapter folds both forms the same way, so the filter
+does not depend on how many values the principal holds.
 
-`exists`/`all` over a collection the PDP resolves at plan time — typically a
-principal attribute, as in `P.attr.teams.exists(t, R.attr.team == t)` — needs no
-relation mapping. The Cerbos planner unrolls it into a plain `or`/`and` chain at
-10 elements or fewer and ships the lambda with a literal value-list collection
-above that (`maxItems = 10` in the planner's struct matcher; cerbos/cerbos#2570,
-cerbos/cerbos#2817). The adapter applies the same fold, uncapped, so the emitted
-filter is equivalent on both sides of that threshold rather than depending on how
-many teams a given principal happens to hold.
+Each element is substituted into the lambda body (`t` → the element, `t.name` → its field) and the
+results combine with `$or` (`exists`) or `$and` (`all`). An empty collection emits
+`{ $expr: false }` for `exists` and `{ $expr: true }` for `all`. `exists_one`, `filter`, `map` and
+`except` over a literal list throw, as does a `t.path` the element does not carry.
 
-Each element is substituted into the lambda body — a bare `t` becomes the
-element, `t.name` drills into it — and the per-element filters combine with
-`$or` (`exists`) or `$and` (`all`). An empty collection keeps CEL identity
-semantics: `exists` emits `{ $expr: false }` (matches nothing) and `all` emits
-`{ $expr: true }` (matches everything), since MongoDB rejects an empty
-`$or`/`$and`. `exists_one`, `filter`, `map` and `except` have no flat equivalent
-and throw over a literal value list, as does a `t.path` reference the element
-does not carry.
-
-#### Mapper functions
-
-You can also supply a function if your mappings follow a predictable pattern:
+### Mapper functions
 
 ```ts
 const mapper: Mapper = (path) => {
@@ -306,9 +164,7 @@ const mapper: Mapper = (path) => {
 };
 ```
 
-#### Value parsing
-
-Use `valueParser` to convert values from the Cerbos plan into types that MongoDB expects. A common use case is converting string IDs to `ObjectId`:
+### Value parsing
 
 ```ts
 import { Types } from "mongoose";
@@ -318,113 +174,171 @@ const mapper: Mapper = {
     field: "_id",
     valueParser: (value) => new Types.ObjectId(value),
   },
-};
-```
-
-`valueParser` also works on nested relation fields via the `fields` map:
-
-```ts
-const mapper: Mapper = {
   "request.resource.attr.createdBy": {
     relation: {
       name: "createdBy",
       type: "one",
       field: "id",
-      fields: {
-        id: {
-          field: "id",
-          valueParser: (value) => new Types.ObjectId(value),
-        },
-      },
+      fields: { id: { field: "id", valueParser: (value) => new Types.ObjectId(value) } },
     },
   },
 };
 ```
 
-## Usage example
+## NULL attribute representation
+
+`R.attr.x == null` produces the same plan however your application sends a NULL field to
+`check()`, so tell the adapter which convention you use:
+
+| Attributes you send for a NULL field | `check()` on that document | Null-matching filter |
+| --- | --- | --- |
+| `{"x": null}` — explicit null | allow | selects it — aligned |
+| `{}` — attribute omitted | **deny** (missing-attribute error) | selects it — **over-grants** |
+
+`nullAttributeRepresentation` defaults to `"explicit"`. If you omit NULL attributes, set
+`"omitted"`: the adapter then rejects every null comparison operand instead of emitting a filter
+that returns documents the PDP denies.
 
 ```ts
-import { GRPC as Cerbos } from "@cerbos/grpc";
-import mongoose from "mongoose";
-import {
-  queryPlanToMongoose,
-  PlanKind,
-  type Mapper,
-} from "@cerbos/orm-mongoose";
-
-await mongoose.connect("mongodb://127.0.0.1:27017/test");
-const cerbos = new Cerbos("localhost:3592", { tls: false });
-const MyModel = mongoose.model("MyModel", /* ... schema ... */);
-
-const mapper: Mapper = {
-  "request.resource.attr.title": { field: "title" },
-  "request.resource.attr.owner": {
-    relation: { name: "owner", type: "one", field: "id" },
-  },
-  "request.resource.attr.tags": {
-    relation: {
-      name: "tags",
-      type: "many",
-      fields: { name: { field: "name" } },
-    },
-  },
-};
-
-const queryPlan = await cerbos.planResources({
-  principal: { id: "user1", roles: ["USER"] },
-  resource: { kind: "document" },
-  action: "view",
-});
-
-const result = queryPlanToMongoose({ queryPlan, mapper });
-
-if (result.kind === PlanKind.ALWAYS_DENIED) {
-  return [];
-}
-
-const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-const records = await MyModel.find(filters);
+queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-If you already have application-specific criteria you can combine them using `$and`:
+The rejection is wider than the shapes that actually over-grant, because a leaf cannot tell whether
+an enclosing `not` will flip it. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+For a single field, `nullable: true` on its mapper entry is the per-attribute alternative.
 
-```ts
-const filters = result.kind === PlanKind.CONDITIONAL ? result.filters : {};
-await MyModel.find({ $and: [filters ?? {}, { archived: false }] });
-```
+## Timestamps and conversions
+
+- **Timestamps** accept BSON dates or RFC 3339 strings with at most 3 fractional-second digits, in
+  CEL's range `0001-01-01T00:00:00Z` to `9999-12-31T23:59:59.999Z`. Higher-precision or
+  out-of-range values fail closed rather than being truncated.
+- A bare comparison of two `dateTime` fields throws, because MongoDB no longer holds the original
+  strings CEL compares. Use `timestamp(...)` on both operands when the policy compares instants.
+- **Conversions** fail closed when the stored BSON type is not a CEL-compatible source or parsing
+  fails, and stay denied under negation. `double`/`int` accept strings and numbers, not booleans;
+  `int` rejects BSON dates. `string` accepts strings, booleans and numbers.
+- **`matches`** supports literals, `.`, `*`, `+`, `?`, leading `^`, terminal `$` and escaped
+  metacharacters; anything else fails closed. A terminal `$` becomes PCRE2's absolute end anchor so
+  MongoDB cannot match before a trailing newline, as RE2 would not.
+
+## Supported operators
+
+| Category | Operators | Behaviour |
+| --- | --- | --- |
+| Logical | `and`, `or`, `not` | `$and`, `$or`, `$nor`. |
+| Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` on the mapped field. |
+| Membership | `in`, `hasIntersection` | `$in`, or `$elemMatch` on array relations. `hasIntersection` takes an array field or a `map` projection, in either operand order. |
+| String helpers | `contains`, `startsWith`, `endsWith` | Escaped regular expressions. |
+| Null checks | `eq`/`ne` against `null`, `exists` | `$eq: null`/`$ne: null` on scalars, `$elemMatch` on collections. |
+| Collections | `filter`, `lambda`, `map`, `all` | Scoped `$elemMatch`; over a literal value list, `$or`/`$and` of the substituted body. |
+| Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Document-level `$expr`. Division needs a non-zero constant denominator; `index` needs a non-negative integer constant and adds a bounds check. |
+| Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Guarded conversion and regex expressions (see above). |
+| Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Literal prefix and ancestor-list filters on a mapped scalar path, including through to-one relations and under negation. |
+
+Translations may use `$expr` but never need an aggregation pipeline.
+
+### What throws
+
+- `Invalid query plan.` — the plan kind is not a `PlanKind`.
+- `Invalid Cerbos expression structure` — a conditional plan lacks `operator`/`operands`.
+- `Unsupported operator: <name>` — anything not in the table above.
+- `No mapper entry for <reference>` — an unmapped attribute.
+- Collection operators without a `type: "many"` relation (e.g. `map operator requires a relation mapping`).
+- Malformed lambdas (`Lambda variable must have a name`) and mistyped operands (e.g. a non-array
+  `hasIntersection` value).
+- Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
+  outer-document references inside a collection predicate, nested collection counts, correlated
+  variable-in-variable membership, unsafe division or non-finite arithmetic, negated collection
+  macros over nullable fields (including a negated string match against a nullable field needle),
+  whole-list equality (including over a `map()` projection), list-valued membership needles, and
+  `+` between two field paths (see the contract table).
+
+## Conformance contract
+
+Select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `=true`; other
+values are rejected. For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial`
+enables strict evaluation for both planning and the `check()` oracle. CI runs both modes for each
+adversarial store and client-version combination.
+
+The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+
+| Classification | Coverage |
+| --- | --- |
+| Oracle-tested | 207 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (211 actions) |
+| Fail-closed | 90 reference actions plus the 7 reference-unsupported shapes (97 actions total) |
+| Operand types the plan does not carry | CEL overloads `+` on strings and a plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** it cannot be decided, and MongoDB's `$add` accepts only numbers and dates, so the shape is refused at translation rather than aborting the query on the server (cerbos/query-plan-adapters#391) |
+| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares that a stored null is a missing attribute; the global option is the backstop for mappings that do not declare it |
+| Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null compares as a null *value* exactly as CEL does. Four `null-value-*` probes (cerbos/query-plan-adapters#308) are aligned; the fifth is refused by the negated-collection-macro limitation, not by the null convention |
+| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+
+Every fail-closed shape's error message is pinned in `conformance/actions.json` and asserted here,
+so a classification proves the throw names its declared mechanism. The emitted filter for every
+corpus action is pinned separately by the offline translator unit test (see
+[Development](#development)).
+
+## Mapping hazards
+
+The contract above proves the plan side. The other half is the mapping: **the documents the filter
+reads must be the documents the application put into the resource attributes.** The shared corpus
+catalogues six ways that can break.
+
+This adapter **builds no subquery**: a relation is a path inside the same document, and it never
+emits `$lookup`/`$graphLookup` or calls `populate()`/`aggregate()`. `src/adversarial.test.ts`
+asserts that, since five of the rows below depend on it.
+
+| Hazard | Position | Mechanism to check |
+|---|---|---|
+| Filtered association | Not applicable — no subquery | — |
+| Default scope on the target model | Not applicable — no second collection is read | — |
+| Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter run against the *base* model matches other subtypes' documents — the `__t` criterion Mongoose adds for a discriminator model is not in the adapter's filter, and cannot be: the plan does not say which model you will use |
+| To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
+| Composite association key | Not applicable — no join, so no key to compose | — |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `relation.requiresParent` for a flattened array parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration: it ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation never matches a document whose subdocument is absent ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+
+## Behaviour changes
+
+- **Breaking** — an unmapped reference throws `No mapper entry for <reference>` instead of being
+  used verbatim as a document path, which made `$ne`/`$nor` match every document. Callers relying
+  on the fallback (including passing no mapper) must add entries
+  ([#492](https://github.com/cerbos/query-plan-adapters/issues/492)).
+- **Breaking** — collection predicates reject references outside their lambda scope for every leaf
+  comparison operator; MongoDB's `$elemMatch` cannot evaluate them against the root document.
+- **Breaking** — whole-list equality and list-valued membership needles throw; they previously
+  produced invalid or incorrect filters.
+- **Breaking** — `+` between two field paths throws instead of reaching the server as `$add`
+  ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
+- **Breaking** — a bare comparison of two `dateTime` fields throws.
+- A `type: "one"` relation ANDs a non-null guard outside any negation, so a negation over it no
+  longer matches documents where the subdocument is absent (over-grant fix); a bare boolean read
+  through a to-one hop now translates instead of throwing "Bare collection variables are
+  unsupported" ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- `hasIntersection` accepts the value-first operand order (`hasIntersection(["a","b"], R.attr.list)`)
+  instead of throwing "Invalid operands". Widening only
+  ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 
 ## Example application
 
-This repository carries a runnable [`example/`](example/), which installs the adapter from the
-artifact `npm publish` would upload and exercises it against a live PDP over the shared
-[demo domain](../demo/README.md):
+[`example/`](example/) installs the packed adapter and runs it against a live PDP and MongoDB over
+the shared [demo domain](../demo/README.md), including pagination and composition with an
+application filter:
 
 ```bash
 # from the repository root
 demo/scripts/run-example.sh mongoose
 ```
 
-Unlike the test suites, it resolves the adapter through its **published** surface — the `exports`
-map, `types` and the `files` allowlist — and covers usage shapes past a single flat query:
-pagination, and the adapter's filter composed with an application-owned filter.
+## Development
 
-## Error handling
+| Command | What it does | Needs |
+| --- | --- | --- |
+| `npm test` | Translator unit test: every corpus action's emitted filter, plan kind or pinned refusal, plus the mapper contract no policy can reach (`valueParser` incl. `ObjectId` coercion, function mappers, the `nullAttributeRepresentation` boundary, malformed input) | Node only |
+| `npm run typecheck` | Type-checks `src/` and the tests | Node only |
+| `npm run mongo` | Starts the pinned MongoDB ([`MONGO_IMAGE`](MONGO_IMAGE)) on port 27017 | Docker |
+| `npm run test:adversarial` | Runs the shared corpus against real MongoDB with `check()` as the oracle | Cerbos CLI, `npm run mongo` in another shell |
 
-`queryPlanToMongoose` throws descriptive errors in the following scenarios:
-
-- The plan kind is not one of the Cerbos `PlanKind` values (`Invalid query plan.`).
-- A conditional plan omits the `operator`/`operands` structure (`Invalid Cerbos expression structure`).
-- An operator listed in the plan is not implemented (`Unsupported operator: <name>`).
-- Collection-oriented operators (`map`, `filter`, `exists`, `all`, etc.) are used without a `relation` mapper, or with a mapper that declares `type: "one"` where `type: "many"` is required (errors such as `map operator requires a relation mapping`).
-- A plan references an attribute the mapper has no entry for (`No mapper entry for <reference>`).
-- Lambda expressions in the plan are malformed (for example, missing a variable operand results in `Lambda variable must have a name`).
-- Value operands do not match the expected type, e.g., `hasIntersection` supplies a non-array value.
-
-Surfacing these errors early helps keep the adapter and your Cerbos policies in sync.
-
-## Limitations
-
-- `exists_one` throws rather than silently degrading to `exists`.
-- Aggregation expressions inside collection predicates, outer-document references from lambdas, and negation of nullable collection macros fail closed because `$elemMatch` cannot preserve their CEL scoping and three-valued error semantics.
-- Operators not enumerated in **Supported operators** (such as search, mode, scalar math helpers, atomic number operations, composite keys, etc.) are not implemented and will throw `Unsupported operator`.
-- Translations may use document-level `$expr`, but never require a multi-stage aggregation pipeline.
+`npm test` reads its plans from `conformance/wire-fixtures/`, so a change to the emitted query shows
+up as a diff even when it selects the same seed documents, and a new corpus action fails it until
+its filter is recorded ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
+Mongoose still keeps its expectations inline rather than in a `golden/expectations.json`; see
+"Golden expectations" in [conformance/README.md](../conformance/README.md). CI also runs the
+adversarial suite against [`MONGO_NEXT_IMAGE`](MONGO_NEXT_IMAGE).
