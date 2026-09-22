@@ -1,321 +1,276 @@
 # Conformance corpus
 
-Shared hostile-shape corpus for the adversarial differential harness pattern, extracted from the
-spring-data adapter's `AdversarialConformanceTest` (see cerbos/query-plan-adapters#263). Every
-adapter's differential test should consume this directory rather than maintaining its own copy of
-the policy, seed data, or action list.
+The shared adversarial corpus every adapter is proved against: one hostile policy suite, one set of
+hostile seed rows, one derived-field table, one classification ledger (`actions.json`) and golden
+planner wire fixtures. Each adapter's harness plans against a real PDP loaded with `policies/`,
+executes the translated query against its real store, and compares the returned ids with per-row
+`check()` decisions. The PDP is the oracle for both sides, so there are no hand-written
+expectations. Adapters consume this directory; none keeps its own copy of the policy, seeds or
+action list (extracted from spring-data's `AdversarialConformanceTest`, #263).
+
+**The invariant: a shape an adapter cannot express must throw, never emit a filter.** A wrong
+filter returns rows the PDP denies; a throw is a bug report.
+
+```bash
+conformance/scripts/validate-corpus.sh           # corpus integrity, offline; runs in every adapter's CI
+conformance/scripts/regenerate-wire-fixtures.sh  # after a policy edit or a PDP bump (Docker, curl, jq)
+conformance/scripts/check-evaluation-modes.sh    # engine probes in both strictEvaluation modes (Docker)
+# Each adapter's harness: npm run test:adversarial, pdm run test, go test ./..., gradle test (see CLAUDE.md)
+```
+
+Common tasks:
+
+- **Add or fix a shape** — [Adding a new hostile shape](#adding-a-new-hostile-shape), then
+  [Golden expectations](#golden-expectations).
+- **Onboard an adapter** — [Adding a new adapter](#adding-a-new-adapter).
+- **Bump the PDP** — [Regenerating wire fixtures after a Cerbos version bump](#regenerating-wire-fixtures-after-a-cerbos-version-bump).
+- **A harness fails a vacuity check** — [The degeneracy guard](#the-degeneracy-guard).
 
 ## Contents
 
-Long, and meant to be read by section rather than front to back. After adding or renaming a
-heading, regenerate this list with `scripts/check-docs.sh --print-toc` — CI checks it.
+Read by section, not front to back.
 
 - [Why this exists](#why-this-exists)
 - [Layout](#layout)
 - [The oracle recipe](#the-oracle-recipe)
-  - [Case sensitivity is two invariants, not one](#case-sensitivity-is-two-invariants-not-one)
-    - [Case-sensitive is not byte-exact](#case-sensitive-is-not-byte-exact)
-  - [NULL conventions](#null-conventions)
-    - [`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire](#nullrepresentationomitted-the-two-conventions-are-indistinguishable-on-the-wire)
-    - [The other side of the same option: an explicit null against a non-null constant](#the-other-side-of-the-same-option-an-explicit-null-against-a-non-null-constant)
-    - [The absent to-one parent](#the-absent-to-one-parent)
-  - [Shapes that live only in a unit test](#shapes-that-live-only-in-a-unit-test)
-  - [Issue #414 port and planner evidence](#issue-414-port-and-planner-evidence)
-  - [Issue #396 regex, indexing and conversion probes](#issue-396-regex-indexing-and-conversion-probes)
-  - [Number and boolean list elements](#number-and-boolean-list-elements)
-  - [The real to-one relation](#the-real-to-one-relation)
-  - [The primary key as a filterable attribute](#the-primary-key-as-a-filterable-attribute)
-  - [Casts and concatenation are store-dependent in opposite directions](#casts-and-concatenation-are-store-dependent-in-opposite-directions)
-    - [A constant is what tells the two `+` overloads apart](#a-constant-is-what-tells-the-two--overloads-apart)
-  - [Root position and bare operand forms](#root-position-and-bare-operand-forms)
-  - [Hazard classes the corpus missed](#hazard-classes-the-corpus-missed)
-  - [The degeneracy guard](#the-degeneracy-guard)
-  - [Pinned throw messages](#pinned-throw-messages)
-  - [Known divergences still need a tripwire](#known-divergences-still-need-a-tripwire)
-  - [Deterministic derived fields](#deterministic-derived-fields)
-  - [Seed, principal and derived-field coverage](#seed-principal-and-derived-field-coverage)
 - [Adding a new hostile shape](#adding-a-new-hostile-shape)
 - [Golden expectations](#golden-expectations)
-  - [The file](#the-file)
-  - [What the entry holds is per adapter, and has to be](#what-the-entry-holds-is-per-adapter-and-has-to-be)
-  - [When the generator is an input](#when-the-generator-is-an-input)
-  - [A throwing action carries no entry](#a-throwing-action-carries-no-entry)
-  - [The completeness guard](#the-completeness-guard)
-  - [Regeneration is a deliberate act, and the diff is the review](#regeneration-is-a-deliberate-act-and-the-diff-is-the-review)
-  - [Language neutrality](#language-neutrality)
 - [Adding a new adapter](#adding-a-new-adapter)
-  - [Pinning service images](#pinning-service-images)
-  - [Vendored code stays byte-identical](#vendored-code-stays-byte-identical)
-  - [Mapping hazards: the rows the subquery sees](#mapping-hazards-the-rows-the-subquery-sees)
-  - [Gotchas worth knowing up front](#gotchas-worth-knowing-up-front)
 - [Evaluation modes and the 0.55 baseline](#evaluation-modes-and-the-055-baseline)
 - [Regenerating wire fixtures after a Cerbos version bump](#regenerating-wire-fixtures-after-a-cerbos-version-bump)
 
 ## Why this exists
 
-Each adapter re-derives certain properties of the Cerbos planner's wire output by hand: operand
-source-order preservation, directional-operator mirroring on value-first comparisons, `in`
-normalization, receiver-sensitive string operators, three-valued logic under negation. A bug in
-one of these assumptions has historically shipped identically to more than one adapter (the
-value-first inversion in prisma and sqlalchemy: #258, #259) because nothing shared enforced the
-rule. This corpus is that shared enforcement: one hostile policy suite, one set of hostile seed
-rows, and one oracle recipe that every adapter's harness implements against its own ORM.
+Every adapter re-derives properties of the planner's wire output by hand: operand source order,
+mirroring a directional operator on a value-first comparison, `in` normalization,
+receiver-sensitive string operators, three-valued logic under negation. The same wrong assumption
+has shipped to more than one adapter at once (value-first inversion in prisma and sqlalchemy:
+#258, #259) because nothing shared enforced the rule. This corpus is that shared enforcement.
 
 ## Layout
 
-- `policies/adversarial.yaml` — the hostile policy suite. One resource kind (`adversarial`), one
-  role (`USER`), one action per hostile shape. Pure Cerbos policy YAML — no adapter-specific
-  content. Edit this file to add a new hostile shape; it is the corpus of record.
-- `seeds.json` — the hostile seed rows (NULLs, empty strings/collections, negatives, LIKE
-  metacharacters `% _ \`, unicode, duplicate/mirrored names) plus the fixed principal used
-  throughout. This is the single source of truth an adapter's harness persists into its own
-  schema (SQL rows, Prisma records, whatever) AND mirrors into check() oracle calls — see
-  "The oracle recipe" below. Every key except `note` must be consumed by every harness; that is
-  asserted, not assumed (see "Deterministic derived fields"). `parentSeedId` is the one key that
-  resolves against another row — see "The real to-one relation" below.
-- `derived-fields.json` — the six attributes derived from each seed (`createdBy`, `aDouble`,
-  `createdAt`, `updatedAt`, `scope`, `labels`), materialised once per seed id. Every harness reads this file
-  instead of restating the rules; `scripts/validate-corpus.sh` re-derives the rule-based fields
-  from `seeds.json` and fails on drift. See "Deterministic derived fields" below.
-- `actions.json` — every action in `policies/adversarial.yaml`, grouped into `adapters` (the
-  canonical adapter roster, which every other per-adapter key is checked against), `conformance`
-  (must match the check() oracle exactly), `adapterUnsupported` (per-adapter lists of conformance
-  actions that adapter's query language genuinely cannot express — LIKE-wildcard escaping,
-  relation-count thresholds, cross-model column comparisons; the adapter must THROW for these,
-  never emit a silently-wrong filter, and its harness asserts the throw instead of the oracle
-  match), `expectedUnsupported` (planner shapes rejected by the Spring reference adapter; other
-  adapters must also fail loudly unless listed in `adapterSupportedExpected`),
-  `adapterSupportedExpected` (per-adapter exceptions that intentionally translate a
-  reference-unsupported shape through a documented database capability), `nullRepresentationOmitted`
-  (actions probing `== null` against an attribute the oracle OMITS for NULL columns; every adapter
-  must translate these with its NULL representation set to omitted and reject them — see "NULL
-  conventions" below), and `knownDivergences` (an action plus the affected adapters intentionally
-  excluded from the oracle run, with a reason — currently only `p-has`, excluded because of a
-  planner bug, not an adapter bug).
+- `policies/adversarial.yaml` — the hostile policy suite and the corpus of record. One resource kind
+  (`adversarial`), one role (`USER`), one action per hostile shape, no adapter-specific content.
+- `seeds.json` — the hostile seed rows (NULLs, empty strings and collections, negatives, LIKE
+  metacharacters `% _ \`, unicode, duplicate and mirrored names) plus the fixed principal. Each
+  harness persists these into its own schema **and** mirrors them into `check()` calls. Every key
+  except `note` must be consumed by every harness, and that is asserted (see "Seed, principal and
+  derived-field coverage"). `parentSeedId` is the one key that resolves against another row (see
+  "The real to-one relation").
+- `derived-fields.json` — six attributes derived from each seed (`createdBy`, `aDouble`,
+  `createdAt`, `updatedAt`, `scope`, `labels`), materialised once per seed id. Harnesses read this
+  file; `scripts/validate-corpus.sh` re-derives the rule-based fields and fails on drift. See
+  "Deterministic derived fields".
+- `actions.json` — every action in the policy, grouped:
+  - `adapters` — the canonical roster every other per-adapter key is checked against;
+  - `conformance` — must match the `check()` oracle exactly;
+  - `adapterUnsupported` — per adapter, conformance actions its query language genuinely cannot
+    express (LIKE-wildcard escaping, relation-count thresholds, cross-model column comparisons).
+    The adapter must throw, and its harness asserts the throw instead of the oracle match;
+  - `expectedUnsupported` — planner shapes the Spring reference adapter rejects; every other
+    adapter must also fail loudly unless listed in `adapterSupportedExpected`;
+  - `adapterSupportedExpected` — per-adapter exceptions that translate a reference-unsupported
+    shape through a documented database capability;
+  - `nullRepresentationOmitted` — `== null` probes against an attribute the oracle omits for NULL
+    columns; every adapter translates them with its NULL representation set to omitted and must
+    reject them (see "NULL conventions");
+  - `degenerateOracles` — actions whose oracle is empty or total by construction (see "The
+    degeneracy guard");
+  - `knownDivergences` — an action plus the adapters excluded from its oracle run, with a reason.
+    Currently only `p-has`, a planner bug.
 - `wire-fixtures/*.json` — one golden `PlanResources` response per action, captured against the
-  pinned Cerbos version in `CERBOS_VERSION`. These pin planner *wire shape* independent of any
-  adapter or database — a `diff` against a freshly-regenerated fixture after bumping
-  `CERBOS_VERSION` shows exactly what the planner's output changed for a given hostile shape,
-  which is a much smaller signal than "an adapter test failed."
-- `wire-fixtures-strict/*.json` — the same actions captured by real `PlanResources` requests
-  against a separately started PDP with `engine.strictEvaluation=true`. These are generated
-  independently, never copied from the default capture, even when their contents agree.
-- `CERBOS_VERSION` — the exact Cerbos PDP version the wire fixtures were captured against.
-  Deliberately pinned rather than `latest`: a fixture diff should come from a deliberate version
-  bump, not silently from whatever `latest` resolved to on a given day.
-- `CERBOS_IMAGE_DIGEST` — the digest of the image that version's tag resolves to. The tag says
-  which release; the digest says which build, and a tag can be re-pushed. Every harness and
-  workflow composes `ghcr.io/cerbos/cerbos:$CERBOS_VERSION@$CERBOS_IMAGE_DIGEST` from the two
-  files, and `scripts/validate-corpus.sh` asserts both halves everywhere either is restated.
-- `scripts/regenerate-wire-fixtures.sh` — regenerates `wire-fixtures/` from a running (pinned)
-  Cerbos container. Run it after bumping `CERBOS_VERSION`, review the diff, commit both together.
+  pinned PDP. They pin planner wire shape independently of any adapter: after a PDP bump, the
+  fixture diff shows exactly what the planner changed.
+- `wire-fixtures-strict/*.json` — the same actions captured from a separate PDP started with
+  `engine.strictEvaluation=true`. Generated independently, never copied from the default capture,
+  even where the two agree.
+- `CERBOS_VERSION` — the exact PDP tag the fixtures were captured against. Pinned, not `latest`, so
+  a fixture diff comes only from a deliberate bump.
+- `CERBOS_IMAGE_DIGEST` — the digest that tag resolves to; a tag can be re-pushed. Every harness
+  and workflow composes `ghcr.io/cerbos/cerbos:$CERBOS_VERSION@$CERBOS_IMAGE_DIGEST` from the two
+  files, and `scripts/validate-corpus.sh` asserts both halves wherever either is restated.
+- `scripts/regenerate-wire-fixtures.sh` — regenerates both fixture directories from a pinned PDP.
+  Review the diff and commit it with the change that caused it.
+- `evaluation-modes/` — engine probes run by `scripts/check-evaluation-modes.sh` (see "Evaluation
+  modes and the 0.55 baseline").
 
-Deliberately **not** here: the filter each adapter is pinned to emit for each action. Those are
-per-adapter **golden expectations**, they live in the adapter's own directory, and the format is
-documented under "Golden expectations" below.
+**Not here:** the filter each adapter is pinned to emit. Those are per-adapter golden expectations
+in the adapter's own directory (see "Golden expectations").
 
-`scripts/validate-corpus.sh` enforces closed entry schemas in `actions.json`: unknown keys,
-missing required fields and empty or incorrectly typed metadata fail validation. Optional
-`relatedIssue` values must be non-empty strings, not `null`, and every adapter named by a known
-divergence must belong to the canonical roster. When moving an action between buckets, use the
-destination bucket's declared fields.
+`validate-corpus.sh` holds `actions.json`'s entry schemas closed: unknown keys, missing required
+fields and empty or wrongly typed metadata fail. Optional `relatedIssue` values must be non-empty
+strings, not `null`, and every adapter a known divergence names must be on the roster. When you
+move an action between buckets, use the destination bucket's fields.
 
 ## The oracle recipe
 
-The differential harness pattern (implemented per-adapter, since translation and query execution
-are necessarily language/ORM-specific):
+Each harness implements this against its own ORM:
 
-1. **Seed** the adapter's own schema from `seeds.json`, in whatever native shape the ORM needs
-   (rows, documents, whatever `tags`/`subCategoryNames` map onto for that adapter).
-2. **Plan**: call `PlanResources` against a real PDP for each `conformance` action in
-   `actions.json`, translate the response through the adapter under test, execute the resulting
-   native query, and collect the returned id set (`adapterFilteredIds`).
-3. **Oracle**: for each seed row, call `check()` against the *same* PDP and action, with Cerbos
-   attributes built to mirror that row exactly (`oracleAllowedIds`). No hand-computed
-   expectations — the PDP is the oracle for both sides.
+1. **Seed** the adapter's schema from `seeds.json`, in whatever native shape the ORM needs.
+2. **Plan**: call `PlanResources` against a real PDP for each `conformance` action, translate the
+   response through the adapter, execute the native query, and collect the returned ids
+   (`adapterFilteredIds`).
+3. **Oracle**: for each seed row, call `check()` against the same PDP and action, with attributes
+   mirroring that row exactly (`oracleAllowedIds`).
 4. **Compare**: `adapterFilteredIds(action)` must equal `oracleAllowedIds(action)` for every
    `conformance` action. Translation must throw for every `expectedUnsupported` action unless the
-   adapter is listed for that action in `adapterSupportedExpected`; declared exceptions must run
-   through the same oracle comparison as conformance actions. A throw must carry the message the
-   corpus pins for that adapter — see "Pinned throw messages" below.
+   adapter is listed for it in `adapterSupportedExpected`, in which case it runs through the same
+   oracle comparison. A throw must carry the message the corpus pins for that adapter (see "Pinned
+   throw messages").
 
 ### Case sensitivity is two invariants, not one
 
-CEL string comparison is exact. The corpus proves that twice, because a store can satisfy it for
-one operator and not the other:
+CEL string comparison is exact, and a store can satisfy that for one operator and not the other:
 
-- **`cs-eq`** proves `=`. Collation governs this one, and the advice every adapter README gives —
-  use a byte-exact collation — is sufficient for it. *Case-sensitive* is not: see
-  "Case-sensitive is not byte-exact" below.
-- **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string MATCHING, which collation does
-  not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII no matter what
-  collation the column was created with; only `PRAGMA case_sensitive_like = ON` changes it, and
-  it is per-connection.
+- **`cs-eq`** proves `=`. Collation governs it, and a byte-exact collation is sufficient —
+  case-sensitive is not (see below).
+- **`cs-contains` / `cs-startswith` / `cs-endswith`** prove string matching, which collation does
+  not govern on every engine. SQLite's `LIKE` is case-insensitive for ASCII whatever the column's
+  collation; only the per-connection `PRAGMA case_sensitive_like = ON` changes it.
 
-`c1` (`aString` "One") is the single witness in all four, and the only seed that differs from
-another by case alone, so a case-insensitive store adds exactly one row and nothing else moves.
+`c1` (`aString` "One") is the witness in all four and the only seed differing from another by case
+alone, so a case-insensitive store adds exactly one row.
+
+A harness whose store needs configuring must configure it, and the adapter's README must state the
+whole lever. ent, sqlalchemy and prisma set the SQLite pragma; drizzle needs none because it lowers
+string matching to `REPLACE` rather than `LIKE`. Prisma's README once named only the collation,
+which satisfied the invariant on paper and violated it in fact.
 
 #### Case-sensitive is not byte-exact
 
-`h6` carries a SOFT HYPHEN (U+00AD) in both of its strings: `aString` is `"o\u00ADne"` and
-`aOptionalString` is `"s\u00ADet"`. CEL tells them apart from `"one"` and `"set"`; a Unicode
-Collation Algorithm collation does not, because UCA gives a default-ignorable code point no weight
-at all. MySQL's `utf8mb4_0900_as_cs` is case- AND accent-sensitive and still a UCA collation, so it
-passes `c1` and fails `h6`: `cs-eq` and every `in` over the principal's teams (`in-single`,
-`pv-in`, …) over-grant it, and `nary-and`'s `aString != "one"` and `pv-not-exists` under-grant it
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Those existing equality and
-negation actions are its witnesses, so the row needed no new action and moved no plan.
+`h6` carries a SOFT HYPHEN (U+00AD) in both strings: `aString` is `"o­ne"` and
+`aOptionalString` is `"s­et"`. CEL tells them apart from `"one"` and `"set"`; a Unicode
+Collation Algorithm collation does not, because UCA gives a default-ignorable code point no weight.
+MySQL's `utf8mb4_0900_as_cs` is case- and accent-sensitive and still UCA, so it passes `c1` and
+fails `h6`: `cs-eq` and every `in` over the principal's teams (`in-single`, `pv-in`, …) over-grant
+it, and `nary-and`'s `aString != "one"` and `pv-not-exists` under-grant it
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Existing actions are its
+witnesses, so the row needed no new action.
 
-`utf8mb4_bin` is byte-exact but PAD SPACE (`'a' = 'a '`), so the one MySQL collation that matches
-CEL on case, accent, ignorables and trailing spaces is `utf8mb4_0900_bin` (8.0.17+), which every
-MySQL leg pins. Measured on the pinned `mysql:8.4`:
+`utf8mb4_bin` is byte-exact but PAD SPACE (`'a' = 'a '`), so the one MySQL collation matching CEL
+on case, accent, ignorables and trailing spaces is `utf8mb4_0900_bin` (8.0.17+), which every MySQL
+leg pins. Measured on the pinned `mysql:8.4`:
 
 | probe | `_0900_ai_ci` | `_0900_as_cs` | `utf8mb4_bin` | `_0900_bin` |
 |---|---|---|---|---|
 | `'One' = 'one'` | TRUE | FALSE | FALSE | FALSE |
-| `'o\u00ADne' = 'one'` | TRUE | TRUE | FALSE | FALSE |
+| `'o­ne' = 'one'` | TRUE | TRUE | FALSE | FALSE |
 | `'one ' = 'one'` | FALSE | FALSE | TRUE | FALSE |
-| `'o\u00ADne' LIKE 'one'` | FALSE | FALSE | FALSE | FALSE |
+| `'o­ne' LIKE 'one'` | FALSE | FALSE | FALSE | FALSE |
 
 `LIKE` compares per character, so `h6` never reaches it; the witness is `=` and `IN`.
 
 `h6` also found a bug no collation governs: drizzle rendered CEL `size()` as `length()`, which
-counts BYTES on MySQL, so `string-size`'s `size(aString) > 4` admitted the 4-character, 5-byte
-`"o\u00ADne"`. The same byte count positioned the `substr()` behind drizzle's `startsWith` and
-`endsWith`, which counts CHARACTERS, so any multi-byte needle mis-sliced. `h7` witnesses that:
-its `aOptionalString` `"é"` (2 bytes, 1 character) both starts and ends its `aString` `"é-x-é"`, so
+counts bytes on MySQL, so `string-size`'s `size(aString) > 4` admitted the 4-character, 5-byte
+`"o­ne"`. The same byte count positioned the `substr()` behind drizzle's `startsWith` and
+`endsWith`, which counts characters, so any multi-byte needle mis-sliced. `h7` witnesses that: its
+`aOptionalString` `"é"` (2 bytes, 1 character) both starts and ends its `aString` `"é-x-é"`, so
 `f2f-startswith` and `f2f-endswith` under-grant it and `not-startswith` over-grants it under a
 byte-counting slice. drizzle now renders `char_length()` over a MySQL column for all three.
 
-A harness whose store needs configuring to satisfy the invariant must configure it — that is a
-property of the deployment the adapter documents, not of the translation — but the adapter's
-README has to state the *whole* lever. Three harnesses (ent, sqlalchemy, prisma) set the SQLite
-pragma; drizzle needs none because it lowers string matching to `REPLACE` rather than `LIKE`.
-Prisma's did not until these actions existed, and its README named only the collation, which is
-how a documented invariant can be satisfied on paper and violated in fact.
-
 ### NULL conventions
 
-A DB `NULL` (or a missing element field, e.g. a NULL tag name) must become a **missing attribute**
-on the check side by default. CEL's `!=`/macro bodies raise a missing-attribute evaluation error,
-which Cerbos treats as a deny — the same three-valued logic SQL applies when a `NULL` participates
-in a comparison (`UNKNOWN`, excluded from both a predicate and its negation). In particular,
-`NOT (NULL = x)` is still `UNKNOWN`, not `TRUE`.
+By default a DB `NULL` (or a missing element field, such as a NULL tag name) becomes a **missing
+attribute** on the check side. CEL's `!=` and macro bodies then raise a missing-attribute error,
+which Cerbos treats as a deny — the same three-valued logic SQL applies to `NULL` (`UNKNOWN`,
+excluded from both a predicate and its negation). `NOT (NULL = x)` is still `UNKNOWN`.
 
-The `in-null-elem-*` and `in-var-var*` probes deliberately exercise the other planner convention:
-`owner` aliases the `aOptionalString` column but is sent as an **explicit null** when the column is
-NULL, and `tagNames` is the scalar projection of `tags[].name` with NULL names retained as explicit
-null list elements. This pins `null in [null]`, `null in tagNames`, and variable-in-variable
-membership. Object-valued `tags` still omit a NULL `name`, so collection lambda bodies continue to
-exercise missing-attribute errors. Each harness must implement both representations exactly.
+The `in-null-elem-*` and `in-var-var*` probes exercise the other planner convention: `owner`
+aliases the `aOptionalString` column but is sent as an **explicit null** when the column is NULL,
+and `tagNames` is the scalar projection of `tags[].name` with NULL names kept as explicit null
+elements. This pins `null in [null]`, `null in tagNames` and variable-in-variable membership.
+Object-valued `tags` still omit a NULL `name`, so lambda bodies still hit missing-attribute errors.
+Every harness must implement both representations exactly.
 
 #### `nullRepresentationOmitted`: the two conventions are indistinguishable on the wire
 
-The planner emits the same `eq(attr, null)` node under both conventions — `null-eq` (against the
-explicit-null `owner`) and `null-eq-missing` (against the default-convention `aOptionalString`)
-have byte-identical wire fixtures apart from the variable name. Their oracles do not agree:
+The planner emits the same `eq(attr, null)` node under both conventions: `null-eq` (explicit-null
+`owner`) and `null-eq-missing` (default-convention `aOptionalString`) have byte-identical wire
+fixtures apart from the variable name. Their oracles differ:
 
 | action | attribute convention | `check()` allows | a NULL-selecting filter returns |
 |---|---|---|---|
 | `null-eq` | explicit null | `a2 a4 a8 c2 e1` | the same 5 — aligned |
 | `null-eq-missing` | omitted | **nothing** | those 5 — **over-grants** |
 
-Under the omitted convention CEL raises a missing-attribute error for every NULL row and compares
-`"set" == null` false for every other, so `check()` denies all 29 seeds. An adapter cannot recover
-the caller's convention from the plan, so it has to be told: every adapter that can emit a
-NULL-selecting predicate takes a `nullAttributeRepresentation` option, defaulting to `explicit`
-(the historical translation). See cerbos/query-plan-adapters#302.
+Under the omitted convention CEL errors for every NULL row and compares `"set" == null` false for
+every other, so `check()` denies all 29 seeds. An adapter cannot recover the convention from the
+plan, so every adapter that can emit a NULL-selecting predicate takes a
+`nullAttributeRepresentation` option, defaulting to `explicit` (the historical translation; #302).
 
-`null-eq-missing` lives in its own `actions.json` group rather than in `conformance`, because a
-rejected shape has no filter to compare against the oracle. Each harness translates the group's
-actions with its adapter's representation set to omitted and asserts the rejection — and asserts
-the *reason* the rejection is needed, so the test cannot pass by throwing for an unrelated cause.
-What that second assertion looks like depends on where the adapter's NULL lives:
+`null-eq-missing` lives in its own group rather than `conformance`, because a rejected shape has no
+filter to compare. Each harness translates the group with its representation set to omitted,
+asserts the rejection, **and** asserts why the rejection is needed, so it cannot pass by throwing
+for an unrelated cause. That second assertion depends on where the adapter's NULL lives:
 
 - **prisma, drizzle, sqlalchemy, spring-data** — a SQL `NULL` is a stored value, so the default
-  translation genuinely returns the five rows the PDP denies. The harnesses pin that over-grant.
-- **mongoose** — already discriminates per attribute: `nullable: true` on a mapper entry means "a
-  stored null is a missing Cerbos attribute" and makes `eq(field, null)` contradictory. Its
-  harness asserts the aligned empty result *and* that `owner` (same column, no `nullable`) still
-  returns its five explicit-null documents, so the empty set is the flag talking.
-- **convex** — a document store, so the seeded shape mirrors the convention directly: the harness
-  omits the field entirely, and because `aOptionalString` is `nullable: true` in the mapper the
-  adapter refuses the push-down and evaluates the predicate in its own JavaScript post-filter,
-  where the absent path raises the same CEL missing-attribute error that made `check()` deny. Same
-  paired assertion as mongoose — `owner` is the same seed field stored as an explicit null and
-  returns its five documents through that same evaluator. Alignment here comes from the storage
-  layout, not from the plan, and *not* from a Convex `q.eq(field, null)`: that code path never runs
-  for either action (cerbos/query-plan-adapters#327).
-- **langchain-chromadb, elasticsearch-java** — need no option at all: neither store can represent
-  an explicit null distinguishably from a missing key, so every null-selecting direction already
-  fails closed under both conventions. Their harnesses assert the rejection happens regardless,
-  which is also the tripwire for a future null sentinel introducing a representation dependency.
+  translation returns the five rows the PDP denies. The harnesses pin that over-grant.
+- **mongoose** — `nullable: true` on a mapper entry means "a stored null is a missing Cerbos
+  attribute" and makes `eq(field, null)` contradictory. The harness asserts the empty result *and*
+  that `owner` (same column, no `nullable`) still returns its five explicit-null documents.
+- **convex** — the harness omits the field entirely; because `aOptionalString` is `nullable: true`,
+  the adapter refuses the push-down and evaluates in its JavaScript post-filter, where the absent
+  path raises the same CEL error `check()` denied on. Same paired `owner` assertion as mongoose.
+  Alignment comes from the storage layout, not from a Convex `q.eq(field, null)`, which never runs
+  for either action (#327).
+- **langchain-chromadb, elasticsearch-java** — need no option: neither store distinguishes an
+  explicit null from a missing key, so every null-selecting direction fails closed under both
+  conventions. The harnesses assert the rejection regardless, as a tripwire for a future null
+  sentinel.
 
-Because the oracle for these actions is empty by construction, they must **not** join the
-degeneracy guard below — that guard asserts a non-empty, non-total oracle, which is exactly what
-this shape cannot have.
+These oracles are empty by construction, so the actions are declared in `degenerateOracles` (see
+"The degeneracy guard") and carry this "why" assertion as their anti-vacuity check.
 
 #### The other side of the same option: an explicit null against a non-null constant
 
-`null-eq` and friends compare the explicit-null attribute only **against null**, where SQL's
-`IS NULL` and CEL's null-valued comparison agree. Against a non-null constant they do not. CEL holds
-a null *value* under that convention, so `null != "x"` is TRUE and `null == "x"` is FALSE — both
-definite — while SQL answers UNKNOWN, which excludes the row under **both** polarities. Every
-SQL-backed adapter therefore returned fewer rows than the PDP allows
-(cerbos/query-plan-adapters#308). `optional-ne` does not reach it: it is the only other comparison
-against a non-null constant and it uses `aOptionalString`, the omitted-convention attribute, where
-UNKNOWN and a missing-attribute error agree.
+Against null, SQL's `IS NULL` and CEL agree. Against a non-null constant they do not: CEL holds a
+null *value* under the explicit convention, so `null != "x"` is TRUE and `null == "x"` FALSE, while
+SQL answers UNKNOWN and excludes the row under both polarities. Every SQL-backed adapter returned
+fewer rows than the PDP allowed (#308). `optional-ne` does not reach this: it uses the
+omitted-convention `aOptionalString`, where UNKNOWN and a missing-attribute error agree.
 
-The direction is safe — narrower than the decision, never wider — but the id sets do not match,
-which is what this corpus exists to enforce. Five actions pin it: `null-value-ne-const`,
-`null-value-not-eq-const`, `null-value-not-in-const`, `null-value-f2f` and
+The direction is safe (narrower, never wider) but the id sets differ. Five actions pin it:
+`null-value-ne-const`, `null-value-not-eq-const`, `null-value-not-in-const`, `null-value-f2f` and
 `null-value-pv-not-exists`.
 
-**A call-level option cannot fix it, which is why the convention is now declared per attribute**
-(see [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)). This suite
-deliberately maps the same column twice — `owner` sends an explicit null, `aOptionalString` sends
-nothing — because real applications do. Told `explicit`, an adapter has to make `optional-ne` return
-the NULL rows and breaks it; told `omitted`, it already refuses the null-comparison shapes. Each
-adapter's mapper therefore carries a per-attribute declaration, and the call-level
+**A call-level option cannot fix it, so the convention is declared per attribute**
+([ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)). The corpus maps
+the same column twice — `owner` sends an explicit null, `aOptionalString` sends nothing — because
+real applications do. Told `explicit`, an adapter breaks `optional-ne`; told `omitted`, it refuses
+the null-comparison shapes. So each mapper carries a per-attribute declaration, and the call-level
 `nullAttributeRepresentation` is its default. Declaring nothing means "treat this column as NOT
-NULL", which is the historical rendering, so the fix is opt-in per column rather than a silent
-rewrite of every nullable comparison.
+NULL" (the historical rendering), so the fix is opt-in per column.
 
-The declaration changes only the **equality family** — `eq`, `ne`, `in`. Those are the operators CEL
-evaluates to a definite boolean over a null value, so they are the only ones whose SQL has to be
-definite too. `lt`/`le`/`gt`/`ge` and the string operators raise a no-overload error on a null
-receiver, which denies under both polarities exactly as UNKNOWN does; making them definite would
-break them.
+The declaration changes only the **equality family** — `eq`, `ne`, `in` — the operators CEL
+evaluates to a definite boolean over null. `lt`/`le`/`gt`/`ge` and the string operators raise a
+no-overload error on a null receiver, which denies under both polarities exactly as UNKNOWN does.
 
-`coOwner` is the second explicit-null attribute the corpus carries, added for `null-value-f2f`. It
-aliases the **`scope`** column rather than `aOptionalString`, because comparing a column with itself
-is TRUE for all 29 seeds and the degeneracy guard forbids a total oracle. Against `scope` the only
-row where both sides are NULL is `e1`, so the oracle is exactly one row — thin, but non-degenerate,
-and it is precisely the row the naive translation loses.
+`coOwner` is the second explicit-null attribute, added for `null-value-f2f`. It aliases **`scope`**
+rather than `aOptionalString`, because a column compared with itself is TRUE for all 29 seeds and
+the degeneracy guard forbids a total oracle. Against `scope`, only `e1` has both sides NULL, so the
+oracle is exactly that row — the one the naive translation loses.
 
-What each adapter does with the declaration differs, and the split is the point:
+Per adapter:
 
-- **prisma, drizzle, sqlalchemy, spring-data, ent, pgx** translate it. All five actions are
-  oracle-compared.
-- **mongoose, convex** need no declaration: they store the value the caller sent, so a stored null
-  already compares as a null value exactly as CEL does. All five were aligned before the change.
-  (Mongoose refuses `null-value-pv-not-exists` for an unrelated, pre-existing reason — the
+- **prisma, drizzle, sqlalchemy, spring-data, ent, pgx** translate the declaration; all five actions
+  are oracle-compared.
+- **mongoose, convex** need none: they store the value the caller sent, so a stored null already
+  compares as CEL does. (Mongoose refuses `null-value-pv-not-exists` for an unrelated reason — the
   value-list fold puts a collection macro under a negation.)
 - **langchain-chromadb** refuses all five: its metadata model has no null, so `$ne`/`$nin` match
   documents missing the key.
-- **elasticsearch-java** takes the declaration in order to **refuse**. It already carried the right
-  message — "cannot distinguish an explicit null value from a missing field without an indexed
-  null-value sentinel" — but the guard keyed off a null *literal* in the plan, so it never fired for
-  these shapes. Every Query DSL spelling of `!= "x"` either requires the field to exist (dropping
-  the row) or matches every document missing it, and neither is the decision.
+- **elasticsearch-java** takes the declaration in order to **refuse** ("cannot distinguish an
+  explicit null value from a missing field without an indexed null-value sentinel"). The guard used
+  to key off a null literal in the plan, so it never fired for these shapes. Every Query DSL
+  spelling of `!= "x"` either requires the field (dropping the row) or matches every document
+  missing it.
 
 #### The absent to-one parent
 
-The other representation mismatch the corpus pins is a *path* that is absent rather than a value
-that is null. `mainCategory` is a to-one parent on the check side: a seed with no
-`subCategoryNames` sends **no `mainCategory` attribute at all**, so CEL raises a missing-path
-error and `check()` denies. An adapter reaches the same data through a join chain rooted at the
-resource row, where an absent parent and a childless parent produce the same empty result set:
+`mainCategory` is a to-one parent on the check side. A seed with no `subCategoryNames` sends **no
+`mainCategory` attribute**, so CEL raises a missing-path error and `check()` denies. An adapter
+reaches the same data through a join chain from the resource row, where an absent parent and a
+childless parent both produce an empty result:
 
 | shape | `check()` | a chain that does not require the hop |
 |---|---|---|
@@ -331,237 +286,206 @@ resource row, where an absent parent and a childless parent produce the same emp
 | `("finance" in mainCategory.subNames) ? … : …` | deny | no rows → `!false` → else-branch → **over-grants** |
 | `size(mainCategory.subCategories) <= 1.5` | deny | count 0 ≤ 1 → **over-grants** |
 
-Only a universal, a negation, a zero/lower-bound count or a ternary's false-branch discriminates
-them, which is why `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the
-bug was live (cerbos/query-plan-adapters#309). `w1-all-chain`, `w1-not-exists-chain`,
-`w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
-`w1-not-size-chain`, `w1-ternary-chain-cond` and `w1-size-frac-le-chain` are the nine that
-discriminate.
+Only a universal, a negation, a zero/lower-bound count or a ternary's false branch discriminates,
+which is why `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` passed everywhere while the bug was
+live (#309). The 9 that discriminate: `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`,
+`w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`, `w1-not-size-chain`,
+`w1-ternary-chain-cond` and `w1-size-frac-le-chain`.
 
-`w1-size-frac-chain` is the one `w1-*` action that does **not** probe this hazard, and it is worth
-being clear about why it is still here: `>= 1.5` rounds up to `>= 2`, which a count of zero fails
-whether or not the hop is required, so guarded and unguarded agree. It pins the other property of
-a fractional threshold — that the adapter ROUNDS rather than truncates — over a chain, which
-`cr-size-frac-ge` only pins over a direct relation. An adapter that truncates to `>= 1` returns
-`a1/a6/a8/c1` against an empty oracle.
+`w1-size-frac-chain` does **not** probe this hazard: `>= 1.5` rounds up to `>= 2`, which a count of
+zero fails either way. It pins that the adapter *rounds* rather than truncates over a chain
+(`cr-size-frac-ge` pins it over a direct relation); truncating to `>= 1` returns `a1/a6/a8/c1`
+against an empty oracle.
 
-The fix is in the translation, not in the classification: **a chained collection must require its
-intermediate hop to exist**, so an absent parent stays excluded under both polarities instead of
-collapsing onto the empty-collection case. `w1-size-zero-chain`, `w1-not-size-chain` and
+The fix is in translation: **a chained collection must require its intermediate hop to exist**, so
+an absent parent stays excluded under both polarities. `w1-size-zero-chain`, `w1-not-size-chain` and
 `w1-size-frac-chain` have empty oracles by construction (no seed holds a parent with zero children,
-nor one with two or more) and are therefore declared in `degenerateOracles`; `w1-all-chain`,
-`w1-not-exists-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain`,
-`w1-ternary-chain-cond` and `w1-size-frac-le-chain` all have non-degenerate oracles and carry the
-anti-vacuity assertion for the group.
+or with two or more) and are declared in `degenerateOracles`; the other `w1-*` discriminators have
+non-degenerate oracles and carry the group's anti-vacuity assertion.
 
-**Put the guard in the shared relation-scope construction, not in each operator.** The #309 round
-guarded the collection macros, which left every sibling operator reached through the same chain
-unguarded — membership and `hasIntersection` (#315), and the negated count spelling `!(size > 0)`,
-which takes a different branch from `size == 0` because the planner emits the negation verbatim
-rather than normalising it (#316). ent and pgx needed no change in any round: their membership
-routes through the same guarded tri-state existence construction as everything else. Adapters with
-no UNKNOWN to represent (Prisma filters, Mongo query documents) get the same result by requiring
-the hops **outside** the negation rather than inside it, so the negation cannot flip the
-requirement along with the predicate.
+**Put the guard in the shared relation-scope construction, not in each operator.** Guarding only the
+collection macros (#309) left sibling operators on the same chain unguarded: membership and
+`hasIntersection` (#315), and `!(size > 0)`, which the planner emits verbatim rather than
+normalising to `size == 0` (#316). ent and pgx needed no change: their membership routes through the
+same guarded tri-state existence construction. Adapters with no UNKNOWN to represent (Prisma
+filters, Mongo query documents) require the hops **outside** the negation, so the negation cannot
+flip the requirement.
 
-**A private copy of "negate this" is how the ternary escaped both rounds.** A ternary rewrites into
-guarded branches, and its false-branch is "the condition is definitively FALSE" — the same
-three-valued negation the `not` handler already computes. Prisma spelled that a second time as a
-bare `NOT`, so the hop requirement #315/#316 added never reached it and the else-branch was selected
-for every parentless row (#334). The repair is delegation, not another patch: one negation with the
-guard inside it, reused wherever a condition has to be falsified.
+**Reuse one negation.** A ternary's false branch is "the condition is definitively FALSE" — the same
+three-valued negation the `not` handler computes. Prisma spelled it a second time as a bare `NOT`,
+so the #315/#316 hop requirement never reached it and the else branch was selected for every
+parentless row (#334). The fix is delegation: one negation with the guard inside, reused wherever a
+condition is falsified.
 
-Mongoose is the other adapter with no UNKNOWN to represent, and it does **not** share that defect:
-its ternary is a single `$cond` inside an aggregation expression, so there is no second negation to
-diverge. It has a *different* latent hazard in the same place — `$cond`'s `if` treats a missing
-field path as falsy, which selects the else-branch for an absent parent — but no corpus action
-reaches it, because every chained operand the corpus carries is a collection and membership has no
-aggregation-expression form there. Probing it needs a chained **scalar** attribute, which is a new
-seed field.
+Mongoose does not share that defect — its ternary is a single `$cond` — but has a latent one: `$cond`'s
+`if` treats a missing field path as falsy, selecting the else branch for an absent parent. No
+collection action reaches it; probing it needs a chained **scalar** attribute (see "The real to-one
+relation").
 
 **The fractional-threshold collapse is the one branch the corpus cannot reach.** CEL rejects
-`==`/`!=` between an `int` and a `double` ("found no matching overload for `_==_` applied to
-`(int, double)`"), so no policy can make the planner emit a fractional equality against `size()`,
-and the ordering spellings the corpus does pin (`>= 1.5`, `<= 1.5`) round to an integer threshold
-and travel the ordinary count path. An adapter that folds the fractional equality to a constant
-must still guard it — `hops AND constant` is two-valued and readmits parentless rows under a
-negation — but only that adapter's unit tests can prove it (#333). This is the first of the cases
-`CLAUDE.md` ("What a translator unit test may pin") admits against "a per-adapter unit test is not
-a substitute for a corpus action": there is no corpus action to substitute for, and there never can
-be.
+`==`/`!=` between `int` and `double` ("found no matching overload for `_==_` applied to
+`(int, double)`"), so no policy can plan a fractional equality against `size()`, and the ordering
+spellings (`>= 1.5`, `<= 1.5`) round to an integer threshold. An adapter that folds the fractional
+equality to a constant must still guard it — `hops AND constant` is two-valued and readmits
+parentless rows under a negation — and only its unit tests can prove that (#333). This is kind 1 in
+`CLAUDE.md`, "What a translator unit test may pin".
 
 ### Shapes that live only in a unit test
 
 `CLAUDE.md` ("What a translator unit test may pin") admits three kinds of material into a
-per-adapter unit test, and this is the registry of what is parked there today, per adapter, so
-that a reader can tell a permanent entry from a bridge. The banners in each test class are the
-source; this list is kept by hand and reviewed with the test, and an entry here that no test
-carries any more is a stale entry, not a licence.
+per-adapter unit test. This is the registry of what each adapter parks there today, so a reader can
+tell a permanent entry from a bridge. The banners in each test class are the source; this list is
+kept by hand, and an entry no test carries any more is stale, not a licence.
 
-**elasticsearch-java** (`ElasticsearchQueryPlanAdapterTest`, with the regex probes in
+**elasticsearch-java** (`ElasticsearchQueryPlanAdapterTest`; regex probes in
 `ElasticsearchSurfaceTest`):
 
-- **Kind 1 — a branch CEL itself cannot reach.** Permanent. Each test quotes the checker error
-  that stops the shape from ever being planned, rather than inferring unreachability from the
-  adapter's own code:
-  - an operator the adapter does not know (`unsupported_op`) — `undeclared reference to
-    'unsupported_op' (in container '')`;
-  - `isSet` (#261) — `undeclared reference to 'isSet'`; existence is spelled
-    `R.attr.x != null`, which the corpus carries as `null-ne`;
-  - a lambda body naming a variable the lambda does not bind — `undeclared reference to 'x'`;
+- **Kind 1 — a branch CEL itself cannot reach.** Permanent. Each test quotes the checker error that
+  stops the shape being planned:
+  - an unknown operator (`unsupported_op`) — `undeclared reference to 'unsupported_op' (in
+    container '')`;
+  - `isSet` (#261) — `undeclared reference to 'isSet'`; existence is `R.attr.x != null`, which the
+    corpus carries as `null-ne`;
+  - a lambda body naming an unbound variable — `undeclared reference to 'x'`;
   - a collection macro over a scalar literal — `expression of type 'string' cannot be range of a
     comprehension (must be list, map, or dynamic)`;
-  - a `timestamp()` literal outside strict RFC 3339 or outside CEL's representable range — CEL's
-    own `timestamp()` rejects each (a calendar-invalid date reads `parsing time
-    "2024-02-30T00:00:00Z": day out of range`). The adapter validates the literal anyway, because it
-    decides whether the emitted `term` or `range` is even well-formed.
+  - a `timestamp()` literal outside strict RFC 3339 or CEL's range — CEL's `timestamp()` rejects
+    each (e.g. `parsing time "2024-02-30T00:00:00Z": day out of range`). The adapter validates it
+    anyway, because it decides whether the emitted `term` or `range` is well-formed.
 - **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent.
-  `actions.json` classifies each action against one `Options` per adapter, so these have no corpus
-  spelling: an unmapped reference (refused rather than used verbatim), an `OperatorFunction`
-  override and which polarities of its operator it reaches, the two lowerings that borrow a shape
-  without borrowing its override (hierarchy → `prefix`/`terms`, `^literal` → `prefix`), a collection
-  macro over an undeclared nested path, a value-list macro needing no nested path, `size()` over a
-  declared flat collection versus an undeclared field, the immutability of `Options` and the
-  convenience overloads delegating to it, and the three typed refusals
-  (`UnsupportedPlanShapeException`, `UnmappedAttributeException`, `MalformedPlanException`).
-- **Kind 3 — a corpus gap wearing a unit test.** Policy-reachable, pinned in this adapter alone and
-  asked of none of the others; each is a bridge tracked by
-  [#414](https://github.com/cerbos/query-plan-adapters/issues/414) and is deleted when its corpus
-  action lands. Every one opens with *Corpus gap.* in the test:
-  - `anUnfoldableMacroOverAValueListIsRefusedByName` — direct boolean-root `filter` and
-    `map` results; the new actions use computed collections as operands instead;
-  - `exceptIsRefusedByNameWhereverItAppears` — directly negated and nested-lambda arrival
-    positions; root, size and equality positions are now corpus actions;
+  `actions.json` classifies against one `Options` per adapter, so these have no corpus spelling: an
+  unmapped reference (refused, not used verbatim), an `OperatorFunction` override and which
+  polarities it reaches, the two lowerings that borrow a shape without its override (hierarchy →
+  `prefix`/`terms`, `^literal` → `prefix`), a collection macro over an undeclared nested path, a
+  value-list macro needing no nested path, `size()` over a declared flat collection versus an
+  undeclared field, `Options` immutability and the convenience overloads delegating to it, and the
+  three typed refusals (`UnsupportedPlanShapeException`, `UnmappedAttributeException`,
+  `MalformedPlanException`).
+- **Kind 3 — a corpus gap wearing a unit test.** Policy-reachable, pinned here alone; each is a
+  bridge tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414), deleted when
+  its corpus action lands, and opens with *Corpus gap.*:
+  - `anUnfoldableMacroOverAValueListIsRefusedByName` — direct boolean-root `filter` and `map`
+    results; the new actions use computed collections as operands instead;
+  - `exceptIsRefusedByNameWhereverItAppears` — directly negated and nested-lambda positions; root,
+    size and equality positions are now corpus actions;
   - `everySpellingOfNonEmptinessIsTheSameCheck` — direct flat-collection `size != 0` and its
     negation; `size-ge-one` covers the inclusive threshold;
-  - `hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt` — intersection
-    inside a nested lambda; the flat and projected operand orders are now corpus actions;
-  - `aNonScalarLiteralWhereAScalarIsExpectedIsRefused` — raw protobuf structured values in
-    ordering and string operations. The new equality actions also cover the planner's
-    `list`/`struct` expression representation, which is a distinct wire shape.
+  - `hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt` — intersection inside a
+    nested lambda; the flat and projected operand orders are now corpus actions;
+  - `aNonScalarLiteralWhereAScalarIsExpectedIsRefused` — raw protobuf structured values in ordering
+    and string operations. The new equality actions cover the planner's `list`/`struct`
+    representation, which is a distinct wire shape.
 
-The numeric decoder's exact signed-long boundaries and non-finite protobuf values remain
-wire contracts. The pinned PDP cannot serialize a non-finite literal (see the evidence below).
-The regex surface tests remain mechanism tests against Lucene: they demonstrate why the
-classified regex actions are refused, a property the corpus's refusal assertion cannot measure.
+The numeric decoder's exact signed-long boundaries and non-finite protobuf values remain wire
+contracts; the pinned PDP cannot serialize a non-finite literal (see below). The regex surface tests
+remain mechanism tests against Lucene: they show why the regex actions are refused, which a refusal
+assertion cannot measure. The empty hierarchy delimiter is now covered by `hier-empty-delim`.
 
-The empty hierarchy delimiter is now covered by `hier-empty-delim`.
+**spring-data** (`SpringDataQueryPlanAdapterTest`; banners are the source, every kind-3 test opens
+with *Corpus gap.*):
 
-**spring-data** (`SpringDataQueryPlanAdapterTest`; the banners in the class are the source, and
-every kind-3 test opens with *Corpus gap.*):
-
-- **Kind 1 — a branch CEL itself cannot reach.** Permanent. An operator CEL does not have
-  (`isSet`), a comparison the type checker rejects (a fractional `size()` equality, a timestamp
-  against a number), an operand shape the planner never emits (a wrong arity, a bare string where
-  `timestamp()` always wraps one, a leaf with a third operand), and constant-only sub-expressions
-  the planner folds before the wire — for which the proof is the corpus's own fixtures rather than
-  the adapter's code: `p-startswith-concat` arrives with `"100" + "%"` already folded and `in-empty`
+- **Kind 1.** Permanent. An operator CEL does not have (`isSet`), a comparison the type checker
+  rejects (fractional `size()` equality, a timestamp against a number), an operand shape the planner
+  never emits (wrong arity, a bare string where `timestamp()` always wraps one, a leaf with a third
+  operand), and constant-only sub-expressions the planner folds before the wire — proved by the
+  corpus's own fixtures: `p-startswith-concat` arrives with `"100" + "%"` folded and `in-empty`
   arrives as `ALWAYS_DENIED`.
-- **Kind 2 — a caller-supplied argument the corpus structurally cannot vary.** Permanent. An
-  `OperatorFunction` override on every scalar-leaf path, the macro-depth bound (the `Options` value
-  and the system property it falls back to), the call-level and per-attribute
-  `NullAttributeRepresentation`, a mapping the corpus does not use (an `OffsetDateTime` or
-  `LocalDateTime` column, an unmapped reference), the bulk-delete guard, the null-predicate contract
-  with Spring Data, the defensive copies, and — in `RefusalTypesTest` and `OptionsTest` — the three
-  typed refusals and the immutability of `Options`.
-- **Kind 3 — a corpus gap wearing a unit test.** Bridges tracked by
-  [#414](https://github.com/cerbos/query-plan-adapters/issues/414), grouped as the banners group
-  them: `size(collection)` against an arbitrary threshold and the fractional and out-of-int-range
-  thresholds; empty-list intersection over a direct scalar, relation or map projection (the new action
-  covers an absent to-one parent); value-first and relation structured comparisons; suffix and integral `add` solve forms; the CEL primitive
-  and minor-operator shapes; collection-macro composition; value-first operand orders beyond the
-  ones the corpus carries; the ternary rewrite's nested, negated and value-first forms; the
-  SQL Server `[` escaping (a gap of the
-  *store* dimension — no leg executes on SQL Server); the constant-receiver string matches;
-  arithmetic as a comparison operand; constant NaN and infinity ordering; and the
-  `timestamp(field)` operator cells the corpus does not reach.
+- **Kind 2.** Permanent. An `OperatorFunction` override on every scalar-leaf path, the macro-depth
+  bound (the `Options` value and its system-property fallback), call-level and per-attribute
+  `NullAttributeRepresentation`, mappings the corpus does not use (`OffsetDateTime` or
+  `LocalDateTime` columns, an unmapped reference), the bulk-delete guard, the null-predicate
+  contract with Spring Data, defensive copies, and — in `RefusalTypesTest` and `OptionsTest` — the
+  three typed refusals and `Options` immutability.
+- **Kind 3.** Bridges tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414),
+  grouped as the banners group them: `size(collection)` against arbitrary, fractional and
+  out-of-int-range thresholds; empty-list intersection over a direct scalar, relation or map
+  projection (the new action covers an absent to-one parent); value-first and relation structured
+  comparisons; suffix and integral `add` solve forms; CEL primitive and minor-operator shapes;
+  collection-macro composition; value-first operand orders beyond the corpus's; the ternary
+  rewrite's nested, negated and value-first forms; SQL Server `[` escaping (a *store*-dimension gap —
+  no leg runs SQL Server); constant-receiver string matches; arithmetic as a comparison operand;
+  constant NaN and infinity ordering; and the `timestamp(field)` operator cells the corpus does not
+  reach.
 
-Error-message context, list cardinality and value redaction remain independent translator
-contracts even where a corpus action already proves the refusal.
+Error-message context, list cardinality and value redaction remain translator contracts even where a
+corpus action proves the refusal.
 
-**prisma** (`translator.test.ts`): the caller-crafted nested-map boolean-body
-contract is a permanent kind-1 test. The pinned PDP rejects
-`R.attr.tags.all(t, R.attr.tags.map(x, x.name))` with
-`expected type 'bool' but found 'list(dyn)'`. The test exercises the defensive
-fallback anyway, proving that an inner map's nullable projection cannot leak
-into the outer lambda scope (#430).
+**prisma** (`translator.test.ts`): the caller-crafted nested-map boolean-body contract is a
+permanent kind-1 test. The pinned PDP rejects `R.attr.tags.all(t, R.attr.tags.map(x, x.name))` with
+`expected type 'bool' but found 'list(dyn)'`; the test exercises the defensive fallback anyway,
+proving an inner map's nullable projection cannot leak into the outer lambda scope (#430).
 
 ### Issue #414 port and planner evidence
 
-The port adds 67 actions. The original families now have corpus spellings: wildcard needles,
-ten regex patterns beyond a literal prefix, the three arrival positions of two-list `except`,
-`size-ge-one`, `in-numbers`, the four empty-list macro identities, principal struct projections,
-variable shadowing, negated principal macros, `root-not-bool`, and literal membership inside a
-lambda. `h4` carries the string `"0"` beside numeric `0`, so heterogeneous equality is also tested
-against SQLite's numeric-string coercion. `h1` carries `a{q}*?b`, `h2` carries `a\nb`, and `h3` carries `ab`: together they distinguish
-literal wildcard escaping, RE2's newline rule, a literal brace, and a real regex match. The
-principal struct fixtures contain `list`/`struct`/`set-field` expressions, which is what the pinned
-planner actually emits; they must not be replaced with assumed protobuf value-list fixtures.
+The port adds 67 actions, giving the original families corpus spellings: wildcard needles, 10 regex
+patterns beyond a literal prefix, the three arrival positions of two-list `except`, `size-ge-one`,
+`in-numbers`, the four empty-list macro identities, principal struct projections, variable
+shadowing, negated principal macros, `root-not-bool`, and literal membership inside a lambda. `h4`
+carries the string `"0"` beside numeric `0`, testing heterogeneous equality against SQLite's
+numeric-string coercion. `h1` (`a{q}*?b`), `h2` (`a\nb`) and `h3` (`ab`) together distinguish literal
+wildcard escaping, RE2's newline rule, a literal brace and a real regex match. The principal struct
+fixtures contain the `list`/`struct`/`set-field` expressions the pinned planner actually emits; do
+not replace them with assumed protobuf value-list fixtures.
 
 The September 18 follow-up adds heterogeneous equality and string-operation probes, omitted
-variable membership, unsolvable concatenation under negation, a hierarchy prefix whose list
-still reads a missing attribute, empty intersection through an absent parent, a nested divisor,
-and raw temporal equality. `type-string-number` uses principal `zero: 0`, so MySQL coercing a
-non-numeric string to zero is observable. The type probes deliberately have empty oracles: their
-purpose is to catch a datastore matching values CEL cannot compare or operate on. Empty macro
-identities and non-scalar literal probes are empty or total too, so every one of these is declared
-in `degenerateOracles` and asserted to be exactly that.
+variable membership, unsolvable concatenation under negation, a hierarchy prefix whose list still
+reads a missing attribute, empty intersection through an absent parent, a nested divisor, and raw
+temporal equality. `type-string-number` uses principal `zero: 0`, so MySQL coercing a non-numeric
+string to zero is observable. The type probes have empty oracles by design — they catch a store
+matching values CEL cannot compare — and the empty macro identities and non-scalar literal probes
+are empty or total too; all are declared in `degenerateOracles` and asserted to be exactly that.
 
-`not-nan-ord-le` distinguishes the ternary arms under the Cerbos 0.55 / CEL 0.30 semantics.
-The boolean-true arm compares `1 <= 2`, so negation denies it. The boolean-false arm compares
-`0.5 <= NaN`, which is false, so **negation allows it**. This changed from 0.54, where that
-unordered comparison raised an error and remained denied under negation. The finite arm was
-changed deliberately during the upgrade: retaining `1 <= 0.5` made the new oracle total and
-tripped every harness's degeneracy guard. See "Evaluation modes and the 0.55 baseline" below.
+`not-nan-ord-le` distinguishes the ternary arms under Cerbos 0.55 / CEL 0.30. The true arm compares
+`1 <= 2`, so negation denies it. The false arm compares `0.5 <= NaN`, which is false, so **negation
+allows it** (under 0.54 that comparison raised an error and stayed denied). The finite arm was
+changed during the upgrade because `1 <= 0.5` made the oracle total. See "Evaluation modes and the
+0.55 baseline".
 
-One requested spelling cannot produce a JSON fixture with the pinned PDP:
-`R.attr.aNumber / (0.0 / 0.0) > 0` compiles, but `PlanResources` returns HTTP 500 with
-`proto: google.protobuf.Value.number_value: invalid NaN value`. It is excluded from the active
-manifest because no adapter receives a plan. This is an upstream serialization limitation,
-not an adapter refusal; the nested finite-divisor case is carried by `div-by-division`.
+One requested spelling has no fixture: `R.attr.aNumber / (0.0 / 0.0) > 0` compiles, but
+`PlanResources` returns HTTP 500 with `proto: google.protobuf.Value.number_value: invalid NaN
+value`. It is excluded from the manifest because no adapter receives a plan — an upstream
+serialization limitation, not an adapter refusal. `div-by-division` carries the nested finite-divisor
+case.
 
-The Java unit-test registry above remains authoritative for finer operator cells not replaced
-by these actions. A broad family action does not establish coverage of every refusal location,
-operand order, or caller contract; a surviving *Corpus gap.* label is still pending port work.
+The Java unit-test registry above stays authoritative for finer operator cells these actions did not
+replace. A broad family action does not cover every refusal location, operand order or caller
+contract; a surviving *Corpus gap.* label is still pending port work.
 
 ### Issue #396 regex, indexing and conversion probes
 
-11 actions cover the remaining mechanisms from #396. `h5` carries `"ab\n"`, while
-`h3` carries `"ab"`: `regex-final-newline` distinguishes RE2's absolute-end `$` from an
-engine that also matches before a final newline. The same new seed carries the derived
-`createdBy = "not-a-timestamp"`, exercising conversion failure in both the existing
-`p-timestamp` and the new `cast-not-timestamp` negation. The derivation checker records
-that exception independently; harnesses continue to read the materialised value.
+11 actions cover the remaining #396 mechanisms. `h5` carries `"ab\n"` and `h3` `"ab"`:
+`regex-final-newline` distinguishes RE2's absolute-end `$` from an engine that also matches before a
+final newline. `h5` also carries the derived `createdBy = "not-a-timestamp"`, exercising conversion
+failure in `p-timestamp` and the new `cast-not-timestamp` negation. The derivation checker records
+that exception; harnesses read the materialised value.
 
-Cerbos 0.55 rejects a **literal** `a(?=b)` at compile time. `regex-lookahead` selects the
-same string through the known principal's `context` attribute, deferring validation until
-evaluation and preserving the original `matches` wire node. This runtime spelling still
-belongs in the corpus; `scripts/check-evaluation-modes.sh` separately asserts the literal's
-compile rejection in both modes. A PCRE engine accepting the expression would allow
-`h3` and `h5`, which the checker denies. `regex-eq-true` separately pins the retained
-`eq(matches(...), true)` expression instead of assuming the planner folds its wrapper.
+Cerbos 0.55 rejects a **literal** `a(?=b)` at compile time. `regex-lookahead` selects the same string
+through the principal's `context` attribute, deferring validation to evaluation and keeping the
+original `matches` wire node; `scripts/check-evaluation-modes.sh` separately asserts the literal's
+compile rejection in both modes. A PCRE engine accepting it would allow `h3` and `h5`, which the
+checker denies. `regex-eq-true` pins the retained `eq(matches(...), true)` rather than assuming the
+planner folds the wrapper.
 
-`index-negative` and `index-fractional` preserve `-1` and `0.5` in their wire nodes. Both
-raise during CEL list access. These two actions and `regex-lookahead` include the independent
-`aNumber == 5` branch: the checker allows `a1` through that branch, keeping the oracle
-non-empty while invalid accesses or a foreign regex engine can still over-grant other rows.
-`index-not-oob` reads index 1 under negation; `a6` supplies an in-bounds unequal value,
-while shorter lists must remain denied instead of making a missing element unequal.
+`index-negative` and `index-fractional` keep `-1` and `0.5` in their wire nodes; both raise during
+CEL list access. These two and `regex-lookahead` include an independent `aNumber == 5` branch that
+allows `a1`, keeping the oracle non-empty while an invalid access or foreign regex engine can still
+over-grant other rows. `index-not-oob` reads index 1 under negation; `a6` supplies an in-bounds
+unequal value, and shorter lists must stay denied rather than making a missing element unequal.
 
-`cast-not-int` and `cast-not-double` have the numeric string `h4` as an allowed witness;
-malformed numeric strings still deny under negation. `cast-not-string-missing` and
-`cast-not-string-null` distinguish an omitted attribute from an explicit null through
-`aOptionalString` and `owner`. Neither conversion error may become an allow under `not`.
-All 11 actions have non-empty, non-total checker oracles and belong in each adapter's
-compared or refusal-liveness guard according to its observed classification (#401).
+`cast-not-int` and `cast-not-double` have the numeric string `h4` as an allowed witness; malformed
+numeric strings still deny under negation. `cast-not-string-missing` and `cast-not-string-null`
+distinguish an omitted attribute from an explicit null through `aOptionalString` and `owner`.
+Neither conversion error may become an allow under `not`. All 11 actions have non-empty, non-total
+oracles and sit in each adapter's compared or refusal-liveness guard according to its observed
+classification (#401).
 
 ### Number and boolean list elements
 
-`index-scalar-list` and its companions read `tagNames`, a list of strings, so they never ask
-whether an adapter keeps an element's JSON type when the literal is a number or a boolean. Two seed
-fields exist for that alone: `aNumberList` and `aBoolList`, homogeneous scalar lists on every seed.
-Most rows hold `[]`, where every position is an index error and the PDP denies under both
-polarities. Eight rows hold the values that discriminate:
+`index-scalar-list` and its companions read `tagNames`, a list of strings, so they never ask whether
+an adapter keeps an element's JSON type for a number or boolean literal. Two seed fields exist for
+that: `aNumberList` and `aBoolList`, homogeneous scalar lists on every seed. Most rows hold `[]`,
+where every position is an index error and the PDP denies under both polarities. Eight rows
+discriminate:
 
 | seed | `aNumberList` | `aBoolList` | what it witnesses |
 | --- | --- | --- | --- |
@@ -574,52 +498,41 @@ polarities. Eight rows hold the values that discriminate:
 | `b4` | `[1]` | `[true]` | 1 and true, which SQLite and MySQL both store as 1 |
 | `c1` | `[0]` | `[true, false]` | a zero a NULL could be mistaken for |
 
-Six actions read them, each with a non-empty, non-total oracle in both evaluation modes:
-`index-number-list` (`[0] == 2`: `a1 a3`) and its negation (`a4 a5 a6 a7 b4 c1`),
-`index-bool-list` (`[0] == true`: `a1 b4 c1`) and its negation (`a3 a4 a5`), and the two
-cross-type probes. `index-bool-list-vs-number` (`aBoolList[0] == 1`) and
-`index-number-list-vs-bool` (`aNumberList[0] == true`) are false for every row in CEL, whose
-equality is heterogeneous. An adapter that reads a JSON element back as SQL and compares it with the
-literal returns `b4` and `c1`, or `b4`, anyway: SQLite and MySQL store a JSON true as 1. Each
-carries the `aNumber == 5` branch, as `index-negative` does, so the oracle is `a1` rather than
-empty.
+Six actions read them, each non-degenerate in both evaluation modes: `index-number-list`
+(`[0] == 2`: `a1 a3`) and its negation (`a4 a5 a6 a7 b4 c1`), `index-bool-list` (`[0] == true`:
+`a1 b4 c1`) and its negation (`a3 a4 a5`), and two cross-type probes. `index-bool-list-vs-number`
+(`aBoolList[0] == 1`) and `index-number-list-vs-bool` (`aNumberList[0] == true`) are false for every
+row in CEL, whose equality is heterogeneous; an adapter comparing a JSON element as SQL returns
+`b4` and `c1`, or `b4`, because SQLite and MySQL store JSON true as 1. Each carries the
+`aNumber == 5` branch, as `index-negative` does, so the oracle is `a1` rather than empty.
 
-The two fields are new seed keys, so every harness declares and consumes them. An adapter with no
-positional read of a list refuses all six, exactly as it refuses `index-scalar-list`.
+Every harness declares and consumes both fields. An adapter with no positional list read refuses all
+six, as it refuses `index-scalar-list`.
 
 ### The real to-one relation
 
-The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further
-out. It is deliberately kept beside `obj.inner`, which looks identical in a policy and is not a
-join at all — every harness maps `obj.inner` to the resource row's own `aString`, the same trick
-the spring-data reference uses for the `p-struct` probe. One of the two dotted attributes emits a
-join and the other does not, and a reader should be able to tell which.
+The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further.
+It sits beside `obj.inner`, which looks identical in a policy but is not a join — every harness maps
+`obj.inner` to the row's own `aString`, as the spring-data reference does for `p-struct`. A reader
+should be able to tell which dotted attribute joins.
 
-`mainCategory` is a real chain too, but its tail is a **collection**, and the hazards a collection
-reaches are not the hazards a scalar reaches. "The absent to-one parent" above records mongoose's
-`$cond` treating a missing field path as falsy and notes that no corpus action reaches it, because
-"every chained operand the corpus carries is a collection and membership has no
-aggregation-expression form there". This is the seed field that entry asks for. See
-[ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
+`mainCategory` is also a chain, but its tail is a collection, and scalars reach different hazards.
+This relation is the chained scalar "The absent to-one parent" asks for to probe mongoose's `$cond`.
+See [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
 
 **One seed key, resolved against another row.** `parentSeedId` names the seed whose four scalars —
 `aBool`, `aNumber`, `aString`, `aOptionalString` — a row's `parent` carries; that seed's own
-`parentSeedId` names the ones `parent.inner` carries, and the chain is **cut there**. There is no
-`parent.inner.inner`. `null` is a row with no parent at all. Seed rows stay one line each, which is
-the property the compact-row convention protects, and the parent values are the corpus's own
-hostile strings — LIKE metacharacters, unicode, the empty string, case traps, NULL optionals —
-rather than a second curated set to keep in step with the first.
+`parentSeedId` names what `parent.inner` carries, and the chain is **cut there** (no
+`parent.inner.inner`). `null` means no parent. Seed rows stay one line each, and the parent values
+are the corpus's own hostile strings (LIKE metacharacters, unicode, empty string, case traps, NULL
+optionals) rather than a second curated set.
 
-**Do not write the nested object into `seeds.json`.** It is materialised harness-side, exactly as
-`mainCategory` is materialised from `subCategoryNames`.
+**Do not write the nested object into `seeds.json`.** Harnesses materialise it, as they materialise
+`mainCategory` from `subCategoryNames`.
 
-**The parent is a copy, not a pointer.** Each harness creates a *fresh* parent (and inner) row per
-resource rather than pointing at the named seed's own row. The corpus already seeds distinct
-category graphs per resource so no two share a relation by accident; here the reason is sharper —
-with shared rows, a filter that returned the parent instead of the child could agree with the
-oracle.
-
-What a store does with it is the store's business, and the split is expected:
+**The parent is a copy, not a pointer.** Each harness creates a fresh parent (and inner) row per
+resource rather than pointing at the named seed's row. With shared rows, a filter returning the
+parent instead of the child could agree with the oracle.
 
 | store | how the two levels are materialised |
 |---|---|
@@ -627,17 +540,14 @@ What a store does with it is the store's business, and the split is expected:
 | mongoose, convex, elasticsearch-java | two nested objects embedded in the document |
 | langchain-chromadb | both levels flattened onto dotted metadata keys (`parent.aString`, `parent.inner.aString`) |
 
-How a store spells "this level is not there" is its own business — a missing row, a missing key, or
-a stored null under the convention that harness already uses for a NULL column. What every one of
-them has to agree on is the **check side**: a level that does not exist sends no `parent` attribute
-(or no `parent.inner`), so CEL raises a missing-path error and `check()` denies. That is the scalar
-counterpart of the collection hazard "The absent to-one parent" documents.
+How a store spells "this level is absent" is its own business (a missing row, a missing key, or a
+stored null under that harness's NULL convention). The **check side** must agree everywhere: an
+absent level sends no `parent` (or no `parent.inner`) attribute, so CEL raises a missing-path error
+and `check()` denies — the scalar counterpart of "The absent to-one parent".
 
-**Every harness maps it, and how each one spells the hop is the point.** The fifteen `rel-*`
-actions are what proved it, and reaching a scalar *through* a to-one hop turned out to be a shape
-several translators did not have. What they have in common is that an absent hop must be UNKNOWN
-rather than false, because `NOT UNKNOWN` is still UNKNOWN and the row has to stay excluded under
-both polarities:
+**How each adapter spells the hop.** The 15 `rel-*` actions proved that reaching a scalar through a
+to-one hop was a shape several translators lacked. In every case an absent hop must be UNKNOWN, not
+false, because `NOT UNKNOWN` is still UNKNOWN:
 
 | adapter | how the hop is reached | what makes an absent hop UNKNOWN |
 |---|---|---|
@@ -648,369 +558,301 @@ both polarities:
 | mongoose, convex, elasticsearch-java | a nested object path | the path is simply absent from the document |
 | langchain-chromadb | flattened dotted metadata keys | nothing does — a missing key MATCHES `$ne`, so the negated and null-comparison shapes fail closed |
 
-A correlated scalar subquery needs no separate hop guard, which is the reason three adapters have
-none: the guard the COLLECTION chains need exists because `EXISTS` is two-valued and collapses
-"absent parent" onto "no matching child", and a scalar projection never makes that collapse. An
-inner join does not work either — it removes the row from the WHOLE query rather than making one
-branch unknown, which is invisible until the hop sits under a disjunction. `rel-hop2-or-exists` is
-the action that discriminates it, and it is the only one in the group whose failure direction is an
-UNDER-grant.
+A correlated scalar subquery needs no hop guard: the collection chains need one because `EXISTS` is
+two-valued and collapses "absent parent" onto "no matching child", which a scalar projection never
+does. An inner join does not work either — it removes the row from the whole query rather than
+making one branch unknown, which shows only under a disjunction. `rel-hop2-or-exists` discriminates
+it and is the one action in the group whose failure is an under-grant.
 
-**A fixture nothing uses can rot, so every harness pins it directly.** Each one reads both hops back
-out of its store — through a real join where it has one — and compares them against the corpus,
-rather than counting rows: a count cannot tell an inner row carrying the corpus's values from one
-carrying the root's own columns, which is exactly the flat-alias failure this relation exists to
-make visible. `scripts/validate-corpus.sh` separately asserts that every `parentSeedId` names a
-seed, that no row is its own parent, and that all three depths — no parent, parent without inner,
-parent with inner — are non-empty.
+**Every harness pins the fixture directly.** Each reads both hops back out of its store (through a
+real join where it has one) and compares them with the corpus rather than counting rows — a count
+cannot tell an inner row carrying the corpus's values from one carrying the root's own columns.
+`scripts/validate-corpus.sh` asserts every `parentSeedId` names a seed, no row is its own parent, and
+all three depths (no parent, parent without inner, parent with inner) are non-empty.
 
 ### The primary key as a filterable attribute
 
-Every action but the `id-*` six filters on a resource **attribute**. Those six filter on
-`request.resource.id` — the resource's own identity, which the planner leaves symbolic because
-PlanResources is asked about a *kind*, not a row, so the operand arrives as a `variable` named
-`request.resource.id` rather than `request.resource.attr.id`.
+Every action but the six `id-*` actions filters on a resource attribute. Those six filter on
+`request.resource.id`, which the planner leaves symbolic (PlanResources is asked about a kind, not a
+row), so the operand arrives as a `variable` named `request.resource.id`, not
+`request.resource.attr.id`.
 
-It is a distinct hazard because the key is the one column whose mapping differs **structurally**
-per adapter rather than merely by name: an ObjectId rather than a string in mongoose, the primary
-key in the SQL adapters, the document identifier rather than a metadata field in ChromaDB, and
-`_id` metadata rather than an indexed field in Elasticsearch. An adapter that resolves references
-by stripping a `request.resource.attr.` prefix never reaches this name at all, and the failure is
-silent — the variable looks like an unmapped attribute rather than the key.
+The key is the one column whose mapping differs **structurally** per adapter: an ObjectId in
+mongoose, the primary key in the SQL adapters, the document identifier in ChromaDB, `_id` metadata
+in Elasticsearch. An adapter that resolves references by stripping `request.resource.attr.` never
+reaches this name, and fails silently — the variable looks like an unmapped attribute.
 
-Two harness rules follow, and both were learned by getting them wrong first:
+Two harness rules:
 
-- **A store whose key is not a queryable field must mirror it into one.** ChromaDB's `where`
-  filters metadata only, and Elasticsearch's `_id` is addressed by the `ids` query rather than a
-  term query. Both harnesses index the corpus id as an ordinary field and map the key onto it.
-  Leaving it unmapped makes the group throw for a *harness* reason (no mapping) instead of an
-  adapter one — the trap #326 documents; leaving it unindexed is worse, because the filter is
-  well-formed and simply matches nothing, which reads as an adapter defect.
+- **A store whose key is not a queryable field must mirror it into one.** ChromaDB's `where` filters
+  metadata only, and Elasticsearch addresses `_id` with the `ids` query, not a term query. Both
+  harnesses index the corpus id as an ordinary field and map the key onto it. Leaving it unmapped
+  makes the group throw for a harness reason (#326); leaving it unindexed is worse — the filter is
+  well-formed and matches nothing.
 - **One key mapping cannot be two types.** Three of the six compare the key against a string
-  column, so mongoose maps it to the string field holding the corpus id rather than to an
-  ObjectId. The ObjectId coercion is a caller-supplied `valueParser` on the mapper entry and is
-  pinned against the `id-eq-const` wire fixture in that adapter's translator unit test instead.
+  column, so mongoose maps it to the string field holding the corpus id. The ObjectId coercion is a
+  caller-supplied `valueParser`, pinned against the `id-eq-const` fixture in the translator unit
+  test instead.
 
-`f1` is the witness seed: its `aString` equals its own id and its `aOptionalString` is that id
-prefixed, so the field-to-field and concatenation oracles are non-degenerate without inventing a
-literal. `principal.attr.context` carries the same id for the value-first and hierarchy shapes.
+`f1` is the witness: its `aString` equals its own id and its `aOptionalString` is that id prefixed,
+so the field-to-field and concatenation oracles are non-degenerate. `principal.attr.context` carries
+the same id for the value-first and hierarchy shapes.
 
 ### Casts and concatenation are store-dependent in opposite directions
 
-`string()` and CEL's `+` over strings are the two shapes where a *correct-looking* lowering is
-wrong on some stores and right on others, so they are classified together.
+`string()` and CEL's string `+` are the two shapes where a correct-looking lowering is right on some
+stores and wrong on others.
 
-`cast-string-double` is the agreeing half. CEL formats the shortest decimal that round-trips and so
-does every store the corpus executes against — PostgreSQL 17 renders `CAST((-0.6)::float8 AS TEXT)`
-as `-0.6`, as do SQLite and MySQL. (Measured against the pinned images. The
-`-0.60000000000000009` rendering only appears under `extra_float_digits = 3`; PostgreSQL 12 made
-shortest round-trip the default, so a port built on that divergence would pin nothing.)
+`cast-string-double` agrees everywhere: CEL formats the shortest round-tripping decimal, and so does
+every store the corpus runs — PostgreSQL 17 renders `CAST((-0.6)::float8 AS TEXT)` as `-0.6`, as do
+SQLite and MySQL (measured on the pinned images; `-0.60000000000000009` appears only under
+`extra_float_digits = 3`, and PostgreSQL 12 made shortest round-trip the default).
 
-`cast-string-bool` is the diverging half, and the reason the two are a pair. SQLite and MySQL have
-no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is `"1"` where CEL and PostgreSQL say
-`"true"`. One translator, one wire node, two answers decided only by the store — which is why an
-adapter spanning both cannot lower it through a `CAST`
-([#418](https://github.com/cerbos/query-plan-adapters/issues/418)):
+`cast-string-bool` diverges. SQLite and MySQL store booleans as 1/0, so `CAST(a_bool AS TEXT)` is
+`"1"` where CEL and PostgreSQL say `"true"`. An adapter spanning both cannot lower it through a
+`CAST` ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)):
 
 - **activerecord, sqlalchemy, ent, pgx and drizzle** lower it through
-  `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's two
-  words on every engine and keeps a NULL column UNKNOWN.
-- **spring-data** does not build a string at all. It compares the constant in Java: `"true"` and
-  `"false"` become `col = true` and `col = false`, and any other constant matches no row.
-- **mongoose and convex** lower it directly, because `$toString` and JavaScript render a bool
-  exactly as CEL does. **prisma, langchain-chromadb and elasticsearch-java** refuse it: none has a
-  computed string operand.
+  `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END`, which spells CEL's words
+  on every engine and keeps a NULL column UNKNOWN.
+- **spring-data** compares the constant in Java: `"true"` and `"false"` become `col = true` and
+  `col = false`; any other constant matches no row.
+- **mongoose and convex** lower it directly (`$toString` and JavaScript render a bool as CEL does).
+  **prisma, langchain-chromadb and elasticsearch-java** refuse it: none has a computed string
+  operand.
 
-The `CASE` carries a hazard the corpus action does not reach. Its two words are literals, so MySQL
-compares them in the *connection's* collation rather than a column's, and a driver's default
-connection collation is case-insensitive: on it, `string(flag) == "TRUE"` matches every true row,
-which CEL never does. drizzle renders the literals `COLLATE utf8mb4_0900_bin`, and ent keeps its
-binary-collation `CAST` around the `CASE`, so both are byte-exact on their MySQL legs; activerecord
-and sqlalchemy run no MySQL leg and state the requirement in their READMEs; spring-data never
-compares text. The action only ever compares with `"true"`, and `aBool` is never NULL on any seed,
-so neither the collation nor the `IS NULL` arm is proved against the oracle yet — both are pinned
-in unit tests and golden expectations until the corpus carries a probe for each
-([#469](https://github.com/cerbos/query-plan-adapters/issues/469)).
+The `CASE` has a hazard the action does not reach. Its words are literals, so MySQL compares them in
+the *connection's* collation, and a driver's default is case-insensitive: `string(flag) == "TRUE"`
+would match every true row. drizzle renders the literals `COLLATE utf8mb4_0900_bin` and ent keeps its
+binary-collation `CAST` around the `CASE`, so both are byte-exact on MySQL; activerecord and
+sqlalchemy run no MySQL leg and state the requirement in their READMEs; spring-data never compares
+text. The action only compares with `"true"` and `aBool` is never NULL, so neither the collation nor
+the `IS NULL` arm is oracle-proved yet — both are pinned in unit tests and golden expectations until
+the corpus carries a probe ([#469](https://github.com/cerbos/query-plan-adapters/issues/469)).
 
-`id-concat` is the same lesson for `add`. The corpus's `add` is numeric everywhere else, and a
-string concatenation dispatched to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite
-— and a silent **over-grant** on MySQL, which coerces both operands to 0 and matched 18 of the 21
-seeds against a one-row oracle. Adapters that know their engine render `||` or `CONCAT`; adapters
-that deliberately do not know their dialect refuse it.
+`id-concat` is the same lesson for `add`. The corpus's `add` is otherwise numeric, and a string
+concatenation sent to SQL `+` is a hard error on PostgreSQL, an under-grant on SQLite, and a silent
+**over-grant** on MySQL, which coerces both operands to 0 and matched 18 of the 21 seeds against a
+one-row oracle. Adapters that know their engine render `||` or `CONCAT`; adapters that do not know
+their dialect refuse it.
 
 #### A constant is what tells the two `+` overloads apart
 
-`id-concat` and `id-concat-vf` both carry a string **literal**, and that literal is the whole reason
-an adapter can translate them: CEL has no mixed-type `+`, so one string operand proves the entire
-expression is a concatenation. `concat-f2f` removes it — `R.attr.aString + R.attr.aOptionalString`
-— and with it the only evidence in the plan. A plan names no operand types, so an adapter looking at
-two variables cannot tell concatenation from arithmetic.
+`id-concat` and `id-concat-vf` carry a string **literal**, and CEL has no mixed-type `+`, so one
+string operand proves the expression is a concatenation. `concat-f2f`
+(`R.attr.aString + R.attr.aOptionalString`) removes it. A plan names no operand types, so two
+variables cannot tell concatenation from arithmetic.
 
-Guessing arithmetic is what every adapter did, and it is wrong in the dangerous direction. The same
-filter answers three ways: a hard error on PostgreSQL, zero rows on SQLite, and on MySQL **16 of the
-21 seeds against a one-row oracle**, because both text operands coerce to 0 and the string constant
-on the other side coerces to 0 with them.
+Guessing arithmetic fails in the dangerous direction: a hard error on PostgreSQL, zero rows on
+SQLite, and on MySQL **16 of the 21 seeds against a one-row oracle**, because both text operands and
+the string constant coerce to 0.
 
-The corpus does not prescribe a resolution, and the adapters split four ways, which is the point
-of asking:
+The corpus does not prescribe a resolution; the adapters split four ways:
 
-- **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript, which is CEL's own
-  semantics; SQLAlchemy renders through the column's own declared type, so its dialect layer picks
-  `||` or `CONCAT` without the plan saying anything.
-- **ent** and **pgx** take a declaration — `ValueType: ValueString` on the mapper entry, the same
-  shape `ValueBool` already had for `string()`. Declared, they concatenate; undeclared, they fail
-  closed.
+- **convex** and **sqlalchemy** need nothing. Convex concatenates in JavaScript (CEL's semantics);
+  SQLAlchemy renders through the column's declared type, so its dialect picks `||` or `CONCAT`.
+- **ent** and **pgx** take a declaration — `ValueType: ValueString` on the mapper entry, like
+  `ValueBool` for `string()`. Declared, they concatenate; undeclared, they fail closed.
 - **prisma**, **drizzle**, **langchain-chromadb**, **elasticsearch-java** and **spring-data** refuse
-  it for limitations they already had, and needed no change.
-- **mongoose** refuses it, but had to be taught to: it was sending `$add` to the server, which
-  aborts the whole query rather than returning a wrong row set.
+  it through limitations they already had.
+- **mongoose** refuses it, after being taught to: it sent `$add` to the server, which aborted the
+  query rather than returning a wrong row set.
 
-There is deliberately no `ValueNumber` to pair with `ValueString`. Every *numeric* `add` the planner
-emits carries a constant operand — that is what makes it arithmetic rather than concatenation — so a
-declaration for the both-columns numeric case would be a constant nothing reads, which is the
-reason there is no `CastInt` either (#319). The corpus action that reaches it is what should
-introduce it.
+There is no `ValueNumber`. Every numeric `add` the planner emits carries a constant operand, so a
+declaration for the both-columns numeric case would be read by nothing — the same reason there is no
+`CastInt` (#319). A corpus action reaching that case should introduce it.
 
 ### Root position and bare operand forms
 
 Eight actions — `not-lt`, `not-gt`, `gt-bare`, `le-bare`, `root-bare-bool`, `root-or`,
-`or-eq-exists`, `or-eq-in` — pin **positions**, not hazards. They came out of set-differencing the
-node shapes the wire fixtures produce (`operator(child,child)` with immediate child labels in
-source order) against the shapes the corpus's policies could reach, and every one of them is a hole
-the corpus had by accident rather than by argument (#388).
+`or-eq-exists`, `or-eq-in` — pin **positions**, not hazards. They came from set-differencing the node
+shapes the wire fixtures produce (`operator(child,child)`, children in source order) against those
+the policies could reach; each was an accidental hole (#388).
 
-Half introduce a node shape nothing else produces: `not(lt)`, `or(V,lt)`, `or(V,exists)`,
-`or(V,in)`. The other half — `not-gt`, `gt-bare`, `le-bare`, `root-bare-bool` — do not, and are
-worth having anyway, because every existing occurrence of their shape is reached through some other
-mechanism:
+`not(lt)`, `or(V,lt)`, `or(V,exists)` and `or(V,in)` are node shapes nothing else produces.
+`not-gt`, `gt-bare`, `le-bare` and `root-bare-bool` are not new shapes, but every existing
+occurrence was reached through another mechanism:
 
-- `gt(V,K)` and `le(V,K)` exist only via `rel-gt-hop`/`rel-le-hop`, so they are behind the to-one
-  join walk — and for an adapter that refuses a hop, behind no walk at all.
-- a bare variable at the root exists only via `rel-bool-hop`, the same way.
+- `gt(V,K)` and `le(V,K)` exist only via `rel-gt-hop`/`rel-le-hop`, behind the to-one join walk — and
+  behind no walk at all for an adapter that refuses a hop.
+- a bare variable at the root exists only via `rel-bool-hop`.
 - `not(gt)` exists only over a `size()` or a ternary (`w1-not-size-chain`, `ternary-negated`,
-  `p-not-ternary-null`) — never over an operand a store can index.
+  `p-not-ternary-null`) — never over an indexable operand.
 
-The expectation going in was that every adapter would translate all eight and the classification
-work would be free. That held for eight adapters. It did not for two, and both are the reason the
-group exists rather than a reason to have skipped it:
+Most adapters translated all eight. Two did not:
 
-- **sqlalchemy** refused `root-bare-bool`. Its root-condition guard — written to reject
-  `filter()`/`map()`, which return a list rather than a boolean — tested for a Core `ColumnElement`,
-  and the ORM attribute a bare column resolves to is a descriptor. The identical operand had always
-  been accepted one level down as an `and`/`or`/`not` child, so the *position* was deciding, not the
-  shape.
+- **sqlalchemy** refused `root-bare-bool`. Its root guard (written to reject `filter()`/`map()`,
+  which return lists) tested for a Core `ColumnElement`, but a bare column resolves to an ORM
+  descriptor. The same operand was accepted as an `and`/`or`/`not` child, so the position was
+  deciding, not the shape.
 - **langchain-chromadb** fails closed on `or-eq-exists` and `or-eq-in`, correctly: its Where model
-  has no nested-expression form, and the left branch being a bare boolean key it *can* express does
-  not give it anywhere to put the branch it cannot.
+  has no nested-expression form for the branch it cannot express.
 
-`or-eq-exists` also matters for a reason the shape alone does not show. The corpus does compose a
-subquery under a disjunction already — `rel-hop2-or-exists` — but that action carries a two-level
-hop, so an adapter that refuses hops never executes the disjunction either. A composition proven
-only inside a shape some adapters throw on is not proven for those adapters.
+`or-eq-exists` also matters because the only other subquery under a disjunction,
+`rel-hop2-or-exists`, carries a two-level hop, so an adapter refusing hops never executed the
+disjunction.
 
-`root-or`'s second disjunct is `R.attr.aNumber < 0` rather than the `aString != "one"` it was
-specified with: `aString` is never NULL and only one seed holds `"one"`, whose `aBool` is true, so
-that spelling allows all 29 seeds. A total oracle is exactly what the degeneracy guard below exists
-to catch, and it would have passed against any filter whatsoever.
+`root-or`'s second disjunct is `R.attr.aNumber < 0`, not the specified `aString != "one"`: `aString`
+is never NULL and the one `"one"` seed has `aBool` true, so that spelling allowed all 29 seeds — a
+total oracle that would pass against any filter.
 
 ### Hazard classes the corpus missed
 
-Twelve actions — `not-and`, `not-contains`, `not-startswith`, `arith-mod`, `index-scalar-list`,
+12 actions — `not-and`, `not-contains`, `not-startswith`, `arith-mod`, `index-scalar-list`,
 `map-eq-list`, `vf-lt`, `vf-size`, `vf-hasint`, `pv-exists-unrolled`, `pv-all-unrolled` and
-`filter-as-conjunct` — were found the same way as the block above, by set-differencing wire-fixture
-node shapes, but they are kept for a different reason (#387). Each pins a place where CEL and a
-store's query language are known to disagree, or where this repository has already shipped the same
-bug to several adapters, and no existing action reaches it:
+`filter-as-conjunct` — came from the same set-differencing (#387). Each pins a place where CEL and a
+store's query language are known to disagree, or where the same bug has already shipped to several
+adapters:
 
-- **`not-and`** is the De Morgan branch. The corpus negates `eq`, `ne`, `in`, `exists`,
-  `exists_one`, `all`, `gt`, `lt`, `hasIntersection` and `or` — never `and`. It is also, byte for
-  byte, the shape a DENY rule composes to, so the corpus covers that path without a second policy.
-- **`not-contains` / `not-startswith`** negate a LIKE, which the corpus never did, against a
-  **column** needle so the negation meets the NULL-needle rows. Both hazards live there: three-valued
-  logic (a NULL needle must be UNKNOWN, not FALSE, or `NOT` flips it and every such row leaks) and
-  metacharacter escaping in the direction that under-grants, which no positive LIKE action can see.
-- **`arith-mod`** is spelled `int(R.attr.aNumber) % 2 == 1`, not the `== 0` it was specified with:
-  `x % 2 == 0` is sign-INVARIANT, so truncated modulo (CEL, Go, SQL, JavaScript) and floored modulo
-  (Python) give the same answer and the disagreement the action exists to pin cannot change it.
-  `== 1` makes the `-5` seed the witness, and the failure direction is an over-grant.
-- **`index-scalar-list`** indexes a scalar list directly, a bare `index(V,K)` in an operand
-  position; `p-index` reaches its rejection through the `get-field` projection wrapping it.
-  Its `index-scalar-list-not-eq` and `index-scalar-list-null` companions distinguish an invalid
-  position from an explicit null element: empty lists stay denied under negation, while the
-  valid null first elements in `b5`, `b6`, and `e1` satisfy the null comparison.
-- **`map-eq-list`** compares a projection to a literal list. The corpus only ever fed `map` into
-  `hasIntersection` or left it bare.
-- **`vf-lt` / `vf-size` / `vf-hasint`** complete the value-first family, this repository's canonical
-  bug class (#258/#259). `vf-hasint` matters most: the operator is commutative, so an inversion is
-  invisible in the answer, but the two operands are not interchangeable in the emitted query.
+- **`not-and`** is the De Morgan branch; the corpus negated every other connective but `and`. It is
+  also byte for byte the shape a DENY rule composes to.
+- **`not-contains` / `not-startswith`** negate a LIKE against a **column** needle, so the negation
+  meets the NULL-needle rows. A NULL needle must be UNKNOWN, not FALSE, or `NOT` flips it and the row
+  leaks; and metacharacter escaping is tested in the under-granting direction no positive LIKE sees.
+- **`arith-mod`** is `int(R.attr.aNumber) % 2 == 1`, not the specified `== 0`: `x % 2 == 0` is
+  sign-invariant, so truncated (CEL, Go, SQL, JavaScript) and floored (Python) modulo agree. `== 1`
+  makes the `-5` seed the witness, and the failure is an over-grant.
+- **`index-scalar-list`** indexes a scalar list directly — a bare `index(V,K)` operand; `p-index`
+  reaches its rejection through a `get-field` projection. The `index-scalar-list-not-eq` and
+  `index-scalar-list-null` companions distinguish an invalid position from an explicit null element:
+  empty lists stay denied under negation, while the null first elements in `b5`, `b6` and `e1`
+  satisfy the null comparison.
+- **`map-eq-list`** compares a projection to a literal list; `map` was previously only fed into
+  `hasIntersection` or left bare.
+- **`vf-lt` / `vf-size` / `vf-hasint`** complete the value-first family, the canonical bug class
+  (#258/#259). `hasIntersection` is commutative, so an inversion is invisible in the answer but not in
+  the emitted query.
 - **`pv-exists-unrolled` / `pv-all-unrolled`** plan the other side of the planner's unroll cliff.
-  `manyTeams` holds eleven elements deliberately, so `pv-exists`/`pv-all` only ever produced the
-  value-list form; `fewTeams` is the same witness set at three, which the planner unrolls into an
-  or/and chain — the shape most real principals actually produce.
+  `manyTeams` holds 11 elements, so `pv-exists`/`pv-all` produce the value-list form; `fewTeams` is
+  the same witness set at 3, which the planner unrolls into an or/and chain — what most real
+  principals produce.
 - **`pv-in` / `pv-in-unrolled`** ([#411](https://github.com/cerbos/query-plan-adapters/issues/411))
-  use direct membership of the omitted-convention `aOptionalString` in `manyTeams` and
-  `fewTeams`. The pinned planner emits `in(variable, value-list)` for both eleven and three
-  elements: the `-unrolled` name identifies the small-list partner, but direct membership does
-  not cross the macro unroll boundary. The pair shares its respective oracle with
-  `pv-exists` / `pv-exists-unrolled`; the different lists discriminate `same`, and missing
-  resource attributes must remain denied.
+  test direct membership of the omitted-convention `aOptionalString` in `manyTeams` and `fewTeams`.
+  The planner emits `in(variable, value-list)` for both sizes; direct membership does not cross the
+  unroll boundary. They share oracles with `pv-exists` / `pv-exists-unrolled`, the lists discriminate
+  `same`, and missing attributes must stay denied.
 - **`filter-as-conjunct`** puts a `filter()` one level below the root. `filter-as-condition` pins
-  the rejection at the root, which is the position an adapter checks explicitly; an adapter can
-  reject there and still walk a macro sitting in a conjunct.
+  the rejection at the root; an adapter can reject there and still walk a macro in a conjunct.
 
-Six adapters diverged, which is why the group is worth having rather than a reason it should have
-been skipped. Two were emitted filters where the contract demands a throw — **drizzle** translated
-the mirrored `hasIntersection` to a bare `FALSE`, and **sqlalchemy** compared an unconsumed
-override intermediate with Python `==` and got a bare `False` that reached `where()`. Two were
-root-only guards that `filter-as-conjunct` walked around: **convex**'s post-filter read the held
-list through `asBoolean()`, denied every row and so AGREED with the empty oracle while translating
-a shape with no boolean meaning, and **sqlalchemy**'s conjunct reached `and_()` and raised
-SQLAlchemy's own coercion error rather than one naming the mechanism. **ent** and **pgx** bound a
-held collection as a query PARAMETER, so only the driver's encoder refused it, at execution time.
-**elasticsearch-java** scanned a size comparison's operands without mirroring the operator, reading
-`0 < size(c)` as `size(c) < 0` and refusing a supported emptiness check.
+The group found, and the adapters now fix:
 
-The seventh is the one the group was written for. **spring-data** rendered a column-needle LIKE as
-`needle IS NOT NULL AND haystack LIKE pattern` — definite FALSE for a NULL needle, which `NOT`
-flips to TRUE. Every negated column-needle match returned exactly the rows whose needle is NULL,
-which the PDP denies. That is an over-grant in a published package, and no hand-written expectation
-had ever been in a position to notice it.
+- emitted filters where a throw was required — drizzle's mirrored `hasIntersection` became a bare
+  `FALSE`; sqlalchemy passed a bare Python `False` to `where()`;
+- root-only guards that `filter-as-conjunct` walked around — convex's post-filter read the held list
+  through `asBoolean()` (denying every row, so agreeing with the empty oracle by accident);
+  sqlalchemy raised SQLAlchemy's coercion error instead of one naming the mechanism;
+- ent and pgx binding a held collection as a query parameter, refused only by the driver at
+  execution time;
+- elasticsearch-java reading `0 < size(c)` as `size(c) < 0`;
+- an **over-grant** in spring-data: a column-needle LIKE rendered as
+  `needle IS NOT NULL AND haystack LIKE pattern` is definite FALSE for a NULL needle, which `NOT`
+  flips to TRUE, so every negated column-needle match returned the NULL-needle rows the PDP denies.
 
-`filter-as-conjunct`'s oracle is empty by construction, so it is declared in `degenerateOracles`
-and carries its own anti-vacuity assertion in every harness: the other conjunct is
-`R.attr.aBool`, which `root-bare-bool` spells on its own and which every adapter can express, so an
-adapter that dropped the untranslatable half would emit that filter and return 14 rows the PDP
+`filter-as-conjunct`'s oracle is empty by construction, so it is in `degenerateOracles` with its own
+anti-vacuity assertion in every harness: the other conjunct is `R.attr.aBool` (what `root-bare-bool`
+spells alone), so an adapter that dropped the untranslatable half would return 14 rows the PDP
 denies. The assertion pins that, not merely that a rejection happens.
 
-The #430 audit adds `projection-exists-eq` and `projection-exists-not-eq` to
-exercise a scalar projection lambda's positive and negated bodies. Negating the
-whole macro, as `lambda-in-literal-neg` does, exercises a different branch. The
-new pair also distinguishes an explicit null list element from a missing object
-attribute: `null != "public"` is true, while reading a missing attribute raises.
-`rel-not-eq-hop`, `rel-not-contains-hop` and `rel-not-hierarchy-hop` test negative
-scalar predicates through the real to-one parent. Parentless rows must stay
-excluded, and every harness guards the new actions for non-empty, non-total PDP
-results on its compared or refusal side.
+The #430 audit adds `projection-exists-eq` and `projection-exists-not-eq` for a scalar projection
+lambda's positive and negated bodies (negating the whole macro, as `lambda-in-literal-neg` does, is a
+different branch). The pair distinguishes an explicit null element from a missing object attribute:
+`null != "public"` is true, while reading a missing attribute raises. `rel-not-eq-hop`,
+`rel-not-contains-hop` and `rel-not-hierarchy-hop` test negative scalar predicates through the
+to-one parent; parentless rows must stay excluded. Every harness guards these for non-empty,
+non-total oracles on its compared or refusal side.
 
 ### The degeneracy guard
 
-The comparison in step 4 can pass vacuously if the oracle itself is trivial. An empty oracle still
-catches an over-grant, because an adapter that returns anything disagrees with it; a **total**
-oracle catches nothing, because an adapter returning every row agrees with it. And a harness whose
-PDP connection or policy load silently failed would pass every comparison against an oracle that
-denies everything.
+The step-4 comparison passes vacuously if the oracle is trivial. An empty oracle still catches an
+over-grant; a **total** oracle catches nothing. A harness whose PDP connection or policy load
+silently failed would pass every comparison against a deny-everything oracle.
 
 So every harness asserts, for **every** action it oracle-compares, that the oracle is neither empty
-nor the full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`). The assertion runs on the
-oracle the comparison already computed, so it costs no extra PDP round trip. It used to cover a
-representative sample per harness, and the sample left every action it did not name free to go
-degenerate unnoticed — on some harnesses fewer than half of the compared actions were guarded
-([#490](https://github.com/cerbos/query-plan-adapters/issues/490)).
+nor the full seed set (`!ids.isEmpty() && ids.size() < seeds.size()`), on the oracle the comparison
+already computed. (It once covered a sample, leaving under half the compared actions guarded on some
+harnesses — [#490](https://github.com/cerbos/query-plan-adapters/issues/490).)
 
-**`degenerateOracles` in `actions.json` is the only way out of that sweep.** It lists every action
-whose oracle is empty or total *by construction*, with `"oracle": "empty"` or `"total"` and a
-reason naming why — a type error, a planner fold, an IEEE identity, a seed set that holds no
-witness. It is corpus data, not a per-harness list, because the oracle is a property of the PDP and
-the corpus and never of an adapter: one list, asserted by every harness, cannot drift the way
-per-harness copies did. Every harness asserts it in both directions:
+**`degenerateOracles` in `actions.json` is the only exemption.** It lists every action whose oracle
+is empty or total *by construction*, with `"oracle": "empty"` or `"total"` and a reason (a type
+error, a planner fold, an IEEE identity, a seed set with no witness). It is corpus data because the
+oracle is a property of the PDP and corpus, not of an adapter. Every harness asserts it both ways:
 
-- a listed action's oracle is **exactly** what it declares — `[]`, or every seed id — so an entry
-  whose oracle starts discriminating fails instead of standing as a blanket exemption;
-- every harness asserts every entry, whether or not that adapter compares the action, because an
-  entry is a statement about the PDP rather than about the adapter.
+- a listed action's oracle is **exactly** what it declares (`[]`, or every seed id), so an entry that
+  starts discriminating fails instead of standing as a blanket exemption;
+- every harness asserts every entry, whether or not it compares the action.
 
 `validate-corpus.sh` holds the schema closed and rejects an entry naming an unclassified action, a
-`knownDivergences` action (never compared, so exempting it exempts nothing) or a duplicate. An
-action is listed only after watching its oracle against a live PDP in both evaluation modes; a
-degenerate oracle on a newly added action is far more often a missing discriminating seed than a
-genuine identity, and the fix is the seed.
+`knownDivergences` action (never compared, so exempting it exempts nothing) or a duplicate. List an
+action only after watching its oracle against a live PDP in both evaluation modes. A degenerate
+oracle on a new action is far more often a missing discriminating seed than a genuine identity; fix
+the seed.
 
-Each harness keeps one list of its own: **liveness-only probes** — shapes the adapter refuses to
-translate, kept because the group has no compared member for that adapter and the non-degenerate
-oracle still proves the PDP and policy are live. Each entry is asserted *not* to be in the adapter's
-oracle set, so a shape the adapter later gains support for leaves the list for the sweep rather than
-staying a weaker probe, and *not* to be in `degenerateOracles`, since a trivial oracle proves no
-liveness. **Derive it per adapter; never copy another harness's** — a copied list drifts into naming
-shapes that adapter compares, and the drift was invisible until the complement assertion existed
-(cerbos/query-plan-adapters#324).
+Each harness also keeps **liveness-only probes**: shapes the adapter refuses, kept because the group
+has no compared member for that adapter and a non-degenerate oracle still proves the PDP and policy
+are live. Each entry is asserted *not* to be in the adapter's oracle set (a newly supported shape
+moves to the sweep) and *not* to be in `degenerateOracles` (a trivial oracle proves no liveness).
+**Derive the list per adapter; never copy another harness's** — a copied list drifts into naming
+shapes the adapter compares (#324).
 
 ### Pinned throw messages
 
-A fail-closed classification is only proven when the throw it rests on is the throw it claims. A
-bare "it threw" assertion is satisfied just as happily by a mapper typo, an unrelated validation, or
-a transport error — and every one of those makes the action pass while never reaching the mechanism
-its `reason` names. The elasticsearch-java harness found this the expensive way: an unmapped
-`categories` field had six of its actions throwing "Unknown attribute" — a harness gap — while
-never reaching the mechanism their `reason` claimed (cerbos/query-plan-adapters#326).
+A bare "it threw" assertion is satisfied by a mapper typo, an unrelated validation or a transport
+error, none of which reaches the mechanism the `reason` names. elasticsearch-java found this out: an
+unmapped `categories` field had six actions throwing "Unknown attribute" — a harness gap (#326).
 
-So every throwing classification carries the substring that adapter's error must contain:
+So every throwing classification carries the substring the adapter's error must contain:
 
-- `adapterUnsupported[<adapter>][].message` — the entry is already per-adapter, so the message sits
-  on it directly.
-- `expectedUnsupported[].messages[<adapter>]` — one entry per adapter that must reject the shape.
-  This generalises the old `springDataMessage`, which pinned the reference and left every other adapter
-  asserting nothing.
+- `adapterUnsupported[<adapter>][].message`;
+- `expectedUnsupported[].messages[<adapter>]` — one per adapter that must reject the shape
+  (generalising the old spring-data-only `springDataMessage`);
 - `nullRepresentationOmitted[].messages[<adapter>]` — the same, for the group every adapter rejects.
 
 `scripts/validate-corpus.sh` enforces all three: every `adapterUnsupported` entry has a non-empty
-`message`; every `expectedUnsupported` entry's `messages` key set is *exactly* the `adapters` roster
-minus the adapters that promoted the shape into `adapterSupportedExpected`; and every
-`nullRepresentationOmitted` entry's key set is the whole roster, since no adapter can translate one.
-A missing key is an adapter whose harness would have nothing to assert; a stray one is a message
+`message`; every `expectedUnsupported` entry's `messages` keys are *exactly* the roster minus the
+adapters that promoted it into `adapterSupportedExpected`; every `nullRepresentationOmitted` entry's
+keys are the whole roster. A missing key leaves a harness nothing to assert; a stray one is a message
 nothing reads.
 
-Each harness resolves its own message when it derives the classification and **fails the run if one
-is absent**, so adding a throwing action without pinning its message is a loud failure rather than a
-silent downgrade to a bare throw. Every harness also unit-tests that guard directly, so it cannot go
-inert against a corpus that already satisfies it.
+Each harness resolves its messages while deriving the classification and **fails the run if one is
+absent**, and unit-tests that guard directly so it cannot go inert.
 
-The assertion is `contains`, not equality. That is deliberate and it is a **weakening for
-spring-data**, which previously asserted `assertEquals` on its own `springDataMessage`: one field
-with one meaning across every harness is worth more than byte-exactness in the reference alone, and
-several messages carry a runtime value (`Timestamp value exceeds millisecond precision:
-<now()-24h>`) that equality could never pin. Rewording the mechanism still fails every suite;
-appending to a message no longer fails spring-data's.
+The assertion is `contains`, not equality — a deliberate weakening for spring-data, which used
+`assertEquals` on `springDataMessage`. One meaning across every harness is worth more, and several
+messages carry a runtime value (`Timestamp value exceeds millisecond precision: <now()-24h>`).
+Rewording the mechanism still fails every suite; appending to a message no longer fails spring-data.
 
-Some messages are deliberately shared across many actions — Chroma answers 86 of its 126 throwing
-shapes with "Nested expressions are not supported by ChromaDB filters". Those 86 `reason` strings
-name different *upstream* limitations (no count function, no relation model, no temporal type), but
-they converge on one rejection: every Chroma comparison operand must be a bare field or literal, and
-a nested expression is not. Pin what the adapter says. The message discriminates the *mechanism*, not
-the action, and a rejection from anywhere else — an unmapped field, a transport error — still fails.
-Making those 86 messages individually specific would mean rewriting the adapter's error strings, not
-the corpus.
+Some messages are shared across many actions: Chroma answers 86 of its 126 throwing shapes with
+"Nested expressions are not supported by ChromaDB filters". Those 86 `reason` strings name different
+upstream limitations (no count function, no relation model, no temporal type) that converge on one
+rejection: every Chroma operand must be a bare field or literal. The message discriminates the
+mechanism, not the action, and a rejection from anywhere else still fails. Pin what the adapter says.
 
-The message and the entry's `reason` must name the same mechanism. Where they disagree, the fix is
-to work out which limitation actually fires first and correct the `reason` — not to loosen the pin.
-Several `reason` strings named the limitation a maintainer had in mind rather than the one the walk
-reaches (prisma's `p-deep-nest` reaches the LIKE-metacharacter needle before the cross-model
-comparison; elasticsearch-java's `p-ternary-under-all` rejects the positive `all` before it ever
-looks at the conditional inside it), and pinning the messages is what surfaced them.
+The message and the `reason` must name the same mechanism. When they disagree, work out which
+limitation fires first and correct the `reason`; do not loosen the pin. Pinning surfaced several
+reasons that named what a maintainer had in mind rather than what the walk reaches (prisma's
+`p-deep-nest` hits the LIKE-metacharacter needle before the cross-model comparison;
+elasticsearch-java's `p-ternary-under-all` rejects the positive `all` before reaching the
+conditional).
 
 ### Known divergences still need a tripwire
 
-An action in `knownDivergences` is excluded from the oracle run, which leaves it exercised on
-neither side unless the harness says something about it explicitly. Every harness therefore pins
-the `p-has` planner over-grant directly: the plan folds to `KIND_ALWAYS_ALLOWED`, the check()
-oracle is non-empty and non-total (it denies the seeds whose attribute is missing), and the adapter
-consequently returns every row. When the upstream fold is fixed the assertion fails, which is the
-prompt to move the action back into the oracle run.
+A `knownDivergences` action is excluded from the oracle run, so it is exercised nowhere unless the
+harness says so. Every harness therefore pins the `p-has` planner over-grant directly: the plan folds
+to `KIND_ALWAYS_ALLOWED`, the oracle is non-empty and non-total (it denies seeds whose attribute is
+missing), and the adapter returns every row. When upstream fixes the fold the assertion fails —
+move the action back into the oracle run.
 
 ### Deterministic derived fields
 
-The corpus keeps raw relational rows compact; six resource attributes and stored columns are
-derived from each seed. **The values live in `derived-fields.json`, one entry per seed id, and
-every harness reads them from there.** They used to be hand-transcribed once per harness, which is
-how a transcription error becomes invisible: the same copy feeds the stored row *and* the check()
-oracle, so a wrong value makes both sides of the differential agree for the wrong reason and
-nothing downstream can catch it (#318).
+Six resource attributes are derived from each seed. **The values live in `derived-fields.json`, one
+entry per seed id, and every harness reads them from there.** Hand-transcribing them per harness
+hid errors: the same copy feeds the stored row and the oracle, so a wrong value makes both sides
+agree (#318).
 
-`scripts/validate-corpus.sh` asserts that the file carries exactly one entry per seed id and that
-every entry carries exactly the fields it declares, re-derives `createdBy`, `aDouble` and
-`createdAt` from `seeds.json` using the rules below, and diffs `scope` and `labels` — which have no
-rule to re-derive from — against a restatement of their tables. That check is the only independent
-statement of these values, and it is a checker, never an input to a harness: unlike the per-adapter copies
-it replaced it can only fail loudly, never make both sides of a differential agree.
+`scripts/validate-corpus.sh` asserts one entry per seed id with exactly the declared fields,
+re-derives `createdBy`, `aDouble` and `createdAt` from `seeds.json` using the rules below, and diffs
+`scope` and `labels` (which have no rule) against its own restatement of the tables. It is a
+checker, never an input to a harness, so it can only fail loudly.
 
 The rules the file materialises:
 
@@ -1024,7 +866,7 @@ The rules the file materialises:
 - `updatedAt`: `a1 = 2020-03-15T10:30:00.000Z`, `a4 = 2024-06-01T00:00:00Z`; otherwise
   NULL/missing. `a1` equals `createdAt` as an instant but differs as an RFC 3339 string, while
   `a4` is equal under both readings. Oracle attributes must preserve these original strings;
-  parsing them and serializing the normalized instant would erase the witness.
+  parsing and re-serializing the instant would erase the witness.
 - third-level `labels[].name`: `a1 = ["gold", "silver"]`, `a6 = [missing, "silver"]`,
   `a8 = ["silver"]`, `c1 = ["Gold"]`, otherwise empty.
 - `scope`: `a1=dept`, `a2=dept.eng`, `a3=dept.eng.platform`,
@@ -1033,120 +875,101 @@ The rules the file materialises:
   `b4=50%:a_b`, `b5=dept.eng.platform2`, `b6=50%.a_b`, `c1=Dept.Eng`,
   `c2=dept.eng.`, `d1=[env]:prod:eu`, `d2=e:prod:eu`; all other seeds use NULL.
 
-These are part of the shared contract. Do not replace them with adapter-specific fixtures, and do
-not recompute them in a harness — read `derived-fields.json`.
+Do not replace these with adapter-specific fixtures, and do not recompute them in a harness.
 
 ### Seed, principal and derived-field coverage
 
-The projection trap this README documents for `actions.json` applies to the seeds too, and it is
-worse there: a seed key a harness does not consume is dropped from the stored row **and** the
-check() oracle simultaneously, so the differential still agrees and the new field tests nothing.
-Every harness therefore declares the exact seed key set it consumes and asserts equality against
-the JSON — not merely that unknown keys are rejected, because that direction says nothing about a
-key the corpus stops carrying, which would decode to its zero value on both sides. `note` is the
-one permitted exclusion: it is corpus prose no harness reads. The same assertion covers `tags[]`,
-the one nested object array a seed carries; a key added inside an element is dropped just as
-silently as a top-level one.
+A seed key a harness does not consume is dropped from the stored row **and** the oracle at once, so
+the differential still agrees and the field tests nothing. Every harness therefore declares the exact
+seed key set it consumes and asserts equality against the JSON — both directions, since a key the
+corpus stops carrying would otherwise decode to its zero value on both sides. `note` is the one
+exclusion. The same assertion covers the elements of `tags[]`, the one nested object array.
 
-The same assertion covers `derived-fields.json`: each harness declares the six fields it consumes
-and fails if the file's `fields` list, or any entry's key set, differs. Concretely this is
-`DisallowUnknownFields` plus a key-set assertion in Go, records without
-`@JsonIgnoreProperties(ignoreUnknown = true)` plus a key-set assertion in Java, and an explicit
-`assertKeys` in the TypeScript and Python harnesses. The TypeScript harnesses that rebuild each
-seed field by field (mongoose, langchain-chromadb) assert against the *raw* JSON — a rebuilt object
-can only ever report the keys the parser already names, so asserting on it would pass vacuously.
+It also covers `derived-fields.json`: each harness declares the six fields it consumes and fails if
+the file's `fields` list or any entry's key set differs. In Go that is `DisallowUnknownFields` plus a
+key-set assertion; in Java, records without `@JsonIgnoreProperties(ignoreUnknown = true)` plus a
+key-set assertion; in TypeScript and Python, an explicit `assertKeys`. TypeScript harnesses that
+rebuild each seed field by field (mongoose, langchain-chromadb) assert against the *raw* JSON — a
+rebuilt object only reports keys the parser already names.
 
-The **principal** is guarded the same way, and it is the input the trap actually caught: the same
-principal feeds the plan under test and the check() oracle, so an attribute dropped on the way in
-vanishes from both sides at once — the plan folds to `ALWAYS_DENIED`, the oracle agrees, and the
-action passes while testing nothing. Every harness therefore declares two key sets,
-`{id, roles, attr}` and the attribute names inside `attr`, and asserts equality in both directions,
-exactly as it does for a seed row and its `tags[]` elements.
+The **principal** is guarded the same way, and it is where the trap actually fired: an attribute
+dropped on the way in vanishes from plan and oracle together, the plan folds to `ALWAYS_DENIED`, the
+oracle agrees, and the action tests nothing. Every harness declares `{id, roles, attr}` and the
+attribute names inside `attr`, and asserts equality in both directions. `id` and `roles` are inside
+the guard: a dropped role changes every decision at once.
 
-`id` and `roles` are deliberately **inside** the guard rather than documented as an exclusion. A
-role dropped on the way in changes every policy decision at once; that it is less likely to be
-projected away than an attribute is a reason to expect that half of the assertion to stay quiet, not
-a reason to omit it.
+Attribute *values* are asserted too: string scalars, the numeric `zero`, string lists (including
+`emptyTeams`), and three struct lists — `manyStructs` (a string `name` on every element),
+`nullableStructs` (an explicit null `name`) and `missingStructs` (empty objects), each with 11
+elements to cross the planner's unrolling threshold. The guards validate each nested key and value
+shape so an SDK cannot erase a missing/null distinction.
 
-The attribute *values* are asserted too: string scalars, the numeric `zero`, string lists
-(including `emptyTeams`), and three lists of structs. `manyStructs` has a string `name` on every
-element, `nullableStructs` has an explicit null `name`, and `missingStructs` has empty objects.
-Each struct list has eleven elements to cross the planner's unrolling threshold. The guards
-validate each nested key and value shape so an SDK cannot silently erase a missing/null
-distinction. That is the same reason the seed guard descends into `tags[]`.
+Construction stays verbatim pass-through; the guard keeps it that way.
+`scripts/regenerate-wire-fixtures.sh` copies `.principal` wholesale with `jq` and needs no guard.
 
-The construction itself stays verbatim pass-through: the guard exists to keep it that way, not to
-replace it. `scripts/regenerate-wire-fixtures.sh` needs no equivalent — it copies `.principal`
-wholesale with `jq` and never names a key.
-
-Adding a field to a seed, or an attribute to the principal, must fail every harness loudly. That is
-the acceptance test for these guards; run it before trusting them.
+Adding a seed field or principal attribute must fail every harness loudly. That is the acceptance
+test for these guards; run it before trusting them.
 
 ## Adding a new hostile shape
 
-1. Add the action + condition to `policies/adversarial.yaml`.
-2. Add the action name to `actions.json` — `conformance` or `expectedUnsupported`, or
-   `nullRepresentationOmitted` if it probes `== null` against an attribute the oracle omits for
-   NULL columns — with a comment in the policy explaining what it probes and which seed rows
-   discriminate it (follow the existing comment style).
-3. If the shape needs new seed data to be non-degenerate, add a seed to `seeds.json` with a `note`
-   explaining what it witnesses (see `a9`, `b1`-`b6` for examples), and add its `derived-fields.json`
-   entry in the same commit — `scripts/validate-corpus.sh` names the expected values when it fails.
-   A seed field that is genuinely new (rather than a new row) has to be added to every harness's
-   consumed key set too; the guard described above makes that a loud failure, not a silent drop.
-   The same applies to a new **principal attribute**: every harness declares those as well, so
-   adding one fails every harness until each declaration names it.
-4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture alongside the policy change.
-5. Every adapter harness picks up the new action automatically from `actions.json` on next run;
-   triage any divergence into a per-adapter fix issue rather than special-casing it in the harness.
-   An action that ends up fail-closed for an adapter needs that adapter's throw message pinned
-   alongside the classification — see "Pinned throw messages" above. Run the adapter first and pin
-   what it actually says; the harness refuses to run with a message missing, so there is no way to
-   forget one.
-6. Each harness pins the corpus size and its throwing-action count as tripwires; convex,
-   langchain-chromadb and elasticsearch-java also pin oracle counts. Bump them deliberately — those assertions exist so a new action
-   cannot slip past an adapter unnoticed. The convex harness additionally pins WHICH actions its
-   filter engine decides on its own, under each of its two mappers, because its README quotes those
-   counts as the coverage the differential actually buys
-   ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)) — a new action lands in one
-   of those buckets and has to be named.
-7. Confirm the action cannot pass vacuously. Every harness sweeps every compared action for a
-   non-empty, non-total oracle, so a translated shape needs nothing added; where an adapter
-   throws on it and the group has no compared member there, add it to that harness's liveness-only
-   list, per "The degeneracy guard" above. If the oracle is empty or total, add a discriminating
-   seed; declare it in `degenerateOracles` only when it is degenerate *by construction*. Also check that no harness projects the corpus into a narrower local shape.
-   `langchain-chromadb` used to
-   rebuild the principal from a hardcoded attribute allowlist; when `pv-exists` added
-   `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
-   the oracle — built from the same projected principal — agreed. The action passed on both sides
-   while testing nothing. Pass corpus data through verbatim. Every harness now declares the
-   principal keys it consumes and asserts them, so that particular projection fails loudly — see
-   "Seed, principal and derived-field coverage" above.
+Any change to how a shape is translated starts here, not in one adapter (see `CLAUDE.md`, "Changing
+how a condition is translated").
 
-   A `nullRepresentationOmitted` action's oracle is empty *by construction*, so it is declared in
-   `degenerateOracles` like any other. It needs a different anti-vacuity assertion instead — assert why the rejection is required,
-   not merely that one happens. See the `nullRepresentationOmitted` section above for the form
-   that takes in each adapter. It pins a message like any other rejection (see "Pinned throw
-   messages"), so a new one needs a `messages` entry per adapter.
-8. Regenerate the **golden expectations** of every adapter that has a translator unit test, and read
-   the added entry. Those suites fail until the new action is accounted for, which is the point —
-   see "Golden expectations" below.
+1. Add the action and condition to `policies/adversarial.yaml`, with a comment saying what it probes
+   and which seed rows discriminate it (follow the existing style).
+2. Add the action to `actions.json` — `conformance`, `expectedUnsupported`, or
+   `nullRepresentationOmitted` if it probes `== null` against an attribute the oracle omits for NULL
+   columns.
+3. If the shape needs new seed data to be non-degenerate, add a seed to `seeds.json` with a `note`
+   saying what it witnesses (see `a9`, `b1`–`b6`), and its `derived-fields.json` entry in the same
+   commit; `scripts/validate-corpus.sh` names the expected values when it fails. A new seed *field*
+   or **principal attribute** must also be added to every harness's declared key set — the guards
+   in "Seed, principal and derived-field coverage" fail every harness until it is.
+4. Run `scripts/regenerate-wire-fixtures.sh` and commit the new fixture with the policy change.
+   Confirm the diff adds only the new action.
+5. Run every adapter's harness; each picks the action up from `actions.json`. Triage each divergence
+   into a fix, an `adapterUnsupported` entry, or a `knownDivergences` entry (see "Adding a new
+   adapter", step 5) — never a special case in the harness. A fail-closed classification needs the
+   message the adapter actually raises pinned beside it (see "Pinned throw messages"); every harness
+   refuses to run with one missing.
+6. Bump the tripwires deliberately. Every harness pins the corpus size and its throwing-action
+   count; convex, langchain-chromadb and elasticsearch-java also pin oracle counts. The convex
+   harness also pins which actions its filter engine decides alone under each of its two mappers,
+   because its README quotes those counts
+   ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)); name the new action in one of
+   those buckets.
+7. Confirm the action cannot pass vacuously. Every compared action is swept for a non-empty,
+   non-total oracle, so a translated shape needs nothing added. Where an adapter throws on it and the
+   group has no compared member there, add it to that harness's liveness-only list (see "The
+   degeneracy guard"). If the oracle is empty or total, add a discriminating seed; declare it in
+   `degenerateOracles` only when it is degenerate *by construction*.
+
+   Check that no harness projects corpus data into a narrower local shape. langchain-chromadb once
+   rebuilt the principal from an attribute allowlist; when `pv-exists` added
+   `principal.attr.manyTeams`, the projection dropped it, the plan folded to `ALWAYS_DENIED`, and
+   the oracle — built from the same projection — agreed. Pass corpus data through verbatim.
+
+   A `nullRepresentationOmitted` action is empty by construction, so it goes in `degenerateOracles`
+   and needs the anti-vacuity assertion that pins *why* the rejection is required (see
+   "`nullRepresentationOmitted`: the two conventions are indistinguishable on the wire"), plus a
+   `messages` entry per adapter.
+8. Regenerate the **golden expectations** of every adapter with a translator unit test and read the
+   added entry. Those suites fail until the action is accounted for (see "Golden expectations").
+9. Update the affected adapters' README `Conformance contract` tables in the same commit.
 
 ## Golden expectations
 
 A **golden expectation** is the database-native filter one adapter is pinned to emit for one corpus
-action. It is the central assertion a *translator unit test* makes — the offline suite that reads
-its plans from `wire-fixtures/` and needs no PDP and no store
-([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)) — though
-not the only one, since that suite also pins the plan kinds, the refusals and the caller-supplied
-contracts a store is not needed to reach (`CLAUDE.md`, "What a translator unit test may pin").
+action. It is the central assertion of a *translator unit test* — the offline suite that reads its
+plans from `wire-fixtures/` and needs no PDP and no store
+([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)). That
+suite also pins plan kinds, refusals and caller-supplied contracts (`CLAUDE.md`, "What a translator
+unit test may pin").
 
-**The expectations are not corpus data and must never live here.** Every adapter workflow triggers on
-`conformance/**`, and so does `conformance.yaml`, so one adapter re-pinning one filter would
-re-run every other adapter for nothing. This is the same argument that keeps per-harness
-service image pins out of the corpus, and
-[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md) records it as a rule. What lives here is
-the *format*.
+**Expectations are not corpus data and never live here.** Every adapter workflow triggers on
+`conformance/**`, so one adapter re-pinning one filter would re-run every other adapter for nothing
+— the same argument that keeps service image pins out of the corpus
+([ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md)). Only the *format* lives here.
 
 ### The file
 
@@ -1164,132 +987,113 @@ One file per adapter, at `<adapter>/golden/expectations.json`:
 }
 ```
 
-- **`adapter`** is checked by the loader, not ignored. The file is a flat map of corpus action
-  names, so a copy taken from another adapter parses cleanly and would be compared against the
-  wrong translator with only the diff to say something went wrong.
-- **`regenerate`** is the command that rewrites the file. Documentation that travels with the data.
-- **`expectations`** is keyed by corpus action, **sorted**, so a translator change reads as the list
-  of shapes it moved. The suite asserts the sort order.
-- **`note`** is the one reserved key inside an entry: commentary, never compared, and carried across
-  by the regenerator. Everything else in the entry is the adapter's own filter document.
+- **`adapter`** is checked by the loader. A copy from another adapter would otherwise parse cleanly
+  and be compared against the wrong translator.
+- **`regenerate`** is the command that rewrites the file.
+- **`expectations`** is keyed by corpus action and **sorted** (asserted), so a translator change reads
+  as the list of shapes it moved.
+- **`note`** is the one reserved key inside an entry: never compared, carried across by the
+  regenerator. Everything else is the adapter's filter document.
 
-An adapter may add a header key of its own alongside these, and exactly one reason justifies it:
-the value depends on something other than the plan. Checked by the loader like `adapter`, never
-ignored.
+An adapter may add its own header key only when the value depends on something other than the plan
+(see below). The loader checks it like `adapter`.
 
 ### What the entry holds is per adapter, and has to be
 
-There is no cross-adapter type for "a database-native filter" — a Prisma `where` input, a Mongoose
-query document, a Drizzle `SQL` tree and an Elasticsearch query are four unrelated things — so the
-*value* schema is the adapter's, documented in the adapter's own README. Only the layout is shared:
-a JSON object, keyed by action, one entry per accounted-for fixture.
+A Prisma `where` input, a Mongoose query document, a Drizzle `SQL` tree and an Elasticsearch query
+share no type, so the *value* schema is the adapter's, documented in its README. Only the layout is
+shared: a JSON object keyed by action, one entry per accounted-for fixture.
 
-An adapter whose output is not data at all still fits: convex emits a **function** of the query
-builder plus an in-memory post-filter, so its entry records the calls that function makes against a
-recording builder, and which half of the output answers the query. The general shape is "the
-observable the translator produced", not "the query text" — and where an adapter has a boundary the
-corpus cannot see, that boundary is the observable worth pinning.
+An adapter whose output is not data still fits. Convex emits a **function** of the query builder
+plus an in-memory post-filter, so its entry records the calls that function makes against a
+recording builder and which half answers the query. The rule is "the observable the translator
+produced", not "the query text"; where the adapter has a boundary the corpus cannot see, pin that
+boundary.
 
 Two rules constrain the value:
 
-- **It must be JSON that round-trips.** A value the encoding cannot hold has to be normalised in the
-  data and pinned in code instead — the drizzle suite records `0` where the adapter binds `-0`,
-  because JSON has no negative zero, and asserts the list of actions that bind one separately.
-- **It is a filter, never a row set.** Which rows a filter returns is the PDP `check()` oracle's
-  answer, established by the adversarial harness against real data. Writing it down would freeze an
-  authorization decision into a file that no longer tracks the policy.
+- **It must round-trip as JSON.** Normalise what JSON cannot hold and pin it in code: drizzle records
+  `0` where the adapter binds `-0` and asserts the list of actions that bind one separately.
+- **It is a filter, never a row set.** Which rows a filter returns is the oracle's answer; writing
+  it down would freeze an authorization decision.
 
 ### When the generator is an input
 
-Most adapters record their translator's return value directly, and a plan is the only input to it.
-Where that does not hold — where producing the recorded value runs the output through something
-whose version or configuration can change the bytes — the asset has to say which one, or the next
-person to open it cannot tell a translation change from a toolchain change.
+Most adapters record their translator's return value, whose only input is the plan. Where the
+recorded value passes through something whose version can change the bytes, the file must say which
+version, or a toolchain change reads as a translation change.
 
-sqlalchemy is the case. It emits a Python expression object, so its entry records that object
-*compiled*: a `WHERE` clause per SQL dialect plus the parameters bound, which the dialects are
-asserted to share. That makes SQLAlchemy's own compiler an input, and the two majors the package
-supports do not render every tree the same way. So the file carries a `"sqlalchemy": "2.x"` header
-key, three things follow from it, and an adapter in the same position should copy all three:
+sqlalchemy is the case: its entry records the emitted expression *compiled* — a `WHERE` clause per
+dialect plus the bound parameters, asserted to be shared across dialects — and the two SQLAlchemy
+majors render some trees differently. The file carries `"sqlalchemy": "2.x"`, and an adapter in the
+same position copies all three consequences:
 
-1. **The loader checks the key**, exactly as it checks `adapter`.
-2. **Regeneration refuses under any other version.** Otherwise `golden:update` rewrites every
-   affected entry and presents a toolchain swap as a translation change — a diff a reviewer has to
-   read line by line to discover said nothing.
-3. **The other version asserts a pinned divergence list rather than the bytes**, in *both*
-   directions, so a shape that stops diverging fails as loudly as one that starts. Skipping instead
-   would leave that leg proving nothing about the emitted filter.
+1. **The loader checks the key**, like `adapter`.
+2. **Regeneration refuses under any other version**, so a toolchain swap cannot pose as a
+   translation change.
+3. **The other version asserts a pinned divergence list** instead of the bytes, in *both*
+   directions, so a shape that stops diverging fails as loudly as one that starts.
 
-spring-data is the second case and it declares `"hibernate": "6.6"`. The adapter emits a JPA
-`Specification`, so the recorded value is Hibernate's rendering of that Criteria tree — the
-renderer is an input for exactly the same reason. Rules 1 and 2 apply unchanged. **Rule 3 has
-nothing to attach to there**, because the build compiles and tests against one Hibernate, so there
-is no second leg to assert a divergence list on; what makes the header load-bearing instead is that
-`hibernate-core` is a `compileOnly` dependency — a consumer brings their own renderer, so which one
-wrote the bytes has to be answerable from the file. An adapter in that position states the version
-it renders under and asserts the running one matches; it does not invent a second CI leg to satisfy
-rule 3.
+spring-data declares `"hibernate": "6.6"`: its entry records Hibernate's rendering of the emitted
+JPA `Specification`. Rules 1 and 2 apply, and so does rule 3 — the `ADAPTER_TEST_ORM=next` leg
+(Hibernate 7 / Spring Data JPA 4) asserts a pinned divergence list in both directions. The header
+matters more there because `hibernate-core` is `compileOnly`: a consumer brings their own renderer,
+so which one wrote the bytes must be answerable from the file.
 
-This is not licence to add a key per environment difference. The test for it is whether the
-difference is *outside* the adapter and *inside* the recorded value; a dialect is neither (it is a
-dimension of the value, so it lives in the entry), and a Node version is neither (it changes
-nothing).
+Do not add a key per environment difference. A key is justified only when the difference is
+*outside* the adapter and *inside* the recorded value; a dialect is a dimension of the value (it goes
+in the entry), and a Node version changes nothing.
 
 ### A throwing action carries no entry
 
-If `actions.json` says the adapter must refuse an action, its pinned message is **already corpus
-data**. The translator unit test reads `adapterUnsupported[adapter]`, `expectedUnsupported` and
-`nullRepresentationOmitted` the same way the harness does and asserts the throw against the message
-pinned there. Writing that message into the adapter's asset too would create two places to change one
-string with nothing to say which is authoritative — and it would make an adapter that rejects most of
-the corpus (langchain-chromadb, elasticsearch-java) carry a file that is almost entirely restatement.
+If `actions.json` says the adapter must refuse an action, its message is already corpus data. The
+translator unit test reads `adapterUnsupported[adapter]`, `expectedUnsupported` and
+`nullRepresentationOmitted` as the harness does and asserts the throw against that message. Copying
+it into the asset would give one string two homes, and would make an adapter that refuses most of the
+corpus (langchain-chromadb, elasticsearch-java) carry a file of restatements.
 
 ### The completeness guard
 
-ADR 0006 requires every wire fixture to be accounted for **exactly once** in every adapter carrying
-this test. With the expectations as data that becomes one set equation the suite asserts:
+ADR 0006 requires every wire fixture to be accounted for **exactly once** per adapter carrying this
+test:
 
 ```
 keys(golden/expectations.json)  ∪  throwing actions from actions.json  ==  wire-fixtures/*.json
 ```
 
-Total, so a fixture with neither lands as a failure; disjoint, so an action that has both is caught
-rather than silently satisfying the union. Add per-bucket count tripwires next to it, for the same
-reason the harnesses carry them.
+Total, so a fixture with neither fails; disjoint, so an action with both is caught. Add per-bucket
+count tripwires beside it.
 
 ### Regeneration is a deliberate act, and the diff is the review
 
-A golden file large enough to be useful is too large to hand-write, so each adapter ships a command
-that rewrites it from what the translator emits today (`npm run golden:update` on drizzle). That is
-the same workflow as `scripts/regenerate-wire-fixtures.sh`, with the same safety: **CI never
-regenerates**, so a translator change that moves the emitted filter fails there whatever anyone ran
-locally, and the diff is what a reviewer reads.
+Each adapter ships a command that rewrites its file from what the translator emits today (`npm run
+golden:update` on drizzle), like `scripts/regenerate-wire-fixtures.sh`. **CI never regenerates**, so
+a translator change that moves a filter fails there whatever anyone ran locally, and the diff is what
+the reviewer reads.
 
-The one thing regeneration cannot protect is a property nobody wrote down — a regenerated file
-happily records a filter that collapses a NULL to FALSE. So keep the *rules* as assertions next to
-the pinned bytes: they survive regeneration, and they hold for a corpus action nobody has added yet.
+Regeneration cannot protect a property nobody wrote down — it will happily record a filter that
+collapses a NULL to FALSE. Keep the *rules* as assertions beside the pinned bytes; they survive
+regeneration and hold for actions not yet added.
 
 ### Language neutrality
 
-The layout is JSON, the guard is set arithmetic, and enumeration is "iterate the keys". A pytest
-suite parametrises over them with `@pytest.mark.parametrize`, a JUnit one with `@MethodSource`, a Go
-one with `t.Run` in a loop — no part of the format assumes a TypeScript runner. What is not shared is
-the code that reads it: per ADR 0007 each adapter writes its own loader, deliberately duplicated, and
-is free to make it idiomatic.
+The layout is JSON, the guard is set arithmetic, enumeration is iterating keys — pytest
+`@pytest.mark.parametrize`, JUnit `@MethodSource`, Go `t.Run` in a loop. The loader is not shared:
+per ADR 0007 each adapter writes its own, idiomatically.
 
 ## Adding a new adapter
 
-The corpus is the contract; a new adapter joins by proving itself against it. Work in this order —
-the classification is an *output* of the harness, not an input to it. Declaring an action
-unsupported before you have watched it fail is how a translatable shape gets permanently skipped.
+A new adapter joins by proving itself against the corpus. Work in this order: the classification is
+an *output* of the harness. Declaring an action unsupported before watching it fail is how a
+translatable shape gets permanently skipped.
 
-1. **Implement translation.** Follow the closest existing adapter. Spring Data is the reference
-   implementation: when a shape is ambiguous, its behaviour defines the answer, and whether it
-   translates a shape at all decides `conformance` vs `expectedUnsupported`.
+1. **Implement translation.** Follow the closest existing adapter. Spring Data is the reference:
+   when a shape is ambiguous its behaviour defines the answer, and whether it translates a shape
+   decides `conformance` vs `expectedUnsupported`.
 
-2. **Write the differential harness**, implementing the oracle recipe above against the adapter's
-   own store. Never hand-write expected id sets — the PDP is the oracle for both sides. Derive
-   the classification from `actions.json` at runtime rather than copying it:
+2. **Write the differential harness**, implementing the oracle recipe against the adapter's own
+   store. Never hand-write expected id sets. Derive the classification from `actions.json` at
+   runtime:
 
    ```
    oracleActions   = conformance - adapterUnsupported[me] + adapterSupportedExpected[me]
@@ -1298,172 +1102,118 @@ unsupported before you have watched it fail is how a translatable shape gets per
    skipped         = knownDivergences where adapters contains me
    ```
 
-   Each throwing action also carries the message the throw must contain — `.message` on an
-   `adapterUnsupported` entry, `.messages[me]` on an `expectedUnsupported` one. Resolve it while
-   deriving the classification and fail the run when it is absent, so a shape cannot join the throw
-   suite with nothing but a bare throw behind it (see "Pinned throw messages" above).
+   Resolve each throwing action's message (`.message` on `adapterUnsupported`, `.messages[me]` on
+   `expectedUnsupported`) while deriving, and fail the run when one is absent.
+   `drizzle/src/adversarial.test.ts` is the cleanest example. Each adapter's key in `actions.json` is
+   its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
 
-   `drizzle/src/adversarial.test.ts` is the cleanest example of this wiring. Every adapter's key
-   in `actions.json` is its **directory name** (`langchain-chromadb`, `elasticsearch-java`).
+   **Read every group, and derive the manifest from the same expressions.** The "each action
+   classified exactly once" assertion catches a forgotten group only if the group feeds both sides.
+   Harnesses that re-validate `actions.json` into a local record (mongoose, langchain-chromadb) must
+   parse each group explicitly; a group the parser does not name vanishes from every count at once.
 
-   **Read every group, and derive the manifest from the same expressions.** The manifest assertion
-   ("each action classified exactly once") is what catches a group you forgot — but only if the
-   group feeds both sides. Harnesses that re-validate `actions.json` into a local record
-   (mongoose, langchain-chromadb) must parse each group explicitly: a field the parser does not
-   name is dropped silently, and a dropped group makes its actions vanish from every count and
-   every parameterised case at once. That is the projection trap, and it passes vacuously.
+3. **Persist the seeds exactly**, including the NULL conventions, and read derived fields from
+   `derived-fields.json`. The NULL `aOptionalString` and `tags[].name` values are what the
+   three-valued-logic probes discriminate on. Declare the seed keys, principal keys and derived
+   fields the harness consumes and assert set equality (see "Seed, principal and derived-field
+   coverage").
 
-3. **Persist the seeds exactly**, including the NULL conventions, and read the derived fields from
-   `derived-fields.json` rather than recomputing them. `aOptionalString` is NULL for several seeds
-   and `tags[].name` is NULL for others — those are not incidental, they are what the
-   three-valued-logic probes discriminate on. Getting them wrong makes the oracle agree with the
-   adapter for the wrong reason.
-
-   Declare the seed keys, the principal keys and the derived fields the harness consumes and assert
-   set equality against the JSON, as "Seed, principal and derived-field coverage" above describes. A
-   harness without those guards silently drops the next corpus field from both sides of its own
-   differential.
-
-4. **Assert the degeneracy guard** (see above) and pin the corpus size, so a silently broken PDP
-   connection or a newly added action cannot pass vacuously: sweep every compared action against
-   `degenerateOracles`, assert every entry of that list, and derive the liveness-only list from the
-   adapter's own refusals, asserting per-entry non-membership — a list lifted from the nearest
-   existing harness will name shapes this adapter compares. Pin every `knownDivergences` action the same way (see above): excluded from the oracle
-   run means exercised nowhere unless the harness says so explicitly.
+4. **Assert the degeneracy guard** and pin the corpus size: sweep every compared action, assert
+   every `degenerateOracles` entry, and derive the liveness-only list from this adapter's own
+   refusals — one lifted from another harness will name shapes this adapter compares. Pin every
+   `knownDivergences` action (see "Known divergences still need a tripwire").
 
 5. **Run it and let it fail.** Triage every divergence into exactly one of:
-   - a translation bug in the adapter — fix it;
+   - a translation bug — fix it;
    - a shape the query language genuinely cannot express — add it to
-     `adapterUnsupported[<adapter>]` with a **specific** reason naming the real mechanism, and
-     make the adapter throw. "Cannot express this shape faithfully" is not a reason; "emits LIKE
-     without an ESCAPE clause, so `%` cannot be matched literally" is. Pin the message the adapter
-     actually raises on the same entry, and check it names the mechanism the reason declares;
-   - an upstream planner bug — add to `knownDivergences` with the affected adapters and a reason.
+     `adapterUnsupported[<adapter>]` with a **specific** reason naming the mechanism, and make the
+     adapter throw. "Cannot express this shape faithfully" is not a reason; "emits LIKE without an
+     ESCAPE clause, so `%` cannot be matched literally" is. Pin the message the adapter actually
+     raises and check it names the mechanism the reason declares;
+   - an upstream planner bug — add it to `knownDivergences` with the affected adapters and a reason.
 
-   The invariant is absolute: **an inexpressible shape must throw before its filter can be used.**
-   A wrong filter is an authorization bug that returns rows the PDP denies. A throw is a bug
-   report. Never degrade one operator into a weaker one (`exists_one` into `exists`) to make a
-   test pass.
+   **An inexpressible shape must throw before its filter can be used.** Never degrade one operator
+   into a weaker one (`exists_one` into `exists`) to make a test pass.
 
-6. **Register in `actions.json`** — add the adapter to the `adapters` roster, and give every
-   `expectedUnsupported` entry it does not promote a `messages` key. Run
-   `scripts/validate-corpus.sh`: it enforces that every `adapterUnsupported` entry names a real
-   `conformance` action and carries a message, that every `adapterSupportedExpected` entry names a
-   real `expectedUnsupported` one, and that each `messages` key set is exactly the roster minus the
-   promotions — so onboarding an adapter without pinning its messages fails there rather than in
-   the new harness alone.
+6. **Register in `actions.json`**: add the adapter to `adapters`, and give every
+   `expectedUnsupported` entry it does not promote a `messages` key. `scripts/validate-corpus.sh`
+   checks that every `adapterUnsupported` entry names a real `conformance` action and carries a
+   message, every `adapterSupportedExpected` entry names a real `expectedUnsupported` one, and each
+   `messages` key set is exactly the roster minus the promotions.
 
-7. **Write the example application.** Registering in the roster is what demands one:
-   `demo/scripts/validate-demo.sh` reads that same `adapters` key — there is deliberately no
-   second list — and fails the build for any adapter on it without a runnable
-   `<adapter>/example/run.sh`. So step 6 and this step land together or CI stays red.
+7. **Write the example application.** `demo/scripts/validate-demo.sh` reads the same `adapters`
+   roster and fails for any adapter without a runnable `<adapter>/example/run.sh`, so steps 6 and 7
+   land together. The example implements the demo domain's five usage shapes against the **packed
+   artifact** ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)) — the published
+   surface and composed usage no harness exercises. There is no opt-out bucket
+   ([ADR 0001](../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md)); a shape needing a
+   carve-out belongs back in this corpus. Read [demo/README.md](../demo/README.md), "What an example
+   must do", first.
 
-   An example implements the demo domain's five usage shapes against the adapter installed as a
-   **packed artifact** rather than imported from source
-   ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)). That is coverage this
-   corpus structurally cannot give you: every harness here imports its adapter from source, which
-   leaves the published surface — `exports` maps, type declarations, `files` allowlists, peer
-   ranges, POM scopes — executed nowhere, and asks only for one flat filtered query, never a
-   paginated one and never the adapter's filter composed with a predicate the application owns. An
-   adapter that cannot implement those five shapes has a packaging or ergonomics problem, and
-   finding it here is the point — before release rather than after.
+8. **Wire CI.** Copy an existing adapter workflow. It must:
+   - read the PDP tag from `CERBOS_VERSION` and digest from `CERBOS_IMAGE_DIGEST`, never hardcoded;
+   - run `scripts/validate-corpus.sh` in every job that replays the corpus **or** hardcodes the PDP
+     image (a job interpolating the two files at runtime cannot drift);
+   - trigger on `conformance/**` and `demo/**` as well as the adapter's directory;
+   - run the adversarial suite **inside the same job as the regular tests** — a separate job costs
+     runner minutes for no coverage;
+   - pin every service image it starts by tag **and** digest (see "Pinning service images");
+   - run `demo/scripts/validate-demo.sh` and `demo/scripts/run-example.sh <adapter>` in an example
+     job **in this adapter's own workflow**. `renovate.json` automerges non-major bumps, so an ORM
+     bump arrives as one PR touching the manifest and the example's lockfile; the example job on that
+     PR is what blocks a breaking automerge. A nightly or standalone workflow fails only after merge.
 
-   There is no classification bucket to opt out with, and adding one is what
-   [ADR 0001](../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) rules out: a shape
-   that would need a per-adapter carve-out is wrong for the demo domain, and the argument belongs
-   back in this corpus, where the buckets already exist. Read
-   [demo/README.md](../demo/README.md) — "What an example must do" — before writing one.
-
-8. **Wire CI.** Copy an existing adapter workflow. It must: read the PDP version from
-   `CERBOS_VERSION` and its digest from `CERBOS_IMAGE_DIGEST` (never hardcode either), run
-   `scripts/validate-corpus.sh` in every job that replays the corpus **or** hardcodes the PDP
-   image — a job that interpolates the two files at runtime cannot drift and does not need it,
-   but a hardcoded pin can, and that assertion is `validate-corpus.sh`'s job — trigger on
-   `conformance/**` as well as the adapter's own directory, and run the adversarial suite
-   **inside the same job as the regular tests**, not as a separate job: the corpus discriminates
-   the translator and the datastore, so a separate job costs runner minutes for no extra
-   coverage. Pin every service image the harness or the workflow starts, by tag **and** digest —
-   see below.
-
-   It also carries the example job from step 7: trigger on `demo/**` too, run
-   `demo/scripts/validate-demo.sh` and `demo/scripts/run-example.sh <adapter>`, and keep that job
-   **in this adapter's own workflow**. `renovate.json` automerges non-major bumps, so an ORM bump
-   arrives as one PR touching both the adapter's manifest and the example's committed lockfile, and
-   the example job on that PR is what blocks the automerge when the new ORM breaks real usage. A
-   nightly or standalone workflow would still fail eventually, but not before the merge, which
-   silently restores the gap it exists to close.
+9. **Document the contract** in the adapter's README: a `Conformance contract` table
+   (oracle-tested / fail-closed / known divergence counts) and a `Mapping hazards` table (see
+   below). Each adapter is published independently, so its README must stand alone.
 
 ### Pinning service images
 
-Every container a test or a workflow starts is written as `repository:tag@sha256:<64 hex>`. The
-tag says which release a reader is looking at; the digest says which build a green run actually
-proved. A tag alone records an intent, not a build — `postgres:16` and
-`docker.elastic.co/elasticsearch/elasticsearch:8.15.3` are both re-pushed — so a suite pinned only
-by tag cannot answer "what did this pass against", and a suite pinned only by digest cannot answer
-"which version is this". `validate-corpus.sh` enforces both halves:
+Every container a test or workflow starts is written `repository:tag@sha256:<64 hex>`. The tag says
+which release; the digest says which build a green run proved. Tags are re-pushed (`postgres:16`,
+`docker.elastic.co/elasticsearch/elasticsearch:8.15.3`). `validate-corpus.sh` enforces both halves:
 
-- **The PDP** is corpus-wide, so its two halves live here: `CERBOS_VERSION` and
-  `CERBOS_IMAGE_DIGEST`. Every restatement anywhere in the repository is asserted to match both.
-  A reference that carries the right tag and a digest from some other build reads as pinned and is
-  not, which is why the two are checked together rather than the tag alone
-  ([#322](https://github.com/cerbos/query-plan-adapters/issues/322)).
-- **Everything else** — the databases, the search and vector stores — is pinned *per harness*, in
-  one constant that both that adapter's suites read. It deliberately does **not** live under
-  `conformance/`: a change here re-runs every adapter workflow, so a shared file would make
-  bumping mongoose's server cost every other adapter an irrelevant CI run. What is shared is the rule.
-  `validate-corpus.sh` holds a list of image repositories, scans the repository for each, requires
-  every occurrence to carry a tag and a digest, and requires a given `repo:tag` to resolve to
-  exactly one digest repo-wide — so two harnesses cannot claim the same nominal version while
-  running different builds. **Adding a new service means adding its repository to that list**; a
-  repository nothing scans is a repository nothing keeps pinned.
-- Markdown is out of scope for both scans. A README telling a *consumer* how to start a PDP of
-  their own is prose about their environment, not something this repository runs.
+- **The PDP** is corpus-wide, so its halves live here in `CERBOS_VERSION` and `CERBOS_IMAGE_DIGEST`.
+  Every restatement in the repository must match both — a right tag with another build's digest
+  reads as pinned and is not ([#322](https://github.com/cerbos/query-plan-adapters/issues/322)).
+- **Everything else** (databases, search and vector stores) is pinned *per harness*, in one constant
+  that adapter's suites share, **not** under `conformance/`: a change here re-runs every adapter
+  workflow. `validate-corpus.sh` holds a list of image repositories, requires every occurrence to
+  carry a tag and digest, and requires each `repo:tag` to resolve to one digest repo-wide. **Adding a
+  new service means adding its repository to that list**; an unscanned repository is unpinned.
+- Markdown is out of scope for both scans: a README telling a consumer how to start their own PDP is
+  about their environment.
 
-Renovate's built-in Docker managers are off (`docker:disable`), so a `Dockerfile` or a compose
-file is bumped by hand, deliberately, alongside whatever re-verification the bump needs. The
-`*_IMAGE` files are the exception: a regex custom manager in `renovate.json` reads the
-`repo:tag@sha256:...` line and proposes tag and digest bumps for them, non-major ones automerged
-like every other dependency and majors left for a maintainer. That keeps the pins from going stale
-while keeping the digest half of the pin under Renovate's control rather than a human's.
+Renovate's Docker managers are off (`docker:disable`), so a `Dockerfile` or compose file is bumped by
+hand with whatever re-verification it needs. The `*_IMAGE` files are the exception: a regex custom
+manager in `renovate.json` proposes tag and digest bumps for them, automerging non-major ones and
+leaving majors to a maintainer.
 
 ### Vendored code stays byte-identical
 
-The ent and pgx modules are standalone: each vendors the translator under its own
-`internal/queryplan` so a consumer pulls in only the one. That means the same source exists twice,
-and a semantic fix can land in one copy alone. Nothing downstream notices — the corpus catches it
-only if some action happens to exercise the fixed shape, and the hostile-plan invariants the two unit
-suites pin never come off a real planner wire at all
-([#319](https://github.com/cerbos/query-plan-adapters/issues/319)).
+ent and pgx each vendor the translator under `internal/queryplan`, so a consumer pulls in only one
+module. A semantic fix can therefore land in one copy alone, and the corpus notices only if some
+action exercises the fixed shape ([#319](https://github.com/cerbos/query-plan-adapters/issues/319)).
 
-So `validate-corpus.sh` diffs `ent/internal/queryplan` against `pgx/internal/queryplan` and fails on
-any difference. Both adapter workflows already run the script, and each triggers on `conformance/**`
-as well as its own directory, so a one-sided edit fails whichever side it lands on. **Byte-identical,
-not identical-modulo-an-allowlist**: an allowlist is a place for a real divergence to hide as a
-comment tweak, so anything genuinely per-engine goes in that module's `render.go`, which is outside
-the shared tree.
+`validate-corpus.sh` diffs `ent/internal/queryplan` against `pgx/internal/queryplan` and fails on any
+difference; both workflows run it and trigger on `conformance/**`, so a one-sided edit fails
+whichever side it lands on. Byte-identical, with no allowlist: anything genuinely per-engine goes in
+that module's `render.go`, outside the shared tree.
 
-Two copies of the same code also need two copies of the same proof, which is why
-`ent/translate_test.go` and `pgx/translate_test.go` share their test names, section order and shapes.
-Keep them in step when you add an invariant to either.
-
-8. **Document the contract** in the adapter's README with a `Conformance contract` table
-   (oracle-tested / fail-closed / known divergence counts). Each adapter is published
-   independently, so its README must stand alone — a consumer should not need this monorepo to
-   understand what the adapter guarantees.
+`ent/translate_test.go` and `pgx/translate_test.go` share test names, section order and shapes. Keep
+them in step when you add an invariant to either.
 
 ### Mapping hazards: the rows the subquery sees
 
-Everything above proves the **plan** side — given a policy shape, does the adapter's filter return
-the rows `check()` allows. The other half of the contract is the **mapping**, and the corpus
-cannot express it with a policy action because the policy is irrelevant to it:
+Everything above proves the **plan** side. The other half of the contract is the **mapping**, which
+no policy action can express:
 
 > **The rows an adapter's subquery sees must equal the rows the application put into the resource
 > attributes.**
 
 When they differ, the filter returns rows the PDP denies and no corpus action notices, because the
-oracle is computed from the attributes and the adapter reads the store. Every hazard below is a
-violation of exactly that one sentence, and every one of them was a real over-grant
-(cerbos/query-plan-adapters#314, found while building the ActiveRecord adapter):
+oracle reads the attributes and the adapter reads the store. Each hazard below violates that
+sentence, and each was a real over-grant (#314, found while building the ActiveRecord adapter):
 
 | Hazard | What goes wrong | Where it shows up |
 |---|---|---|
@@ -1474,63 +1224,40 @@ violation of exactly that one sentence, and every one of them was a real over-gr
 | A **composite association key** | a multi-column key becomes one quoted identifier and the query fails, or worse joins on the wrong column | ActiveRecord 7.1+ composite keys; any two-column FK |
 | An **absent to-one parent** | see the section above — this one *is* expressible, and `w1-all-chain` and friends pin it | every relational adapter |
 
-Two things follow for an adapter author.
+**1. Decide about each hazard explicitly.** For a hazard that can arise in an adapter there are three
+sanctioned outcomes:
 
-**1. Decide about each hazard explicitly.** For a hazard that *can arise* in an adapter, there are
-exactly three sanctioned outcomes:
-
-- **Reproduced** — the mapping carries the store-side predicate, so the subquery reads the rows the
+- **Reproduced** — the mapping carries the store-side predicate, so the subquery reads what the
   application reads. Class 1 adapters (below) take an optional relation predicate for this.
-- **Rejected** — the adapter refuses the mapping with an error naming the real mechanism, or the
-  mapper type makes the hazardous mapping unexpressible in the first place. A composite association
-  key is rejected this way by every adapter whose relation mapping takes a single source column: the
-  caller gets a compile error, not a wrong join.
-- **Declared caller-owned** — the adapter states that holding the invariant is the caller's job, and
-  the README names the ORM feature the caller has to go and check.
+- **Rejected** — the adapter refuses the mapping with an error naming the mechanism, or its mapper
+  type cannot express the hazardous mapping. Every adapter whose relation mapping takes a single
+  source column rejects a composite key this way: a compile error, not a wrong join.
+- **Declared caller-owned** — the README states the caller must hold the invariant and names the
+  exact ORM feature to check. Available **only** where the adapter cannot detect the hazard from its
+  mapper (it cannot see a client extension, a soft-delete convention or a discriminator from a table
+  and two columns). Where it can see the hazard, it must reproduce or reject. A row saying only
+  "caller-owned" does not pass review.
 
-A best-effort subquery is the one outcome the invariant forbids.
+A best-effort subquery is forbidden. **Not applicable** is allowed only when the hazard structurally
+cannot arise and the row says why, backed by a test: class 3 adapters write it for the five subquery
+hazards because they build no subquery, and mongoose's harness asserts that — the day it grows a
+`$lookup`, those rows would become over-grants.
 
-A fourth answer is available, and it is not one of the three because it is not a decision: **not
-applicable** — the hazard cannot arise, so there is nothing to decide. It is only honest when the
-row can say *structurally* why, and the structural reason is load-bearing enough to be worth a test
-of its own. Class 3 adapters (below) write it for the five subquery hazards because they build no
-subquery, and mongoose's harness asserts exactly that — the day it grows a `$lookup`, five "not
-applicable" rows silently become over-grants. "Not applicable" with no mechanism behind it is a
-best-effort subquery wearing a label, and does not pass review.
-
-**Declared caller-owned is available only where the adapter cannot detect the hazard from the mapper
-it is given.** That restriction is what stops it being a loophole, because "reject" presupposes a
-detection that mostly does not exist: an adapter handed a table and two column references cannot see
-a client extension, a soft-delete convention or a discriminator. Where the adapter *can* see the
-hazard, caller-owned is not available and the position must be reproduced or rejected.
-
-The second guard is a positive obligation: **a caller-owned row must name the exact ORM feature the
-caller must check.** A row that only says "caller-owned" does not pass review, for the same reason
-"cannot express this shape faithfully" is not an acceptable `adapterUnsupported` reason.
-
-**2. Say so in the adapter's README**, next to the `Conformance contract` table, as a table with one
-row per hazard above — six rows, in the same order:
+**2. Say so in the adapter's README**, next to the `Conformance contract` table: one row per hazard
+above, all six, in this order, even when most are inapplicable:
 
 ```
 | Hazard | Position | Mechanism to check |
 ```
 
-Six rows even when most of them are inapplicable, because a reader diffing the adapter's table
-against this one should find every hazard accounted for rather than having to work out which
-omissions were deliberate. The absent to-one parent's row records that it is *proved by the corpus*
-(`w1-all-chain` and its siblings) rather than merely documented — it is what a closed hazard looks
-like, and it is the row that makes the difference visible.
+The absent to-one parent's row records that it is *proved by the corpus* (`w1-all-chain` and
+siblings). An adapter may append rows for a hazard only its store has, saying so in the prose above
+the table, with the six shared rows first. A hazard two adapters could hit belongs in this shared
+list instead. The one such row today is elasticsearch-java's **analyzed (`text`) field mapping**:
+Elasticsearch tokenizes a stored string before comparing, so a field mapped `text` widens every
+string comparison. No other store transforms a value between write and comparison.
 
-An adapter may append **additional** rows below those six for a hazard only its store has, and must
-say in the prose above the table that it has done so — the six shared rows stay first and in order,
-so the diff against this list still reads cleanly. A hazard is adapter-specific only when no other
-store can reach it; anything two adapters could hit belongs here, in the shared list, so every adapter
-has to record a position on it. The one such row today is elasticsearch-java's **analyzed (`text`)
-field mapping**: Elasticsearch rewrites a stored string into tokens before comparing it, so a field
-mapped `text` widens every string comparison the adapter emits. No other store in this repository
-transforms a value between write and comparison, so there is nothing for the other adapters to answer.
-
-The three classes the adapters fall into determine most of the answers:
+The adapters fall into three classes:
 
 | Class | Adapters | What the store applies to the subquery |
 |---|---|---|
@@ -1538,153 +1265,126 @@ The three classes the adapters fall into determine most of the answers:
 | **2 — ORM-association subquery** | spring-data, sqlalchemy | Hibernate applies `@SQLRestriction`/`@Where` — on the entity and on the joined collection — and the single-table discriminator; SQLAlchemy applies `primaryjoin` and the single-table discriminator *only* when the caller's override goes through a mapped `relationship()` |
 | **3 — no subquery** | mongoose, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
 
-Prisma names a relation, so it looks like class 2. It is class 1: Prisma has no `@Where` equivalent,
-so nothing store-side reaches the nested `some`/`every`/`none`.
+Prisma names a relation but is class 1: it has no `@Where` equivalent, so nothing store-side reaches
+the nested `some`/`every`/`none`.
 
-Class 1 adapters expose an **optional** relation predicate the caller attaches to the mapping;
-declaring nothing emits exactly the filter the adapter emitted before the field existed. Class 2
-adapters deliberately do **not** expose one — a caller who re-declared a filter the ORM already
-applies would have it applied twice, silently removing rows the PDP permits.
+Class 1 adapters expose an **optional** relation predicate; declaring none emits exactly the old
+filter. Class 2 adapters do **not** — re-declaring a filter the ORM already applies would apply it
+twice, removing rows the PDP permits.
 
-activerecord is class 1 by what reaches its subquery — it reads the table with a join predicate and
-nothing else — but it is the one class-1 adapter that **rejects** rather than reproduces, and the
-difference is structural rather than stylistic. It is handed an association *name*, so
-`reflect_on_association` hands it the scope, the `default_scope` on the target, the STI
-discriminator and the composite key directly. Where the hazard is visible, "declared caller-owned"
-is not on the menu, and an optional caller-supplied predicate would be a second place for the same
-truth to live. Those subquery hazards are therefore refusals, each with a message naming the
-reflection that carries it.
+activerecord is class 1 by what reaches its subquery, but it **rejects** rather than reproduces. It is
+handed an association *name*, so `reflect_on_association` exposes the scope, the target's
+`default_scope`, the STI discriminator and the composite key directly. With the hazard visible,
+caller-owned is not available, and a caller-supplied predicate would be a second home for the same
+truth; each is a refusal naming the reflection that carries it.
 
-The precedent for handling this without a policy action is `nullRepresentationOmitted`: a
-per-adapter contract asserted by each harness rather than a shape in `adversarial.yaml`. If a
-hazard turns out to be expressible as a plan shape — as the absent to-one parent was — move it into
-the policy suite and classify it like anything else.
+The precedent for a contract with no policy action is `nullRepresentationOmitted`. If a hazard turns
+out to be expressible as a plan shape — as the absent to-one parent was — move it into the policy
+suite and classify it.
 
 ### Gotchas worth knowing up front
 
-- **Do not trust a local pass that depends on gitignored generated state.** Convex's harness
-  imports `convex/_generated/`, which only exists after `npx convex codegen` against a live
-  backend; a type-check that passes locally can fail in CI purely because your tree has stale
-  artifacts. The same applies to Prisma's generated clients.
-- **Java harnesses read `../conformance/`**, so containerised runs must mount the repository
-  root, not the adapter directory. See the recipe in the repo's `CLAUDE.md`.
-- **The wire fixtures are not consumed by adapter harnesses.** A harness plans against a live PDP;
-  the fixtures pin planner shape independently and are enforced by the `Conformance Corpus`
-  workflow, which replans against the pinned PDP and fails on drift. They *are* consumed by
-  **translator unit tests** — an adapter's offline test that a plan produces the expected
-  database-native filter, with no PDP and no store
+- **Do not trust a local pass that depends on gitignored generated state.** Convex's harness imports
+  `convex/_generated/`, which exists only after `npx convex codegen` against a live backend; Prisma's
+  generated clients are the same. Stale local artifacts can pass where CI fails.
+- **Java harnesses read `../conformance/`**, so containerised runs must mount the repository root.
+  See the recipe in `CLAUDE.md`.
+- **Wire fixtures are not consumed by adversarial harnesses**, which plan against a live PDP. The
+  `Conformance Corpus` workflow replans them against the pinned PDP and fails on drift. They *are*
+  consumed by translator unit tests
   ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md);
-  `prisma/src/translator.test.ts` is the reference). Those tests classify every fixture exactly
-  once, so **adding a corpus action fails every adapter that has one** until someone records the
-  filter it emits. That is deliberate: it is the same forcing function `actions.json` applies to
-  the classification.
-- **A dialect the harness does not exercise is not covered.** Collation, LIKE metacharacter
-  handling and parameter typing all differ per dialect, and the READMEs treat them as part of the
-  policy contract for exactly this reason. `ent` and `spring-data` run three dialects each, and so
-  do `drizzle` and `prisma` — SQLite, PostgreSQL and MySQL, chosen with `ADAPTER_TEST_DB`
-  ([#320](https://github.com/cerbos/query-plan-adapters/issues/320) for PostgreSQL,
-  [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); the remaining
-  TypeScript harnesses are still single-store. Those legs are not a formality. Adding them turned
-  up four live mechanisms SQLite could not see, only two of them visible in `actions.json`
-  afterwards because the other two were fixed in the translator:
-  - `drizzle`, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, so a hard error
-    rather than the redundancy it is on SQLite (`cr-contains`, `like-underscore`, and the five
-    `cr-div-*` shapes).
-  - `drizzle`, a numeric constant typed from the column instead of the value — `aNumber >= 1.5`
-    against an `integer`, `size(aString) > 4294967296` against `length()`'s `integer`
-    (`double-threshold`, `p-double-frac`, `cr-size-frac-ge`, `size-huge-gt`, `size-huge-lt`,
-    `cr-div-neg-zero`, `cr-div-other-column`). Read as SQL `numeric` rather than `float(53)`
-    this one is silent, not loud: `aNumber * 0.1 == 0.3` is exact decimal arithmetic and admits
-    a row CEL's binary floating point denies.
-  - `prisma`, `like-backslash` — `\` is the default `LIKE` escape character on PostgreSQL and
-    MySQL and literal on SQLite, so one needle meant two things. Not expressible without an
-    `ESCAPE` clause Prisma does not emit, so it is now `adapterUnsupported` and throws.
-  - `drizzle`, `cast-string-double` — the cast TARGET, not the value. `CAST(… AS TEXT)` is a
-    syntax error on MySQL, which spells it `CHAR`, and `CHAR` on PostgreSQL is `character(1)`.
-    An adapter that does not know its dialect has no portable spelling, so `string()` is now
-    `adapterUnsupported` there and throws; `ent` keeps translating it because `WithDialect` tells
-    its renderer which target to emit.
+  `prisma/src/translator.test.ts` is the reference), which account for every fixture exactly once —
+  so **adding a corpus action fails every adapter that has one** until its golden expectation is
+  recorded.
+- **A dialect the harness does not run is not covered.** Collation, LIKE metacharacters and parameter
+  typing differ per dialect. ent and spring-data run three dialects each, and so do drizzle and prisma
+  (SQLite, PostgreSQL, MySQL, chosen with `ADAPTER_TEST_DB`;
+  [#320](https://github.com/cerbos/query-plan-adapters/issues/320) for PostgreSQL,
+  [#340](https://github.com/cerbos/query-plan-adapters/issues/340) for MySQL); the other TypeScript
+  harnesses are single-store. Those legs found four mechanisms SQLite could not see:
+  - drizzle, `$1 IS NULL` over a bound constant — untypeable on PostgreSQL, a hard error rather than
+    a redundancy (`cr-contains`, `like-underscore`, the five `cr-div-*` shapes). Fixed in the
+    translator.
+  - drizzle, a numeric constant typed from the column instead of the value — `aNumber >= 1.5` against
+    an `integer`, `size(aString) > 4294967296` against `length()`'s `integer` (`double-threshold`,
+    `p-double-frac`, `cr-size-frac-ge`, `size-huge-gt`, `size-huge-lt`, `cr-div-neg-zero`,
+    `cr-div-other-column`). Read as SQL `numeric` rather than `float(53)` it is silent:
+    `aNumber * 0.1 == 0.3` is exact in decimal and admits a row CEL's binary floating point denies.
+    Fixed in the translator.
+  - prisma, `like-backslash` — `\` is the default `LIKE` escape on PostgreSQL and MySQL and literal on
+    SQLite. Prisma emits no `ESCAPE` clause, so it is `adapterUnsupported` and throws.
+  - drizzle, `cast-string-double` — the cast *target*: `CAST(… AS TEXT)` is a syntax error on MySQL,
+    which spells it `CHAR`, and `CHAR` on PostgreSQL is `character(1)`. With no known dialect there is
+    no portable spelling, so `string()` is `adapterUnsupported` there; ent translates it because
+    `WithDialect` tells its renderer the target.
 
-  The MySQL legs also measured what the collation costs, which is a store fact no classification
-  records: replayed under MySQL's default `utf8mb4_0900_ai_ci`, **61 of drizzle's 236** oracle-tested
-  actions disagree with the PDP, and under Prisma's `utf8mb4_unicode_ci` **58 of prisma's 172** do,
-  `cs-eq` among them. Both legs pin
-  `utf8mb4_0900_bin` instead and both READMEs state the requirement — not the case-sensitive
-  `utf8mb4_0900_as_cs` they first pinned, which the soft-hyphen seed `h6` showed is not byte-exact
-  (see "Case-sensitive is not byte-exact" above). On prisma the requirement
-  is sharper than a server setting: its migration engine writes `COLLATE utf8mb4_unicode_ci` into
-  every `CREATE TABLE` and ignores the server default, so the tables have to be converted after
-  `db push`.
+  Collation cost, measured on the MySQL legs: under MySQL's default `utf8mb4_0900_ai_ci`, **61 of
+  drizzle's 236** oracle-tested actions disagree with the PDP, and under Prisma's
+  `utf8mb4_unicode_ci` **58 of prisma's 172** do, `cs-eq` among them. Both legs pin
+  `utf8mb4_0900_bin` (not `utf8mb4_0900_as_cs`, which `h6` showed is not byte-exact — see
+  "Case-sensitive is not byte-exact") and both READMEs state the requirement. Prisma's migration
+  engine writes `COLLATE utf8mb4_unicode_ci` into every `CREATE TABLE`, ignoring the server default,
+  so its tables must be converted after `db push`.
 
-  The same caution applies to a *hosted* store the harness substitutes a local build for: `convex`
-  runs against a pinned self-hosted `convex-backend` container, never Convex Cloud, and most of its
-  corpus is decided by the adapter's own JavaScript post-filter rather than by any filter engine at
-  all ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)).
-
-  Each adapter's README names the stores its contract is actually proved on, and how much of the
-  corpus each one actually executes.
+  The same applies to a hosted store replaced by a local build: convex runs against a pinned
+  self-hosted `convex-backend`, never Convex Cloud, and most of its corpus is decided by the
+  adapter's own JavaScript post-filter rather than a filter engine
+  ([#327](https://github.com/cerbos/query-plan-adapters/issues/327)). Each adapter's README names the
+  stores its contract is proved on and how much of the corpus each executes.
 
 ## Evaluation modes and the 0.55 baseline
 
-The current baseline is Cerbos **0.55.0**, with both `engine.strictEvaluation=false` (the PDP
-default) and `true`. Every live adapter suite accepts `ADAPTER_TEST_STRICT_EVALUATION=false|true`,
-defaults to `false`, rejects other values, and sets the engine flag explicitly. CI executes both
-modes inside the existing adversarial jobs, retaining the database/ORM dimensions and baseline
-Node gate. Each run compares its translated filter with `check()` from the **same PDP mode**.
-A strict-mode result is never compared with a default-mode oracle.
+The baseline is Cerbos **0.55.0**, under both `engine.strictEvaluation=false` (the PDP default) and
+`true`. Every live adapter suite accepts `ADAPTER_TEST_STRICT_EVALUATION=false|true`, defaults to
+`false`, rejects other values and sets the engine flag explicitly. CI runs both modes inside the
+existing adversarial jobs, keeping the database/ORM dimensions and the baseline Node gate. Each run
+compares against `check()` from the **same** PDP mode, never across modes.
 
-`scripts/regenerate-wire-fixtures.sh` captures both modes independently: `wire-fixtures/` holds
-default-mode plans and `wire-fixtures-strict/` holds strict-mode plans. It publishes neither
-capture until both succeed. `validate-corpus.sh` checks complete action coverage, response identity,
-plan kinds and timestamp normalization in each directory. Offline translator tests continue to
-consume the default fixtures; the live suites execute plans from both modes. The two fixture sets
-currently match. This is an observed property, not a reason to copy one over the other or assume
-that their check decisions must agree. The classification ledger is shared because current
-adapter support/refusal classifications agree in both modes; any future difference must be
-measured and represented explicitly rather than skipped.
+`scripts/regenerate-wire-fixtures.sh` captures both modes independently — `wire-fixtures/` (default)
+and `wire-fixtures-strict/` (strict) — and publishes neither until both succeed.
+`validate-corpus.sh` checks action coverage, response identity, plan kinds and timestamp
+normalization in each. Offline translator tests consume the default fixtures; live suites run both.
+The two sets currently match; that is observed, not a reason to copy one over the other or to assume
+their decisions agree. The classification ledger is shared because classifications currently agree
+in both modes; a future difference must be measured and represented, not skipped.
 
 Strict evaluation denies an affected action when a rule condition errors; variable errors affect
-referencing actions, and derived-role errors affect rules using that role. The existing adapter
-corpus predominantly exercises individual conditions. `evaluation-modes/` therefore defines
-**engine contract probes** against dedicated resource kinds in the same `policies/` tree,
-run by `scripts/check-evaluation-modes.sh`: a matching ALLOW alongside
-an erroring DENY, missing attributes, type errors, a referenced variable, a derived role, and an
-unrelated action that must remain allowed. Known principal inputs make these plans unconditional,
-so the probes assert exact Check decisions and Plan kinds in both modes without implementing an
-adapter or weakening the corpus's non-degeneracy guards. They also assert a valid-input control.
+referencing actions, and derived-role errors affect rules using that role. The adapter corpus mostly
+exercises single conditions, so [`evaluation-modes/`](evaluation-modes/README.md) defines **engine
+contract probes** against dedicated resource kinds in the same `policies/` tree, run by
+`scripts/check-evaluation-modes.sh`: a matching ALLOW beside an erroring DENY, missing attributes,
+type errors, a referenced variable, a derived role, an unrelated action that must stay allowed, and a
+valid-input control. Known principal inputs make these plans unconditional, so the probes assert
+exact Check decisions and Plan kinds in both modes without an adapter or weakening the
+non-degeneracy guards.
 
-The 0.55 upgrade exposed three distinct changes:
+The 0.55 upgrade exposed three changes:
 
-- **Invalid literal regexes fail compilation.** The live `regex-lookahead` action uses a
-  principal-selected pattern to retain the hostile plan; the engine probes pin the literal
-  compile failure separately.
+- **Invalid literal regexes fail compilation.** `regex-lookahead` uses a principal-selected pattern
+  to keep the hostile plan; the engine probes pin the literal compile failure.
 - **Compile-time non-finite arithmetic cannot be serialized in a plan.** The five NaN/infinity
-  actions include `now() == now()`: Cerbos captures one timestamp per evaluation, so it is true,
-  and expressions containing `now()` bypass compile-time constant folding. This preserves the
-  original division subtrees and their adapter coverage. Engine probes separately require the
-  unguarded NaN and infinity plans to fail with their actual HTTP 500 serialization diagnostics,
-  while checking their per-resource decisions. If upstream fixes serialization, those probes
-  fail and prompt removal of the workaround rather than silently losing coverage.
-- **NaN ordering now yields false, including beneath negation.** The original wire plan stayed
-  unchanged while Check decisions changed. Adapters that fold these comparisons must preserve
-  false under negation, rather than treating NaN as an evaluation error. Missing attributes and
-  SQL NULL still retain their own error/unknown semantics. This is a consumer-visible semantic
-  change: the updated adapters target the 0.55 baseline and must not claim unchanged 0.54
-  compatibility for these expressions.
+  actions include `now() == now()`: Cerbos captures one timestamp per evaluation, so it is true, and
+  an expression containing `now()` bypasses constant folding, keeping the original division subtrees
+  and their adapter coverage. The engine probes require the unguarded plans to fail with their actual
+  HTTP 500 diagnostics while checking their decisions; if upstream fixes serialization, those probes
+  fail and prompt removing the workaround.
+- **NaN ordering now yields false, including beneath negation.** The wire plan is unchanged; Check
+  decisions changed. Adapters that fold these comparisons must preserve false under negation rather
+  than treating NaN as an error. Missing attributes and SQL NULL keep their own error/unknown
+  semantics. This is a consumer-visible change: updated adapters target 0.55 and must not claim
+  unchanged 0.54 compatibility for these expressions.
 
-Two additional corpus actions protect the migration fixes. `not-ternary-parent` distinguishes
-an unselected missing relation from a selected missing/null attribute under ternary negation;
-negating the whole translated relation predicate can either deny the former or allow the latter.
-`not-nan-order-string` distinguishes a finite-number/string type error from NaN/string ordering,
-which CEL 0.30 treats as false. Each action is classified from live adapter runs, with its actual
-refusal message where required, and participates in the corresponding non-degeneracy guard.
-The latter also catches SQL dialects inferring an all-NULL conditional expression as text where
-a boolean UNKNOWN is required.
+Two actions protect the migration fixes. `not-ternary-parent` distinguishes an unselected missing
+relation from a selected missing/null attribute under ternary negation; negating the whole relation
+predicate can either deny the former or allow the latter. `not-nan-order-string` distinguishes a
+finite-number/string type error from NaN/string ordering (false under CEL 0.30), and also catches a
+SQL dialect inferring an all-NULL conditional as text where a boolean UNKNOWN is required. Both are
+classified from live runs, with refusal messages where required, and sit in the non-degeneracy
+guards.
 
-The existing `p-has` planner divergence remains pinned in both modes; strict evaluation does not
-remove that limitation. New SDK/renderer goldens are reviewed only after same-mode live oracle
-checks pass. A future PDP upgrade must review both plan diffs **and** decision changes: identical
-wire output alone does not establish semantic compatibility.
+The `p-has` divergence stays pinned in both modes. Review new SDK/renderer goldens only after
+same-mode live oracle checks pass. A future PDP upgrade must review plan diffs **and** decision
+changes: identical wire output does not establish semantic compatibility.
 
 ## Regenerating wire fixtures after a Cerbos version bump
 

@@ -1,34 +1,52 @@
 # Evaluation-mode engine contracts
 
-Run `conformance/scripts/check-evaluation-modes.sh` from any directory. It reads the repository's
-Cerbos tag and digest, uses temporary containers on random loopback ports, and tests both explicit
-values of `engine.strictEvaluation`.
+Engine probes, separate from the adapter corpus: they test the pinned PDP itself, under both
+explicit values of `engine.strictEvaluation`. No adapter and no database is involved.
 
-These are engine probes using dedicated resource kinds in the shared `conformance/policies/`
-tree, separate from the adapter action ledger. Every error-mode expression uses known
-principal inputs, so Plan must return an unconditional result agreeing with Check; no database
-translation is involved. The hostile principal makes a missing-attribute DENY, a type-error DENY,
-a variable-dependent DENY, and a derived-role DENY error. Default evaluation allows those actions;
-strict evaluation denies them. An unrelated action stays allowed in the same multi-action Check
-request. A failed ALLOW without another grant denies in both modes. A valid control principal
-keeps the four DENY conditions false and proves their actions remain allowed in both modes.
+```bash
+conformance/scripts/check-evaluation-modes.sh   # from any directory; needs docker, curl, jq
+```
 
-The invalid-regex directory is intentionally outside the valid policy tree. The literal RE2
-lookahead `a(?=b)` must fail compilation with `invalid matches argument`, regardless of evaluation
-mode. It cannot be a planner-wire fixture because compilation prevents a PDP from loading it.
+The script reads the PDP tag and digest from `conformance/CERBOS_VERSION` and
+`conformance/CERBOS_IMAGE_DIGEST`, and starts temporary containers on random loopback ports. Run it
+after a PDP bump (see `conformance/README.md`, "Evaluation modes and the 0.55 baseline").
 
-`conformance/policies/nonfinite-plan-probe.yaml` retains all five original NaN/infinity corpus expressions
-unmodified, including the original `not-nan-ord-le` finite threshold of `0.5`. It pins a separate
-0.55 limitation: compile-time folding puts NaN and infinity into plans that cannot be serialized
-as protobuf JSON. The Plan API must currently fail with HTTP 500 and the corresponding `invalid NaN value` / `invalid +Inf value` diagnostic; Check
-allows the true branch and denies the false branch for both ternary orderings and infinity,
-denies both branches of `nan-ord-le`, and allows both branches of the original negated comparison,
-in both modes. The last result proves the changed CEL semantics independently of the adapter
-corpus.
+## What it asserts
 
-The adapter corpus keeps its arithmetic plans reachable using the request-constant
-`now() == now()` guard. The guard is confined to the adapter corpus; the engine probes exercise every original expression through the
-real 0.55 optimizer without that guard. Both fixture directories are generated from real
-PlanResources responses, never manufactured from expected adapter trees. These HTTP failures are engine regressions, not adapter refusals. When a PDP upgrade
-repairs the Plan response, this explicit regression assertion fails and should be replaced with a successful-plan
-assertion after inspecting the new wire output.
+**Check and Plan agree on errors** (`policies/evaluation-probe.yaml`,
+`policies/evaluation-probe-roles.yaml`, principals in `principals.json`). Every error-mode
+expression uses known principal inputs, so Plan must return an unconditional kind that agrees with
+Check.
+
+- The `hostile` principal makes four DENY conditions error: a missing attribute, a type error, a
+  variable, and a derived role. Default evaluation allows those actions; strict evaluation denies
+  them.
+- `unrelated` stays allowed in the same multi-action Check request, in both modes.
+- `missing-allow` — a failed ALLOW with no other grant — denies in both modes.
+- The `valid` control principal keeps the four DENY conditions false, so their actions stay allowed
+  in both modes.
+
+**An invalid literal regex fails compilation** (`invalid-regex/`, kept outside the loaded policy
+tree). The RE2 lookahead `a(?=b)` must fail `cerbos compile` with `invalid matches argument` in
+both modes. It cannot be a wire fixture, because a PDP cannot load it; the corpus reaches the same
+plan through a principal-selected pattern (`regex-lookahead`).
+
+**Non-finite plans fail to serialize** (`policies/nonfinite-plan-probe.yaml`). It keeps the five
+original NaN/infinity expressions unmodified, including `not-nan-ord-le`'s original finite
+threshold of `0.5`. Under 0.55, compile-time folding puts NaN and infinity into plans that cannot be
+serialized as protobuf JSON, so Plan must fail with HTTP 500 and `invalid NaN value` (or
+`invalid +Inf value` for `nan-ord-inf`). Check, in both modes:
+
+- allows the true branch and denies the false branch of both ternary orderings and of infinity;
+- denies both branches of `nan-ord-le`;
+- allows both branches of the negated `not-nan-ord-le` — proving the changed CEL NaN semantics
+  independently of the adapter corpus.
+
+The adapter corpus keeps its arithmetic plans reachable with the request-constant
+`now() == now()` guard; these probes run the original expressions through the real optimizer
+without it. The corpus's `wire-fixtures/` and `wire-fixtures-strict/` are always generated from real
+`PlanResources` responses, never from expected adapter trees.
+
+These HTTP 500s are engine regressions, not adapter refusals. When a PDP upgrade repairs Plan
+serialization, this assertion fails: inspect the new wire output, then replace it with a
+successful-plan assertion.
