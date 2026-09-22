@@ -167,6 +167,94 @@
         "param_1": "-0.6"
       }
     },
+    "compose-allow-deny": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ? AND adversarial_resource.a_bool = 1",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s AND adversarial_resource.a_bool = true"
+      },
+      "params": {
+        "a_number_1": 10
+      }
+    },
+    "compose-deny-only": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number >= ?",
+        "postgresql": "adversarial_resource.a_number >= %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 0
+      }
+    },
+    "compose-derived-deny": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool != 1 AND adversarial_resource.a_number < ?",
+        "postgresql": "adversarial_resource.a_bool != true AND adversarial_resource.a_number < %(a_number_1)s"
+      },
+      "params": {
+        "a_number_1": 12
+      }
+    },
+    "compose-derived-role": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number < ? AND adversarial_resource.a_bool = 1",
+        "postgresql": "adversarial_resource.a_number < %(a_number_1)s AND adversarial_resource.a_bool = true"
+      },
+      "params": {
+        "a_number_1": 5
+      }
+    },
+    "compose-multi-allow": {
+      "where": {
+        "sqlite": "adversarial_resource.a_bool = 1 AND adversarial_resource.a_number > ? OR adversarial_resource.a_bool = 0 AND adversarial_resource.a_number < ?",
+        "postgresql": "adversarial_resource.a_bool = true AND adversarial_resource.a_number > %(a_number_1)s OR adversarial_resource.a_bool = false AND adversarial_resource.a_number < %(a_number_2)s"
+      },
+      "params": {
+        "a_number_1": 15,
+        "a_number_2": 7
+      }
+    },
+    "compose-multi-allow-deny": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ? AND (adversarial_resource.a_bool = 1 AND adversarial_resource.a_number > ? OR adversarial_resource.a_bool = 0 AND adversarial_resource.a_number < ?)",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s AND (adversarial_resource.a_bool = true AND adversarial_resource.a_number > %(a_number_2)s OR adversarial_resource.a_bool = false AND adversarial_resource.a_number < %(a_number_3)s)"
+      },
+      "params": {
+        "a_number_1": 20,
+        "a_number_2": 15,
+        "a_number_3": 7
+      }
+    },
+    "compose-or-not": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number > ? OR adversarial_resource.a_bool != 1",
+        "postgresql": "adversarial_resource.a_number > %(a_number_1)s OR adversarial_resource.a_bool != true"
+      },
+      "params": {
+        "a_number_1": 20
+      }
+    },
+    "compose-two-deny": {
+      "where": {
+        "sqlite": "NOT (adversarial_resource.a_bool = 0 OR adversarial_resource.a_number > ?) AND adversarial_resource.a_number >= ?",
+        "postgresql": "NOT (adversarial_resource.a_bool = false OR adversarial_resource.a_number > %(a_number_1)s) AND adversarial_resource.a_number >= %(a_number_2)s"
+      },
+      "params": {
+        "a_number_1": 18,
+        "a_number_2": 0
+      }
+    },
+    "compose-variable": {
+      "where": {
+        "sqlite": "adversarial_resource.a_number <= ? AND CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (?, ?, ?) END = 1",
+        "postgresql": "adversarial_resource.a_number <= %(a_number_1)s AND CASE WHEN (adversarial_resource.a_optional_string IS NOT NULL) THEN adversarial_resource.a_optional_string IN (%(a_optional_string_1_1)s, %(a_optional_string_1_2)s, %(a_optional_string_1_3)s) END"
+      },
+      "params": {
+        "a_number_1": 10,
+        "a_optional_string_1_1": "set",
+        "a_optional_string_1_2": "",
+        "a_optional_string_1_3": "%_o"
+      }
+    },
     "concat-f2f": {
       "where": {
         "sqlite": "(adversarial_resource.a_string || adversarial_resource.a_optional_string) = ?",

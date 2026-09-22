@@ -50,7 +50,9 @@ has shipped to more than one adapter at once (value-first inversion in prisma an
 ## Layout
 
 - `policies/adversarial.yaml` — the hostile policy suite and the corpus of record. One resource kind
-  (`adversarial`), one role (`USER`), one action per hostile shape, no adapter-specific content.
+  (`adversarial`), one role (`USER`), one action per hostile shape, no adapter-specific content. One
+  rule per action, except the `compose-*` family, which exists to make the planner combine several
+  (see "Rule composition"). `policies/adversarial-compose-roles.yaml` holds that family's derived role.
 - `seeds.json` — the hostile seed rows (NULLs, empty strings and collections, negatives, LIKE
   metacharacters `% _ \`, unicode, duplicate and mirrored names) plus the fixed principal. Each
   harness persists these into its own schema **and** mirrors them into `check()` calls. Every key
@@ -705,7 +707,8 @@ store's query language are known to disagree, or where the same bug has already 
 adapters:
 
 - **`not-and`** is the De Morgan branch; the corpus negated every other connective but `and`. It is
-  also byte for byte the shape a DENY rule composes to.
+  the shape a DENY rule with an `all` condition composes to, but spelled inside one ALLOW; the
+  planner's own composition of rules is the `compose-*` family's job (see "Rule composition").
 - **`not-contains` / `not-startswith`** negate a LIKE against a **column** needle, so the negation
   meets the NULL-needle rows. A NULL needle must be UNKNOWN, not FALSE, or `NOT` flips it and the row
   leaks; and metacharacter escaping is tested in the under-granting direction no positive LIKE sees.
@@ -760,6 +763,48 @@ different branch). The pair distinguishes an explicit null element from a missin
 `rel-not-contains-hop` and `rel-not-hierarchy-hop` test negative scalar predicates through the
 to-one parent; parentless rows must stay excluded. Every harness guards these for non-empty,
 non-total oracles on its compared or refusal side.
+
+### Rule composition
+
+Until [#487](https://github.com/cerbos/query-plan-adapters/issues/487) every action was one
+`EFFECT_ALLOW` rule for one role, so every plan's root was the root of one hand-written condition.
+Real policies compose, and then the planner builds the root: a conditional DENY beside a conditional
+ALLOW plans to `and(not(Y), X)`, several ALLOWs to `or(...)`, a derived role with a resource
+condition to a conjunction with the rule's own condition. An adapter with special handling at the
+root (convex's split between its filter engine and its post-filter, a root-only guard) only ever met
+the roots the corpus happened to spell. The nine `compose-*` actions make the planner assemble them
+from separate rules:
+
+| action | rules | pinned plan root |
+|---|---|---|
+| `compose-allow-deny` | ALLOW + DENY | `and(not(gt), eq)` |
+| `compose-multi-allow` | two ALLOW `all`s | `or(and, and)` |
+| `compose-multi-allow-deny` | two ALLOW `all`s + DENY | `and(not(gt), or(and, and))` |
+| `compose-or-not` | ALLOW + ALLOW `none` | `or(gt, not(eq))` |
+| `compose-deny-only` | unconditional ALLOW + DENY | `not(lt)` |
+| `compose-two-deny` | ALLOW + two DENYs | `and(not(or(eq, gt)), ge)` |
+| `compose-derived-role` | ALLOW on a derived role with a resource condition | `and(lt, eq)` |
+| `compose-derived-deny` | ALLOW + unconditional DENY on that derived role | `and(not(eq), lt)` |
+| `compose-variable` | ALLOW + DENY, each through a policy variable | `and(not(gt), in)` |
+
+- **They share the `adversarial` resource kind.** Every harness plans the one `resourceKind` in
+  `seeds.json` against one seed table, so a second kind would be a second corpus. DENY rules,
+  derived roles and variables only reach the actions that reference them: adding them moved none of
+  the existing fixtures. `validate-corpus.sh` still rejects a repeated action outside `compose-`,
+  where a second rule is a copy-paste that silently ORs another condition into an existing shape.
+- **Every DENY is a plain comparison on a column no seed holds NULL.** A LIKE needle would test
+  metacharacter escaping, which the `like-*` actions own, and every adapter refusing it would never
+  reach the composition. NULL is excluded because a DENY over a NULL-bearing column is the one
+  composition where `check()` disagrees with itself across evaluation modes while the plan does not:
+  `ALLOW aNumber >= 0` plus `DENY aOptionalString == "set"` plans to
+  `and(not(eq(aOptionalString, "set")), ge(aNumber, 0))` in both modes, strict mode denies the
+  missing-attribute rows (agreeing with the plan), and default mode drops the erroring DENY and
+  **allows** them (a4, a8, c2, e1), which no filter faithful to the plan can return. It fails safe,
+  but it is a planner/check disagreement, not an adapter shape, and `knownDivergences` has no
+  per-mode form to hold it, so it is tracked separately.
+- **The derived role reads the resource.** `evaluation-probe`'s derived role reads only the
+  principal, so it folds before reaching an adapter. `compose_flagged` is `R.attr.aBool == true`,
+  so it survives into the plan, negated in `compose-derived-deny`.
 
 ### The degeneracy guard
 

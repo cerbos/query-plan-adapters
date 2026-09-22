@@ -47,7 +47,8 @@ if ! jq -e '
 fi
 
 sed -n 's/^[[:space:]]*- actions: \["\([^"]*\)"\].*/\1/p' \
-  policies/adversarial.yaml | sort >"${VALIDATION_TMP}/policy-actions"
+  policies/adversarial.yaml | sort >"${VALIDATION_TMP}/policy-rule-actions"
+uniq "${VALIDATION_TMP}/policy-rule-actions" >"${VALIDATION_TMP}/policy-actions"
 
 jq -r '
   .conformance[],
@@ -56,7 +57,11 @@ jq -r '
   .knownDivergences[].action
 ' actions.json | sort >"${VALIDATION_TMP}/classified-actions"
 
-if duplicates="$(uniq -d "${VALIDATION_TMP}/policy-actions")" && [[ -n "${duplicates}" ]]; then
+# One rule per action, except the rule-composition probes (#487): a `compose-*` action exists to
+# make the planner combine several rules, so it is the one family allowed to repeat. Anywhere else a
+# repeat is a copy-paste that silently ORs a second condition into an existing shape.
+if duplicates="$(uniq -d "${VALIDATION_TMP}/policy-rule-actions" | grep -v '^compose-' || true)" \
+  && [[ -n "${duplicates}" ]]; then
   echo "Duplicate policy actions:"
   echo "${duplicates}"
   exit 1

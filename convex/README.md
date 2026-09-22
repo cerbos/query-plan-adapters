@@ -230,7 +230,7 @@ Data adapter defines the reference semantics for this snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 262 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (269 actions total). A positional read of a number or boolean list keeps the element's JSON type, so `true` never equals `1` and a null element is a value that negation admits (the `index-number-list*` and `index-bool-list*` actions) |
+| Oracle-tested | 271 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (278 actions total). A positional read of a number or boolean list keeps the element's JSON type, so `true` never equals `1` and a null element is a value that negation admits (the `index-number-list*` and `index-bool-list*` actions) |
 | Fail-closed | `filter()`/`map()` used as a condition or conjunct; `list`, `struct`, and `except` constructor/operator forms without a lowering; regex patterns outside the supported RE2 subset; a constant zero divisor whose sign the JSON hop discards; and a nested division denominator whose numeric type the plan does not preserve (30 actions). All 30 throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
 | Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it returns the empty set the PDP demands when the document omits the field for a NULL value (what the harness seeds), because the field is `nullable: true` and `postFilter` raises the same missing-attribute error `check()` does. A deployment that stores explicit nulls while omitting the attribute would over-grant |
@@ -252,13 +252,13 @@ conformance run:
 
 | Decided by | Default mapper | Pushdown mapper |
 | --- | --- | --- |
-| Convex's filter engine, alone | 29 | 40 |
-| the engine narrowing and the `postFilter` deciding (`rel-hop-and-root`) | 1 | 1 |
+| Convex's filter engine, alone | 37 | 48 |
+| the engine narrowing and the `postFilter` deciding (`rel-hop-and-root`, `compose-variable`) | 2 | 2 |
 | the adapter's `postFilter`, alone | 233 | 222 |
 | folded to an unconditional plan before any filter exists | 6 | 6 |
 
 For the 233 post-filtered actions the differential compares the adapter's CEL evaluator against the
-PDP's; Convex's own comparison semantics only decide the 29. The **pushdown mapper** leg clears
+PDP's; Convex's own comparison semantics only decide the 37. The **pushdown mapper** leg clears
 `nullable` on `owner` (always present, stored as `v.union(v.string(), v.null())`), which moves 11
 null-comparison actions (`null-eq`, `null-ne`, `null-not-eq`, `vf-null-ne`, the four
 `in-null-elem-*` and the three `null-value-*-const`) into the engine, proving `q.eq(field, null)`

@@ -166,6 +166,18 @@ const DEGENERACY_LIVENESS_PROBES = [
 // the largest single addition this list has taken, and that is the finding: the positions the
 // corpus had never planned turn out to be the ones Convex pushes down best.
 const DB_DECIDED_DEFAULT = [
+  // Several rules composed into one plan (#487): ALLOW with DENY, several ALLOWs, a derived role
+  // and a policy variable. Every leaf is `aBool` or `aNumber` — required fields — against a
+  // literal, so the whole and/or/not tree the planner builds from the rules reaches the engine.
+  // Their one sibling that does not is `compose-variable`, which splits (see SPLIT_ACTIONS).
+  "compose-allow-deny",
+  "compose-deny-only",
+  "compose-derived-deny",
+  "compose-derived-role",
+  "compose-multi-allow",
+  "compose-multi-allow-deny",
+  "compose-or-not",
+  "compose-two-deny",
   "cs-eq",
   "double-negation",
   "double-threshold",
@@ -254,8 +266,13 @@ const UNCONDITIONAL_ACTIONS = [
  * to-one hop, which is `nullable` and therefore has to be answered by the adapter's own evaluator.
  * That is the whole point of splitting — the engine narrows, and the semantics that need CEL's
  * missing-attribute error stay with the adapter.
+ *
+ * `compose-variable` (#487) is the second, and the first to get there by composing rules: a DENY
+ * on `aNumber > 10` and an ALLOW whose policy variable tests `aOptionalString` against a list
+ * become one root `and`. The negated `aNumber` comparison is a required field, so the engine takes
+ * it; `aOptionalString` is `nullable`, so its membership test stays with the post-filter.
  */
-const SPLIT_ACTIONS = ["rel-hop-and-root"];
+const SPLIT_ACTIONS = ["compose-variable", "rel-hop-and-root"];
 
 /** The plan the live PDP produces for `action` against the corpus principal. */
 function planFor(action: string): Promise<PlanResourcesResponse> {
@@ -527,10 +544,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(301);
+    expect(allActions.size).toBe(310);
     expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(269);
+    expect(ORACLE_ACTIONS).toHaveLength(278);
     expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
@@ -654,11 +671,12 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 269,
+      total: 278,
       defaultDb: DB_DECIDED_DEFAULT,
-      // Exactly one corpus action splits: `buildFilters` only splits a root `and`, and
-      // rel-hop-and-root is the one hostile shape rooted there that mixes a pushable conjunct
-      // with a non-pushable one (#375). Both mappers split it — the hop is `nullable` under each.
+      // Exactly two corpus actions split: `buildFilters` only splits a root `and`, and
+      // rel-hop-and-root (#375) and compose-variable (#487) are the hostile shapes rooted there
+      // that mix a pushable conjunct with a non-pushable one. Both mappers split both — the hop
+      // and `aOptionalString` are `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
       defaultPostCount: 233,

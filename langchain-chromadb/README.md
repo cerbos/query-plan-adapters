@@ -199,7 +199,7 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 48 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms (bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, a disjunction of two scalar predicates); plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field |
+| Oracle-tested | 57 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms (bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, a disjunction of two scalar predicates); plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field |
 | Fail-closed | 240 reference conformance actions — among them positional access into the number and boolean lists, which has no `Where` form — plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (251 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent: Chroma metadata has no null value, so a NULL column is stored as an absent key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused |
@@ -260,7 +260,7 @@ demo/scripts/run-example.sh langchain-chromadb
 `golden/expectations.json`. Because a `Where` clause is JSON, each entry is the translator's
 `{ kind, filters? }` result verbatim, keyed by action name; a literal JSON cannot carry fails
 regeneration. A refused action has no entry (its message lives in `conformance/actions.json`) —
-that is 252 of the corpus's 301 shapes. A wire fixture in neither place fails the suite. The suite
+that is 252 of the corpus's 310 shapes. A wire fixture in neither place fails the suite. The suite
 also asserts, across every translated action, that each field is a mapped key, no `$not`/`$nor`
 is emitted, inequalities appear only on `required` fields, and fractional thresholds only on
 `numericType: "float"` fields. See "Golden expectations" in

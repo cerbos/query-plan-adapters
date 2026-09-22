@@ -88,6 +88,69 @@
         "mysql": "re1_0.a_bool=1"
       }
     },
+    "compose-allow-deny": {
+      "where": {
+        "h2": "not(re1_0.a_number>10) and re1_0.a_bool=true",
+        "postgresql": "not(re1_0.a_number>10) and re1_0.a_bool=true",
+        "mysql": "not(re1_0.a_number>10) and re1_0.a_bool=1"
+      }
+    },
+    "compose-deny-only": {
+      "where": {
+        "h2": "not(re1_0.a_number<0)",
+        "postgresql": "not(re1_0.a_number<0)",
+        "mysql": "not(re1_0.a_number<0)"
+      }
+    },
+    "compose-derived-deny": {
+      "where": {
+        "h2": "not(re1_0.a_bool=true) and re1_0.a_number<12",
+        "postgresql": "not(re1_0.a_bool=true) and re1_0.a_number<12",
+        "mysql": "not(re1_0.a_bool=1) and re1_0.a_number<12"
+      }
+    },
+    "compose-derived-role": {
+      "where": {
+        "h2": "re1_0.a_number<5 and re1_0.a_bool=true",
+        "postgresql": "re1_0.a_number<5 and re1_0.a_bool=true",
+        "mysql": "re1_0.a_number<5 and re1_0.a_bool=1"
+      }
+    },
+    "compose-multi-allow": {
+      "where": {
+        "h2": "re1_0.a_bool=true and re1_0.a_number>15 or re1_0.a_bool=false and re1_0.a_number<7",
+        "postgresql": "re1_0.a_bool=true and re1_0.a_number>15 or re1_0.a_bool=false and re1_0.a_number<7",
+        "mysql": "re1_0.a_bool=1 and re1_0.a_number>15 or re1_0.a_bool=0 and re1_0.a_number<7"
+      }
+    },
+    "compose-multi-allow-deny": {
+      "where": {
+        "h2": "not(re1_0.a_number>20) and (re1_0.a_bool=true and re1_0.a_number>15 or re1_0.a_bool=false and re1_0.a_number<7)",
+        "postgresql": "not(re1_0.a_number>20) and (re1_0.a_bool=true and re1_0.a_number>15 or re1_0.a_bool=false and re1_0.a_number<7)",
+        "mysql": "not(re1_0.a_number>20) and (re1_0.a_bool=1 and re1_0.a_number>15 or re1_0.a_bool=0 and re1_0.a_number<7)"
+      }
+    },
+    "compose-or-not": {
+      "where": {
+        "h2": "re1_0.a_number>20 or not(re1_0.a_bool=true)",
+        "postgresql": "re1_0.a_number>20 or not(re1_0.a_bool=true)",
+        "mysql": "re1_0.a_number>20 or not(re1_0.a_bool=1)"
+      }
+    },
+    "compose-two-deny": {
+      "where": {
+        "h2": "not((re1_0.a_bool=false or re1_0.a_number>18)) and re1_0.a_number>=0",
+        "postgresql": "not((re1_0.a_bool=false or re1_0.a_number>18)) and re1_0.a_number>=0",
+        "mysql": "not((re1_0.a_bool=0 or re1_0.a_number>18)) and re1_0.a_number>=0"
+      }
+    },
+    "compose-variable": {
+      "where": {
+        "h2": "not(re1_0.a_number>10) and re1_0.a_optional_string in ('set','','%_o')",
+        "postgresql": "not(re1_0.a_number>10) and re1_0.a_optional_string in ('set','','%_o')",
+        "mysql": "not(re1_0.a_number>10) and re1_0.a_optional_string in ('set','','%_o')"
+      }
+    },
     "cr-contains": {
       "where": {
         "h2": "'s100Xdone-tail\\one-end' like case when re1_0.a_string is null then null else (('%'||replace(replace(replace(replace(re1_0.a_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\['))||'%') end escape '\\'",

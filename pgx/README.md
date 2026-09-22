@@ -232,7 +232,7 @@ semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 236 reference conformance actions |
+| Oracle-tested | 245 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()` (SQL regex dialects do not guarantee RE2 semantics), ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list of strings, numbers or booleans (SQL row order is undefined), list equality over a `map()` projection, a hierarchy with an empty delimiter, two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
 | Operand types the plan does not carry | `R.attr.a + "x"` and `"x" + R.attr.a` translate. Between **two columns**, declare the string column `ValueType: cerbospgx.ValueString` to get concatenation; otherwise it fails closed rather than emit a numeric `+` — a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |

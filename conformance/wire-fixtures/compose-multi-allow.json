@@ -1,0 +1,80 @@
+{
+  "action": "compose-multi-allow",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "or",
+        "operands": [
+          {
+            "expression": {
+              "operator": "and",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "eq",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": true
+                      }
+                    ]
+                  }
+                },
+                {
+                  "expression": {
+                    "operator": "gt",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 15
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "and",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "eq",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": false
+                      }
+                    ]
+                  }
+                },
+                {
+                  "expression": {
+                    "operator": "lt",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 7
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

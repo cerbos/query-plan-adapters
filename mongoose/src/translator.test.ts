@@ -748,6 +748,214 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  "compose-allow-deny": {
+    $and: [
+      {
+        $nor: [
+          {
+            aNumber: {
+              $gt: 10,
+            },
+          },
+        ],
+      },
+      {
+        aBool: {
+          $eq: true,
+        },
+      },
+    ],
+  },
+  "compose-deny-only": {
+    $nor: [
+      {
+        aNumber: {
+          $lt: 0,
+        },
+      },
+    ],
+  },
+  "compose-derived-deny": {
+    $and: [
+      {
+        $nor: [
+          {
+            aBool: {
+              $eq: true,
+            },
+          },
+        ],
+      },
+      {
+        aNumber: {
+          $lt: 12,
+        },
+      },
+    ],
+  },
+  "compose-derived-role": {
+    $and: [
+      {
+        aNumber: {
+          $lt: 5,
+        },
+      },
+      {
+        aBool: {
+          $eq: true,
+        },
+      },
+    ],
+  },
+  "compose-multi-allow": {
+    $or: [
+      {
+        $and: [
+          {
+            aBool: {
+              $eq: true,
+            },
+          },
+          {
+            aNumber: {
+              $gt: 15,
+            },
+          },
+        ],
+      },
+      {
+        $and: [
+          {
+            aBool: {
+              $eq: false,
+            },
+          },
+          {
+            aNumber: {
+              $lt: 7,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  "compose-multi-allow-deny": {
+    $and: [
+      {
+        $nor: [
+          {
+            aNumber: {
+              $gt: 20,
+            },
+          },
+        ],
+      },
+      {
+        $or: [
+          {
+            $and: [
+              {
+                aBool: {
+                  $eq: true,
+                },
+              },
+              {
+                aNumber: {
+                  $gt: 15,
+                },
+              },
+            ],
+          },
+          {
+            $and: [
+              {
+                aBool: {
+                  $eq: false,
+                },
+              },
+              {
+                aNumber: {
+                  $lt: 7,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  "compose-or-not": {
+    $or: [
+      {
+        aNumber: {
+          $gt: 20,
+        },
+      },
+      {
+        $nor: [
+          {
+            aBool: {
+              $eq: true,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  "compose-two-deny": {
+    $and: [
+      {
+        $nor: [
+          {
+            $or: [
+              {
+                aBool: {
+                  $eq: false,
+                },
+              },
+              {
+                aNumber: {
+                  $gt: 18,
+                },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        aNumber: {
+          $gte: 0,
+        },
+      },
+    ],
+  },
+  "compose-variable": {
+    $and: [
+      {
+        $nor: [
+          {
+            aNumber: {
+              $gt: 10,
+            },
+          },
+        ],
+      },
+      {
+        $and: [
+          {
+            aOptionalString: {
+              $ne: null,
+            },
+          },
+          {
+            aOptionalString: {
+              $in: ["set", "", "%_o"],
+            },
+          },
+        ],
+      },
+    ],
+  },
   // A constant receiver with a column needle: `K.contains(aString)` cannot become a regex over the
   // column, so it becomes `$indexOfCP` with the constant as the haystack. The SQL adapters have to
   // enumerate every substring of the constant here; an aggregation expression can say it directly.
@@ -7256,7 +7464,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 197, kinds: 7, throwing: 97 });
+    }).toEqual({ filters: 206, kinds: 7, throwing: 97 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

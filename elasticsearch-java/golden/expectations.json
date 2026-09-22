@@ -12,6 +12,334 @@
         }
       }
     },
+    "compose-allow-deny": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "range": {
+                "aNumber": {
+                  "lte": 10
+                }
+              }
+            },
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-deny-only": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "range": {
+          "aNumber": {
+            "gte": 0
+          }
+        }
+      }
+    },
+    "compose-derived-deny": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aBool"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aBool": {
+                              "value": true
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "range": {
+                "aNumber": {
+                  "lt": 12
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-derived-role": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "range": {
+                "aNumber": {
+                  "lt": 5
+                }
+              }
+            },
+            {
+              "term": {
+                "aBool": {
+                  "value": true
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-multi-allow": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "term": {
+                      "aBool": {
+                        "value": true
+                      }
+                    }
+                  },
+                  {
+                    "range": {
+                      "aNumber": {
+                        "gt": 15
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "term": {
+                      "aBool": {
+                        "value": false
+                      }
+                    }
+                  },
+                  {
+                    "range": {
+                      "aNumber": {
+                        "lt": 7
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-multi-allow-deny": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "range": {
+                "aNumber": {
+                  "lte": 20
+                }
+              }
+            },
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "bool": {
+                      "must": [
+                        {
+                          "term": {
+                            "aBool": {
+                              "value": true
+                            }
+                          }
+                        },
+                        {
+                          "range": {
+                            "aNumber": {
+                              "gt": 15
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must": [
+                        {
+                          "term": {
+                            "aBool": {
+                              "value": false
+                            }
+                          }
+                        },
+                        {
+                          "range": {
+                            "aNumber": {
+                              "lt": 7
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-or-not": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "range": {
+                "aNumber": {
+                  "gt": 20
+                }
+              }
+            },
+            {
+              "bool": {
+                "must": [
+                  {
+                    "exists": {
+                      "field": "aBool"
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": [
+                        {
+                          "term": {
+                            "aBool": {
+                              "value": true
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-two-deny": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "bool": {
+                "must": [
+                  {
+                    "bool": {
+                      "must": [
+                        {
+                          "exists": {
+                            "field": "aBool"
+                          }
+                        },
+                        {
+                          "bool": {
+                            "must_not": [
+                              {
+                                "term": {
+                                  "aBool": {
+                                    "value": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "range": {
+                      "aNumber": {
+                        "lte": 18
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "range": {
+                "aNumber": {
+                  "gte": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "compose-variable": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "range": {
+                "aNumber": {
+                  "lte": 10
+                }
+              }
+            },
+            {
+              "terms": {
+                "aOptionalString": [
+                  "set",
+                  "",
+                  "%_o"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
     "cs-contains": {
       "kind": "CONDITIONAL",
       "query": {

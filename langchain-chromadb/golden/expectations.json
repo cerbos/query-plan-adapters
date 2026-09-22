@@ -2,6 +2,208 @@
   "adapter": "langchain-chromadb",
   "regenerate": "npm run golden:update",
   "expectations": {
+    "compose-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aNumber": {
+              "$lte": 10
+            }
+          },
+          {
+            "aBool": {
+              "$eq": true
+            }
+          }
+        ]
+      }
+    },
+    "compose-deny-only": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "aNumber": {
+          "$gte": 0
+        }
+      }
+    },
+    "compose-derived-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aBool": {
+              "$ne": true
+            }
+          },
+          {
+            "aNumber": {
+              "$lt": 12
+            }
+          }
+        ]
+      }
+    },
+    "compose-derived-role": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aNumber": {
+              "$lt": 5
+            }
+          },
+          {
+            "aBool": {
+              "$eq": true
+            }
+          }
+        ]
+      }
+    },
+    "compose-multi-allow": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "$and": [
+              {
+                "aBool": {
+                  "$eq": true
+                }
+              },
+              {
+                "aNumber": {
+                  "$gt": 15
+                }
+              }
+            ]
+          },
+          {
+            "$and": [
+              {
+                "aBool": {
+                  "$eq": false
+                }
+              },
+              {
+                "aNumber": {
+                  "$lt": 7
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "compose-multi-allow-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aNumber": {
+              "$lte": 20
+            }
+          },
+          {
+            "$or": [
+              {
+                "$and": [
+                  {
+                    "aBool": {
+                      "$eq": true
+                    }
+                  },
+                  {
+                    "aNumber": {
+                      "$gt": 15
+                    }
+                  }
+                ]
+              },
+              {
+                "$and": [
+                  {
+                    "aBool": {
+                      "$eq": false
+                    }
+                  },
+                  {
+                    "aNumber": {
+                      "$lt": 7
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "compose-or-not": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aNumber": {
+              "$gt": 20
+            }
+          },
+          {
+            "aBool": {
+              "$ne": true
+            }
+          }
+        ]
+      }
+    },
+    "compose-two-deny": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "$and": [
+              {
+                "aBool": {
+                  "$ne": false
+                }
+              },
+              {
+                "aNumber": {
+                  "$lte": 18
+                }
+              }
+            ]
+          },
+          {
+            "aNumber": {
+              "$gte": 0
+            }
+          }
+        ]
+      }
+    },
+    "compose-variable": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aNumber": {
+              "$lte": 10
+            }
+          },
+          {
+            "aOptionalString": {
+              "$in": [
+                "set",
+                "",
+                "%_o"
+              ]
+            }
+          }
+        ]
+      }
+    },
     "cs-eq": {
       "kind": "KIND_CONDITIONAL",
       "filters": {
