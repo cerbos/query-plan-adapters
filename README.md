@@ -10,6 +10,7 @@ Current supported adapters:
 - [Elasticsearch (Java)](https://github.com/cerbos/query-plan-adapters/tree/main/elasticsearch-java)
 - [Ent (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/ent)
 - [LangChain / ChromaDB](https://github.com/cerbos/query-plan-adapters/tree/main/langchain-chromadb)
+- [MongoDB (Ruby)](https://github.com/cerbos/query-plan-adapters/tree/main/mongodb-ruby) — **work-in-progress prototype. Not ready for production use.**
 - [Mongoose](https://github.com/cerbos/query-plan-adapters/tree/main/mongoose)
 - [pgx (Go)](https://github.com/cerbos/query-plan-adapters/tree/main/pgx)
 - [Prisma](https://github.com/cerbos/query-plan-adapters/tree/main/prisma)
@@ -20,7 +21,8 @@ Current supported adapters:
 > **The ActiveRecord adapter is a work-in-progress prototype.** It has not been released, it
 > has not been used in production by anyone, and its public interface can still change without
 > a deprecation. Do not depend on it to enforce access control in a live system yet. See
-> [`activerecord/README.md`](activerecord/README.md) for what it does and does not cover.
+> [`activerecord/README.md`](activerecord/README.md) for what it does and does not cover. The same
+> holds for the **MongoDB Ruby adapter** — see [`mongodb-ruby/README.md`](mongodb-ruby/README.md).
 
 Every adapter is proved against two shared corpora at the root of this repository:
 

@@ -1493,7 +1493,7 @@ The three classes the adapters fall into determine most of the answers:
 |---|---|---|
 | **1 — bare-table subquery** | drizzle, ent, pgx, prisma, activerecord | nothing |
 | **2 — ORM-association subquery** | spring-data, sqlalchemy | Hibernate applies `@SQLRestriction`/`@Where` — on the entity and on the joined collection — and the single-table discriminator; SQLAlchemy applies `primaryjoin` and the single-table discriminator *only* when the caller's override goes through a mapped `relationship()` |
-| **3 — no subquery** | mongoose, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
+| **3 — no subquery** | mongoose, mongodb-ruby, convex, langchain-chromadb, elasticsearch-java | n/a — relations are paths inside the same document |
 
 Prisma names a relation, so it looks like class 2. It is class 1: Prisma has no `@Where` equivalent,
 so nothing store-side reaches the nested `some`/`every`/`none`.

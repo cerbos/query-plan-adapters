@@ -1,0 +1,195 @@
+# frozen_string_literal: true
+
+require_relative "errors"
+
+module Cerbos
+  module MongoDB
+    # How Cerbos attribute references map onto document paths.
+    #
+    # The caller supplies either a Hash keyed by the plan's variable name
+    # (+"request.resource.attr.title"+) or anything that responds to +call(reference)+ and
+    # returns the same config Hash or +nil+. A config is:
+    #
+    #   {
+    #     field: "title",                 # the document path, dotted for a subdocument
+    #     nullable: true,                 # a stored null IS a missing Cerbos attribute
+    #     value_parser: ->(v) { ... },    # rewrites each constant compared with this field
+    #     value_type: :string,            # :number, :string, :boolean or :date_time
+    #     relation: {
+    #       name: "tags",                 # the path of the subdocument or array
+    #       type: :many,                  # :one (subdocument) or :many (array of subdocuments)
+    #       field: "name",                # the element field the relation stands for, if any
+    #       requires_parent: "categories",# an optional to-ONE parent array this path goes through
+    #       fields: {"name" => {field: "name"}}
+    #     }
+    #   }
+    #
+    # Keys may be Symbols or Strings. An unknown key raises {MapperError}: a misspelt +nullable+
+    # silently ignored would drop a guard, which is an over-grant rather than a typo.
+    class Mapper
+      Config = Struct.new(:field, :nullable, :value_parser, :value_type, :relation)
+      Relation = Struct.new(:name, :type, :field, :requires_parent, :fields)
+
+      CONFIG_KEYS = %i[field nullable value_parser value_type relation].freeze
+      RELATION_KEYS = %i[name type field requires_parent fields].freeze
+      VALUE_TYPES = %i[number string boolean date_time].freeze
+      RELATION_TYPES = %i[one many].freeze
+
+      # @param source [Hash, #call, Mapper]
+      def self.wrap(source)
+        return source if source.is_a?(Mapper)
+        return new(->(reference) { source.call(reference) }) if source.respond_to?(:call)
+        raise MapperError, "mapper must be a Hash or respond to #call, got #{source.class}" unless source.is_a?(Hash)
+
+        entries = source.to_h { |key, config| [key.to_s, normalise_config(config, key.to_s)] }
+        new(->(reference) { entries[reference] })
+      end
+
+      # @return [Config, nil]
+      def self.normalise_config(config, label)
+        return nil if config.nil?
+        return config if config.is_a?(Config)
+        raise MapperError, "mapper entry #{label} must be a Hash, got #{config.class}" unless config.is_a?(Hash)
+
+        config = symbolise(config, CONFIG_KEYS, "mapper entry #{label}")
+        field = config[:field]
+        raise MapperError, "mapper entry #{label}: field must be a String" unless field.nil? || field.is_a?(String)
+        nullable = config.fetch(:nullable, false)
+        raise MapperError, "mapper entry #{label}: nullable must be true or false" unless [true, false].include?(nullable)
+        parser = config[:value_parser]
+        unless parser.nil? || parser.respond_to?(:call)
+          raise MapperError, "mapper entry #{label}: value_parser must respond to #call"
+        end
+        value_type = config[:value_type]&.to_sym
+        unless value_type.nil? || VALUE_TYPES.include?(value_type)
+          raise MapperError, "mapper entry #{label}: value_type must be one of #{VALUE_TYPES.inspect}"
+        end
+
+        Config.new(field, nullable, parser, value_type, normalise_relation(config[:relation], label))
+      end
+
+      def self.normalise_relation(relation, label)
+        return nil if relation.nil?
+        return relation if relation.is_a?(Relation)
+        raise MapperError, "mapper entry #{label}: relation must be a Hash" unless relation.is_a?(Hash)
+
+        relation = symbolise(relation, RELATION_KEYS, "mapper entry #{label} relation")
+        name = relation[:name]
+        raise MapperError, "mapper entry #{label}: relation name must be a non-empty String" unless name.is_a?(String) && !name.empty?
+        type = relation[:type]&.to_sym
+        unless RELATION_TYPES.include?(type)
+          raise MapperError, "mapper entry #{label}: relation type must be :one or :many"
+        end
+        fields = (relation[:fields] || {}).to_h { |key, nested|
+          [key.to_s, normalise_config(nested, "#{label}.fields.#{key}")]
+        }
+
+        Relation.new(name, type, relation[:field]&.to_s, relation[:requires_parent]&.to_s, fields)
+      end
+
+      def self.symbolise(hash, allowed, label)
+        hash = hash.transform_keys(&:to_sym)
+        unknown = hash.keys - allowed
+        raise MapperError, "#{label} carries unknown keys #{unknown.inspect}" unless unknown.empty?
+
+        hash
+      end
+
+      def initialize(lookup)
+        @lookup = lookup
+      end
+
+      # The caller's entry for exactly +reference+.
+      # @return [Config, nil]
+      def lookup(reference)
+        self.class.normalise_config(@lookup.call(reference), reference)
+      end
+
+      # +a.b+ → the +b+ entry in the +fields+ of the relation +a+ maps to, if any.
+      def relation_field_config(reference)
+        parts = reference.split(".")
+        last = parts.pop
+        return nil if parts.empty? || last.nil? || last.empty?
+
+        lookup(parts.join("."))&.relation&.fields&.[](last)
+      end
+
+      # The mapper entry for a reference: its own, or the one its parent relation declares.
+      def resolve_config(reference)
+        lookup(reference) || relation_field_config(reference)
+      end
+
+      def nullable?(reference)
+        resolve_config(reference)&.nullable == true
+      end
+
+      def value_type(reference)
+        resolve_config(reference)&.value_type
+      end
+
+      def apply_value_parser(reference, value)
+        # Unlike resolve_config, a reference's own entry does not shadow its relation's parser.
+        parser = lookup(reference)&.value_parser || relation_field_config(reference)&.value_parser
+        parser ? parser.call(value) : value
+      end
+
+      Resolved = Struct.new(:path, :relation)
+      ResolvedRelation = Struct.new(:name, :type, :requires_parent)
+
+      # Resolves a plan variable to a document path, through the relation it belongs to if any.
+      # A to-many relation keeps its array segment first so it can be split off.
+      def resolve_field(reference)
+        parts = reference.split(".")
+        return Resolved.new([reference], nil) if parts.empty? || parts.last.empty?
+
+        config = lookup(reference)
+        return relation_reference(config.relation, config.relation.field) if config&.relation
+        return Resolved.new([config.field], nil) if config&.field
+
+        if parts.length > 1
+          parent = lookup(parts[0..-2].join("."))&.relation
+          if parent
+            return relation_reference(parent, parent.fields[parts.last]&.field || parts.last)
+          end
+        end
+
+        Resolved.new([reference], nil)
+      end
+
+      # The mapper a collection macro's lambda body is translated with: the iteration variable
+      # (and +variable.field+) resolve against the relation's element +fields+, relative to the
+      # element; every other key falls through to this mapper.
+      def scoped(collection_path, variable)
+        outer = self
+        Mapper.new(lambda { |key|
+          unless key == variable || key.start_with?("#{variable}.")
+            next outer.lookup(key) || Config.new(key, false, nil, nil, nil)
+          end
+
+          relation = outer.lookup(collection_path)&.relation
+          if key == variable
+            field = relation&.field
+            next Config.new(key, false, nil, nil, nil) if field.nil?
+
+            next relation.fields[field] || Config.new(field, false, nil, nil, nil)
+          end
+          element_field = key[(variable.length + 1)..]
+          relation&.fields&.[](element_field) || Config.new(element_field, false, nil, nil, nil)
+        })
+      end
+
+      private
+
+      def relation_reference(relation, field)
+        path = if field.nil?
+          [relation.name]
+        elsif relation.type == :one
+          ["#{relation.name}.#{field}"]
+        else
+          [relation.name, field]
+        end
+        Resolved.new(path, ResolvedRelation.new(relation.name, relation.type, relation.requires_parent))
+      end
+    end
+  end
+end

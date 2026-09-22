@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+# The adapter comes from the PACKED ARTIFACT, never from ../lib
+# (docs/adr/0002-examples-install-the-packed-artifact.md). run.sh builds the gem and unpacks it
+# into vendor/, so this path holds exactly the files the gemspec's `files` allowlist shipped — a
+# lib/ file left out of that allowlist fails here rather than for the first consumer.
+source "https://rubygems.org"
+
+gem "cerbos-mongodb", path: "vendor/cerbos-mongodb"
+
+# The adapter declares no dependency on the driver — it returns plain Hashes — so the `mongo`
+# here is the application's own, exactly as it would be in a consumer's Gemfile. No committed
+# lockfile, so a new driver release reaches this job on the next run.
+gem "mongo", "~> 2.21"
+gem "cerbos", "~> 0.14"
