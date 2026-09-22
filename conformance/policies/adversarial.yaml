@@ -3377,9 +3377,11 @@ resourcePolicy:
             of:
               - expr: R.attr.aBool == true
 
-    # not(contains): an UNCONDITIONAL ALLOW with a conditional DENY — the most common real policy
-    # ("everyone may, except ...") — so the root is a bare negation of a literal-needle LIKE.
-    # a2/a4/b2/c2 hold an underscore and are denied.
+    # not(lt): an UNCONDITIONAL ALLOW with a conditional DENY — the most common real policy
+    # ("everyone may, except ...") — so the root is a bare negation the planner produced. The DENY
+    # is a plain comparison on purpose: a LIKE needle would test metacharacter escaping, which the
+    # like-* actions already own, and every adapter refusing it would never reach the composition.
+    # a2/a5/b3 (negative aNumber) are denied.
     - actions: ["compose-deny-only"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -3389,7 +3391,7 @@ resourcePolicy:
       roles: ["USER"]
       condition:
         match:
-          expr: R.attr.aString.contains("_")
+          expr: R.attr.aNumber < 0
 
     # and(not(or(eq, gt)), ge): two DENYs, which the planner joins under ONE negation. Oracle:
     # aNumber >= 0 and aBool true and aNumber <= 18. b4/b6/g1 witness the first DENY, h2/h3 the

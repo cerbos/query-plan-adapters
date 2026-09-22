@@ -915,7 +915,7 @@ the planner assemble them from separate rules instead:
 | `compose-multi-allow` | two ALLOW `all`s | `or(and, and)` |
 | `compose-multi-allow-deny` | two ALLOW `all`s + DENY | `and(not(gt), or(and, and))` |
 | `compose-or-not` | ALLOW + ALLOW `none` | `or(gt, not(eq))` |
-| `compose-deny-only` | unconditional ALLOW + DENY | `not(contains)` |
+| `compose-deny-only` | unconditional ALLOW + DENY | `not(lt)` |
 | `compose-two-deny` | ALLOW + two DENYs | `and(not(or(eq, gt)), ge)` |
 | `compose-derived-role` | ALLOW on a derived role with a resource condition | `and(lt, eq)` |
 | `compose-derived-deny` | ALLOW + unconditional DENY on that derived role | `and(not(eq), lt)` |
