@@ -8,15 +8,10 @@ package dev.cerbos.queryplan.springdata;
 import jakarta.persistence.criteria.CriteriaBuilder;
 
 /**
- * Classpath-guarded probe for the {@code cerbos_ieee_double} MySQL cast function
- * registered by {@link MySqlDoubleCastFunctionContributor}. The adapter itself depends
- * only on Jakarta Persistence; everything that touches Hibernate types lives in the
- * nested {@link Probe} class, which is only loaded after {@code hibernate-core} has been
- * confirmed present — on non-Hibernate providers {@link #isRegistered} is a constant
- * {@code false} and the caller keeps the portable {@code cb.toDouble} path.
- *
- * <p>Its one caller is {@link ArithmeticTranslator#toIeeeDouble}; it is a separate type so
- * that the Hibernate class reference stays out of every collaborator's constant pool.
+ * Checks whether the {@code cerbos_ieee_double} function from
+ * {@link MySqlDoubleCastFunctionContributor} is registered. Hibernate types are touched only in
+ * {@link Probe}, which loads only when {@code hibernate-core} is on the classpath; on other JPA
+ * providers {@link #isRegistered} is always {@code false}.
  */
 final class IeeeDoubleCast {
 
@@ -34,12 +29,12 @@ final class IeeeDoubleCast {
         }
     }
 
-    /** True when the current CriteriaBuilder's session factory has the function registered. */
+    /** Whether {@code cb}'s session factory has the function registered. */
     static boolean isRegistered(CriteriaBuilder cb) {
         return HIBERNATE_PRESENT && Probe.isRegistered(cb);
     }
 
-    /** The only code that references Hibernate types; never loaded without hibernate-core. */
+    /** The only code that references Hibernate types. */
     private static final class Probe {
         static boolean isRegistered(CriteriaBuilder cb) {
             return cb instanceof org.hibernate.query.sqm.NodeBuilder nb

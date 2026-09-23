@@ -20,44 +20,26 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Resolution context for Cerbos plan variables: maps a variable such as
- * {@code request.resource.attr.foo} (or a lambda-scoped {@code t.name}) to what it denotes —
- * a scalar JPA {@link Path} or a relation to join through — relative to the {@code From} the
- * current (sub)query is built against.
+ * Resolves a plan variable such as {@code request.resource.attr.foo} or a lambda-scoped
+ * {@code t.name} to a scalar JPA {@link Path} or a relation, relative to the current
+ * (sub)query's {@code From}.
  */
 sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
 
     /**
-     * Classify a Cerbos plan variable and resolve it against this scope.
+     * Resolves {@code cerbosVar} against this scope. Never returns null: throws
+     * {@link UnmappedAttributeException} for a name the mapping does not cover and
+     * {@link MalformedPlanException} for an unbound lambda reference.
      *
-     * <p>TOTAL: every variable either lands in one of {@link Resolution}'s two arms or throws
-     * naming why — {@link UnmappedAttributeException} for a name the mapping does not cover,
-     * {@link MalformedPlanException} for a lambda reference the plan never bound — there is no
-     * null return and no second classifier to consult afterwards. Callers that need a column narrow with {@link #path};
-     * callers that need a collection pattern-match {@link ResolvedRelation}, and get the
-     * unmapped-variable rejection from this throw rather than from a second call made purely
-     * for it.
-     *
-     * <p>The three resolution rules live here and only here:
-     * <ul>
-     *   <li><b>chain walking</b> — a dotted variable is matched against the longest registered
-     *       Relation prefix and its suffix walked through nested {@code fields()} maps, so
-     *       {@code ...attr.categories.subCategories} resolves to the two-hop join chain;</li>
-     *   <li><b>lambda delegation</b> — a {@link LambdaScope} resolves variables prefixed with
-     *       its lambda variable against the joined element and delegates everything else
-     *       outward;</li>
-     *   <li><b>owner anchoring</b> — a {@link ResolvedRelation} carries the scope that OWNS
-     *       its first hop, which is where a subquery over it must correlate.</li>
-     * </ul>
+     * <p>A dotted variable matches the longest registered Relation prefix, and the rest is
+     * walked through nested {@code fields()} maps. A {@link LambdaScope} resolves its own
+     * variable against the joined element and delegates everything else outward.
      */
     Resolution resolve(String cerbosVar);
 
     /**
-     * Narrow {@link #resolve} to the scalar arm: the JPA path to compare {@code cerbosVar} as.
-     *
-     * <p>Relation-valued variables and Fields with no column on this scope's {@code From} are
-     * rejected here rather than resolved to a guessed path — the adapter fails closed rather
-     * than comparing the wrong column.
+     * The JPA path to compare {@code cerbosVar} as. Throws for a relation, or for a Field with
+     * no column on this scope's {@code From}.
      */
     default Path<?> path(String cerbosVar) {
         if (resolve(cerbosVar) instanceof ResolvedScalar scalar) {
@@ -78,37 +60,22 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     sealed interface Resolution permits ResolvedScalar, ResolvedRelation {}
 
     /**
-     * A variable denoting a single value: {@code path} is the JPA path to compare it as and
-     * {@code mapping} is the {@link AttributeMapping} it was resolved through.
+     * A variable denoting a single value, and the mapping it was resolved through.
      *
-     * <p>{@code mapping} is never null, but it is a {@link AttributeMapping.Relation} for the
-     * bare lambda variable — {@code t} inside {@code tags.exists(t, ...)} denotes the ELEMENT,
-     * whose {@code path} is the relation's {@code defaultMemberField} (or the joined element
-     * itself), and whose only mapping is the relation it came from. Callers that need a
-     * genuine scalar attribute test {@code mapping instanceof AttributeMapping.Field}.
-     *
-     * <p>{@code path} is null exactly when the Field is reachable only THROUGH a relation
-     * chain ({@code ...attr.categories.name} against a root scope): mapped, and scalar per
-     * ELEMENT, but with no column on the entity this scope is rooted at. It resolves to this
-     * arm rather than throwing so the collection operators can say the variable is a scalar
-     * one instead of calling it unknown; {@link #path} reports it as the "Unknown attribute"
-     * it has always been.
+     * <p>For the bare lambda variable ({@code t} in {@code tags.exists(t, ...)}) the mapping
+     * is the {@link AttributeMapping.Relation} it ranges over. {@code path} is null when the
+     * Field is reachable only through a relation chain, so it has no column on this scope's
+     * entity; {@link #path} reports that as an unknown attribute.
      */
     record ResolvedScalar(Path<?> path, AttributeMapping mapping) implements Resolution {}
 
     /**
-     * A relation-valued variable resolved to the Relations to join through — in hop order,
-     * first hop owned by {@code owner.from()} — ending at the {@code tail} Relation whose
-     * elements the enclosing operator ranges over. Multi-hop chains
-     * ({@code categories.subCategories}) denote the FLATTENED union of tail elements across
-     * the intermediate hops, which is exactly what a correlated join chain expresses.
+     * A relation-valued variable: the Relations to join through, in hop order. A multi-hop
+     * chain denotes the flattened union of the last hop's elements.
      *
-     * <p>The owner is the resolution site — the root scope for
-     * {@code request.resource.attr.*} references (even when resolved from inside a lambda,
-     * whose scope merely delegates outward), or the lambda scope itself when the chain hangs
-     * off the lambda element. A subquery over the relation must correlate the OWNER's
-     * {@code from()}: joining the chain off any other {@code From} either fails at query-build
-     * time or silently queries a same-named collection on the wrong entity.
+     * <p>{@code owner} is the scope whose {@code from()} holds the first hop. A subquery over
+     * the relation must correlate that {@code From}; any other could silently query a
+     * same-named collection on the wrong entity.
      */
     record ResolvedRelation(Scope owner, List<AttributeMapping.Relation> chain)
             implements Resolution {
@@ -135,14 +102,11 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Re-root the scope CHAIN for use inside a subquery that correlated {@code target}'s
-     * {@code from()}: the level identical to {@code target} is re-rooted at {@code correlated},
-     * so paths resolved through it become valid correlation references of that subquery; levels
-     * between {@code scope} and the target keep their Froms — paths through them stay legal as
-     * implicit correlation references, the same reliance the base case already places on
-     * untouched {@code outer} links — but adopt {@code sub} as the query any deeper subqueries
-     * are built against. Identity comparison is deliberate: the target is always the
-     * {@link ResolvedRelation#owner()} {@link #resolve} returned on this same chain.
+     * Re-roots the scope chain for use inside subquery {@code sub}, which correlated
+     * {@code target}'s {@code from()}. The {@code target} level is re-rooted at
+     * {@code correlated}; levels between {@code scope} and {@code target} keep their Froms but
+     * build deeper subqueries against {@code sub}. {@code target} is matched by identity, since
+     * it is the {@link ResolvedRelation#owner()} returned on this chain.
      */
     static Scope rebaseAt(Scope scope, Scope target, From<?, ?> correlated, AbstractQuery<?> sub) {
         if (scope == target) {
@@ -156,9 +120,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             return new LambdaScope(ls.from(), sub, ls.relation(), ls.lambdaVar(),
                     rebaseAt(ls.outer(), target, correlated, sub));
         }
-        // An invariant between resolve() and chainSubquery, not a refusal of the plan: no plan
-        // input reaches it, so it goes through none of the Refusals factories. It stays the
-        // IllegalArgumentException ScopeTest pins rather than becoming Refusals.internal().
+        // An adapter invariant, not a plan refusal. ScopeTest pins the exception type.
         throw new IllegalArgumentException(
                 "Relation owner scope is not on the current resolution chain");
     }
@@ -167,15 +129,10 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             implements Scope {
         @Override
         public Resolution resolve(String cerbosVar) {
-            // A directly registered Field is a column on this From — the common case, and the
-            // only one where the variable names a scalar the entity actually holds.
             if (mapper.get(cerbosVar) instanceof AttributeMapping.Field f) {
                 return new ResolvedScalar(traversePath(from, f.jpaPath()), f);
             }
-            // Otherwise the variable is either a registered Relation, or a dotted suffix off
-            // one. Example: mapper has "request.resource.attr.categories" →
-            // Relation("categories", fields={"subCategories": Relation(...)}) and we are asked
-            // for "request.resource.attr.categories.subCategories" — walk the chain.
+            // Otherwise a registered Relation or a dotted path off one.
             RelationChain chain = resolveRelationChain(mapper, cerbosVar);
             if (chain == null) {
                 throw Refusals.unknownAttribute(cerbosVar);
@@ -183,18 +140,15 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             if (chain.tail() == null) {
                 return new ResolvedRelation(this, chain.relations());
             }
-            // A Field reached THROUGH the chain: scalar per element, no column here — see
-            // ResolvedScalar on why this is an arm rather than a throw.
+            // A Field reached through the chain has no column here; see ResolvedScalar.
             return new ResolvedScalar(null, chain.tail());
         }
     }
 
     /**
-     * Scope inside a collection lambda. Variables prefixed with the lambda variable resolve
-     * against the joined collection element; anything else (e.g. another
-     * {@code request.resource.attr.*} reference in the lambda body) delegates to {@code outer}
-     * — the enclosing scope re-rooted at the subquery's correlated parent, so the produced
-     * path is a legal correlation reference.
+     * Scope inside a collection lambda. The lambda variable resolves against the joined
+     * element; anything else delegates to {@code outer}, the enclosing scope re-rooted inside
+     * the subquery.
      */
     record LambdaScope(From<?, ?> from, AbstractQuery<?> parentQuery,
                        AttributeMapping.Relation relation, String lambdaVar,
@@ -207,10 +161,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         @Override
         public Resolution resolve(String cerbosVar) {
             if (!isLambdaRef(cerbosVar)) {
-                // An outer reference: it resolves — and, when relation-valued, is OWNED —
-                // further out. request.resource.attr.tags inside a categories lambda belongs
-                // to the root, so a subquery over it correlates the root's From, not this
-                // lambda's element join.
+                // An outer reference is resolved and owned further out.
                 if (outer != null) {
                     return outer.resolve(cerbosVar);
                 }
@@ -218,25 +169,22 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
             }
             String suffix = extractLambdaSuffix(cerbosVar, lambdaVar);
             if (suffix.isEmpty()) {
-                // The bare lambda variable is the element itself, not a relation: its value is
-                // the relation's scalar projection, its mapping the relation it came from.
+                // The bare lambda variable is the element itself.
                 return new ResolvedScalar(memberPath(from, relation, suffix), relation);
             }
             List<AttributeMapping.Relation> chain = relationChain(suffix);
             if (chain != null) {
                 return new ResolvedRelation(this, chain);
             }
-            // Not a chain off the element, so a member scalar: the mapping registered under
-            // the whole suffix if there is one, else the suffix read as a raw JPA path.
+            // A member scalar: its nested mapping if registered, else the suffix as a JPA path.
             AttributeMapping nested = relation.fields().get(suffix);
             return new ResolvedScalar(memberPath(from, relation, suffix),
                     nested != null ? nested : AttributeMapping.field(suffix));
         }
 
         /**
-         * Walk {@code suffix}'s dotted parts through the element's nested {@code fields()}
-         * maps, or {@code null} as soon as a hop is scalar or unmapped: {@code c.subCategories}
-         * is a relation chain hanging off the element, {@code c.name} is not.
+         * The Relations {@code suffix} walks through the element's nested {@code fields()}, or
+         * {@code null} if any part is not a Relation.
          */
         private List<AttributeMapping.Relation> relationChain(String suffix) {
             List<AttributeMapping.Relation> chain = new ArrayList<>();
@@ -252,16 +200,12 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         }
     }
 
-    /**
-     * A dotted top-level Cerbos attribute resolved to a chain of Relations, ending in either a
-     * leaf {@code tail} Field or (when {@code tail} is null) the final Relation itself.
-     */
+    /** A chain of Relations, ending in the Field {@code tail}, or in the last Relation when null. */
     record RelationChain(List<AttributeMapping.Relation> relations, AttributeMapping.Field tail) {}
 
     /**
-     * Resolve a Cerbos variable to a {@link RelationChain} by matching the longest registered
-     * Relation prefix and walking the remaining dotted suffix through nested {@code fields()}
-     * maps. Returns {@code null} if no prefix resolves all the way.
+     * Resolves {@code cerbosVar} by its longest registered Relation prefix that the rest of the
+     * path can be walked from, or returns {@code null}.
      */
     static RelationChain resolveRelationChain(Map<String, AttributeMapping> mapper, String cerbosVar) {
         AttributeMapping direct = mapper.get(cerbosVar);
@@ -282,9 +226,8 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Walk {@code suffix} through {@code head}'s nested {@code fields()} maps: every part must
-     * name a Relation, except that the LAST may name a Field. {@code null} when a part is
-     * unmapped, or a Field appears before the end.
+     * Walks {@code suffix} through {@code head}'s nested {@code fields()}. Every part must be a
+     * Relation except the last, which may be a Field; otherwise returns {@code null}.
      */
     private static RelationChain walkSuffix(AttributeMapping.Relation head, String[] suffix) {
         List<AttributeMapping.Relation> chain = new ArrayList<>(List.of(head));
@@ -304,10 +247,9 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Resolve a member path off a join over {@code rel}: an empty/null {@code memberField}
-     * yields the relation's {@code defaultMemberField} if set, else the joined element itself
-     * ({@code @ElementCollection} of primitives); otherwise the member resolves through the
-     * relation's {@code fields()} mapping, falling back to the raw name as a JPA path.
+     * A member path off a join over {@code rel}. With no {@code memberField}: the
+     * {@code defaultMemberField}, else the element itself. Otherwise the nested Field mapping,
+     * else the raw name as a JPA path.
      */
     static Path<?> memberPath(From<?, ?> from, AttributeMapping.Relation rel, String memberField) {
         if (memberField == null || memberField.isEmpty()) {
@@ -324,22 +266,12 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Walks a dotted JPA path, joining any to-ONE association it passes through with a LEFT join.
+     * Walks a dotted JPA path, LEFT-joining each association before the last segment.
      *
-     * <p>{@code Path.get()} on an association is an INNER join, which removes the row from the
-     * WHOLE query when the association is absent. That is indistinguishable from the correct
-     * answer for a predicate that stands alone — both exclude the row — but it is wrong under a
-     * disjunction, where the missing hop must only make ITS OWN branch unknown: a row with no
-     * parent that satisfies the other branch is one the PDP allows, and an inner join drops it
-     * (cerbos/query-plan-adapters#375).
-     *
-     * <p>A LEFT join makes the absent hop SQL NULL instead, which is CEL's missing-path error and
-     * is branch-local: NULL propagates through the comparison, {@code NOT NULL} is still NULL so
-     * the row stays excluded under both polarities, and {@code NULL OR TRUE} is TRUE. The
-     * associations reached this way are to-ONE, so the join cannot multiply rows.
-     *
-     * <p>Embeddable members are left on {@code get()}: they are not associations, they are
-     * columns on the same row, and joining them is not portable.
+     * <p>{@code Path.get()} would inner-join, dropping the row from the whole query when the
+     * association is absent, even when another {@code OR} branch allows it. A LEFT join makes
+     * the missing hop NULL, which only makes its own comparison UNKNOWN. Embeddables stay on
+     * {@code get()}.
      */
     static Path<?> traversePath(From<?, ?> from, String dottedJpaPath) {
         String[] parts = dottedJpaPath.split("\\.");
@@ -356,9 +288,8 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     }
 
     /**
-     * Whether {@code part} names an association on {@code from}'s type, asked of the metamodel
-     * rather than by resolving a path — resolving one would register the very implicit inner join
-     * this check exists to avoid.
+     * Whether {@code part} is an association on {@code from}'s type. Asks the metamodel, because
+     * resolving the path would register an implicit inner join.
      */
     private static boolean isAssociation(From<?, ?> from, String part) {
         ManagedType<?> managed = managedTypeOf(from);
@@ -368,19 +299,14 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         try {
             return managed.getAttribute(part).isAssociation();
         } catch (IllegalArgumentException notAnAttribute) {
-            // An unknown name here is not this method's error to raise: get() below produces the
-            // provider's own diagnostic, which names the entity and the property.
+            // Let get() raise the provider's own error for an unknown name.
             return false;
         }
     }
 
     /**
-     * The managed type {@code from} exposes attributes of.
-     *
-     * <p>A {@code Root} models its own entity type, but a {@code Join} models the ATTRIBUTE it was
-     * created from, so the target type has to be read back off that attribute. Missing this is why
-     * only the first hop of a multi-level path would be joined, leaving the second an inner join
-     * off the first — and one inner join anywhere on the path is enough to drop the row.
+     * The managed type of {@code from}. A {@code Join}'s model is the attribute it was created
+     * from, so the target type is read from that attribute.
      */
     private static ManagedType<?> managedTypeOf(From<?, ?> from) {
         Bindable<?> model = from.getModel();

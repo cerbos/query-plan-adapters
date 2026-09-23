@@ -6,14 +6,11 @@
 package dev.cerbos.queryplan.springdata;
 
 /**
- * The plan violates the planner's wire contract — an operator with the wrong arity, a lambda
- * whose second operand is not a variable, a conditional plan with no condition, an unknown
- * filter kind, a protobuf value with no kind, a literal CEL's own {@code timestamp()} would
- * reject, a constant comparison the planner should have folded away.
+ * The plan violates the planner's wire contract, for example an operator with the wrong arity,
+ * a conditional plan with no condition, or a literal CEL's {@code timestamp()} would reject.
  *
- * <p>No Cerbos planner output should produce one of these, so a caller seeing it has either a
- * hand-built plan or an upstream bug to report, not a policy shape to rewrite. The shared
- * corpus is planner output and reaches none of these sites; {@code RefusalTypesTest} pins that.
+ * <p>Planner output should never produce this, so it points to a hand-built plan or an
+ * upstream bug rather than a policy to rewrite.
  */
 public final class MalformedPlanException extends IllegalArgumentException {
 

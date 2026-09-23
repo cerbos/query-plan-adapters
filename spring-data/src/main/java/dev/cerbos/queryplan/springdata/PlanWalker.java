@@ -16,23 +16,12 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * The one walk over a plan's expression tree.
+ * Walks a plan's expression tree. It lowers {@code and}/{@code or}/{@code not} and bare
+ * boolean variables itself and dispatches every other operator to its translator.
  *
- * <p>It lowers the boolean connectives ({@code and}/{@code or}/{@code not}) and the bare
- * boolean variable itself, and dispatches every other operator by name to the collaborator
- * that owns it: the collection macros, membership, the ternary, the hierarchy operators, and
- * — for everything not handled by name — the comparison seam. Where a variable resolves is
- * the {@link Scope} threaded through every call; which truth value is being proved is NOT a
- * walk parameter here, unlike the Elasticsearch adapter's walk: negation is
- * junction-barriered in {@link TriPredicate#not} and applied around a built predicate, and
- * the collaborators that need a sub-tree in both polarities translate it twice through the
- * suppliers {@link TriPredicate} demands. Pushing polarity down the walk would change the
- * emitted SQL.
- *
- * <p>One instance per Specification evaluation, built from the caller's
- * {@link SpringDataQueryPlanAdapter.Options} and the {@code CriteriaBuilder} the repository
- * hands over. Its only mutable state is the collection-macro nesting depth, which is why the
- * public facade builds a fresh one on every invocation.
+ * <p>Polarity is not passed down the walk: {@code not} wraps the built predicate (see
+ * {@link TriPredicate#not}). Build a new instance per Specification evaluation, because it
+ * tracks macro nesting depth.
  */
 final class PlanWalker {
 
@@ -64,12 +53,8 @@ final class PlanWalker {
     }
 
     /**
-     * Track one collection-macro nesting level around {@code body}, failing closed when the
-     * plan nests deeper than {@link SpringDataQueryPlanAdapter.Options#effectiveMaxMacroDepth()}
-     * allows, including literal-collection folds. Relation macros translate each body polarity;
-     * literal folds translate the body per element. These multiply nested work, so a runaway-deep
-     * policy must throw a clear error at translation time instead of silently emitting a filter
-     * that times out on production-sized tables.
+     * Runs {@code body} one macro level deeper, throwing when the depth exceeds the configured
+     * maximum. Each level multiplies translation work and subqueries.
      */
     Predicate enterMacro(String op, Supplier<Predicate> body) {
         macroDepth++;
@@ -121,21 +106,13 @@ final class PlanWalker {
             }
             case "exists", "exists_one", "all" ->
                     collections.handleCollectionOperator(op, operands, scope);
-            // filter() yields a list, not a boolean. Reaching it here means the plan used it
-            // as a predicate, and there is no meaning to pick — `filter(...)` is not
-            // `size(filter(...)) > 0` (cerbos/query-plan-adapters#313). The legitimate
-            // size(filter(...)) form is intercepted by the size handler before this.
+            // filter() is a list, not a boolean; size(filter(...)) is handled before this.
             case "filter" -> throw Refusals.unsupported(
                     "filter() returns a list, not a boolean, so it cannot be a condition on "
                             + "its own; only size(filter(...)) has a boolean meaning");
-            // Cerbos except() is a two-list function — PDP-verified wire shape:
-            // size(R.attr.tags.except(["archived"])) > 0 arrives as
-            // gt(size(except(variable, value-list)), 0). No lambda form exists on the wire
-            // (a previous lambda-except translation here was unreachable from any real
-            // plan), and list difference has no JPA Criteria translation — fail closed
-            // with a named error instead.
+            // List difference has no JPA Criteria translation.
             case "except" -> throw Refusals.exceptUnsupported();
-            // has_intersection is the deprecated pre-camelCase alias still accepted by the PDP.
+            // has_intersection is a deprecated alias the PDP still accepts.
             case "hasIntersection", "has_intersection" ->
                     membership.handleHasIntersection(operands, scope);
             case "in" -> membership.handleIn(operands, scope);
