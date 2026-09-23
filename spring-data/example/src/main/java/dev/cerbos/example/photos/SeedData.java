@@ -69,35 +69,32 @@ public class SeedData implements CommandLineRunner {
                         .addGrant("globex", "view", null, "globex:finance")
         ));
 
-        // Adversarial regression seeds — isolated in their own "edge" tenant so the
-        // tenant fence keeps them invisible to every scenario in scripts/smoke.sh.
-        // Each row exists to trigger a historical adapter bug end-to-end; the pinned
-        // expectations live in scripts/smoke-edge-cases.sh and the `edge-*` rules in
-        // policies/photo.yaml.
+        // Rows for the edge-* rules in policies/photo.yaml, asserted by
+        // scripts/smoke-edge-cases.sh. The "edge" tenant keeps them out of scripts/smoke.sh.
         Instant oldEnough = Instant.now().minus(30, ChronoUnit.DAYS);   // outside 24h window
         Instant tooRecent = Instant.now().minus(1, ChronoUnit.HOURS);   // inside 24h window
         photoRepository.saveAll(List.of(
-                // e1: literal "[SEC]" title prefix — must MATCH edge-bracket-title (PR #285).
+                // e1: literal "[SEC]" prefix; must match edge-bracket-title.
                 new Photo("e1", "edge", "edge-user", "[SEC] Quarterly report", true, false,
                         null, 3, new PhotoDetails(1000, 800), Set.of())
                         .withCreatedAt(oldEnough),
-                // e2: class-trap title — 'S' is in the T-SQL class [SEC]; an unescaped
-                // pattern would match it on SQL Server. Must NOT match edge-bracket-title.
+                // e2: 'S' is in the SQL Server character class [SEC], so an unescaped pattern
+                // would match it there. Must not match edge-bracket-title.
                 new Photo("e2", "edge", "edge-user", "Secret launch plan", false, false,
                         null, 3, new PhotoDetails(1000, 800), Set.of())
                         .withCreatedAt(tooRecent),
-                // e3: score = -0.6 — the exact value the pre-#274 algebraic solve produced
-                // for `score + 0.7 == 0.1`; check() DENIES it (IEEE sum != 0.1).
+                // e3: -0.6 solves `score + 0.7 == 0.1` algebraically, but not in IEEE doubles,
+                // so edge-ieee-eq must not match it.
                 new Photo("e3", "edge", "edge-user", "Precision probe", true, false,
                         null, 3, new PhotoDetails(1000, 800), Set.of())
                         .withScore(-0.6)
                         .withCreatedAt(tooRecent),
-                // e4: unrelated non-null score; allowed by edge-ieee-ne alongside e3.
+                // e4: another non-null score; edge-ieee-ne matches it and e3.
                 new Photo("e4", "edge", "edge-user", "Cold archive shot", false, false,
                         null, 3, new PhotoDetails(1000, 800), Set.of())
                         .withScore(2.5)
                         .withCreatedAt(oldEnough),
-                // e5/e6: retention window rows — e5 old enough, e6 too recent (PR #279).
+                // e5/e6: for edge-retention. e5 is older than 24h, e6 is not.
                 new Photo("e5", "edge", "edge-user", "Retention candidate", true, false,
                         null, 3, new PhotoDetails(1000, 800), Set.of())
                         .withCreatedAt(oldEnough),

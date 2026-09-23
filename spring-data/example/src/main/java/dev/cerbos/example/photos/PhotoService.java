@@ -21,13 +21,8 @@ import java.util.Map;
 @Service
 public class PhotoService {
 
-    /**
-     * Maps Cerbos resource-attribute paths used in the policy to JPA paths on {@link Photo}.
-     * The Spring Data adapter translates each plan operand to {@code root.get(...)} via this
-     * mapping. Declaring {@code tags} and {@code labels} as relations makes collection operators
-     * emit correlated subqueries; the nested labels map also decouples policy field names from
-     * Java property names.
-     */
+    // Maps policy attribute paths to JPA paths on Photo. Relation mappings make collection
+    // operators emit correlated subqueries, and their nested maps rename child fields.
     private static final Map<String, AttributeMapping> PHOTO_ATTRS = Map.ofEntries(
             Map.entry("request.resource.attr.ownerId", AttributeMapping.field("ownerId")),
             Map.entry("request.resource.attr.tenantId", AttributeMapping.field("tenantId")),
@@ -36,9 +31,7 @@ public class PhotoService {
             Map.entry("request.resource.attr.title", AttributeMapping.field("title")),
             Map.entry("request.resource.attr.location", AttributeMapping.field("location")),
             Map.entry("request.resource.attr.rating", AttributeMapping.field("rating")),
-            // Edge-case regression scenarios (scripts/smoke-edge-cases.sh): a nullable
-            // double for the IEEE arithmetic probes and an Instant column for the
-            // timestamp()/retention-window rule.
+            // Used only by the edge-* scenarios in scripts/smoke-edge-cases.sh.
             Map.entry("request.resource.attr.score", AttributeMapping.field("score")),
             Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
             Map.entry("request.resource.attr.metadata.width", AttributeMapping.field("details.pixelWidth")),
@@ -74,16 +67,13 @@ public class PhotoService {
     }
 
     /**
-     * Deliberately passes the Cerbos Specification to
-     * {@code JpaSpecificationExecutor.delete(Specification)} — the one repository operation
-     * the adapter forbids. Whenever the plan touches a Relation mapping (tags, labels,
-     * grants), the adapter throws {@link UnsupportedOperationException} instead of letting
-     * Hibernate's multi-table bulk delete corrupt the collection tables (PR #273: the bulk
-     * delete first clears the @ElementCollection/join rows the correlated EXISTS references,
-     * so 0 entity rows were deleted while their collection rows were silently destroyed).
-     * Exists only so {@code DELETE /photos/bulk-unsafe} can demonstrate — and the smoke
-     * harness can pin — that guard. Production code should select ids with
-     * {@code findAll(spec)} and delete via {@code deleteAllById(ids)}.
+     * Passes the Cerbos Specification to {@code delete(Specification)}, which the adapter
+     * refuses. Exists only for {@code DELETE /photos/bulk-unsafe}.
+     *
+     * <p>When the plan uses a relation mapping, the adapter throws
+     * {@link UnsupportedOperationException}: Hibernate's bulk delete would clear the collection
+     * tables first and delete no photos. Use {@code findAll(spec)} and {@code deleteAllById(ids)}
+     * instead.
      */
     public long unsafeBulkDelete(AccessContext context, String action) {
         return repository.delete(specification(context, action, null));

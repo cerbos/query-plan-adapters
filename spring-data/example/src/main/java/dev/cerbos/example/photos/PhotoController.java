@@ -52,17 +52,12 @@ public class PhotoController {
     }
 
     /**
-     * GET /photos?user=alice&role=user&action=view
+     * Lists the photos the principal may perform {@code action} on.
      *
-     * <p><strong>DEMO ONLY — never copy this identity handling.</strong> Identity, role,
-     * tenant, and groups arrive as unauthenticated query parameters purely so the curl/smoke
-     * harness can switch principals per request. In production, derive the principal from
-     * your authentication layer — Spring Security's {@code Authentication} /
-     * {@code SecurityContextHolder}, a verified JWT/OIDC token, or equivalent — never from
-     * request input (parameters, headers, or bodies). As written, any caller can assert
-     * {@code role=admin} (hitting the unconditional-ALLOW rule in {@code photo.yaml}) or
-     * pick another tenant; an authorization filter built from a caller-asserted principal
-     * authorizes nothing. See the "Demo identity only" warning in the example README.
+     * <p><strong>Demo only: do not copy this identity handling.</strong> The principal comes from
+     * unauthenticated query parameters so the smoke scripts can switch users. Any caller can
+     * claim any role or tenant. In production, take the principal from your authentication
+     * layer (for example Spring Security's {@code SecurityContextHolder}), never from the request.
      */
     @GetMapping
     public List<PhotoView> list(@RequestParam String user,
@@ -80,11 +75,10 @@ public class PhotoController {
     }
 
     /**
-     * GET /photos/page?user=alice&action=needs-moderation&page=0&size=1
+     * Pages through the photos the principal may perform {@code action} on.
      *
-     * <p><strong>DEMO ONLY:</strong> same caveat as {@link #list} — the principal comes from
-     * query parameters for harness reproducibility; production code must derive it from the
-     * authentication layer, never from request input.
+     * <p><strong>Demo only:</strong> the principal comes from query parameters, as in
+     * {@link #list}.
      */
     @GetMapping("/page")
     public Page<PhotoView> page(@RequestParam String user,
@@ -104,19 +98,15 @@ public class PhotoController {
     }
 
     /**
-     * DELETE /photos/bulk-unsafe?user=alice&action=comment
+     * Shows the adapter's bulk-delete guard. Expected to return 409 and delete nothing.
      *
-     * <p><strong>Intentionally-failing demonstration of the adapter's bulk-delete guard —
-     * this endpoint is expected to return 409, not delete anything.</strong> It passes the
-     * Cerbos Specification to {@code JpaSpecificationExecutor.delete(Specification)}, which
-     * the adapter forbids whenever the plan touches a Relation mapping: Hibernate's
-     * multi-table bulk delete would first clear the collection tables the correlated EXISTS
-     * subquery references, silently destroying tag/label/grant rows while deleting zero
-     * photos (PR #273). The adapter detects the bulk-delete invocation context and throws
-     * {@link UnsupportedOperationException} before any SQL runs; this endpoint surfaces that
-     * as HTTP 409 with the guard's message. The smoke harness asserts the 409 and then
-     * proves the photo and collection rows are untouched. The correct deletion pattern is
-     * {@code findAll(spec)} then {@code deleteAllById(ids)}.
+     * <p>The adapter throws {@link UnsupportedOperationException} when its Specification is
+     * passed to {@code delete(Specification)} and the plan uses a relation mapping. This endpoint
+     * returns that as 409. To delete permitted rows, call {@code findAll(spec)} and then
+     * {@code deleteAllById(ids)}.
+     *
+     * <p><strong>Demo only:</strong> the principal comes from query parameters, as in
+     * {@link #list}.
      */
     @DeleteMapping("/bulk-unsafe")
     public ResponseEntity<String> bulkUnsafeDelete(@RequestParam String user,
@@ -128,7 +118,7 @@ public class PhotoController {
         try {
             long deleted = service.unsafeBulkDelete(
                     context(user, role, tenant, groups, interests), action);
-            // The guard failing to fire is itself a regression — make it loud.
+            // The guard did not fire, which is a bug.
             return ResponseEntity.internalServerError()
                     .body("bulk-delete guard did not fire; rows deleted: " + deleted);
         } catch (UnsupportedOperationException e) {
