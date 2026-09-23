@@ -10,15 +10,12 @@ import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 import java.util.Map;
 
 /**
- * The {@code matches()} lowering: a {@code prefix} query for a plain {@code ^literal}, otherwise a
- * {@code regexp} query over the RE2/Lucene subset the two engines agree on.
+ * Translates {@code matches()}: a {@code prefix} query for a plain {@code ^literal}, otherwise a
+ * {@code regexp} query.
  *
- * <p>CEL {@code matches()} uses RE2 partial-match semantics. Elasticsearch's {@code regexp} query
- * uses Lucene regex with whole-field semantics, and Lucene {@code .} includes newlines while RE2
- * {@code .} does not. Only explicitly whole-field patterns in the common syntax subset reach
- * Lucene; simple {@code ^literal} prefixes use {@code prefix}. Optional Lucene operators are
- * disabled at the query site with {@code flags=NONE}. The subset validation is its own class
- * because it is a small parser with its own refusals, and nothing else in the walk needs it.
+ * <p>CEL uses RE2 partial matching; Lucene matches the whole field, and its {@code .} matches
+ * newlines. So only fully anchored patterns in the syntax both engines share are accepted, and
+ * Lucene's optional operators are disabled with {@code flags=NONE}.
  */
 final class RegexTranslator {
 
@@ -35,8 +32,7 @@ final class RegexTranslator {
         if (anchoredEnd) {
             body = body.substring(0, body.length() - 1);
         }
-        // The body is validated before the anchors are, so a pattern that is both unanchored and
-        // outside the subset is refused for its syntax.
+        // Syntax is checked before anchoring, so an unanchored bad pattern reports its syntax.
         String luceneBody = validateAndEscapeLuceneRegexBody(body);
         if (!anchoredStart || !anchoredEnd) {
             throw unsupported(
@@ -112,9 +108,6 @@ final class RegexTranslator {
                 }
                 depth--;
             } else if (current == '|' && depth == 0) {
-                // RE2 parses `^a|b$` as two alternatives, each anchored on one side only; Lucene
-                // matches the whole field against `a|b`. The two languages agree only once the
-                // alternation is parenthesised under both anchors.
                 throw unsupported("matches regex has a top-level alternation at index " + index
                         + ": RE2 reads ^a|b$ as two separately anchored alternatives, while "
                         + "Lucene matches the whole field against a|b, so the alternation must "
@@ -143,8 +136,8 @@ final class RegexTranslator {
     }
 
     /**
-     * The index of the {@code }} closing a well-formed {@code {n}}, {@code {n,}} or {@code {n,m}}
-     * interval opening at {@code open}, or {@code -1} when the brace begins no such interval.
+     * The index of the brace closing a {@code {n}}, {@code {n,}} or {@code {n,m}} interval that
+     * opens at {@code open}, or {@code -1} if there is none.
      */
     private static int intervalEnd(String pattern, int open) {
         int cursor = open + 1;
