@@ -843,28 +843,6 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(sql).not_to include('FROM "adversarial_tags" WHERE')
     end
 
-    # Corpus gap (#509): no corpus action nests a macro over the same association. Without a
-    # fresh alias per scope, the inner subquery would compare a tag with itself and allow
-    # denied rows. Delete this test once the corpus action lands.
-    it "correlates a macro nested over the same association to the outer element" do
-      inner = expression("exists", variable("request.resource.attr.tags"),
-        expression("lambda",
-          expression("ne", variable("u.name"), variable("t.name")), variable("u")))
-
-      sql = translate(conditional(expression("exists",
-        variable("request.resource.attr.tags"),
-        expression("lambda", inner, variable("t"))))).to_sql
-
-      # Two different aliases. Matched by pattern, since the numbering may change.
-      comparison = sql[/"(cerbos_adversarial_tags_\d+)"\."name" != "(cerbos_adversarial_tags_\d+)"\."name"/, 0]
-      expect(comparison).not_to be_nil
-      inner_alias, outer_alias = comparison.scan(/cerbos_adversarial_tags_\d+/)
-      expect(inner_alias).not_to eq(outer_alias)
-
-      # The outer alias belongs to the enclosing EXISTS, so the inner one correlates to it.
-      expect(sql).to match(/EXISTS \(SELECT 1 FROM "adversarial_tags" "#{outer_alias}".*#{inner_alias}/m)
-    end
-
     it "resolves a dotted path as a correlated scalar subquery, not a join" do
       sql = described_class.query_plan_to_relation(
         plan: conditional(expression("eq", variable("a"), value("Ada"))),

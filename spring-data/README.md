@@ -373,7 +373,7 @@ implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 256 of the 311 reference conformance actions |
+| Oracle-tested | 259 of the 314 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (a boolean's text is decided in Java instead), CEL's `+` over strings (against a constant and between two columns), `mod`, a positional read of a list of any element type, list equality over a `map()` projection, and a hierarchy with an empty delimiter (66 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` includes NULL rows where CEL's null value says it should; undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -396,7 +396,7 @@ Two suites read the classification. `AdversarialConformanceTest` plans each acti
 PDP (30-second deadline per call) and compares returned rows with `check()`;
 `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` selects the PDP mode, and CI runs both.
 `SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/`
-and asserts the **SQL** against `golden/expectations.json` — 258 recorded statements and 66
+and asserts the **SQL** against `golden/expectations.json` — 261 recorded statements and 66
 refusals, one per action, whose union must equal the corpus. The golden SQL catches rewrites that
 agree on all 29 seeds but would change results on rows nobody seeded.
 
@@ -603,6 +603,14 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
+  the relation an enclosing lambda iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
+  ranges its subquery over a fresh root pinned to the outer row by identity instead of joining off
+  the correlated root. On Hibernate 7 the two `tags` joins got the same navigable path, the outer
+  `t` rendered as the inner join, and the body compared each tag with itself: an under-grant, and
+  an over-grant under negation. Hibernate 6.6 rendered it correctly and now emits one redundant
+  self-join. **Breaking:** the same nesting over a relation owned by a collection element (rather
+  than by the entity) now throws, since only an entity root can be given a fresh range variable.
 - Membership in a **collection** mapping (`x in R.attr.list`, `hasIntersection(R.attr.list, [...])`,
   and `hasIntersection` over a `map()` projection) drops each constant whose type cannot equal the
   element column's before the SQL is built, since CEL's `"2" in [2]` is false. H2 used to coerce

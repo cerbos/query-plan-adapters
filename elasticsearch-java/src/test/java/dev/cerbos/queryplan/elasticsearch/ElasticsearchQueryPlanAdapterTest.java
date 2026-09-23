@@ -692,7 +692,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#414, and is deleted
+    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#509, and is deleted
     // when its corpus action lands. They are NOT covered by #387 or #388, whose actions are
     // enumerated and landed.
     // ============================================================================================

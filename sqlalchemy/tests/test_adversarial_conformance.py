@@ -391,6 +391,10 @@ DEGENERACY_LIVENESS_PROBES = (
     # override consumes.
     "arith-mod",
     "map-eq-list",
+    # #509: a macro nested over the same collection whose body reads the
+    # enclosing element. The negated form is the one a self-comparison
+    # over-grants, so it is the probe.
+    "nest-same-not-exists",
 )
 
 
@@ -989,11 +993,11 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 324
+        assert len(MANIFEST_ACTIONS) == 327
         assert len(SEEDS) == 29
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
-        assert len(THROWING_ACTIONS) == 57
+        assert len(THROWING_ACTIONS) == 60
         assert misclassified == []
         assert SQLALCHEMY_SUPPORTED_EXPECTED <= {
             entry["action"] for entry in MANIFEST.expected_unsupported

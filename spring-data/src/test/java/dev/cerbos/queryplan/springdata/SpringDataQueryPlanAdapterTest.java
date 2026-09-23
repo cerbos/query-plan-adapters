@@ -1605,7 +1605,7 @@ class SpringDataQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#414, and is deleted
+    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#509, and is deleted
     // when its corpus action lands.
     // ============================================================================================
 

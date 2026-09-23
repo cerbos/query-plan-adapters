@@ -364,7 +364,7 @@ kept by hand, and an entry no test carries any more is stale, not a licence.
   three typed refusals (`UnsupportedPlanShapeException`, `UnmappedAttributeException`,
   `MalformedPlanException`).
 - **Kind 3 — a corpus gap wearing a unit test.** Policy-reachable, pinned here alone; each is a
-  bridge tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414), deleted when
+  bridge tracked by [#509](https://github.com/cerbos/query-plan-adapters/issues/509), deleted when
   its corpus action lands, and opens with *Corpus gap.*:
   - `anUnfoldableMacroOverAValueListIsRefusedByName` — direct boolean-root `filter` and `map`
     results; the new actions use computed collections as operands instead;
@@ -398,7 +398,7 @@ with *Corpus gap.*):
   `LocalDateTime` columns, an unmapped reference), the bulk-delete guard, the null-predicate
   contract with Spring Data, defensive copies, and — in `RefusalTypesTest` and `OptionsTest` — the
   three typed refusals and `Options` immutability.
-- **Kind 3.** Bridges tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414),
+- **Kind 3.** Bridges tracked by [#509](https://github.com/cerbos/query-plan-adapters/issues/509),
   grouped as the banners group them: `size(collection)` against arbitrary, fractional and
   out-of-int-range thresholds; empty-list intersection over a direct scalar, relation or map
   projection (the new action covers an absent to-one parent); value-first and relation structured
@@ -795,6 +795,28 @@ different branch). The pair distinguishes an explicit null element from a missin
 `rel-not-contains-hop` and `rel-not-hierarchy-hop` test negative scalar predicates through the
 to-one parent; parentless rows must stay excluded. Every harness guards these for non-empty,
 non-total oracles on its compared or refusal side.
+
+### A macro nested over the same collection
+
+`nest-same-exists`, `nest-same-not-exists` and `nest-same-all`
+([#509](https://github.com/cerbos/query-plan-adapters/issues/509)) nest a macro inside another over
+the SAME collection, with the inner lambda reading the outer element:
+`R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))`. An adapter that gives both
+subqueries one table name, alias or scope renders `u.name != t.name` as a column compared with
+itself, and which way that errs depends on the polarity: `a6` (two differently named tags) is
+dropped by the positive form and returned by the negated one, and `a3` (two tags sharing a name,
+distinct ids) is dropped by `nest-same-all`, which also pins that the inner scope correlates the id
+and not only the name. `b6` mixes a NULL-name tag with a named one and stays denied under every
+polarity.
+
+The family was a unit test in one adapter (activerecord, which already aliased every subquery) until
+it landed here, and running it everywhere found the bug twice more: drizzle rendered both levels
+against the bare table name on every store, and spring-data compared each tag with itself on
+Hibernate 7 only, where every correlated copy of a root restarts the join-alias counter and the
+inner join gets the outer element's navigable path. sqlalchemy's harness only refused because it
+did not map the inner variable; a caller who did would have got the self-comparison, so the
+translator now refuses the shape itself. prisma, mongoose, langchain-chromadb and
+elasticsearch-java refuse it by mechanism, and ent, pgx and convex translated it correctly.
 
 ### Rule composition
 

@@ -520,6 +520,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   "in-scalar-number-vs-string",
   "exists-tag-name-vs-number",
   "hasint-map-vs-number",
+  // #509: a macro nested over the same relation whose body reads the enclosing element. The
+  // negated form is the one a self-comparison would over-grant, so it carries the group's probe.
+  "nest-same-not-exists",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -1075,7 +1078,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   );
 
-  test("manifest assigns all 324 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 327 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1091,10 +1094,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(324);
+    expect(MANIFEST_ACTIONS.size).toBe(327);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(138);
+    expect(THROWING_ACTIONS).toHaveLength(141);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(

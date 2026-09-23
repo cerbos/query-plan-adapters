@@ -640,6 +640,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   "hasint-map-vs-number",
   "null-in-number-list",
   "not-null-in-number-list",
+  // #509: a macro nested over the same relation whose body reads the enclosing element. The
+  // negated form is the one a self-comparison would over-grant, so it carries the group's probe.
+  "nest-same-not-exists",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -908,11 +911,11 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(324);
+    expect(MANIFEST_ACTIONS.size).toBe(327);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(62);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(249);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(252);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(260);
+    expect(THROWING_ACTIONS).toHaveLength(263);
     expect(misclassified).toEqual([]);
   });
 

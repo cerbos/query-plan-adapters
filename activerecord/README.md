@@ -333,7 +333,7 @@ else; CI runs both, each against a PDP configured with the same mode.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 250 corpus actions |
+| Tested against the oracle | 253 corpus actions |
 | Fail-closed | 72 actions: 61 that this adapter cannot express, and the 11 that the reference adapter does not support either. Each must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED`, but `checkResource` denies rows where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` instead of `has(R.attr.x)` for database attributes |

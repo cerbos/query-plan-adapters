@@ -184,12 +184,58 @@ final class ChainSubqueries {
         }
         Subquery<T> sub = scope.parentQuery().subquery(resultType);
         From<?, ?> correlated = correlate(sub, ref.owner().from());
-        Join<?, ?> join = correlated.join(ref.chain().get(0).joinAttribute());
+        From<?, ?> joinedFrom = correlated;
+        Predicate anchor = null;
+        if (rejoinsAnEnclosingElement(scope, ref)) {
+            // Hibernate 7 gives every correlated copy of a From the original's alias and a fresh
+            // join counter, so a chain joined off it here gets the very navigable path the
+            // enclosing lambda's element join got in ITS subquery — `tags.exists(t,
+            // tags.exists(u, u.name != t.name))` renders `t2_0.name<>t2_0.name` and compares each
+            // tag with itself (#509). A fresh range variable over the owner's entity, pinned to
+            // the correlated row by identity, starts a path of its own on every Hibernate major.
+            if (!(correlated instanceof Root<?> owner)) {
+                throw Refusals.unsupported("Cannot nest a collection macro over '"
+                        + ref.chain().stream()
+                                .map(AttributeMapping.Relation::joinAttribute)
+                                .collect(Collectors.joining("."))
+                        + "' inside a lambda over the same relation when the relation is owned by "
+                        + "a collection element: the inner subquery can only be given its own range "
+                        + "variable over an entity root");
+            }
+            Root<?> fresh = sub.from(owner.getModel());
+            anchor = cb.equal(fresh, correlated);
+            sub.where(anchor);
+            joinedFrom = fresh;
+        }
+        Join<?, ?> join = joinedFrom.join(ref.chain().get(0).joinAttribute());
         for (int i = 1; i < ref.chain().size(); i++) {
             join = join.join(ref.chain().get(i).joinAttribute());
         }
         Scope rebased = Scope.rebaseAt(scope, ref.owner(), correlated, sub);
-        return new ChainSubquery<>(sub, join, rebased);
+        return new ChainSubquery<>(sub, join, rebased, anchor);
+    }
+
+    /**
+     * Whether a lambda between {@code scope} and the chain's owner iterates an element joined
+     * through one of the chain's own attributes — the case where the chain's join, taken off a
+     * fresh correlation of the owner, can collide with that element's (see
+     * {@link #chainSubquery}). Matched by attribute name, which over-approximates: a false
+     * positive costs one redundant self-join, a miss compares an element with itself.
+     */
+    private static boolean rejoinsAnEnclosingElement(Scope scope, Scope.ResolvedRelation ref) {
+        for (Scope level = scope; level != null && level != ref.owner();
+             level = level instanceof Scope.LambdaScope ls ? ls.outer() : null) {
+            if (level instanceof Scope.LambdaScope ls && ref.chain().stream()
+                    .anyMatch(r -> r.joinAttribute().equals(ls.relation().joinAttribute()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Set {@code cs}'s WHERE to {@code predicate}, conjoined with its fresh-root anchor if any. */
+    void restrict(ChainSubquery<?> cs, Predicate predicate) {
+        cs.sub().where(cs.anchor() == null ? predicate : cb.and(cs.anchor(), predicate));
     }
 
     /** A chain subquery seeded to {@code SELECT COUNT(tailJoin)} — the shared seed of every counting shape. */
@@ -237,7 +283,7 @@ final class ChainSubqueries {
                              SubqueryBodyBuilder bodyBuilder) {
         ChainSubquery<Integer> cs = chainSubquery(Integer.class, scope, ref);
         cs.sub().select(cb.literal(1));
-        cs.sub().where(cs.body(bodyBuilder));
+        restrict(cs, cs.body(bodyBuilder));
         return cb.exists(cs.sub());
     }
 
@@ -262,7 +308,7 @@ final class ChainSubqueries {
             return existsSubquery(scope, ref, bodyBuilder);
         }
         ChainSubquery<Long> cs = countSubquery(scope, ref);
-        cs.sub().where(cs.body(bodyBuilder));
+        restrict(cs, cs.body(bodyBuilder));
         return cb.greaterThan(
                 requireLeadingHops(scope, ref, cs.sub(), Long.class), 0L);
     }

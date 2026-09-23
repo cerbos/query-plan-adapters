@@ -243,7 +243,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 56, unconditional: 7, throwing: 261 });
+    }).toEqual({ conditional: 56, unconditional: 7, throwing: 264 });
   });
 });
 
@@ -319,10 +319,10 @@ describe("the rejection sites the corpus reaches", () => {
     }
 
     expect(counts).toEqual({
-      "computed operand": 154,
+      "computed operand": 156,
       "no such operator": 40,
       "inequality over an optional key": 14,
-      "not negatable": 17,
+      "not negatable": 18,
       "field-to-field": 17,
       "mirrored membership": 11,
       "non-scalar literal": 5,
@@ -357,7 +357,7 @@ describe("the rejection sites the corpus reaches", () => {
 
     expect(counts).toEqual({
       add: 14,
-      all: 8,
+      all: 9,
       ancestorOf: 3,
       contains: 11,
       descendentOf: 6,
@@ -366,7 +366,7 @@ describe("the rejection sites the corpus reaches", () => {
       endsWith: 7,
       eq: 9,
       except: 2,
-      exists: 31,
+      exists: 33,
       exists_one: 3,
       filter: 2,
       ge: 1,

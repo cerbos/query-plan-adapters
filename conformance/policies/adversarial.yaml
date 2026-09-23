@@ -1333,6 +1333,47 @@ resourcePolicy:
         match:
           expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, t.name == "public"))'
 
+    # ==================== a macro nested over the SAME association (#509) ====================
+    # The inner lambda ranges over the collection the outer one does and compares its element with
+    # the OUTER element. Its subquery must take a fresh alias and correlate to the enclosing one; an
+    # adapter that reuses one alias (or one scope) at both levels compares every tag with ITSELF, and
+    # which way that errs depends on the polarity — so the three actions pin all of them.
+    #
+    # Witnesses: a6 has two DIFFERENTLY named tags (public, private); a3 has two tags with the SAME
+    # name (t3a, t3b — both public) and distinct ids. b6 mixes a NULL-name tag with a public one,
+    # which is a missing attribute on the check side, so it errors (and denies) under both polarities.
+    #
+    # nest-same-exists — some pair of tags differs by name. Oracle a6. Self-comparison under-grants:
+    # `u.name != u.name` is never true, so a6 is dropped.
+    - actions: ["nest-same-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))'
+
+    # nest-same-not-exists — the same shape negated: every tag has the same name. Every row with
+    # zero or one non-NULL tag, plus a3, is allowed; a6 is not. Self-comparison OVER-grants a6,
+    # which is the authorization bug the issue exists for.
+    - actions: ["nest-same-not-exists"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))'
+
+    # nest-same-all — every tag has a DIFFERENT tag (by id) sharing its name. a3 (two public tags)
+    # and every row with no tags are allowed; a single-tag row and a6 are not. Self-comparison makes
+    # `u.id != t.id` never true, so the inner exists is always false and a3 is dropped; an alias that
+    # only correlates the name and not the id would instead count a tag as its own duplicate and
+    # over-grant every single-tag row.
+    - actions: ["nest-same-all"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.all(t, R.attr.tags.exists(u, u.id != t.id && u.name == t.name))'
+
     # ==================== fractional size() thresholds ====================
     # COUNT is integral: >= 1.5 must round UP to >= 2 (truncation to >= 1 over-includes).
     # Only the ORDERING operators are probeable end to end — CEL rejects ==/!= between int

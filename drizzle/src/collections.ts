@@ -21,11 +21,12 @@ import {
 import {
   chainCorrelation,
   relationCorrelation,
+  relationSource,
   requireLeadingHops,
   resolveTableName,
   wrapWithRelations,
 } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
 
 /**
  * CEL's collection macros — `exists`, `all`, `exists_one`, `except`, `filter` — over a relation
@@ -60,6 +61,7 @@ const resolveMacroScope = (
   lambdaOperand: PlanExpressionOperand,
   context: string,
   mapper: Mapper,
+  options: BuildFilterOptions,
 ): MacroScope => {
   if (!isNameOperand(collectionOperand)) {
     throw new Error("Collection operand must be a field reference");
@@ -69,13 +71,21 @@ const resolveMacroScope = (
     context,
   );
   return {
-    ...createCollectionScope(collectionOperand.name, variable.name, mapper),
+    ...createCollectionScope(
+      collectionOperand.name,
+      variable.name,
+      mapper,
+      options.openTables,
+    ),
     collectionName: collectionOperand.name,
     conditionOperand: expression,
   };
 };
 
-/** The lambda body, translated once, as the per-row condition of the collection's subquery. */
+/**
+ * The lambda body, translated once, as the per-row condition of the collection's subquery. The
+ * iterated table joins `openTables`, so a macro over it again inside the body takes an alias.
+ */
 const buildRowCondition = (
   scope: MacroScope,
   options: BuildFilterOptions,
@@ -83,7 +93,19 @@ const buildRowCondition = (
   buildFilterFromExpression(scope.conditionOperand, scope.mapper, {
     ...options,
     skipRelations: scope.skipRelations,
+    openTables: [
+      ...(options.openTables ?? []),
+      resolveTableName(scope.primaryRelation.table, scope.collectionName),
+    ],
   });
+
+/** The alias the subquery over the scope's primary relation takes, as `wrapWithRelations` reads it. */
+const primaryAlias = (
+  scope: MacroScope,
+): ReadonlyMap<RelationMapping, string> | undefined =>
+  scope.alias === undefined
+    ? undefined
+    : new Map([[scope.primaryRelation, scope.alias]]);
 
 /**
  * `size(filter(coll, lambda))`: COUNT with the lambda condition as the predicate. An element
@@ -108,21 +130,24 @@ export const buildFilteredCount = (
     lambdaOperand,
     "'filter' lambda operand",
     mapper,
+    options,
   );
   const rowCondition = buildRowCondition(scope, options);
-  const tableName = resolveTableName(
-    scope.primaryRelation.table,
-    scope.collectionName,
-  );
   const chainWhere = chainCorrelation(
     scope.primaryRelation,
     scope.leadingRelations,
     scope.collectionName,
     options,
+    scope.alias,
+  );
+  const source = relationSource(
+    scope.primaryRelation,
+    scope.collectionName,
+    scope.alias,
   );
   return requireLeadingHops(
     scope.leadingRelations,
-    sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${sql.identifier(tableName)} where ${chainWhere})`,
+    sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${source} where ${chainWhere})`,
     scope.collectionName,
     options,
   );
@@ -326,6 +351,7 @@ export const buildCollectionOperatorFilter = (
     lambdaOperand,
     `'${operator}' lambda operand`,
     mapper,
+    options,
   );
   const { primaryRelation, leadingRelations, collectionName } = scope;
   const rowCondition = buildRowCondition(scope, options);
@@ -335,8 +361,11 @@ export const buildCollectionOperatorFilter = (
   // scope's table instead.
   const wrapLeading = (inner: SQL): SQL =>
     wrapWithRelations(leadingRelations, inner, collectionName, options);
+  const aliases = primaryAlias(scope);
   const wrapAll = (inner: SQL): SQL =>
-    wrapLeading(wrapWithRelations([primaryRelation], inner, collectionName));
+    wrapLeading(
+      wrapWithRelations([primaryRelation], inner, collectionName, { aliases }),
+    );
   // An absent to-one parent must stay UNKNOWN rather than reaching the empty-collection
   // answer, which `all` reads as TRUE and `!exists` inverts into an allow (#309).
   const guardHops = (inner: SQL): SQL =>
@@ -375,15 +404,15 @@ export const buildCollectionOperatorFilter = (
       );
     }
     case "exists_one": {
-      const tableName = resolveTableName(primaryRelation.table, collectionName);
       const matchCondition =
-        and(relationCorrelation(primaryRelation), rowCondition) ??
+        and(relationCorrelation(primaryRelation, scope.alias), rowCondition) ??
         FALSE_CONDITION;
-      const countExpr = sql`(select count(*) from ${sql.identifier(tableName)} where ${matchCondition})`;
+      const countExpr = sql`(select count(*) from ${relationSource(primaryRelation, collectionName, scope.alias)} where ${matchCondition})`;
       const unknownWitness = wrapWithRelations(
         [primaryRelation],
         sql`(${rowCondition}) is null`,
         collectionName,
+        { aliases },
       );
       const triState = sql`(case when ${unknownWitness} then null when ${countExpr} = 1 then true else false end)`;
       return withPolarity(guardHops(wrapLeading(triState)), negated);

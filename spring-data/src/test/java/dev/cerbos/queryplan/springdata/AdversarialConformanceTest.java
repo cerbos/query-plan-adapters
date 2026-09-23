@@ -1339,7 +1339,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(324, manifest.size(),
+        assertEquals(327, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(29, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or

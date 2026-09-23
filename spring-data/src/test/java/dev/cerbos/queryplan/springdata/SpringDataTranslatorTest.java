@@ -449,7 +449,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 255, "unconditional", 3, "throwing", 66),
+                Map.of("conditional", 258, "unconditional", 3, "throwing", 66),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -1001,6 +1001,14 @@ class SpringDataTranslatorTest {
             // And the detector must recognise the thing it is looking for. This is the broken
             // rendering, built here rather than hoped for.
             assertEquals(2, fromClausesNamingTheResource(uncorrelatedRendering()));
+            // The pinned fresh range variable the exemption above admits is exercised by the
+            // corpus, and only there: without the pin it would count.
+            String nested = emitted.get("nest-same-exists").get("h2");
+            assertTrue(nested.contains("from resources re2_0 join tags")
+                    && nested.contains("re2_0.id=re1_0.id"), nested);
+            // One pinned root per polarity the body is translated in, each counted once unpinned.
+            assertEquals(3, fromClausesNamingTheResource(
+                    nested.replaceAll("re\\d+_0\\.id=re1_0\\.id", "")));
         }
 
         /** A subquery over the same association WITHOUT correlating it to the outer root. */
@@ -1127,6 +1135,12 @@ class SpringDataTranslatorTest {
          * How many of a statement's FROM lists name the resource table. A FROM list is one or
          * more table references — which is exactly how an uncorrelated subquery pulls the outer
          * table in.
+         *
+         * <p>A reference pinned to the outer row by identity ({@code re2_0.id=re1_0.id}) is not
+         * counted: that is the fresh range variable a macro nested over the same relation takes,
+         * so its join cannot collide with the enclosing element's on Hibernate 7 (#509). It is
+         * correlated by the pin rather than by {@code correlate()}, and the pin is what this
+         * detector checks for.
          */
         private int fromClausesNamingTheResource(String statement) {
             int count = 0;
@@ -1134,7 +1148,10 @@ class SpringDataTranslatorTest {
                     .matcher(statement);
             while (m.find()) {
                 for (String reference : m.group(1).split(",")) {
-                    if (reference.trim().startsWith("resources ")) {
+                    String trimmed = reference.trim();
+                    if (trimmed.startsWith("resources ")
+                            && !statement.contains(trimmed.substring("resources ".length())
+                                    + ".id=re1_0.id")) {
                         count++;
                     }
                 }

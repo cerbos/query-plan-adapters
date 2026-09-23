@@ -39,6 +39,7 @@ from cerbos_sqlalchemy._plan import (
     Expr,
     Operand,
     Value,
+    assert_no_same_collection_correlation,
     declared_collection_name,
     parse_operand,
 )
@@ -376,6 +377,7 @@ def get_query(
     assert_no_null_comparison_operands(
         condition, null_conventions, null_attribute_representation
     )
+    assert_no_same_collection_correlation(condition)
     _require_table_mapping(
         table, attr_map, table_mapping, overrides, condition, declared_collections
     )

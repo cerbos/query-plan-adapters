@@ -14,6 +14,7 @@ import {
   buildColumnExpression,
   columnForOperand,
   getMappingEntry,
+  isColumn,
   isMappingConfig,
   isRelationValue,
   isScalarCollection,
@@ -161,6 +162,29 @@ const buildVariableMembershipFilter = (
   if (collection.relations.length === 0) {
     throw new Error(
       "Variable membership requires its second operand to resolve to a collection",
+    );
+  }
+
+  // An enclosing lambda's element read against a collection stored in the SAME table renders
+  // as the same `"table"."column"` the membership subquery ranges over, so SQL would test each
+  // row against itself rather than against the enclosing element (#509).
+  const memberColumn = isMappingConfig(member.mapping)
+    ? member.mapping.column
+    : isColumn(member.mapping)
+      ? member.mapping
+      : undefined;
+  if (
+    memberColumn !== undefined &&
+    collection.relations.some(
+      (relation) =>
+        !options.skipRelations?.has(relation) &&
+        relation.table === memberColumn.table,
+    )
+  ) {
+    throw new Error(
+      `Cannot test '${memberOperand.name}' for membership in '${collectionOperand.name}': ` +
+        "both are stored in the same table, so the membership subquery would compare each " +
+        "row with itself instead of with the enclosing element",
     );
   }
 

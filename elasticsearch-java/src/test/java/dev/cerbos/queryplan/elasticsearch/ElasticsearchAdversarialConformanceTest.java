@@ -320,7 +320,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(172, unsupported.size(),
+        assertEquals(175, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -365,9 +365,9 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
         assertEquals(141, oracleActions.size());
-        assertEquals(181, throwingActions.size());
+        assertEquals(184, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(324, classified.size());
+        assertEquals(327, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -943,7 +943,10 @@ class ElasticsearchAdversarialConformanceTest {
             // A null element of a flat number list leaves no indexed term, so membership of null
             // is refused in both polarities, the negation first as negated collection membership.
             "null-in-number-list",
-            "not-null-in-number-list");
+            "not-null-in-number-list",
+            // #509: a macro nested over the same nested path whose body reads the enclosing
+            // element. The negated form is the one a self-comparison would over-grant.
+            "nest-same-not-exists");
 
     /**
      * Guard the guard, over the WHOLE oracle set. The comparison in
