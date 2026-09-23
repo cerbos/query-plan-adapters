@@ -843,8 +843,9 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(sql).not_to include('FROM "adversarial_tags" WHERE')
     end
 
-    # The corpus never nests a macro over the same association. Without a fresh alias per
-    # scope, the inner subquery would compare a tag with itself and allow denied rows.
+    # Corpus gap (#509): no corpus action nests a macro over the same association. Without a
+    # fresh alias per scope, the inner subquery would compare a tag with itself and allow
+    # denied rows. Delete this test once the corpus action lands.
     it "correlates a macro nested over the same association to the outer element" do
       inner = expression("exists", variable("request.resource.attr.tags"),
         expression("lambda",
