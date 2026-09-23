@@ -15,10 +15,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 /**
- * One element of the corpus's {@code aBoolList}, as a row of its own — an entity rather than an
- * {@code @ElementCollection} for the reason {@link NumberListElementEntity} gives: the corpus
- * carries a null element (a4 {@code [null, true]}), and Hibernate drops one from an element
- * collection.
+ * One element of the corpus's {@code aBoolList}. An entity, not an {@code @ElementCollection},
+ * because the corpus has a null element and Hibernate drops nulls from element collections.
  */
 @Entity
 @Table(name = "resource_bool_list")

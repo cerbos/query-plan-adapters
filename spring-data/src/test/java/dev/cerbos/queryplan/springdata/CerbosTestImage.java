@@ -17,35 +17,16 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Pinned Cerbos image used by {@link AdversarialConformanceTest}, the one suite here that
- * starts a PDP. The other suites run offline.
+ * The pinned Cerbos image for {@link AdversarialConformanceTest}, the only suite here that starts
+ * a PDP. The pin is read from {@code conformance/CERBOS_VERSION} and
+ * {@code conformance/CERBOS_IMAGE_DIGEST}.
  *
- * <p>The PDP is the oracle for BOTH sides of the differential — it produces the plan under test
- * and the per-row {@code check()} decisions it is compared against — so which build answered is
- * the one fact a green run cannot be read without. {@link #assertPinned} is where that fact is
- * asserted rather than printed: the container's resolved digest must be the one
- * {@code conformance/CERBOS_IMAGE_DIGEST} names, unless the {@code cerbos.test.image} override is
- * set, in which case the run says so in a way nobody can miss.
- *
- * <p><b>Why pinned.</b> Several tests pin planner-shape-dependent behavior (exact fail-closed
- * error strings for pass-through shapes, the {@code has()} over-grant tripwire,
- * differential-oracle row sets). A floating {@code :latest} tag makes past green runs
- * unreproducible once the tag moves and lets upstream planner changes flow into CI unnoticed.
- *
- * <p><b>Bump policy.</b> The pin lives in {@code conformance/CERBOS_VERSION} and
- * {@code conformance/CERBOS_IMAGE_DIGEST}, and bumping it is a deliberate, reviewed change:
- * update both halves, run the full suite, and re-evaluate every upstream-tracking test — in
- * particular {@code AdversarialConformanceTest.upstreamHasFoldOverGrantTripwire}, whose "fires
- * when upstream fixes the fold" property is dormant between bumps and only re-checks upstream
- * behavior when the pinned image moves. Override per-run with
- * {@code -Dcerbos.test.image=<image reference>} to trial a newer PDP without editing source.
- * (Spelled with a placeholder rather than a real reference on purpose: validate-corpus.sh scans
- * the whole repository for Cerbos image references and holds every one of them to the corpus
- * pin, including ones that only appear in documentation.)
+ * <p>Override for one run with {@code -Dcerbos.test.image=<image reference>}. Do not write a real
+ * Cerbos image reference in a comment: {@code validate-corpus.sh} holds every one to the pin.
  */
 final class CerbosTestImage {
 
-    /** The system property that swaps the oracle. Never set by any workflow. */
+    /** Replaces the pinned PDP for one run. No workflow sets it. */
     static final String OVERRIDE_PROPERTY = "cerbos.test.image";
 
     static final String IMAGE = System.getProperty(OVERRIDE_PROPERTY, defaultImage());
@@ -53,8 +34,7 @@ final class CerbosTestImage {
     /** True when a caller replaced the pinned oracle for this run. */
     static final boolean OVERRIDDEN = System.getProperty(OVERRIDE_PROPERTY) != null;
 
-    // A stalled HTTP/2 stream must fail the differential instead of hanging the CI job.
-    // Healthy local calls complete in milliseconds; 30 seconds leaves ample startup/load margin.
+    // Fail a stalled call instead of hanging the CI job.
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(30);
 
     static CerbosBlockingClient client(GenericContainer<?> container)
@@ -91,9 +71,7 @@ final class CerbosTestImage {
         Path conformance = conformanceDir();
         Path versionFile = conformance.resolve("CERBOS_VERSION");
         try {
-            // Tag AND digest: the tag records which release this is, the digest makes the pin
-            // immune to the tag being re-pointed. validate-corpus.sh asserts the two agree
-            // everywhere they are restated.
+            // The digest protects against the tag being re-pointed.
             return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip()
                     + "@" + pinnedDigest();
         } catch (IOException e) {
@@ -110,12 +88,8 @@ final class CerbosTestImage {
     }
 
     /**
-     * The started container runs the pinned build, or the run is loudly NOT the pinned run.
-     *
-     * <p>Without this the override property changed the oracle silently: the resolved digest was
-     * printed, and a log line is not an assertion. A wrong digest here is a Docker cache holding
-     * a different build under the pinned reference, or a pin whose two halves disagree — either
-     * way the differential would be against a PDP nobody chose, so it fails rather than runs.
+     * Fails unless the container runs the pinned digest. With the override set, prints a banner
+     * instead.
      */
     static void assertPinned(GenericContainer<?> container) {
         List<String> digests = resolvedDigests(container);

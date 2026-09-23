@@ -13,9 +13,8 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 
 /**
- * The second level of the conformance corpus's real to-one relation: {@code parent.inner}. Seeded
- * only for resources whose parent itself has a parent, so an absent second hop is as reachable as
- * an absent first one. See {@link AdversarialParentEntity}.
+ * Second hop of the corpus's to-one relation, {@code parent.inner}. Only some parents have one, so
+ * a missing second hop is covered too.
  */
 @Entity
 @Table(name = "adversarial_inner")
