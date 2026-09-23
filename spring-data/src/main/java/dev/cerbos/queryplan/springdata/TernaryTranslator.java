@@ -15,16 +15,11 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * The CEL ternary, {@code if(c, a, b)}, in both of its positions: as a whole condition
- * ({@link #handleBareTernary}) and as one operand of a comparison
- * ({@link #tryTernaryComparison}).
+ * Translates the CEL ternary {@code if(c, a, b)} as a whole condition
+ * ({@link #handleBareTernary}) and as a comparison operand ({@link #tryTernaryComparison}).
  *
- * <p>Both are REWRITES, not lowerings: the branches are substituted back into the surrounding
- * shape and walked again, so a ternary branch translates identically to the same condition
- * written directly, and the third (condition-UNKNOWN) arm is owned by
- * {@link TriPredicate#ternary}. The comparison form has to see the RAW operands — before
- * {@link NormalizedBinary} mirrors anything — which is why it is the first step of
- * {@link ComparisonTranslator#translate} rather than a resolved-operand case.
+ * <p>Each branch is substituted back into the surrounding shape and walked again, so it
+ * translates exactly like the same condition written directly.
  */
 final class TernaryTranslator {
 
@@ -39,14 +34,11 @@ final class TernaryTranslator {
     }
 
     /**
-     * A comparison wrapping a CEL ternary — {@code cmp(if(c, a, b), other)}. Each branch is
-     * substituted back into the comparison and recursed through
-     * {@link PlanWalker#traverseExpression}, so a ternary branch behaves identically to the
-     * same comparison written directly (see {@link #translateTernary} for the rewrite and its
-     * null semantics). Recursion also handles nested ternaries and a ternary on the other side
-     * for free.
+     * Rewrites {@code cmp(if(c, a, b), other)} as {@code cmp(a, other)} and
+     * {@code cmp(b, other)}. Runs on the raw operands, before any mirroring. Nested ternaries
+     * and a ternary on the other side are handled by the recursion.
      *
-     * @return the rewritten predicate, or {@code null} if this comparison involves no ternary
+     * @return the rewritten predicate, or {@code null} if this comparison has no ternary
      */
     Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
         if (!ComparisonTranslator.COMPARISON_OPS.contains(op) || operands.size() != 2) {
@@ -72,28 +64,12 @@ final class TernaryTranslator {
     }
 
     /**
-     * Rewrite a CEL ternary {@code if(c, a, b)} into a pure predicate:
+     * Rewrites {@code if(c, a, b)} with {@link TriPredicate#ternary}, which keeps the result
+     * UNKNOWN when {@code c} is (CEL denies a null condition). A predicate rewrite rather than
+     * {@code CASE WHEN} sends each branch through the normal leaf paths.
      *
-     * <pre>{@code (pred(c) AND branch(a)) OR (NOT pred(c) AND branch(b)) OR NOT(pred(c) OR NOT pred(c))}</pre>
-     *
-     * where {@code branch} is supplied by the caller — comparison substitution for
-     * {@link #tryTernaryComparison}, {@link #booleanBranchPredicate} for
-     * {@link #handleBareTernary}. We rewrite instead of emitting {@code CASE WHEN}
-     * ({@code cb.selectCase}) because this translator is predicate-only: every existing typed
-     * leaf path — field-first normalization, size() handling, add-fold, fractional
-     * double-space comparison — operates on comparison predicates, and routing the branches
-     * back through those exact paths keeps them identical to the same condition written
-     * directly.
-     *
-     * <p>A constant boolean condition folds to a single branch — only that branch is
-     * translated, so an untranslatable dead branch cannot fail the whole plan.
-     *
-     * <p>Null semantics and the third (condition-UNKNOWN) arm are owned by
-     * {@link TriPredicate#ternary}: a null/missing condition in a CEL ternary is an
-     * evaluation error and the check denies, so the SQL must evaluate to UNKNOWN — never
-     * FALSE — when the condition column is NULL. The condition is passed as a Supplier and
-     * translated fresh for each arm (Hibernate 6 negation is stateful — see
-     * {@link TriPredicate#not}).
+     * <p>A constant condition translates only the live branch, so an untranslatable dead branch
+     * cannot fail the plan.
      */
     private Predicate translateTernary(List<Operand> ifOps,
                                        Function<Operand, Predicate> branchTranslator,
@@ -110,8 +86,7 @@ final class TernaryTranslator {
         if (condition.getNodeCase() == Operand.NodeCase.VALUE) {
             Boolean known = constantBooleanOrNull(condition);
             if (known == null) {
-                // A non-boolean literal condition is a CEL type error the planner
-                // never emits; a column condition is translated below.
+                // A non-boolean literal condition is a CEL type error.
                 throw Refusals.malformed(
                         "if (ternary) condition must be a boolean expression");
             }
@@ -124,21 +99,12 @@ final class TernaryTranslator {
                 () -> branchTranslator.apply(elseBranch));
     }
 
-    /**
-     * A CEL ternary in boolean position — {@code if(c, a, b)} used directly as a condition,
-     * so both branches are themselves boolean and translate through
-     * {@link #booleanBranchPredicate}. Same rewrite, rationale and null semantics as
-     * {@link #translateTernary}.
-     */
+    /** {@code if(c, a, b)} used directly as a condition, so both branches are boolean. */
     Predicate handleBareTernary(List<Operand> operands, Scope scope) {
         return translateTernary(operands, branch -> booleanBranchPredicate(branch, scope), scope);
     }
 
-    /**
-     * A ternary branch in boolean position: a boolean VALUE folds to the always-true /
-     * always-false predicate (the same collapse the unsolvable add-solve cases use); anything
-     * else translates as a normal boolean operand (bare variables become {@code path = true}).
-     */
+    // A boolean constant branch becomes always-true or always-false.
     private Predicate booleanBranchPredicate(Operand branch, Scope scope) {
         if (branch.getNodeCase() == Operand.NodeCase.VALUE) {
             Boolean constant = constantBooleanOrNull(branch);
@@ -151,7 +117,6 @@ final class TernaryTranslator {
         return walker.traverse(branch, scope);
     }
 
-    /** Rebuild {@code op(operands...)} with the operand at {@code idx} replaced. */
     private static PlanResourcesFilter.Expression substituteOperand(
             String op, List<Operand> operands, int idx, Operand replacement) {
         PlanResourcesFilter.Expression.Builder b =
@@ -162,7 +127,6 @@ final class TernaryTranslator {
         return b.build();
     }
 
-    /** The operand's boolean constant, or {@code null} if it is not a boolean VALUE. */
     private static Boolean constantBooleanOrNull(Operand o) {
         return PlanValues.protoValueToJava(o.getValue()) instanceof Boolean b ? b : null;
     }

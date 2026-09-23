@@ -15,17 +15,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Translates the Cerbos hierarchy operators ({@code overlaps} / {@code ancestorOf} /
- * {@code descendentOf}).
+ * Translates the Cerbos hierarchy operators {@code overlaps}, {@code ancestorOf} and
+ * {@code descendentOf}.
  *
- * <p>A Cerbos hierarchy is a delimited path (e.g. {@code "a:b:c"}). Both sides of a hierarchy
- * operator are wrapped in a {@code hierarchy(...)} expression that resolves to one of:
- * <ul>
- *   <li>a constant string split into segments,</li>
- *   <li>a single field whose column holds the whole delimited string, or</li>
- *   <li>a {@code list(...)} of segments, each a constant or a field.</li>
- * </ul>
- * The translations mirror the Prisma adapter so behaviour is consistent across adapters.
+ * <p>A hierarchy is a delimited path such as {@code "a:b:c"}. Each operand is a
+ * {@code hierarchy(...)} expression holding a constant string, a column with the whole path,
+ * or a {@code list(...)} of segments that are constants or columns.
  */
 final class HierarchyTranslator {
 
@@ -37,19 +32,14 @@ final class HierarchyTranslator {
         this.tri = tri;
     }
 
-    /** A resolved {@code hierarchy(...)} operand: a constant path, a whole-column field, or a list of segments. */
     private sealed interface Hierarchy permits Hierarchy.Constant, Hierarchy.FieldRef, Hierarchy.Segmented {
-        /** A literal delimited path split into segments. */
         record Constant(List<String> segments, String delimiter) implements Hierarchy {}
 
-        /** A single column holding the whole delimited string. */
         record FieldRef(Path<?> path, String delimiter) implements Hierarchy {}
 
-        /** A {@code list(...)} of segments, each a constant or a field. */
         record Segmented(List<Seg> segments) implements Hierarchy {}
     }
 
-    /** One segment of a {@link Hierarchy.Segmented}: either a literal value or a field reference. */
     private sealed interface Seg permits Seg.Const, Seg.FieldSeg {
         record Const(String value) implements Seg {}
 
@@ -87,24 +77,21 @@ final class HierarchyTranslator {
         if (rightPrefixOfLeft != null) valid.add(rightPrefixOfLeft);
 
         if (valid.isEmpty()) {
-            // Neither side can be a prefix of the other. If a field is involved the overlap is
-            // simply never satisfiable (always-false); two incompatible constants are a planner
-            // bug — a constant comparison it should have folded away.
+            // Neither side can be a prefix of the other. With a field involved that is always
+            // false; with two constants the planner would have folded it.
             boolean hasField = containsFieldSegment(leftSegs) || containsFieldSegment(rightSegs);
             if (hasField) {
                 return cb.disjunction();
             }
             throw Refusals.malformed("Cannot determine hierarchy overlap: no field references found");
         }
-        // An empty condition list means every compared segment was a matching constant — overlap
-        // holds unconditionally.
+        // No conditions: every compared segment was a matching constant.
         for (List<Predicate> c : valid) {
             if (c.isEmpty()) {
                 return cb.conjunction();
             }
         }
-        // Both directions (equal-length hierarchies) compare the same segment pairs, so either
-        // condition set is equivalent; use the first.
+        // Two entries means equal lengths, which compare the same pairs.
         List<Predicate> chosen = valid.get(0);
         return chosen.size() == 1 ? chosen.get(0) : cb.and(chosen.toArray(Predicate[]::new));
     }
@@ -125,13 +112,11 @@ final class HierarchyTranslator {
         List<String> strictPrefixes = getStrictPrefixes(constant.segments(), delimiter);
 
         List<Predicate> conditions = new ArrayList<>();
-        // field is an ancestor of the constant...
+        // The field is an ancestor of the constant, equal to it, or a descendant of it.
         if (!strictPrefixes.isEmpty()) {
             conditions.add(field.path().in(strictPrefixes));
         }
-        // ...or equal to it...
         conditions.add(cb.equal(field.path(), otherRaw));
-        // ...or a descendant of it.
         conditions.add(startsWithLiteral(field.path(), otherRaw + delimiter));
 
         return cb.or(conditions.toArray(Predicate[]::new));
@@ -140,7 +125,7 @@ final class HierarchyTranslator {
     Predicate handleAncestorDescendant(List<Operand> operands, Scope scope, boolean isAncestor) {
         String opName = isAncestor ? "ancestorOf" : "descendentOf";
         Hierarchy[] both = extractHierarchyOperands(opName, operands, scope);
-        // ancestorOf(A, B) ⇔ A is a strict prefix of B; descendentOf(A, B) ⇔ B is a strict prefix of A.
+        // ancestorOf(A, B): A is a strict prefix of B. descendentOf(A, B): B is a strict prefix of A.
         Hierarchy ancestor = isAncestor ? both[0] : both[1];
         Hierarchy descendant = isAncestor ? both[1] : both[0];
 
@@ -163,8 +148,7 @@ final class HierarchyTranslator {
                     && isPrefix(a.segments(), d.segments())) {
                 return cb.conjunction();
             }
-            // Two constants that fail the relationship are a comparison the planner folds to
-            // false before it ever reaches an adapter.
+            // The planner folds two constants that fail the relationship to false.
             throw Refusals.malformed(
                     opName + ": constant operands do not satisfy the " + (isAncestor ? "ancestor" : "descendant")
                             + " relationship");
@@ -193,18 +177,13 @@ final class HierarchyTranslator {
             Operand strOp = ops.get(0);
             Operand delimOp = ops.get(1);
             if (delimOp.getNodeCase() != Operand.NodeCase.VALUE) {
-                // A delimiter read from a column is legal CEL; the prefixes below are built
-                // in Java from a delimiter known at translation time.
+                // Legal CEL, but the prefixes are built in Java and need a known delimiter.
                 throw Refusals.unsupported("hierarchy delimiter must be a value");
             }
             String delimiter = String.valueOf(PlanValues.protoValueToJava(delimOp.getValue()));
             if (delimiter.isEmpty()) {
-                // Cerbos splits a path on an empty delimiter into one segment per CHARACTER, so
-                // the relation becomes a strict string-prefix test. The descendant lowering
-                // here is `LIKE prefix + delimiter + '%'`, which with an empty delimiter
-                // matches the path ITSELF (never its own descendant) as well as every string
-                // extension of it — the corpus's hier-empty-delim over-granted a2 that way —
-                // so the shape is refused rather than emitted with the wrong boundary.
+                // An empty delimiter splits per character, but the descendant LIKE
+                // (prefix + delimiter + '%') would then also match the path itself.
                 throw Refusals.unsupported(
                         "hierarchy delimiter must be a non-empty string: an empty delimiter splits "
                                 + "the path per character, and the prefix LIKE this adapter emits "
@@ -217,8 +196,7 @@ final class HierarchyTranslator {
             if (strOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
                 return new Hierarchy.FieldRef(scope.path(strOp.getVariable()), delimiter);
             }
-            // A path computed by an expression (a concatenation, a ternary) has no prefix the
-            // LIKE below can be built from.
+            // A computed path (a concatenation, a ternary) has no known prefix.
             throw Refusals.unsupported("hierarchy(string, delimiter) requires a value or field operand");
         }
         if (ops.size() == 1) {
@@ -251,7 +229,7 @@ final class HierarchyTranslator {
         throw Refusals.malformed("hierarchy requires 1 or 2 operands");
     }
 
-    /** Collapse an all-constant segmented hierarchy to a plain Constant (default delimiter). */
+    // An all-constant list becomes a Constant with the default delimiter.
     private Hierarchy normalizeHierarchy(Hierarchy h) {
         if (!(h instanceof Hierarchy.Segmented seg)) {
             return h;
@@ -279,9 +257,8 @@ final class HierarchyTranslator {
     }
 
     /**
-     * If {@code shorter} is a prefix of {@code longer}, return the predicates that must hold for
-     * the field segments to line up (an empty list = unconditionally true). Returns {@code null}
-     * if {@code shorter} cannot be a prefix of {@code longer}.
+     * The predicates under which {@code shorter} is a prefix of {@code longer} (empty means
+     * always), or {@code null} if it cannot be.
      */
     private List<Predicate> checkPrefixConditions(List<Seg> shorter, List<Seg> longer) {
         if (shorter.size() > longer.size()) {
@@ -327,7 +304,7 @@ final class HierarchyTranslator {
         return true;
     }
 
-    /** All proper (strict) ancestor prefixes of a segment list, joined with {@code delimiter}. */
+    /** The strict ancestor prefixes of a path, joined with {@code delimiter}. */
     private static List<String> getStrictPrefixes(List<String> segments, String delimiter) {
         if (segments.size() <= 1) {
             return List.of();
@@ -342,11 +319,8 @@ final class HierarchyTranslator {
         return prefixes;
     }
 
-    /**
-     * Split on a literal, non-empty delimiter (not a regex), keeping trailing empty segments —
-     * {@code split(Pattern.quote(delimiter), -1)} without compiling a Pattern per call. An empty
-     * delimiter never reaches here: {@link #resolveHierarchy} refuses it first.
-     */
+    // Like split(Pattern.quote(delimiter), -1): literal, keeps trailing empty segments. The
+    // delimiter is never empty.
     private static List<String> splitLiteral(String raw, String delimiter) {
         List<String> parts = new ArrayList<>();
         int start = 0;

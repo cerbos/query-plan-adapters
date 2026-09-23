@@ -17,17 +17,13 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Membership: {@code in} and {@code hasIntersection}, over a scalar column, a relation chain,
- * or a {@code map()} projection of one.
+ * Translates {@code in} and {@code hasIntersection} over a scalar column, a relation chain, or a
+ * {@code map()} projection of one.
  *
- * <p>Owns the CEL null-element semantics of a value list — a null element is an
- * {@code IS NULL} disjunct, never an {@code IN (..., NULL)} that SQL silently drops — and the
- * two views of a NULL member column that decide it: under the scalar-projection view
- * ({@link #collectionContainsAny}) a NULL member IS the null element, while under member
- * ACCESS ({@link #handleMapIntersection}) it is a missing element attribute and therefore an
- * UNKNOWN row. Every existence test over a chain goes through
- * {@link ChainSubqueries#chainContains} so an absent to-one parent stays UNKNOWN under both
- * polarities.
+ * <p>A null element in a value list becomes an {@code IS NULL} disjunct, because SQL
+ * {@code IN (..., NULL)} never matches. A NULL member column is a null element when the
+ * collection is compared directly ({@link #collectionContainsAny}), but a missing attribute,
+ * and so UNKNOWN, under {@code map()} member access ({@link #handleMapIntersection}).
  */
 final class MembershipTranslator {
 
@@ -44,11 +40,7 @@ final class MembershipTranslator {
         this.subqueries = subqueries;
     }
 
-    /**
-     * Wrap a scalar plan constant as a single-element list; lists pass through unchanged.
-     * The scalar may be the null constant ({@code null in R.attr.items} is planner-emitted),
-     * so the wrapper must be null-tolerant — {@code List.of} is not.
-     */
+    // The planner can emit a null scalar (`null in R.attr.items`), and List.of rejects null.
     private static List<?> asList(Object val) {
         return (val instanceof List<?> l) ? l : Collections.singletonList(val);
     }
@@ -57,25 +49,20 @@ final class MembershipTranslator {
         if (rawOperands.size() != 2) {
             throw Refusals.malformed("in requires exactly 2 operands");
         }
-        // Both shapes — `field in [values]` and `value in collection-field` — resolve the
-        // same way once normalized field-first: the mapping kind (Relation vs Field) decides
-        // whether this is collection membership or a scalar IN, not the operand order.
+        // After normalization the mapping kind (Relation or Field), not the operand order,
+        // decides between collection membership and a scalar IN.
         List<Operand> operands = NormalizedBinary.of("in", rawOperands).operands();
         Operand fieldOp = operands.get(0);
         Operand valueOp = operands.get(1);
-        // in(variable, variable) — attribute-in-attribute membership
-        // (`R.attr.createdBy in R.attr.ownedBy` arrives verbatim; PDP-verified). CEL `in`
-        // is receiver-shaped — the member is always FIRST, the list second — and two
-        // VARIABLE operands rank equally so normalization never swaps them: source order
-        // is authoritative here.
+        // `R.attr.createdBy in R.attr.ownedBy`. Normalization never swaps two variables, so the
+        // member is first.
         if (fieldOp.getNodeCase() == Operand.NodeCase.VARIABLE
                 && valueOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
             return handleInVariableVariable(fieldOp.getVariable(), valueOp.getVariable(), scope);
         }
         if (fieldOp.getNodeCase() != Operand.NodeCase.VARIABLE
                 || valueOp.getNodeCase() != Operand.NodeCase.VALUE) {
-            // Membership in a computed collection (`x in R.attr.tags.map(...)`) or of a
-            // computed member: legal CEL, no column pair to compare.
+            // A computed collection or member: legal CEL with no column pair to compare.
             throw Refusals.unsupported("Unsupported in operand combination: "
                     + Refusals.describeOperand(rawOperands.get(0)) + " / "
                     + Refusals.describeOperand(rawOperands.get(1)));
@@ -97,82 +84,49 @@ final class MembershipTranslator {
                     return cb.disjunction();
                 }
                 Predicate membership = scalarInWithNullElements(path, list);
-                // Without a null element nothing has made the membership definite yet:
-                // `NOT (col IN (…))` over a NULL column is UNKNOWN and drops the row, while
-                // CEL compares a null VALUE against each element and gets a definite false.
-                // With a null element `scalarInWithNullElements` already adds the IS NULL
-                // disjunct, which settles it (#308).
+                // For an explicit-null attribute, CEL's `null in [...]` without a null element
+                // is a definite false, but SQL leaves `NOT (col IN (...))` UNKNOWN.
                 if (list.stream().noneMatch(Objects::isNull)
                         && leaf.isExplicitNull(var, scope)) {
                     return cb.and(cb.isNotNull(path), membership);
                 }
                 return membership;
             }
-            // Scalar membership over a Field mapping is equality — and equality against
-            // the null constant is IS NULL, mirroring the eq-null leaf translation.
+            // A scalar on a Field mapping is equality; against null that is IS NULL.
             if (val == null) {
                 return cb.isNull(path);
             }
-            // The eq leaf, not a bare cb.equal: a constant the column's type cannot equal is
-            // CEL's heterogeneous FALSE, which the leaf decides rather than the database.
+            // The eq leaf decides a type mismatch as CEL's false instead of asking the database.
             return leaf.defaultLeaf("eq", path, val);
         });
     }
 
     /**
-     * {@code in(variable, variable)} — a scalar attribute tested for membership of a
-     * collection attribute on the SAME resource ({@code R.attr.createdBy in
-     * R.attr.ownedBy}; PDP-verified the shape arrives verbatim). The member variable must
-     * resolve to a scalar column and the collection variable to a Relation mapping; the
-     * translation is a correlated EXISTS whose body compares the collection's member
-     * column against the outer scalar column:
+     * {@code R.attr.createdBy in R.attr.ownedBy}: a scalar column tested against a Relation on
+     * the same resource, as a correlated EXISTS comparing each element with the scalar.
      *
-     * <pre>{@code EXISTS (SELECT 1 FROM <relation chain> e
-     *          WHERE e.member = outer.scalar
-     *             OR (e.member IS NULL AND outer.scalar IS NULL))}</pre>
-     *
-     * <p>Null semantics, verified against a live PDP {@code check()} oracle under the
-     * adapter's established column conventions (a NULL scalar column is the
-     * explicitly-null attribute — the {@code eq(x, null) → IS NULL} convention; a NULL
-     * member column is an explicit null list element — the {@code collectionContainsAny}
-     * convention; an empty join is the empty list):
-     * <ul>
-     *   <li>member matches an element → TRUE (row included);</li>
-     *   <li>no match (including the empty collection) → the EXISTS is FALSE, so the row
-     *       is excluded and {@code not(...)} includes it — matching CEL, where a
-     *       non-matching {@code in} is plain FALSE, not an error;</li>
-     *   <li>NULL scalar vs a null element → TRUE ({@code null in [..., null]} is TRUE in
-     *       CEL — the IS NULL conjunct is what matches it, since SQL {@code = NULL} never
-     *       does);</li>
-     *   <li>NULL scalar vs no null element → FALSE (the equality is UNKNOWN and the
-     *       IS NULL conjunct fails on the member side, so no subquery row qualifies).</li>
-     * </ul>
-     * A direct relation's EXISTS is two-valued, so {@code tri.not} composes exactly; over a
-     * CHAIN the membership goes through {@link ChainSubqueries#chainContains}, which is
-     * UNKNOWN for an absent to-one parent so that the negation cannot readmit it. Like
-     * field-to-field comparisons, there is no (field, value) pair — {@link OperatorFunction}
-     * overrides are not consulted.
+     * <p>A NULL scalar makes the result UNKNOWN (a missing attribute), unless the member is
+     * declared explicit-null: then it matches a NULL element and otherwise is false. Over a
+     * chain, {@link ChainSubqueries#chainContains} keeps an absent to-one parent UNKNOWN.
+     * {@link OperatorFunction} overrides are not consulted, since there is no (field, value)
+     * pair.
      */
     private Predicate handleInVariableVariable(String memberVar, String collectionVar,
                                                Scope scope) {
-        // resolve() is total, so an unmapped collectionVar throws "Unknown attribute" here
-        // rather than needing a separate call made purely for its throw.
+        // resolve() throws for an unknown attribute.
         if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
             throw Refusals.unmapped(
                     "in(" + memberVar + ", " + collectionVar + ") requires the second "
                             + "attribute to be mapped as a Relation (collection membership), "
                             + "but " + collectionVar + " resolves to a scalar Field mapping");
         }
-        // Check the member eagerly: resolved only inside the subquery body, an unknown or
-        // Relation-valued member would be masked by chainSubquery's own failure (the
-        // bulk-delete guard). The path itself has to be rebuilt against the REBASED scope
-        // below to be a legal correlation reference, so this call is a check, not a value.
+        // Resolve the member now so an unknown or Relation member reports its own error. The
+        // subquery body rebuilds the path against the rebased scope.
         Path<?> member = scope.path(memberVar);
         boolean explicit = leaf.isExplicitNull(memberVar, scope);
         Predicate membership = subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
             Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
-            // The outer scalar resolves through the REBASED scope so the produced path is
-            // a legal correlation reference inside the subquery.
+            // Resolved through the rebased scope to be a legal correlation reference.
             Path<?> outer = rebased.path(memberVar);
             return explicit ? cb.or(cb.equal(element, outer),
                     cb.and(cb.isNull(element), cb.isNull(outer))) : cb.equal(element, outer);
@@ -181,31 +135,21 @@ final class MembershipTranslator {
     }
 
     /**
-     * {@code path IN (list)} with CEL null-element semantics. CEL {@code x in [..., null]}
-     * is TRUE for an explicitly-null {@code x} (PDP-verified for both {@code in} and
-     * {@code hasIntersection}; the planner even folds the degenerate {@code x in [null]}
-     * to {@code eq(x, null)}, which this adapter translates as IS NULL) — so a null list
-     * element must become an IS NULL disjunct. Passing it to {@code path.in} instead
-     * renders {@code IN (..., NULL)} (verified on Hibernate 6.6/H2), whose SQL
-     * three-valued semantics silently EXCLUDE null rows — and make the negation UNKNOWN
-     * for every non-matching row, returning nothing. Both disjuncts here are two-valued
-     * for every row (IS NULL absorbs the NULL-column case), so {@code tri.not} composes
-     * cleanly over the OR. Callers guarantee a non-empty list.
+     * {@code path IN (list)} with CEL null-element semantics: {@code x in [..., null]} is true
+     * for a null {@code x}, so a null element becomes an {@code IS NULL} disjunct. Callers
+     * pass a non-empty list.
      */
     private Predicate scalarInWithNullElements(Path<?> path, List<?> list) {
         List<?> nonNull = list.stream().filter(Objects::nonNull).toList();
         boolean hasNull = nonNull.size() < list.size();
-        // A constant the column's type cannot equal is CEL's heterogeneous FALSE disjunct
-        // (`5 in ["5", 2]` is decided by the 2 alone), so it never reaches the database —
-        // H2 would coerce '5' onto the numeric column and match 5 (an over-grant).
+        // Constants of another type are CEL's false (`5 in ["5", 2]`) and are dropped. H2 would
+        // coerce '5' and match 5.
         List<?> comparable = comparableTo(path, nonNull);
         if (comparable.isEmpty()) {
             if (hasNull) {
                 return cb.isNull(path);
             }
-            // Every constant dropped: FALSE for a present value, and still UNKNOWN for a
-            // NULL column, exactly as `path IN (...)` would have been, so the negation
-            // cannot readmit a missing attribute (handleIn adds the explicit-null guard).
+            // False for a present value, UNKNOWN for a NULL column, like `path IN (...)`.
             return tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path));
         }
         Predicate membership = path.in(comparable);
@@ -218,9 +162,7 @@ final class MembershipTranslator {
         if (rawOperands.size() != 2) {
             throw Refusals.malformed("hasIntersection requires exactly 2 operands");
         }
-        // Intersection is symmetric, and the planner preserves policy source order —
-        // `hasIntersection(P.attr.tags, R.attr.tags)` folds the principal side to a value
-        // list in the FIRST position. Normalization puts the field/map side first.
+        // The planner keeps source order, so a folded principal list can come first.
         List<Operand> operands = NormalizedBinary.of("hasIntersection", rawOperands).operands();
         Operand first = operands.get(0);
         Operand second = operands.get(1);
@@ -235,7 +177,7 @@ final class MembershipTranslator {
                 return collectionContainsAny(scope, relRef, values);
             }
             Path<?> path = scope.path(var);
-            // hasIntersection(field, []) is always false; avoid a dialect-dependent empty `IN ()`.
+            // Avoids an empty `IN ()`, which is dialect-dependent.
             if (values.isEmpty()) {
                 return cb.disjunction();
             }
@@ -245,8 +187,7 @@ final class MembershipTranslator {
         if (first.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && "map".equals(first.getExpression().getOperator())) {
             if (second.getNodeCase() != Operand.NodeCase.VALUE) {
-                // An intersection of a projection with another column: legal CEL, no
-                // constant list for the projected IN.
+                // A projection against another column: legal CEL, no constant list.
                 throw Refusals.unsupported(
                         "hasIntersection second operand must be a value list when used with map()");
             }
@@ -262,10 +203,9 @@ final class MembershipTranslator {
                         + "hasIntersection(map(collection, lambda), [values...]).");
     }
 
-    /** Translate {@code hasIntersection(map(collection, lambda), values)}. */
+    /** {@code hasIntersection(map(collection, lambda), values)}. */
     private Predicate handleMapIntersection(PlanResourcesFilter.Expression mapExpr,
                                             List<?> values, Scope scope) {
-        // hasIntersection(map(...), []) is always false; short-circuit before the subquery.
         if (values.isEmpty()) {
             return cb.disjunction();
         }
@@ -278,7 +218,7 @@ final class MembershipTranslator {
         Operand lambdaOperand = mapOperands.get(1);
 
         if (collectionOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
-            // A chained projection (`tags.filter(...).map(...)`): legal CEL, no chain.
+            // e.g. `tags.filter(...).map(...)`: legal CEL with no join chain.
             throw Refusals.unsupported("map first operand must be a variable");
         }
         String collectionVar = collectionOperand.getVariable();
@@ -287,35 +227,25 @@ final class MembershipTranslator {
                 "map second operand must be a lambda",
                 "map lambda requires exactly 2 operands (body, variable)",
                 "map lambda body must be a simple variable projection");
-        // map()'s extra shape constraint: the body must project a plain member variable.
         Operand projection = lambda.body();
         if (projection.getNodeCase() != Operand.NodeCase.VARIABLE) {
-            // A computed projection (`map(t, t.a + "x")`): legal CEL, no column to IN over.
+            // e.g. `map(t, t.a + "x")`: legal CEL with no column to compare.
             throw Refusals.unsupported("map lambda body must be a simple variable projection");
         }
         String memberField = Scope.extractLambdaSuffix(projection.getVariable(), lambda.varName());
 
-        // Resolve the collection to its owner-anchored join chain. Single Relations and
-        // dotted chains ("request.resource.attr.categories.subCategories") share one path:
-        // the subquery correlates the OWNING From and joins through every hop, so the
-        // projection ranges over the flattened tail elements.
+        // A single Relation and a dotted chain both join through every hop, so the projection
+        // ranges over the flattened tail elements.
         if (!(scope.resolve(collectionVar) instanceof Scope.ResolvedRelation ref)) {
             throw Refusals.unmapped(
                     "map can only be applied to a collection mapped as Relation: " + collectionVar);
         }
-        // CEL map() has no error absorption: a NULL projected column is a missing element
-        // attribute, so the whole hasIntersection(map(...), values) is an evaluation error
-        // (deny) even when another element would intersect — the strict
-        // TriPredicate.baseUnlessUnknown table, with the null-witness EXISTS as the unknown
-        // detector (IS NULL itself is two-valued, so both EXISTS legs are safe to compose).
+        // A NULL projected column is a missing element attribute, and map() does not absorb
+        // errors, so any NULL projection makes the whole result UNKNOWN, even when another
+        // element intersects.
         //
-        // A null element in the constant list only matches an explicitly-null projection,
-        // which member ACCESS can never yield from the column model: a NULL member column
-        // is the missing-attribute error above (PDP-verified: tags=[{}] denies under BOTH
-        // polarities even with null in the list; tags=[{"name": null}] would allow, but a
-        // column cannot distinguish that case and the error convention wins here). Null
-        // elements are therefore inert — stripped so they don't render as a never-matching
-        // SQL `IN (..., NULL)` literal — while NULL-projection rows stay UNKNOWN.
+        // A column cannot hold an explicitly-null member, so null list elements never match
+        // and are dropped.
         List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
         Predicate base = nonNull.isEmpty()
                 ? cb.disjunction()
@@ -331,20 +261,12 @@ final class MembershipTranslator {
     }
 
     private Predicate collectionContainsAny(Scope scope, Scope.ResolvedRelation ref, List<?> values) {
-        // Intersection with an empty value set is always false — and an EXISTS wrapping an
-        // empty `IN ()` is dialect-dependent — so short-circuit before building the subquery.
+        // Avoids an empty `IN ()`, which is dialect-dependent.
         if (values.isEmpty()) {
             return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> cb.disjunction());
         }
-        // CEL membership/intersection with a null constant is satisfied by a collection
-        // element that IS null (PDP-verified for both routes here: `null in R.attr.xs`
-        // with xs=["a", null] allows, and hasIntersection(R.attr.xs, ["public", null])
-        // with xs=[null] allows). A related row whose member column is NULL is exactly
-        // such an element under the scalar-projection (defaultMemberField) view, so the
-        // null constant becomes an IS NULL disjunct inside the EXISTS body —
-        // `member IN (...)`/`member = NULL` never matches it in SQL. (Contrast with
-        // map(t, t.name) member ACCESS, where a NULL column is a MISSING element
-        // attribute → CEL error; see handleMapIntersection.)
+        // Here a NULL member column is a null element, so a null constant matches it through
+        // an IS NULL disjunct. Contrast handleMapIntersection, where it is a missing attribute.
         List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
         boolean hasNull = nonNull.size() < values.size();
         return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
@@ -360,19 +282,10 @@ final class MembershipTranslator {
     }
 
     /**
-     * The constants a column — a collection's element column, or a scalar attribute's — can
-     * equal, in CEL's sense.
-     *
-     * <p>CEL's equality is heterogeneous: {@code "2" == 2} and {@code "true" == true} are a
-     * definite FALSE, not an error, so {@code "2" in R.attr.aNumberList} is false for every row and
-     * a {@code hasIntersection} literal of the wrong type contributes nothing. Handing such a
-     * constant to the database is wrong either way it goes — H2 coerces {@code '2'} onto a
-     * numeric element column and matches the rows holding 2 (an over-grant), and Hibernate
-     * refuses to build a Boolean-to-String comparison at all. So a constant whose type cannot compare
-     * with the element column is dropped here, which is exactly the FALSE disjunct CEL gives it.
-     * Dropping is sound only because membership is a disjunction over the constants and an
-     * element-to-constant equality between present values is two-valued; callers keep their own
-     * handling of a null constant and of a NULL element column.
+     * Drops constants whose type cannot equal the column. CEL equality across types is a
+     * definite false ({@code "2" == 2}), but H2 would coerce {@code '2'} and match 2, and
+     * Hibernate refuses a Boolean-to-String comparison. Dropping is safe because membership
+     * is a disjunction over the constants.
      */
     private static List<?> comparableTo(Path<?> element, List<?> nonNullValues) {
         return nonNullValues.stream()
