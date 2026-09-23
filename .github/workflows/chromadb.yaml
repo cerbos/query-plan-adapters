@@ -30,7 +30,7 @@ defaults:
 jobs:
   test:
     strategy:
-      # The adversarial suite now shares this matrix, so the default fail-fast would let an
+      # The conformance harness shares this matrix, so the default fail-fast would let an
       # unrelated Node leg cancel the baseline leg mid-corpus and report it as "cancelled" —
       # neither a pass nor a failure for the repo's load-bearing signal.
       fail-fast: false
@@ -43,25 +43,11 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
-      # Only the adversarial suite needs a PDP and a vector store: `npm test` is the translator
-      # unit test, which reads its plans from conformance/wire-fixtures/ — replanned and diffed
-      # against this same pinned version by the `Conformance Corpus` workflow — and its expected
-      # filters from golden/expectations.json. Both setup steps are therefore gated to the
-      # baseline Node leg, the one the adversarial step below runs on.
-      - name: Read pinned Cerbos version
-        if: matrix.node-version == '22'
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        if: matrix.node-version == '22'
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
-        with:
-          # Without a token the action fetches the release under GitHub's stricter anonymous
-          # rate limit, and that download is the step that has failed a run with no code change.
-          github_token: ${{ github.token }}
-          version: v${{ steps.cerbos.outputs.version }}
-
+      # Only the conformance harness needs a server: it replays the recorded goldens
+      # (conformance/golden/) against ChromaDB and needs no PDP. `npm test` is the offline unit
+      # suite. The server is therefore gated to the baseline Node leg, the one the conformance step
+      # below runs on.
+      #
       # The image is read from langchain-chromadb/CHROMA_IMAGE rather than restated here: the
       # `npm run chroma` helper developers use locally reads the same file, and a matrix entry
       # that drifted from it would prove the adapter against a different server than anyone
@@ -94,19 +80,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs in both evaluation modes on the baseline leg only. Each mode starts its own PDP so
-      # planning and the Check oracle share the engine configuration.
-      - name: Run adversarial differential suite
+      # The conformance corpus discriminates the translator and the store, not the Node runtime, so
+      # it runs on the baseline Node leg only.
+      - name: Run conformance harness
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:cerbos || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial
         env:
           CHROMA_URL: http://127.0.0.1:8000
 
@@ -131,7 +109,7 @@ jobs:
   # workflow of its own silently restores that gap.
   #
   # One Node leg only: the demo domain discriminates the package and the client, not the runtime —
-  # the same reasoning that gates the adversarial step above to Node 22.
+  # the same reasoning that gates the conformance step above to Node 22.
   #
   # No ChromaDB is started here, unlike the job above: the example's own run.sh starts one, on
   # 18234 rather than 8234, because bringing the store up is part of what a consumer does.
@@ -160,7 +138,7 @@ jobs:
       - run: npm install
 
       # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh langchain-chromadb
