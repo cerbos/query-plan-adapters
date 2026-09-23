@@ -12,8 +12,8 @@ import (
 //
 // The correlation is always `<Table>.<TargetColumn> = <parent>.<SourceColumn>`, where the parent
 // is the enclosing scope's table — the root table at the top level, or the previous hop's table
-// inside a nested lambda. Getting that rebase wrong is what the corpus's `outer-attr-depth2` and
-// `w2-outer-relation` actions exist to catch.
+// inside a nested lambda. Getting that rebase wrong is what the corpus cases `collection/exists/nested-with-outer-attribute` and
+// `collection/exists/outer-collection-inside-lambda` exist to catch.
 type Relation struct {
 	// Field maps a scalar collection's element to its single column, e.g. `subCategoryNames`
 	// where each element is the string itself rather than an object.

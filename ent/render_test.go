@@ -86,7 +86,7 @@ func TestRenderErrorsEscapeNestedParentheses(t *testing.T) {
 	require.ErrorContains(t, err, "notAFunction")
 }
 
-// TestSelectorReportsPredicateErrors pins the contract the adversarial harness depends on when it
+// TestSelectorReportsPredicateErrors pins the contract the conformance harness depends on when it
 // checks selector.Err() after Query() (cerbos/query-plan-adapters#319).
 //
 // The predicate is lazy, so its second write pass runs inside the caller's Query(). ent reports a

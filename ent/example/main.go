@@ -5,8 +5,9 @@
 // domain in demo/.
 //
 // This is NOT a test of what the adapter translates — ../adversarial_test.go proves that against a
-// hostile corpus with a live PDP as the oracle, and ../translate_test.go and ../render_test.go pin
-// the SQL it emits. This proves the thing every suite in ../ structurally cannot: the usage shapes.
+// hostile corpus with recorded PDP decisions as the oracle, and ../translate_test.go and
+// ../render_test.go pin the SQL it emits. This proves the thing every suite in ../ structurally
+// cannot: the usage shapes.
 //
 // A conformance harness runs one flat filtered query, and it runs it through a hand-built
 // entsql.Selector against database/sql — no generated ent client is involved anywhere in ../. So
