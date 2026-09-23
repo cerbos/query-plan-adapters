@@ -11,6 +11,8 @@ on:
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
 
+permissions: {}
+
 defaults:
   run:
     working-directory: sqlalchemy
@@ -19,6 +21,8 @@ jobs:
   test-sqla:
     name: SQLA ${{ matrix.sqlalchemy.name }} test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +36,8 @@ jobs:
             constraint: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
@@ -52,16 +58,32 @@ jobs:
       # The 2.x leg installs straight from the committed lockfile. The 1.4 leg
       # re-resolves under a constraint into a throwaway lockfile, so pdm.lock
       # stays the single pinned source of truth and no second lockfile has to be
-      # kept in step with it.
+      # kept in step with it. Naming a dev group with -G selects only the dev
+      # groups named, so `test` is listed explicitly; only the 2.x leg lints.
       - if: matrix.sqlalchemy.constraint == ''
-        run: pdm install -G testcontainers
+        run: pdm install -G testcontainers -G test -G lint
 
       - if: matrix.sqlalchemy.constraint != ''
         run: |
           echo "${{ matrix.sqlalchemy.constraint }}" > /tmp/sqlalchemy-constraint.txt
-          pdm install -G testcontainers \
+          pdm install -G testcontainers -G test \
             --override /tmp/sqlalchemy-constraint.txt \
             --lockfile /tmp/sqlalchemy-${{ matrix.sqlalchemy.name }}.lock
+
+      # Formatting and lint are properties of the source, not of the SQLAlchemy
+      # version, so they run once. Both scripts rewrite files in place, and
+      # check-repo-status fails the job on any diff they leave.
+      - name: Format
+        if: matrix.sqlalchemy.constraint == ''
+        run: pdm run format
+
+      - name: Lint
+        if: matrix.sqlalchemy.constraint == ''
+        run: pdm run lint
+
+      - name: Check repo status
+        if: matrix.sqlalchemy.constraint == ''
+        uses: cerbos/actions/check-repo-status@c19f023116079958e91290ea4af73e25296d7614 # main
 
       # Fails the job if the constraint did not take, rather than silently
       # running the same version twice.
@@ -113,8 +135,12 @@ jobs:
   # dimension, already run twice above by the job this one sits beside.
   example:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
