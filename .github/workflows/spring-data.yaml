@@ -11,6 +11,12 @@ on:
     tags:
       - spring-data/v*
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: spring-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: spring-data
@@ -58,10 +64,18 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
+          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
+          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
+          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          cache: gradle
+          cache-dependency-path: spring-data/**/*.gradle*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
+          # setup-java owns the cache above; two caches over one Gradle home conflict.
+          cache-disabled: true
           # Pinned rather than taking the runner's floating preinstall, and to the same version
           # the `example` job below pins and the adapter's README documents building with — so a
           # Gradle major landing on the runner image cannot turn this job red for a reason that is
@@ -79,7 +93,7 @@ jobs:
         env:
           ADAPTER_TEST_ORM: ${{ matrix.orm }}
 
-  # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle)
+  # Runs AdversarialConformanceTest (the differential check()-oracle)
   # backed by a real database via Testcontainers instead of in-memory H2. Guards against
   # dialect divergences H2 cannot surface — most importantly the collation over-grant
   # documented in spring-data/README.md "Database collation requirements": the MySQL leg
@@ -120,18 +134,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
+          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
+          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
+          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          cache: gradle
+          cache-dependency-path: spring-data/**/*.gradle*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
+          # setup-java owns the cache above; two caches over one Gradle home conflict.
+          cache-disabled: true
           # Pinned for the same reason as in `test`: the runner's preinstall floats, and a Gradle
           # major landing there must not turn a store leg red for a reason that is not the change
           # under review. Same version the README documents building with.
           gradle-version: "8.12"
 
-      - name: Build and test (${{ matrix.database }})
+      # AdversarialConformanceTest alone, in both modes: it is the only suite that reads
+      # ADAPTER_TEST_DB, so a full `gradle build` here replayed the translator, contract and H2
+      # suites the `test` job already ran, once per store leg.
+      - name: Adversarial suite (${{ matrix.database }})
         run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=false gradle test --tests '*AdversarialConformanceTest' --no-daemon
           ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
@@ -187,10 +212,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
+          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
+          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
+          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          cache: gradle
+          cache-dependency-path: spring-data/**/*.gradle*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
+          # setup-java owns the cache above; two caches over one Gradle home conflict.
+          cache-disabled: true
           # The example's Spring Boot 3.5.x Gradle plugin is validated against Gradle 8.x
           # (smoke.sh's documented prerequisite), not the runner's floating preinstall.
           gradle-version: "8.12"
