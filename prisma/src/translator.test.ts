@@ -1899,7 +1899,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 179, kinds: 7, throwing: 138 });
+    }).toEqual({ filters: 179, kinds: 7, throwing: 144 });
   });
 });
 
