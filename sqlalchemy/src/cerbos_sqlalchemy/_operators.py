@@ -438,9 +438,22 @@ def _in(c: Any, values: Any) -> Any:
     """CEL membership, including explicit-null list elements."""
     members = values if isinstance(values, list) else [values]
     non_nulls = [member for member in members if member is not None]
+    # CEL's equality is heterogeneous: `5 in ["5"]` is false. A member the column's
+    # type cannot equal is dropped here, as `_compare_leaf` answers the same pair
+    # under `==`, rather than handed to a store that converts '5' to 5.
+    column_kind = scalar_kind(c)
+    comparable = [
+        member
+        for member in non_nulls
+        if not column_kind or scalar_kind(member) in ("", column_kind)
+    ]
     predicates = []
-    if non_nulls:
-        predicates.append(c.in_(non_nulls))
+    if comparable:
+        predicates.append(c.in_(comparable))
+    elif non_nulls and hasattr(c, "isnot"):
+        # Every member was dropped: false for a present value, and NULL for an
+        # absent one, exactly as `c IN (...)` would have answered.
+        predicates.append(case((c.isnot(None), false())))
     if len(non_nulls) != len(members):
         predicates.append(c.is_(None))
     if not predicates:

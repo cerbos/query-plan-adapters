@@ -816,14 +816,10 @@ def _has_intersection_fn(mapped: Any, values: Any):
 
 
 def _scalar_membership(column: Any, values: Any):
-    members = values if isinstance(values, list) else [values]
-    non_nulls = [member for member in members if member is not None]
-    predicates = []
-    if non_nulls:
-        predicates.append(column.in_(non_nulls))
-    if len(non_nulls) != len(members):
-        predicates.append(column.is_(None))
-    return or_(*predicates) if predicates else false()
+    # The adapter's own lowering, not a copy of it: it keeps a null member as
+    # `IS NULL` and drops a member the column's type cannot equal, which a
+    # store would otherwise convert ('5' = 5 on SQLite) where CEL says false.
+    return OPERATOR_FNS["in"](column, values)
 
 
 def _relation_membership(relation: _Relation, value: Any):
@@ -918,7 +914,11 @@ PG_ARRAY_COLLECTION_COLUMNS = {
 
 
 def reads_declared_collection(action: str) -> bool:
-    """Whether ``action``'s plan reads a declared collection through ``size()`` or ``index``.
+    """Whether ``action``'s plan reads a declared collection's storage.
+
+    That is ``size()`` or ``index`` over any declared collection, and ``in`` or
+    ``hasIntersection`` over one :data:`ATTR_MAP` does not map -- the attributes whose membership
+    the adapter answers from the declaration rather than from a relation override.
 
     Read off the wire fixture rather than listed, so an action added to the corpus over one of
     these attributes joins the PostgreSQL leg without anyone remembering to add it.
@@ -935,6 +935,12 @@ def reads_declared_collection(action: str) -> bool:
             expression["operator"] in ("size", "index")
             and operands
             and operands[0].get("variable") in COLLECTION_COLUMNS
+        ):
+            return True
+        if expression["operator"] in ("in", "hasIntersection") and any(
+            operand.get("variable") in COLLECTION_COLUMNS
+            and operand.get("variable") not in ATTR_MAP
+            for operand in operands
         ):
             return True
         return any(walk(operand) for operand in operands)

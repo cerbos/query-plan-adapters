@@ -526,6 +526,36 @@
         "a_string_1": ""
       }
     },
+    "eq-bool-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_bool IS NOT NULL) THEN ? END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_bool IS NOT NULL) THEN %(param_1)s END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": false,
+        "a_number_1": 5
+      }
+    },
+    "eq-number-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN ? END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN %(param_1)s END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": false,
+        "a_number_1": 2
+      }
+    },
+    "eq-string-vs-number": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_string IS NOT NULL) THEN ? END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_string IS NOT NULL) THEN %(param_1)s END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": false,
+        "a_number_1": 5
+      }
+    },
     "exists-on-empty": {
       "where": {
         "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name = ?)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name = ?) IS NULL)) THEN NULL ELSE 0 END",
@@ -546,6 +576,18 @@
         "param_1": 1,
         "name_1": "public",
         "param_2": 1
+      }
+    },
+    "exists-tag-name-vs-number": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN (adversarial_tag.name IS NOT NULL) THEN ? END = 1)) THEN 1 WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN (adversarial_tag.name IS NOT NULL) THEN ? END IS NULL)) THEN NULL ELSE 0 END OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN (adversarial_tag.name IS NOT NULL) THEN %(param_2)s END)) THEN true WHEN (EXISTS (SELECT %(param_3)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND CASE WHEN (adversarial_tag.name IS NOT NULL) THEN %(param_2)s END IS NULL)) THEN NULL ELSE false END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": false,
+        "param_3": 1,
+        "a_number_1": 5
       }
     },
     "f2f-contains": {
@@ -616,6 +658,16 @@
         "a_number_1": 1
       }
     },
+    "hasint-bool-list-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_bool_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_bool_list_json) AS cerbos_element WHERE (cerbos_element.type = 'text' AND cerbos_element.value = ?)) END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_bool_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_bool_list_json AS JSONB)) AS cerbos_element WHERE (cerbos_element.value = to_jsonb(CAST(%(param_1)s AS TEXT)))) END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": "true",
+        "a_number_1": 5
+      }
+    },
     "hasint-map-null": {
       "where": {
         "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)) THEN NULL WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (?) OR adversarial_tag.name IS NULL))) THEN 1 ELSE 0 END = 1",
@@ -650,6 +702,17 @@
         "name_1_2": "other"
       }
     },
+    "hasint-map-vs-number": {
+      "where": {
+        "sqlite": "CASE WHEN (EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)) THEN NULL WHEN (EXISTS (SELECT ? AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (?))) THEN 1 ELSE 0 END = 1",
+        "postgresql": "CASE WHEN (EXISTS (SELECT %(param_1)s AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IS NULL)) THEN NULL WHEN (EXISTS (SELECT %(param_2)s AS anon_2 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND adversarial_tag.name IN (%(name_1_1)s))) THEN true ELSE false END"
+      },
+      "params": {
+        "param_1": 1,
+        "param_2": 1,
+        "name_1_1": "public"
+      }
+    },
     "hasint-null-vf": {
       "where": {
         "sqlite": "EXISTS (SELECT ? AS anon_1 FROM adversarial_tag WHERE adversarial_tag.resource_id = adversarial_resource.id AND (adversarial_tag.name IN (?) OR adversarial_tag.name IS NULL))",
@@ -658,6 +721,16 @@
       "params": {
         "param_1": 1,
         "name_1_1": "public"
+      }
+    },
+    "hasint-number-list-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_number_list_json) AS cerbos_element WHERE (cerbos_element.type = 'text' AND cerbos_element.value = ?) OR (CASE WHEN cerbos_element.type IN ('integer', 'real') THEN CAST(cerbos_element.value AS REAL) = CAST(? AS REAL) ELSE 0 END)) END = 1",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_number_list_json AS JSONB)) AS cerbos_element WHERE (cerbos_element.value = to_jsonb(CAST(%(param_1)s AS TEXT))) OR (CASE WHEN jsonb_typeof(cerbos_element.value) = 'number' THEN CAST(cerbos_element.value #>> '{}' AS FLOAT(53)) = CAST(%(param_2)s AS FLOAT(53)) ELSE false END)) END"
+      },
+      "params": {
+        "param_1": "2",
+        "param_2": 3
       }
     },
     "hier-ancestor-cf": {
@@ -801,6 +874,16 @@
       },
       "params": {}
     },
+    "in-bool-list-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_bool_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_bool_list_json) AS cerbos_element WHERE (cerbos_element.type = 'text' AND cerbos_element.value = ?)) END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_bool_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_bool_list_json AS JSONB)) AS cerbos_element WHERE (cerbos_element.value = to_jsonb(CAST(%(param_1)s AS TEXT)))) END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": "true",
+        "a_number_1": 5
+      }
+    },
     "in-empty": {
       "note": "`x in []` is false for every row, and the adapter says so with a literal FALSE rather than an empty `IN ()` no dialect accepts. Note SQLite has no boolean type \u2014 `0 = 1` where PostgreSQL emits `false` \u2014 which is the smallest instance of why both dialects are pinned.",
       "where": {
@@ -881,6 +964,25 @@
         "param_1": 1
       }
     },
+    "in-number-list": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_number_list_json) AS cerbos_element WHERE (CASE WHEN cerbos_element.type IN ('integer', 'real') THEN CAST(cerbos_element.value AS REAL) = CAST(? AS REAL) ELSE 0 END)) END = 1",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_number_list_json AS JSONB)) AS cerbos_element WHERE (CASE WHEN jsonb_typeof(cerbos_element.value) = 'number' THEN CAST(cerbos_element.value #>> '{}' AS FLOAT(53)) = CAST(%(param_1)s AS FLOAT(53)) ELSE false END)) END"
+      },
+      "params": {
+        "param_1": 2
+      }
+    },
+    "in-number-list-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_number_list_json) AS cerbos_element WHERE (cerbos_element.type = 'text' AND cerbos_element.value = ?)) END = 1 OR adversarial_resource.a_number = ?",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_number_list_json AS JSONB)) AS cerbos_element WHERE (cerbos_element.value = to_jsonb(CAST(%(param_1)s AS TEXT)))) END OR adversarial_resource.a_number = %(a_number_1)s"
+      },
+      "params": {
+        "param_1": "2",
+        "a_number_1": 5
+      }
+    },
     "in-numbers": {
       "where": {
         "sqlite": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN adversarial_resource.a_number IN (?, ?, ?) END = 1",
@@ -890,6 +992,15 @@
         "a_number_1_1": 2,
         "a_number_1_2": 3,
         "a_number_1_3": 5
+      }
+    },
+    "in-scalar-number-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN adversarial_resource.a_number IN (?) END = 1",
+        "postgresql": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN adversarial_resource.a_number IN (%(a_number_1_1)s) END"
+      },
+      "params": {
+        "a_number_1_1": 2
       }
     },
     "in-single": {
@@ -1261,6 +1372,16 @@
         "a_string_1": "one"
       }
     },
+    "ne-number-vs-string": {
+      "where": {
+        "sqlite": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN ? END = 1 AND adversarial_resource.a_number > ?",
+        "postgresql": "CASE WHEN (adversarial_resource.a_number IS NOT NULL) THEN %(param_1)s END AND adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "param_1": true,
+        "a_number_1": 3
+      }
+    },
     "neg-number": {
       "where": {
         "sqlite": "adversarial_resource.a_number < ?",
@@ -1385,6 +1506,13 @@
         "param_1": false
       }
     },
+    "not-null-in-number-list": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_number_list_json) AS cerbos_element WHERE (cerbos_element.type = 'null')) END = 0",
+        "postgresql": "NOT CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_number_list_json AS JSONB)) AS cerbos_element WHERE (jsonb_typeof(cerbos_element.value) = 'null')) END"
+      },
+      "params": {}
+    },
     "not-startswith": {
       "where": {
         "sqlite": "adversarial_resource.a_string NOT LIKE (replace(replace(replace(replace(adversarial_resource.a_optional_string, ?, ?), ?, ?), ?, ?), ?, ?) || ?) ESCAPE '\\'",
@@ -1424,6 +1552,13 @@
       "where": {
         "sqlite": "adversarial_resource.a_optional_string IS NULL",
         "postgresql": "adversarial_resource.a_optional_string IS NULL"
+      },
+      "params": {}
+    },
+    "null-in-number-list": {
+      "where": {
+        "sqlite": "CASE WHEN json_type(adversarial_resource.a_number_list_json) = 'array' THEN EXISTS (SELECT 1 FROM json_each(adversarial_resource.a_number_list_json) AS cerbos_element WHERE (cerbos_element.type = 'null')) END = 1",
+        "postgresql": "CASE WHEN jsonb_typeof(CAST(adversarial_resource.a_number_list_json AS JSONB)) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(adversarial_resource.a_number_list_json AS JSONB)) AS cerbos_element WHERE (jsonb_typeof(cerbos_element.value) = 'null')) END"
       },
       "params": {}
     },

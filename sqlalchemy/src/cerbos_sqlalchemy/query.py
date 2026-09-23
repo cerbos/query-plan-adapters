@@ -337,9 +337,12 @@ def get_query(
     storage, ``"json"`` or ``"pgArray"``. It is read in exactly two places --
     the operand of ``size()`` and the collection an ``index`` reads -- and in
     both it takes precedence over ``attr_map`` and over any operator override,
-    because it is the more specific declaration. Everywhere else the attribute
-    still resolves through ``attr_map``, so a relation marker there keeps
-    serving the collection macros. An index is translated only as a direct
+    because it is the more specific declaration. For an attribute ``attr_map``
+    does not map it also answers literal membership: ``literal in x`` and
+    ``hasIntersection(x, [literals])``, each literal matching only an element
+    of its own JSON type. Everywhere else the attribute still resolves through
+    ``attr_map``, so a relation marker there keeps serving the collection
+    macros and membership. An index is translated only as a direct
     ``==``/``!=`` against a scalar literal at a constant non-negative position;
     anything else over a declared collection is refused. The SQL renders on
     SQLite and PostgreSQL. See ``cerbos_sqlalchemy.collection_storage`` and

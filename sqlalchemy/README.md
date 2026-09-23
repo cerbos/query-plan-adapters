@@ -127,7 +127,7 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 | `operator_override_fns` | `None` | you need a dialect-specific operator, or a collection in a related table |
 | `null_attribute_representation` | `"explicit"` | your app omits attributes for NULL columns (`"omitted"`) |
 | `attribute_null_representation` | `None` | the NULL convention differs per attribute |
-| `collection_columns` | `None` | a policy calls `size()` or indexes a JSON / PostgreSQL array column |
+| `collection_columns` | `None` | a policy calls `size()`, indexes, or tests literal membership in a JSON / PostgreSQL array column |
 
 ### NULL attribute representation
 
@@ -198,8 +198,8 @@ get_query(
 )
 ```
 
-The storage names match the drizzle adapter's. The declaration takes precedence over `attr_map` and
-any override, in exactly two places:
+The storage names match the drizzle adapter's. The declaration is read in exactly three places. In
+the first two it takes precedence over `attr_map` and any override:
 
 - **`size()`** counts elements. Empty is `0`; an SQL NULL column or a non-array JSON value is
   UNKNOWN, so `size(x) == 0` selects empty rows, never missing ones, and `size(x) >= 0` excludes them.
@@ -208,6 +208,15 @@ any override, in exactly two places:
   `1`; `true` is not `1` even on SQLite); numbers compare as doubles. An absent element is UNKNOWN,
   so it stays excluded under negation. A null *element* is a value: `[null][0] == null` is true.
   PostgreSQL arrays are read through `to_jsonb`, so a non-1 lower bound still reads the element CEL does.
+
+The third applies only to an attribute `attr_map` does **not** map, so a declaration added for
+`size()` and indexing never changes how an existing relation answers membership:
+
+- **`literal in x`** / **`hasIntersection(x, [literals])`**, either operand order, for string,
+  number, boolean and `null` literals. Each literal matches only an element of its own JSON type, as
+  CEL's heterogeneous equality does: `"2" in [2]` is false, and `hasIntersection(x, ["2", 3])`
+  matches on the `3` alone. An SQL NULL column or a non-array JSON value is UNKNOWN, so a negated
+  membership still excludes it. A column, an expression, or a list/map literal as the element raises.
 
 Everything else over a declared element raises: a negative, fractional or dynamic index, ordering, a
 projection like `x[0].name`, and comparison with a list or map literal. Elsewhere the attribute
@@ -325,6 +334,7 @@ instants with `timestamp()` on both operands.
 | `size()` over a string column | `LENGTH` | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `x[i] == literal`, `x[i] != literal` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
+| `literal in x`, `hasIntersection(x, [literals])` over a JSON or PostgreSQL array column | refused until declared | `collection_columns`, for an attribute `attr_map` does not map |
 | `exists`, `all` over a literal list (a principal attribute) | folded | — |
 | `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | overrides; `require_hops` for a chain through a to-one parent |
 | `index` over any other storage | refused | an `index` override |
@@ -351,7 +361,7 @@ action runs on every leg, and every fail-closed shape is asserted as a throw ove
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 251 reference conformance actions, of which the 21 that read a declared collection also run on PostgreSQL under both storage shapes |
+| Oracle-tested | 265 reference conformance actions, of which the 28 that read a declared collection also run on PostgreSQL under both storage shapes |
 | Transport-dependent | `cr-div-neg-zero` and `nan-ord-inf` — a constant zero divisor. Refused over HTTP, whose JSON renders `-0.0` as `-0` and decodes it to integer `0`, losing the sign that picks CEL's infinity; **translated over gRPC**, where the protobuf double keeps it, and compared against the oracle there. Both count among the 57 fail-closed actions below, which classify the HTTP transport |
 | Fail-closed corpus shapes | Nanosecond `now()` thresholds; regex `matches()`; a negative or fractional index and an indexed object projection (`get-field`); `timestamp()` over an ambiguous string column; `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero); `filter()`/`map()` used as a condition (both return a list); a constant zero divisor whose sign HTTP discards; a hierarchy path built by `list()` rather than read from a column; `mod` (reached through the `int()` cast); list equality over a `map()` projection, whose deferred intermediate no override consumes; a hierarchy with an empty delimiter (Cerbos splits per character, and the prefix `LIKE` would match the path itself); two-list `except` with resource-list and principal-list receivers; constructor expressions and structured membership needles; unsupported principal-list macros; conditional divisors; bare temporal-column comparisons (57 actions) |
 | Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
@@ -435,6 +445,13 @@ chain.
 
 ## Behaviour changes
 
+- A literal list member the column's type cannot equal is dropped from `in` (`R.attr.aNumber in
+  ["5", 2]` compares `2` alone), as `==` already answered it, where it used to be bound into
+  `IN (...)` and converted by the store (`'5' = 5` is TRUE on SQLite) — an over-grant, since CEL's
+  `5 in ["5"]` is false. A list left with no comparable member is false for a present value.
+- **Widening:** literal membership (`in`, `hasIntersection`) over a declared collection that
+  `attr_map` does not map now translates, where it used to raise `Attribute does not exist in the
+  attribute column map`. An attribute `attr_map` maps resolves membership exactly as before.
 - **Breaking** ([#227](https://github.com/cerbos/query-plan-adapters/issues/227)): `size()` over a JSON
   or array column not declared in `collection_columns` now raises; it used to return `LENGTH()` of the
   column's text. `index` over undeclared storage raises a message naming the missing declaration
