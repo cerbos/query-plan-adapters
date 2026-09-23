@@ -1,3 +1,5 @@
+import { UnsupportedQueryPlanError } from "./errors";
+
 /** Escapes every regex metacharacter so the value matches itself literally. */
 export const escapeRegexValue = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -21,7 +23,7 @@ export const normalizeRe2PatternForMongo = (pattern: string): string => {
     if (character === "\\") {
       const escaped = pattern[index + 1];
       if (!escaped || !escapedLiterals.has(escaped)) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "matches supports only literal escapes in the common RE2/PCRE2 subset",
         );
       }
@@ -32,7 +34,7 @@ export const normalizeRe2PatternForMongo = (pattern: string): string => {
     }
     if (character === "^") {
       if (index !== 0) {
-        throw new Error("matches supports ^ only at the start of the pattern");
+        throw new UnsupportedQueryPlanError("matches supports ^ only at the start of the pattern");
       }
       normalized += character;
       canQuantify = false;
@@ -40,7 +42,7 @@ export const normalizeRe2PatternForMongo = (pattern: string): string => {
     }
     if (character === "$") {
       if (index !== pattern.length - 1) {
-        throw new Error("matches supports $ only at the end of the pattern");
+        throw new UnsupportedQueryPlanError("matches supports $ only at the end of the pattern");
       }
       normalized += "\\z";
       canQuantify = false;
@@ -48,14 +50,14 @@ export const normalizeRe2PatternForMongo = (pattern: string): string => {
     }
     if (character === "*" || character === "+" || character === "?") {
       if (!canQuantify) {
-        throw new Error(`matches has an invalid ${character} quantifier`);
+        throw new UnsupportedQueryPlanError(`matches has an invalid ${character} quantifier`);
       }
       normalized += character;
       canQuantify = false;
       continue;
     }
     if (unsupportedSyntax.has(character) || character.charCodeAt(0) < 0x20) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "matches pattern is outside the supported common RE2/PCRE2 subset",
       );
     }

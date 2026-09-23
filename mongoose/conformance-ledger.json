@@ -1,0 +1,429 @@
+{
+  "adapter": "mongoose",
+  "cases": {
+    "arithmetic/add/self-division-plus-constant-greater-than": {
+      "status": "unsupported",
+      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through arithmetic composed on the division"
+    },
+    "arithmetic/add/self-division-plus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Same zero-denominator abort as `arithmetic/add/self-division-plus-constant-greater-than`, reached through an inequality"
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator"
+    },
+    "arithmetic/divide/negated-self-division-equals": {
+      "status": "unsupported",
+      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through a negated equality"
+    },
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "$divide aborts the whole query on a zero denominator instead of producing CEL's signed infinity for that document, so the adapter requires a non-zero constant denominator and rejects a literal zero"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: div operator requires a non-zero constant denominator."
+    },
+    "arithmetic/divide/self-division-greater-than": {
+      "status": "unsupported",
+      "reason": "a row-dependent zero denominator aborts a Mongo query instead of denying that row"
+    },
+    "arithmetic/divide/self-division-not-equals": {
+      "status": "unsupported",
+      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through an inequality"
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "int() over a numeric column, needed to give `%` an integer operand, has no faithful $convert lowering — the same limitation that makes `cast/int/negative-fraction` unsupported. The cast is refused before the modulo is reached"
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "double() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "The translator unconditionally refuses numeric casts; it has no implemented lowering that proves CEL conversion and error semantics under negation. MongoDB $convert rejects malformed prefixes, so the existing refusal message does not accurately describe that store behavior."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "The translator unconditionally refuses numeric casts; it has no implemented lowering that proves CEL conversion and error semantics under negation. MongoDB $convert rejects malformed prefixes, so the existing refusal message does not accurately describe that store behavior."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "int() over a numeric column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
+    },
+    "cast/string/negated-missing-attribute": {
+      "status": "unsupported",
+      "reason": "MongoDB query negation would turn a missing-field evaluation error into a match."
+    },
+    "collection/all/nested-exists-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Same top-level-only $expr restriction as `collection/exists/nested-over-same-collection`, reached through all(): the inner $elemMatch cannot compare its element's id and name with the enclosing element's"
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: except."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: except."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: except."
+    },
+    "collection/exists-one/several-matches": {
+      "status": "unsupported",
+      "reason": "exactly-one collection cardinality is not expressible by the current match-filter translator"
+    },
+    "collection/exists/arithmetic-on-outer-attribute": {
+      "status": "unsupported",
+      "reason": "MongoDB rejects $expr below the top level of a query ('$expr can only be applied to the top-level document'), and field arithmetic exists only as an aggregation expression inside $expr; the per-element scope this needs comes from $elemMatch, so no find filter is both element-scoped and expression-valued. It would take an aggregation pipeline ($map/$filter plus $anyElementTrue), which a Mongoose Query filter is not"
+    },
+    "collection/exists/element-contains-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Using an outer document field as the needle of a string search over an array element needs an aggregation expression over a $-anchored path, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot sit inside the $elemMatch that scopes the element"
+    },
+    "collection/exists/element-field-to-element-field": {
+      "status": "unsupported",
+      "reason": "Comparing two fields of the same array element is only expressible as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot be placed inside the $elemMatch that establishes the element scope"
+    },
+    "collection/exists/element-field-to-outer-field": {
+      "status": "unsupported",
+      "reason": "MongoDB $expr cannot be safely scoped inside the adapter's $elemMatch predicates"
+    },
+    "collection/exists/negated": {
+      "status": "unsupported",
+      "reason": "negating a nullable collection macro would turn CEL errors into matches"
+    },
+    "collection/exists/negated-element-in-literal-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
+    },
+    "collection/exists/negated-empty-collection": {
+      "status": "unsupported",
+      "reason": "negated exists over nullable element members needs explicit three-valued logic"
+    },
+    "collection/exists/negated-nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "The negated macro reaches collection elements whose name may be NULL; the filter lowering refuses NOT over a collection macro because it cannot preserve their missing-attribute errors. Without the negation the shape is still refused, as `collection/exists/nested-over-same-collection`"
+    },
+    "collection/exists/negated-nested-three-levels": {
+      "status": "unsupported",
+      "reason": "same nullable macro-negation limitation across three collection levels"
+    },
+    "collection/exists/nested-collection-size": {
+      "status": "unsupported",
+      "reason": "nested collection size requires aggregation pipeline scoping"
+    },
+    "collection/exists/nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "The inner $elemMatch rebases every field path onto its own array element, so the enclosing element's name is reachable only as an aggregation expression inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
+    },
+    "collection/exists/nested-with-outer-attribute": {
+      "status": "unsupported",
+      "reason": "outer resource references inside nested element predicates require aggregation pipeline scoping"
+    },
+    "collection/exists/outer-collection-inside-lambda": {
+      "status": "unsupported",
+      "reason": "The categories.exists lambda reads the root document's tags collection from inside the element scope. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() as a conjunct returns a list, not a boolean; dropping the untranslatable half would over-grant, so the whole plan is refused."
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() used as the whole condition returns a list, not a boolean; only size(filter(...)) has a boolean meaning, so there is no MongoDB filter to emit."
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "Mongoose handles map() only as the collection operand of hasIntersection, where it becomes an $elemMatch. Comparing the projection itself to a literal list would need $map inside an aggregation expression, which the adapter's expression builder has no case for"
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "$divide by a zero denominator fails when MongoDB optimizes the query ('can't $divide by zero'), aborting it before any document is read rather than yielding CEL's +Inf/-Inf; constant folding means even a $cond arm no document takes still aborts, so the adapter rejects the literal 1.0/0.0 and -1.0/0.0 branches"
+    },
+    "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "MongoDB division by zero aborts rather than producing CEL non-finite values"
+    },
+    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Both sides are conditionals, so the Mongoose $expr caster fails to build the comparison for the same reason as `conditional/ternary/on-both-sides`; independently, the 0.0/0.0 branch is rejected because $divide by zero fails at query-optimization time ('can't $divide by zero'), aborting the whole query even though no document takes that branch"
+    },
+    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Mongoose cannot cast comparisons between two conditional expressions."
+    },
+    "comparison/less-than/nan-from-ternary-value-first": {
+      "status": "unsupported",
+      "reason": "same non-finite arithmetic limitation in value-first form"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
+    },
+    "conditional/ternary/as-whole-exists-body": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: if aggregation expressions inside collection predicates are unsupported."
+    },
+    "conditional/ternary/inside-all": {
+      "status": "unsupported",
+      "reason": "Same top-level-only $expr restriction as `conditional/ternary/inside-exists`, reached through all(): the negated $elemMatch that expresses all() still cannot contain the $cond aggregation expression the conditional needs"
+    },
+    "conditional/ternary/inside-exists": {
+      "status": "unsupported",
+      "reason": "$cond exists only as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so a conditional cannot be evaluated inside the $elemMatch that establishes the element scope"
+    },
+    "conditional/ternary/negated-branch-on-relation": {
+      "status": "unsupported",
+      "reason": "The negated conditional reaches a nullable parent attribute; the filter lowering refuses NOT because it cannot preserve selected-branch missing-attribute errors."
+    },
+    "conditional/ternary/negated-missing-attribute-condition": {
+      "status": "unsupported",
+      "reason": "negating a ternary over a nullable field cannot preserve CEL error semantics"
+    },
+    "conditional/ternary/on-both-sides": {
+      "status": "unsupported",
+      "reason": "Mongoose's $expr caster drops the schema when it recurses into a non-literal right-hand operand (cast$expr.js castComparison calls _castExpression(val[1]) with no schema argument), so a comparison whose right side is another $cond containing a path/literal comparison throws TypeError: Cannot read properties of undefined (reading 'path') while the query is built. MongoDB itself evaluates $cond against $cond correctly, so a Mongoose fix would change this answer"
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "The hierarchy operand parser refuses an empty separator before the anchored `^prefix + separator` regex is built: with an empty separator that regex would match the path itself (a2, never its own descendant) as well as every string extension of it"
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "the descendant path is CONSTRUCTED by list() from a constant segment and the primary key rather than read from a field, and the adapter resolves a hierarchy operand only from a mapped field or a string constant — it has no form for a path assembled at query time"
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: hierarchy path must be a field or string value."
+    },
+    "logic/not/deep-mixed-nesting": {
+      "status": "unsupported",
+      "reason": "The tags.exists lambda compares an element's name with the root document's aString. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
+    },
+    "membership/in/field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "variable-in-variable membership requires correlated aggregation scoping"
+    },
+    "membership/in/negated-field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "same variable-in-variable limitation under negation"
+    },
+    "null/all/negated-null-element": {
+      "status": "unsupported",
+      "reason": "negated all over nullable element members needs explicit three-valued logic"
+    },
+    "null/all/negated-null-element-with-false-sibling": {
+      "status": "unsupported",
+      "reason": "same nullable all-negation limitation with an absorbing false witness"
+    },
+    "null/exists-one/negated-null-element": {
+      "status": "unsupported",
+      "reason": "The negation over a collection macro whose elements are nullable is rejected first, for the same three-valued reason as `collection/exists/negated`: a $nor would turn a CEL element error into a match. The exists_one cardinality of `collection/exists-one/several-matches` is inexpressible underneath it either way"
+    },
+    "null/exists/negated-explicit-null-in-principal-list": {
+      "status": "unsupported",
+      "reason": "The value-list fold produces a collection macro under a negation, which Mongoose refuses before it ever reaches the comparison leaves: $nor over an exists would turn a CEL element error into a match. The explicit-null convention this action probes is expressible in Mongoose (its four siblings are oracle-compared) — the negated macro above it is not"
+    },
+    "null/in/missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
+    "null/in/negated-missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
+    },
+    "principal/all/negated-long-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: except."
+    },
+    "principal/exists-one/long-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Invalid operands for collection operation."
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Invalid operands for collection operation."
+    },
+    "principal/exists/negated-long-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: filter."
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset."
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Lookahead is outside RE2; the translator rejects patterns outside the common RE2/PCRE2 subset."
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "matches() with an anchored top-level alternation (^o|e$): the pattern is outside the RE2/PCRE2 subset the adapter proves MongoDB's $regex reads identically, so it is refused."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "relation/exists/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Negating a collection macro over nullable element members would turn CEL errors into matches, the same three-valued limitation as `collection/exists/negated` — and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent"
+    },
+    "relation/ternary/to-one-chain-condition": {
+      "status": "unsupported",
+      "reason": "A bare ternary is planned as $expr/$cond, and an aggregation expression has no membership form here: MongoDB's $in aggregation operator raises a runtime error when its array operand is missing, which is exactly the absent-to-one-parent case this action probes, so lowering it would fail the whole query rather than deny the row"
+    },
+    "size/equals/filtered-collection": {
+      "status": "unsupported",
+      "reason": "size(filter(...)) requires an aggregation pipeline expression"
+    },
+    "size/equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "size/less-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
+    },
+    "string/concatenate/field-to-field": {
+      "status": "unsupported",
+      "reason": "a CONSTANT is what tells CEL's two `+` overloads apart, and between two field paths there is none. MongoDB spells the two differently — $add accepts numeric and date types only, $concat strings — and the mapper carries no field types, so neither can be chosen. Sending $add anyway is what the server aborts the whole query on, so the shape is refused at translation instead"
+    },
+    "string/concatenate/negated-unsatisfiable-equals": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
+    },
+    "string/contains/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "The needle is a nullable COLUMN. Mongoose's guard refuses `not` over a nullable field outright, because a missing field matches a negated aggregation predicate and the row the PDP denies would be returned — the same rejection that protects the other negated nullable shapes"
+    },
+    "string/starts-with/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "Same nullable-needle refusal as `string/contains/negated-field-to-field`: the operator differs, the guard is the field's nullability under a negation"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."
+    },
+    "timestamp/greater-than/relative-window-value-first": {
+      "status": "unsupported",
+      "reason": "same nanosecond-precision now() limitation in value-first form"
+    },
+    "timestamp/less-than/relative-window": {
+      "status": "unsupported",
+      "reason": "the planner emits a nanosecond-precision now() literal that BSON Date cannot represent without changing the CEL instant"
+    },
+    "type-mismatch/descendent-of/number-field-as-path": {
+      "status": "unsupported",
+      "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: struct."
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: struct."
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Invalid operands for hasIntersection."
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "status": "unsupported",
+      "reason": "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element."
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "The numeric expression lowering refuses the zero denominator before it can compare the NaN arm; MongoDB arithmetic does not reproduce CEL floating-point division by zero."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: struct."
+    }
+  }
+}

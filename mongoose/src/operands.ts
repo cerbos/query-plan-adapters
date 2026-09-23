@@ -5,6 +5,8 @@ import type {
   PlanExpressionVariable,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
+
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
 export const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
@@ -20,7 +22,7 @@ export const getOperandAt = (
 ): PlanExpressionOperand => {
   const operand = operands[index];
   if (!operand) {
-    throw new Error(errorMessage);
+    throw new UnsupportedQueryPlanError(errorMessage);
   }
   return operand;
 };

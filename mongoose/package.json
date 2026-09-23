@@ -34,7 +34,7 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the translator unit test: it reads its plans from conformance/wire-fixtures/, so it needs no Cerbos sidecar and no MongoDB. Only `test:adversarial` needs a PDP and a server.",
+  "//test": "`test` is the offline unit suite: caller-supplied options, the refusal type and malformed plans. It needs no Cerbos and no MongoDB. `test:adversarial` replays the recorded conformance goldens (../conformance/golden/) against a real MongoDB (`npm run mongo`) and needs no PDP.",
   "scripts": {
     "build": "tsc --build",
     "typecheck": "tsc -p tsconfig.typecheck.json",
@@ -43,14 +43,13 @@
     "postversion": "git push && git push --tags",
     "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db \"$(cat MONGO_IMAGE)\"",
     "test": "jest",
-    "test:adversarial": "sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js"
+    "test:adversarial": "jest --config jest.adversarial.config.js"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "@cerbos/core": "^0.33.0",
-    "@cerbos/grpc": "^0.29.0",
     "@tsconfig/node24": "^24.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/jest": "^30.0.0",
