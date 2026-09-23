@@ -5479,6 +5479,58 @@
         }
       }
     },
+    "size-frac-eq-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") = cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            1.5,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") = cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            1.5,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) = cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            1.5,
+            10
+          ]
+        }
+      }
+    },
+    "size-frac-ne-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") <> cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            1.5,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") <> cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            1.5,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) <> cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            1.5,
+            10
+          ]
+        }
+      }
+    },
     "size-ge-one": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -5525,6 +5577,32 @@
         }
       }
     },
+    "size-huge-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") > cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            5000000000,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") > cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            5000000000,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) > cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            5000000000,
+            10
+          ]
+        }
+      }
+    },
     "size-huge-lt": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -5544,6 +5622,84 @@
           "sql": "char_length(`adversarial_resources`.`a_string`) < cast(? as float(53))",
           "params": [
             4294967296
+          ]
+        }
+      }
+    },
+    "size-huge-lt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") < cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            5000000000,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") < cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            5000000000,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) < cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            5000000000,
+            10
+          ]
+        }
+      }
+    },
+    "size-huge-neg-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") > cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            -5000000000,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") > cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            -5000000000,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) > cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            -5000000000,
+            10
+          ]
+        }
+      }
+    },
+    "size-huge-neg-lt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") < cast(? as float(53)) or \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            -5000000000,
+            10
+          ]
+        },
+        "postgresql": {
+          "sql": "(not length(\"adversarial_resources\".\"a_optional_string\") < cast($1 as float(53)) or \"adversarial_resources\".\"a_number\" > $2)",
+          "params": [
+            -5000000000,
+            10
+          ]
+        },
+        "mysql": {
+          "sql": "(not char_length(`adversarial_resources`.`a_optional_string`) < cast(? as float(53)) or `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            -5000000000,
+            10
           ]
         }
       }

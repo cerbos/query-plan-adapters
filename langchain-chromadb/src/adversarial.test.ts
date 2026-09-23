@@ -911,11 +911,11 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(327);
+    expect(MANIFEST_ACTIONS.size).toBe(333);
     expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(62);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(252);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(258);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(263);
+    expect(THROWING_ACTIONS).toHaveLength(269);
     expect(misclassified).toEqual([]);
   });
 

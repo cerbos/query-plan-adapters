@@ -318,7 +318,7 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 262 reference conformance actions |
+| Oracle-tested | 268 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()` (SQL regex dialects do not follow CEL/RE2), indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list), `string()` over a number or text column (no `CAST` target works on all three stores: MySQL rejects `TEXT`/`VARCHAR` and PostgreSQL's `CHAR` is `character(1)`), CEL's `+` over strings (`\|\|` is logical OR on MySQL, and numeric `+` coerces strings to 0), a hierarchy path built by `list()` rather than read from a column, `mod` (reached through the `int()` cast), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the prefix `LIKE` would match the path itself) (63 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `nullAttributeRepresentation: "explicit"` on its mapper entry renders definitely, so a NULL row is included where CEL's null *value* says so. Undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |

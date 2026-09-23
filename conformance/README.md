@@ -199,8 +199,18 @@ The rules the fixes established:
 - **Reuse one negation.** Prisma spelled the ternary's false branch as a second, unguarded `NOT` (#334).
 - Mongoose's `$cond` treats a missing path as falsy — a latent hazard only a chained scalar can reach
   (see "The real to-one relation").
-- A fractional `size()` *equality* is a CEL type error, so no policy can reach it. An adapter that
-  folds it must still guard it, proved only in unit tests (#333; kind 1 in `CLAUDE.md`).
+- A fractional `size()` *equality* is a CEL type error, but **`dyn()` reaches it**: the planner drops
+  the wrapper, so `size(x) != dyn(1.5)` arrives as `ne(size(x), 1.5)`. An adapter that folds it must
+  still guard it (#333). `size-frac-ne-not`/`size-frac-eq-not` carry the string-length half; the chain
+  and `size(filter(...))` halves are unit-tested only, as corpus gaps (kind 3 in `CLAUDE.md`).
+
+**A statically decided `size(string)` must stay UNKNOWN for a NULL column.** Out-of-int-range
+thresholds and fractional equalities are decided for every *present* string, so adapters fold them.
+A NULL column is a missing attribute that denies under both polarities, but a fold to `IS NOT NULL`
+negates to `IS NULL` and a constant FALSE negates to TRUE — both readmit the NULL rows.
+`size-huge-gt`/`-lt` cannot see this (`aString` is never NULL), so the six `size-*-not` actions ask
+it over `aOptionalString`, OR-ed with `aNumber > 10` to keep the oracle non-degenerate: a2/a4/a8 are
+the rows an unguarded fold readmits.
 
 ### Shapes that live only in a unit test
 
@@ -239,9 +249,9 @@ regex surface tests remain mechanism tests against Lucene.
 
 **spring-data** (`SpringDataQueryPlanAdapterTest`; every kind-3 test opens with *Corpus gap.*):
 
-- **Kind 1.** `isSet`; type-checker rejections (fractional `size()` equality, a timestamp against a
-  number); operand shapes the planner never emits (wrong arity, a bare string where `timestamp()`
-  always wraps one, a third operand); and constant sub-expressions the planner folds (proved by
+- **Kind 1.** `isSet`; type-checker rejections (a timestamp against a number); operand shapes the
+  planner never emits (wrong arity, a bare string where `timestamp()` always wraps one, a third
+  operand); and constant sub-expressions the planner folds (proved by
   `p-startswith-concat` and `in-empty`'s fixtures).
 - **Kind 2.** `OperatorFunction` overrides on every scalar-leaf path, the macro-depth bound and its
   system-property fallback, call-level and per-attribute `NullAttributeRepresentation`,
@@ -249,8 +259,10 @@ regex surface tests remain mechanism tests against Lucene.
   null-predicate contract with Spring Data, defensive copies, and (in `RefusalTypesTest`/`OptionsTest`)
   the typed refusals and `Options` immutability.
 - **Kind 3.** Bridges tracked by [#509](https://github.com/cerbos/query-plan-adapters/issues/509):
-  `size()` against arbitrary, fractional and out-of-int-range thresholds; empty-list intersection over
-  a direct scalar, relation or map projection; value-first and relation structured comparisons;
+  `size()` against arbitrary, fractional and out-of-int-range thresholds, and fractional `size()`
+  equality over a collection, a chain and `size(filter(...))` (reachable via `dyn()`); empty-list
+  intersection over a direct scalar, relation or map projection; value-first and relation structured
+  comparisons;
   suffix and integral `add` solve forms; CEL primitive and minor-operator shapes; macro composition;
   further value-first operand orders; nested, negated and value-first ternary rewrites; SQL Server `[`
   escaping (no leg runs SQL Server); constant-receiver string matches; arithmetic as a comparison

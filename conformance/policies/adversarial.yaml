@@ -1133,7 +1133,8 @@ resourcePolicy:
 
     # ==================== fractional size() thresholds ====================
     # COUNT is integral: >= 1.5 must round up to >= 2. CEL rejects ==/!= between int and double,
-    # so only the ordering operators can be planned.
+    # but `dyn(1.5)` defers that to runtime and the planner drops the wrapper, so fractional
+    # eq/ne is plannable too (size-frac-ne-not / size-frac-eq-not).
     - actions: ["cr-size-frac-ge"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1142,8 +1143,9 @@ resourcePolicy:
           expr: 'size(R.attr.tags) >= 1.5'
 
     # -- fractional threshold over a CHAIN (#333) --
-    # Rounding meets the absent-parent guard. eq/ne cannot be planned (int vs double is a type
-    # error), so that collapse is unit-tested only. See README.md, "The absent to-one parent".
+    # Rounding meets the absent-parent guard. The eq/ne collapse over a chain is plannable via
+    # `dyn()` but not carried yet: a corpus gap, unit-tested only for now. See README.md, "The
+    # absent to-one parent".
 
     # `>= 1.5` rounds up to `>= 2`. Empty oracle by design: it tests rounding, not the guard.
     # Truncating to `>= 1` returns a1/a6/a8/c1.
@@ -1180,6 +1182,68 @@ resourcePolicy:
       condition:
         match:
           expr: 'size(R.attr.aString) < 4294967296'
+
+    # The always-true size(string) arms UNDER NEGATION, over a NULLABLE column. A decided
+    # threshold (a fractional `!=`) and a threshold outside int range (`< huge`, `> -huge`) are
+    # true for every PRESENT string, so an adapter folds them statically — but a NULL column is a
+    # missing attribute, and size() of it is a CEL error that denies under BOTH polarities. A
+    # two-valued `col IS NOT NULL` fold negates to `col IS NULL` and readmits exactly those rows.
+    # aString is never NULL, so size-huge-* cannot see this; aOptionalString is NULL on
+    # a2/a4/a8/c2/e1. The negated arm is false for every present string, so on its own the
+    # oracle would be empty by construction: the `|| aNumber > 10` disjunct makes it
+    # non-degenerate (error || true absorbs to true in CEL, UNKNOWN OR TRUE is TRUE in SQL).
+    # Oracle: b6/c1/c2/d1/d2/e1/f1/g1/h1–h7. An IS NULL fold also returns a2/a4/a8.
+    - actions: ["size-huge-lt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+
+    # The same fold below int range: `> -huge` holds for every present string.
+    - actions: ["size-huge-neg-gt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) > -5000000000) || R.attr.aNumber > 10'
+
+    # The same fold for a DECIDED threshold: no integral length equals 1.5, so `!= 1.5` holds
+    # for every present string. `size(x) != 1.5` is an (int, double) type error, but `dyn()`
+    # defers the check to runtime heterogeneous equality and the planner drops the wrapper: the
+    # wire carries `ne(size(x), 1.5)`, so a fractional size() equality IS policy-reachable.
+    - actions: ["size-frac-ne-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) != dyn(1.5)) || R.attr.aNumber > 10'
+
+    # The ALWAYS-FALSE folds under negation. `== 1.5`, `> huge` and `< -huge` hold for no present
+    # string, so an adapter folds them to a constant FALSE — which NOT flips to TRUE for a NULL
+    # column just as surely as it flips IS NOT NULL to IS NULL. Here the negated arm is TRUE for
+    # every present string, so the oracle is every row with aOptionalString set plus c2/e1
+    # (aNumber > 10); a2/a4/a8 are the NULL rows a bare FALSE readmits.
+    - actions: ["size-frac-eq-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+
+    - actions: ["size-huge-gt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) > 5000000000) || R.attr.aNumber > 10'
+
+    - actions: ["size-huge-neg-lt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) < -5000000000) || R.attr.aNumber > 10'
 
     # ==================== constant NaN / ±Infinity ordering ====================
     # CEL 0.30 (Cerbos 0.55) returns false for any ordering involving NaN. `now() == now()`

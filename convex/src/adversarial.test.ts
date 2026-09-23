@@ -553,10 +553,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(327);
+    expect(allActions.size).toBe(333);
     expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(295);
+    expect(ORACLE_ACTIONS).toHaveLength(301);
     expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
@@ -680,7 +680,7 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 295,
+      total: 301,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly two corpus actions split: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root (#375) and compose-variable (#487) are the hostile shapes rooted there
@@ -688,10 +688,10 @@ describe("adversarial conformance corpus", () => {
       // and `aOptionalString` are `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 245,
+      defaultPostCount: 251,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 234,
+      pushdownPostCount: 240,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

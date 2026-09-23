@@ -840,6 +840,14 @@
       "kind": "KIND_CONDITIONAL",
       "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\" = 'public') IS NULL) THEN NULL ELSE (SELECT COUNT(*) FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" = 'public') END) = 1"
     },
+    "size-frac-eq-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") = 1.5)) OR \"adversarial_resources\".\"a_number\" > 10)"
+    },
+    "size-frac-ne-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") != 1.5)) OR \"adversarial_resources\".\"a_number\" > 10)"
+    },
     "size-ge-one": {
       "kind": "KIND_CONDITIONAL",
       "where": "(SELECT COUNT(*) FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\") >= 1"
@@ -848,9 +856,25 @@
       "kind": "KIND_CONDITIONAL",
       "where": "LENGTH(\"adversarial_resources\".\"a_string\") > 4294967296"
     },
+    "size-huge-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") > 5000000000)) OR \"adversarial_resources\".\"a_number\" > 10)"
+    },
     "size-huge-lt": {
       "kind": "KIND_CONDITIONAL",
       "where": "LENGTH(\"adversarial_resources\".\"a_string\") < 4294967296"
+    },
+    "size-huge-lt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") < 5000000000)) OR \"adversarial_resources\".\"a_number\" > 10)"
+    },
+    "size-huge-neg-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") > -5000000000)) OR \"adversarial_resources\".\"a_number\" > 10)"
+    },
+    "size-huge-neg-lt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(NOT ((LENGTH(\"adversarial_resources\".\"a_optional_string\") < -5000000000)) OR \"adversarial_resources\".\"a_number\" > 10)"
     },
     "size-threshold": {
       "kind": "KIND_CONDITIONAL",

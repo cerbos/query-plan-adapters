@@ -81,7 +81,7 @@ RSpec.describe "translator" do
         "conditional" => conditional.size,
         "unconditional" => unconditional.size,
         "throwing" => THROWING_ACTIONS.size
-      }).to eq({"conditional" => 248, "unconditional" => 7, "throwing" => 72})
+      }).to eq({"conditional" => 254, "unconditional" => 7, "throwing" => 72})
     end
 
     # Unconditional plans come from the planner, not this adapter. p-has is a declared
