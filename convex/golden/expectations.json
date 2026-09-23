@@ -1871,6 +1871,14 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "size-frac-eq-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-frac-ne-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "size-ge-one": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
@@ -1879,7 +1887,23 @@
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
+    "size-huge-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "size-huge-lt": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-huge-lt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-huge-neg-gt-not": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "size-huge-neg-lt-not": {
       "kind": "KIND_CONDITIONAL",
       "path": "post"
     },
