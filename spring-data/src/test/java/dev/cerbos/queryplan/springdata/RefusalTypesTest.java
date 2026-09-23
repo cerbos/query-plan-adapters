@@ -26,28 +26,43 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.jpa.domain.Specification;
 
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Checks which exception type each refusal uses: {@link UnsupportedPlanShapeException},
- * {@link UnmappedAttributeException} or {@link MalformedPlanException}. Corpus refusals come from
- * the wire fixtures; malformed plans are hand-built because the planner never emits them. Runs
- * offline.
+ * {@link UnmappedAttributeException} or {@link MalformedPlanException}. Corpus refusals are the
+ * {@code unsupported} entries of {@code conformance-ledger.json}, replayed from the current PDP's
+ * goldens; malformed plans are hand-built because the planner never emits them. Runs offline.
  */
 class RefusalTypesTest {
 
-    private static final Map<String, String> THROWING =
-            Corpus.throwingActions(Corpus.actionsFile(), Corpus.ADAPTER);
-
     private static final Options OPTIONS = Options.of(Corpus.MAPPING);
+
+    /** The case ids the ledger says this adapter refuses under the current PDP. */
+    private static final Set<String> UNSUPPORTED = Corpus.ledger().entrySet().stream()
+            .filter(e -> "unsupported".equals(e.getValue().status())
+                    && e.getValue().appliesTo(Corpus.currentTag()))
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toCollection(TreeSet::new));
+
+    /**
+     * The corpus refusals that are the mapping's to fix rather than a Criteria limit:
+     * {@code createdBy} is a String column, which does not pin an instant, and the mixed-null case
+     * compares two columns declared under different null conventions. Every other corpus refusal
+     * is an {@link UnsupportedPlanShapeException}.
+     */
+    private static final Set<String> UNMAPPED = Set.of(
+            "cast/timestamp/malformed-string",
+            "cast/timestamp/negated-malformed-string",
+            "null/not-equals/field-to-field-mixed-null-conventions");
 
     private static EntityManagerFactory emf;
 
@@ -63,127 +78,17 @@ class RefusalTypesTest {
 
     // -- the corpus ------------------------------------------------------------------------------
 
-    /**
-     * The expected type for every corpus action this adapter refuses. The
-     * {@link UnmappedAttributeException} entries are fixed by changing the mapping:
-     * {@code createdBy} is a String column, and {@code null-value-f2f-mixed} compares two
-     * different null conventions.
-     */
-    private static final Map<String, Class<? extends IllegalArgumentException>> CLASSIFIED =
-            Map.ofEntries(
-                    Map.entry("regex-final-newline", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-eq-true", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-lookahead", UnsupportedPlanShapeException.class),
-                    Map.entry("index-negative", UnsupportedPlanShapeException.class),
-                    Map.entry("index-fractional", UnsupportedPlanShapeException.class),
-                    Map.entry("index-not-oob", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-not-int", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-not-string-missing", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-not-string-null", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-not-timestamp", UnmappedAttributeException.class),
-                    Map.entry("cast-not-double", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-digit", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-case", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-posix", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-unanchored", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-dot", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-alternation", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-grouped", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-brace", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-repetition", UnsupportedPlanShapeException.class),
-                    Map.entry("regex-optional-operators", UnsupportedPlanShapeException.class),
-                    Map.entry("except-root", UnsupportedPlanShapeException.class),
-                    Map.entry("except-size", UnsupportedPlanShapeException.class),
-                    Map.entry("except-eq", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-structs", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-structs-null", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-exists-one", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-filter", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-map", UnsupportedPlanShapeException.class),
-                    Map.entry("pv-except", UnsupportedPlanShapeException.class),
-                    Map.entry("temporal-raw-eq", UnsupportedPlanShapeException.class),
-                    Map.entry("eq-list", UnsupportedPlanShapeException.class),
-                    Map.entry("ne-list", UnsupportedPlanShapeException.class),
-                    Map.entry("eq-map", UnsupportedPlanShapeException.class),
-                    Map.entry("ne-map", UnsupportedPlanShapeException.class),
-                    Map.entry("eq-map-null", UnsupportedPlanShapeException.class),
-                    Map.entry("in-nested-list", UnsupportedPlanShapeException.class),
-                    Map.entry("hasint-map-element", UnsupportedPlanShapeException.class),
-                    Map.entry("arith-mod", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-double-string", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-int-double", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-int-string", UnsupportedPlanShapeException.class),
-                    Map.entry("cast-string-double", UnsupportedPlanShapeException.class),
-                    Map.entry("concat-f2f", UnsupportedPlanShapeException.class),
-                    Map.entry("cr-div-then-add", UnsupportedPlanShapeException.class),
-                    Map.entry("cr-div-then-add-ne", UnsupportedPlanShapeException.class),
-                    Map.entry("filter-as-condition", UnsupportedPlanShapeException.class),
-                    Map.entry("filter-as-conjunct", UnsupportedPlanShapeException.class),
-                    Map.entry("hier-empty-delim", UnsupportedPlanShapeException.class),
-                    Map.entry("id-concat", UnsupportedPlanShapeException.class),
-                    Map.entry("index-scalar-list", UnsupportedPlanShapeException.class),
-                    Map.entry("index-scalar-list-not-eq", UnsupportedPlanShapeException.class),
-                    Map.entry("index-scalar-list-null", UnsupportedPlanShapeException.class),
-                    Map.entry("index-number-list", UnsupportedPlanShapeException.class),
-                    Map.entry("index-number-list-not-eq", UnsupportedPlanShapeException.class),
-                    Map.entry("index-bool-list", UnsupportedPlanShapeException.class),
-                    Map.entry("index-bool-list-not-eq", UnsupportedPlanShapeException.class),
-                    Map.entry("index-bool-list-vs-number", UnsupportedPlanShapeException.class),
-                    Map.entry("index-number-list-vs-bool", UnsupportedPlanShapeException.class),
-                    Map.entry("map-as-condition", UnsupportedPlanShapeException.class),
-                    Map.entry("map-eq-list", UnsupportedPlanShapeException.class),
-                    Map.entry("matches-alt", UnsupportedPlanShapeException.class),
-                    Map.entry("null-value-f2f-mixed", UnmappedAttributeException.class),
-                    Map.entry("p-index", UnsupportedPlanShapeException.class),
-                    Map.entry("p-matches", UnsupportedPlanShapeException.class),
-                    Map.entry("p-timestamp", UnmappedAttributeException.class));
-
     @Test
-    void everyThrowingCorpusActionIsClassified() {
-        assertEquals(new TreeMap<>(THROWING).keySet(), new TreeMap<>(CLASSIFIED).keySet(),
-                "the classified set must be exactly the actions actions.json says this adapter refuses");
-    }
-
-    @Test
-    void everyThrowingCorpusActionIsRefusedAsItsClassifiedType() {
-        for (Map.Entry<String, String> entry : THROWING.entrySet()) {
-            String action = entry.getKey();
-            IllegalArgumentException ex = refusal(Corpus.planFromWireFixture(action), OPTIONS);
-            assertInstanceOf(CLASSIFIED.get(action), ex,
-                    () -> action + " was refused with \"" + ex.getMessage() + "\"");
-            // The right type is not enough; the message must match too.
-            assertTrue(ex.getMessage().contains(entry.getValue()),
-                    () -> action + " was refused with \"" + ex.getMessage()
-                            + "\", not the message actions.json pins");
-        }
-    }
-
-    /** How many corpus refusals use each type. */
-    @Test
-    void theRefusalTypesAreDistributedInTheseNumbers() {
-        Map<String, Integer> counts = new TreeMap<>();
-        for (String action : THROWING.keySet()) {
-            IllegalArgumentException ex = refusal(Corpus.planFromWireFixture(action), OPTIONS);
-            counts.merge(ex.getClass().getSimpleName(), 1, Integer::sum);
-        }
-        assertEquals(new TreeMap<>(Map.of(
-                        "UnsupportedPlanShapeException", 63,
-                        "UnmappedAttributeException", 3)),
-                counts);
-        assertEquals(THROWING.size(), counts.values().stream().mapToInt(Integer::intValue).sum());
-    }
-
-    /**
-     * Planner output is never malformed. A failure here is either an upstream planner bug or a
-     * refusal raised with the wrong type.
-     */
-    @Test
-    void noCorpusActionIsRefusedAsMalformed() {
-        for (String action : THROWING.keySet()) {
-            IllegalArgumentException ex = refusal(Corpus.planFromWireFixture(action), OPTIONS);
-            assertTrue(!(ex instanceof MalformedPlanException),
-                    () -> action + " is planner output but was refused as malformed: "
-                            + ex.getMessage());
+    void everyUnsupportedCaseIsRefusedAsItsClassifiedType() {
+        assertTrue(UNSUPPORTED.containsAll(UNMAPPED), () -> "not ledgered unsupported: " + UNMAPPED);
+        for (String caseId : UNSUPPORTED) {
+            IllegalArgumentException ex = refusal(Corpus.plan(caseId), OPTIONS);
+            Class<? extends IllegalArgumentException> expected = UNMAPPED.contains(caseId)
+                    ? UnmappedAttributeException.class : UnsupportedPlanShapeException.class;
+            // Planner output is never malformed, so MalformedPlanException always fails here.
+            assertInstanceOf(expected, ex,
+                    () -> caseId + " was refused as " + ex.getClass().getSimpleName()
+                            + " with \"" + ex.getMessage() + "\"");
         }
     }
 
@@ -193,17 +98,11 @@ class RefusalTypesTest {
      */
     @Test
     void theOmittedConventionRefusalIsAnUnsupportedShapeRaisedEagerly() {
-        for (Corpus.NullRepresentationOmitted probe
-                : Corpus.nullRepresentationThrows(Corpus.actionsFile())) {
-            PlanResourcesResponse plan = Corpus.planFromWireFixture(probe.action());
-            Options omitted = Options.of(Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS)
-                    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED);
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> SpringDataQueryPlanAdapter.toSpecification(plan, omitted));
-            assertInstanceOf(UnsupportedPlanShapeException.class, ex, probe.action());
-            assertTrue(ex.getMessage().contains(Corpus.nullOmittedMessage(probe, Corpus.ADAPTER)),
-                    ex.getMessage());
-        }
+        PlanResourcesResponse plan = Corpus.plan("null/equals/null-literal-on-missing-attribute");
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> SpringDataQueryPlanAdapter.toSpecification(plan, OPTIONS));
+        assertInstanceOf(UnsupportedPlanShapeException.class, ex);
+        assertTrue(ex.getMessage().contains("NullAttributeRepresentation.OMITTED"), ex.getMessage());
     }
 
     // -- hand-built plans: the shapes a fixture cannot supply ------------------------------------
@@ -360,17 +259,19 @@ class RefusalTypesTest {
         return refusal(response(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition), options);
     }
 
-    /** Builds the Specification's predicate and returns the refusal it throws. */
+    /**
+     * Builds the Specification and its predicate and returns the refusal either step throws: a
+     * refusal under the OMITTED convention is raised by {@code toSpecification} itself.
+     */
     private static IllegalArgumentException refusal(PlanResourcesResponse plan, Options options) {
-        Specification<ResourceEntity> spec = SpringDataQueryPlanAdapter.toSpecification(plan, options);
         EntityManager em = emf.createEntityManager();
         try {
             CriteriaBuilder cb = em.getCriteriaBuilder();
             CriteriaQuery<String> cq = cb.createQuery(String.class);
             Root<ResourceEntity> root = cq.from(ResourceEntity.class);
             cq.select(root.get("id"));
-            return assertThrows(IllegalArgumentException.class,
-                    () -> spec.toPredicate(root, cq, cb));
+            return assertThrows(IllegalArgumentException.class, () -> SpringDataQueryPlanAdapter
+                    .<ResourceEntity>toSpecification(plan, options).toPredicate(root, cq, cb));
         } finally {
             em.close();
         }

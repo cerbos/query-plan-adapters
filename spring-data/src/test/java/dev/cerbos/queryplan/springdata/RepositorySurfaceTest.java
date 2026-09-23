@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Runs the adapter's Specification through a real Spring Data repository: {@code findAll},
- * {@code count}, pagination, de-duplication and composition. Plans come from the wire fixtures and
+ * {@code count}, pagination, de-duplication and composition. Plans are the current PDP's recorded goldens and
  * rows are seeded in H2, so no Docker is needed. Assertions compare the repository's answers with
  * each other rather than with expected ids.
  */
@@ -105,7 +105,7 @@ class RepositorySurfaceTest {
         r3.addTag("r3-t1", "internal");
         r3.setTagNames(new ArrayList<>(List.of("internal")));
 
-        // Third match for vf-hasint, so its second size-2 page is partial.
+        // Third match for collection/has-intersection/value-first, so its second size-2 page is partial.
         ResourceEntity r4 = row("r4", false, "one", 4, null);
         r4.setTagNames(new ArrayList<>(List.of("other")));
 
@@ -132,7 +132,7 @@ class RepositorySurfaceTest {
     }
 
     private static Specification<ResourceEntity> specFor(String action) {
-        PlanResourcesResponse plan = Corpus.planFromWireFixture(action);
+        PlanResourcesResponse plan = Corpus.plan(action);
         return SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING, Map.of());
     }
 
@@ -187,15 +187,15 @@ class RepositorySurfaceTest {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {
             // eq on the @Embedded path.
-            "cs-eq",
+            "string/equals/case-sensitive",
             // exists over the @OneToMany.
-            "exists-on-empty",
+            "collection/exists/empty-collection",
             // hasIntersection over the @ElementCollection, value first.
-            "vf-hasint",
+            "collection/has-intersection/value-first",
             // 0 < size(tags).
-            "vf-size",
+            "size/less-than/value-first",
             // A bare boolean attribute as the whole condition.
-            "root-bare-bool"})
+            "logic/bare-attribute/boolean"})
     void theRepositoryContractHoldsForEveryTranslationShape(String action) {
         assertRepositorySurface(specFor(action));
     }
@@ -206,7 +206,7 @@ class RepositorySurfaceTest {
      */
     @Test
     void pageableFindAllInvokesToPredicateTwiceOnOneSpecification() {
-        CountingSpecification spec = new CountingSpecification(specFor("vf-hasint"));
+        CountingSpecification spec = new CountingSpecification(specFor("collection/has-intersection/value-first"));
         EntityManager em = emf.createEntityManager();
         try {
             SimpleJpaRepository<ResourceEntity, String> repository = repository(em);
@@ -244,14 +244,14 @@ class RepositorySurfaceTest {
      * <p>The first assertion guards against vacuity: r1 must have at least two matching elements.
      */
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"p-hasintersection-map", "vf-hasint"})
+    @ValueSource(strings = {"collection/has-intersection/mapped-names-with-metacharacters", "collection/has-intersection/value-first"})
     void aMultiElementMatchDoesNotDuplicateTheEntity(String action) {
-        // The policy's literal lists (conformance/policies/adversarial.yaml) and the element the
+        // The cases' literal lists (conformance/cases/collection.yaml) and the element the
         // mapping above resolves each action's collection to.
         String elementJpql = switch (action) {
-            case "p-hasintersection-map" -> "select count(t) from ResourceEntity r join r.tags t "
+            case "collection/has-intersection/mapped-names-with-metacharacters" -> "select count(t) from ResourceEntity r join r.tags t "
                     + "where r.id = 'r1' and t.name in ('public', 'héllo🚀', '100%_x')";
-            case "vf-hasint" -> "select count(t) from ResourceEntity r join r.tagNames t "
+            case "collection/has-intersection/value-first" -> "select count(t) from ResourceEntity r join r.tagNames t "
                     + "where r.id = 'r1' and t in ('public', 'other')";
             default -> throw new IllegalArgumentException(action);
         };
@@ -290,7 +290,7 @@ class RepositorySurfaceTest {
     /** {@code .and(...)} with a caller Specification returns the intersection, in either order. */
     @Test
     void composesWithACallerSpecificationInBothOrders() {
-        Specification<ResourceEntity> cerbos = specFor("vf-hasint");
+        Specification<ResourceEntity> cerbos = specFor("collection/has-intersection/value-first");
         Specification<ResourceEntity> caller =
                 (root, query, cb) -> cb.equal(root.get("aBool"), true);
 
@@ -316,9 +316,10 @@ class RepositorySurfaceTest {
 
     /** Dotted field paths through an {@code @Embedded} value and a {@code @ManyToOne} join. */
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"cs-eq", "optional-ne"})
+    @ValueSource(strings = {
+            "string/equals/case-sensitive", "null/not-equals/missing-attribute-against-literal"})
     void aDottedFieldPathTraversesEmbeddablesAndToOneAssociations(String action) {
-        // cs-eq reads aString, mapped here to the @Embedded nested.aString; optional-ne reads
+        // The first reads aString, mapped here to the @Embedded nested.aString; the second reads
         // aOptionalString, mapped to the @ManyToOne creator.id.
         EntityManager em = emf.createEntityManager();
         try {

@@ -564,7 +564,7 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     // Constant-only sub-expressions: the planner folds these before sending the plan (see the
-    // p-startswith-concat wire fixture).
+    // string/starts-with/concatenated-literal-needle golden).
 
     @Test
     void addFoldedTwoConstants() {
@@ -680,7 +680,7 @@ class SpringDataQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 2 — a caller-supplied argument the corpus structurally cannot vary
     //
-    // actions.json classifies each action against one mapping per adapter, so overrides, null
+    // The harness translates every case with one mapping, so overrides, null
     // conventions, other column types and the Spring Data call contract have no corpus spelling.
     // ============================================================================================
 
@@ -896,6 +896,22 @@ class SpringDataQueryPlanAdapterTest {
             assertTrue(thrown.getMessage().contains("missing-attribute error"));
         }
 
+        /** #308: an EXPLICIT declaration wins over a call-level OMITTED; an undeclared one does not. */
+        @Test
+        void declaringExplicitTranslatesANullOperandUnderACallLevelOmitted() {
+            PlanResourcesResponse declared = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.owner"), nullVal()));
+            assertDoesNotThrow(() -> SpringDataQueryPlanAdapter.toSpecification(
+                    declared, mapper, Map.of(), NullAttributeRepresentation.OMITTED));
+
+            PlanResourcesResponse undeclared = buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL,
+                    exprOp("eq", var("request.resource.attr.plain"), nullVal()));
+            IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                    () -> SpringDataQueryPlanAdapter.toSpecification(
+                            undeclared, mapper, Map.of(), NullAttributeRepresentation.OMITTED));
+            assertTrue(thrown.getMessage().contains("null operand"), thrown.getMessage());
+        }
+
     }
 
     // Each nested collection macro adds a correlated subquery, so nesting beyond the limit must
@@ -949,7 +965,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void literalFoldCountsAgainstTheCallLevelDepthBound() {
-            PlanResourcesResponse plan = Corpus.planFromWireFixture("pv-shadow");
+            PlanResourcesResponse plan = Corpus.plan("principal/exists/shadowed-lambda-variable");
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();
@@ -1358,7 +1374,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: The corpus counts a collection against 1 alone
-         * ({@code size-threshold}, {@code size-filter-count}); an arbitrary threshold under every
+         * ({@code size/greater-than/collection-above-one}, {@code size/equals/filtered-collection}); an arbitrary threshold under every
          * operator, over an element collection and an entity relation, is not carried.
          */
         @Test
@@ -1387,7 +1403,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code vf-size} mirrors the emptiness check alone; a
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/value-first} mirrors the emptiness check alone; a
          * value-first arbitrary threshold is not carried.
          */
         @Test
@@ -1408,7 +1424,7 @@ class SpringDataQueryPlanAdapterTest {
      * Fractional {@code size()} equality. CEL's type checker rejects int-vs-double
      * {@code ==}/{@code !=}, but {@code size(x) != dyn(1.5)} compiles and the planner drops the
      * {@code dyn()}, so these are policy-reachable. The corpus carries the negated string-length
-     * half ({@code size-frac-ne-not}, {@code size-frac-eq-not}); the rest is not carried.
+     * half ({@code size/not-equals/negated-fractional-threshold-on-missing-attribute}, {@code size/equals/negated-fractional-threshold-on-missing-attribute}); the rest is not carried.
      */
     @Nested
     class FractionalSizeEquality {
@@ -1440,7 +1456,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code size-frac-ne-not} and {@code size-frac-eq-not}
+         * <strong>Corpus gap.</strong> #509: {@code size/not-equals/negated-fractional-threshold-on-missing-attribute} and {@code size/equals/negated-fractional-threshold-on-missing-attribute}
          * carry the negated string-length forms; the positive polarity is not carried.
          */
         @Test
@@ -1528,7 +1544,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code cr-size-frac-ge} and {@code w1-size-frac-chain}
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-or-equal/fractional-threshold} and {@code size/greater-or-equal/fractional-threshold-on-relation}
          * carry the inclusive {@code >=}; the strict {@code >} rounding is not carried.
          */
         @Test
@@ -1540,7 +1556,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code w1-size-frac-le-chain} carries the inclusive
+         * <strong>Corpus gap.</strong> #509: {@code size/less-or-equal/fractional-threshold-on-relation} carries the inclusive
          * {@code <=}; the strict {@code <} rounding is not carried.
          */
         @Test
@@ -1601,7 +1617,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code size-huge-gt} carries {@code >} at 2^32 alone;
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-than/huge-threshold} carries {@code >} at 2^32 alone;
          * {@code ge}, {@code eq} and the 2^31 boundary are not carried.
          */
         @Test
@@ -1618,8 +1634,8 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code size-huge-lt} carries {@code <} at 2^32 and
-         * {@code size-huge-lt-not} its negation over the nullable aOptionalString; {@code le} and
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/huge-threshold} carries {@code <} at 2^32 and
+         * {@code size/less-than/negated-huge-threshold-on-missing-attribute} its negation over the nullable aOptionalString; {@code le} and
          * the 2^31 boundary are not carried.
          */
         @Test
@@ -1688,7 +1704,7 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #509: {@code exists-one-multi} carries a single-equality body; a
+     * <strong>Corpus gap.</strong> #509: {@code collection/exists-one/several-matches} carries a single-equality body; a
      * disjunctive body is not carried.
      */
     @Test
@@ -1706,7 +1722,7 @@ class SpringDataQueryPlanAdapterTest {
 
     /**
      * <strong>Corpus gap.</strong> #509: {@code hasIntersection(x, [])} against a scalar column is
-     * not carried. It is not known whether the planner folds it as it folds {@code in-empty}.
+     * not carried. It is not known whether the planner folds it as it folds {@code membership/in/empty-list}.
      */
     @Test
     void hasIntersectionScalarEmptyListCompiles() {
@@ -1744,7 +1760,7 @@ class SpringDataQueryPlanAdapterTest {
     class StructuredConstantComparison {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code eq-list} carries a relation-mapped attribute; a
+         * <strong>Corpus gap.</strong> #509: {@code comparison/equals/whole-list-literal} carries a relation-mapped attribute; a
          * scalar column against a list constant is not carried.
          */
         @Test
@@ -1755,7 +1771,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code ne-list} carries a relation-mapped attribute; a
+         * <strong>Corpus gap.</strong> #509: {@code comparison/not-equals/whole-list-literal} carries a relation-mapped attribute; a
          * scalar column against a list constant is not carried.
          */
         @Test
@@ -1786,7 +1802,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code eq-list} carries this shape with a one-element
+         * <strong>Corpus gap.</strong> #509: {@code comparison/equals/whole-list-literal} carries this shape with a one-element
          * list; a multi-element list is not carried.
          */
         @Test
@@ -1799,7 +1815,7 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #509: {@code id-concat-vf} solves a PREFIX concatenation back to
+     * <strong>Corpus gap.</strong> #509: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
      * a key equality; the suffix form is not carried.
      */
     @Test
@@ -1812,7 +1828,7 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #509: {@code arith-add-eq-frac} and its siblings go through SQL
+     * <strong>Corpus gap.</strong> #509: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
      * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
      * is a CEL no-overload error at check time, since attribute values are doubles.
      */
@@ -1851,7 +1867,7 @@ class SpringDataQueryPlanAdapterTest {
     class CelPrimitives {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code string-size} and {@code string-size-gt0} carry
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-than/string-length} and {@code size/greater-than/string-non-empty} carry
          * {@code >}; equality and the value-first mirror over a string length are not carried.
          */
         @Test
@@ -1881,8 +1897,8 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: The corpus orders a column against a constant
-         * ({@code rel-lt-hop} and siblings) and compares two columns for equality
-         * ({@code field-to-field}); a two-column ORDERING is not carried.
+         * ({@code relation/less-than/one-hop} and siblings) and compares two columns for equality
+         * ({@code comparison/equals/field-to-field}); a two-column ORDERING is not carried.
          */
         @Test
         void fieldToFieldOrderingKeepsOperandDirection() {
@@ -1909,7 +1925,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: {@code matches()} between two columns is not carried;
-         * {@code p-matches} refuses the constant form.
+         * {@code regex/matches/anchored-prefix} refuses the constant form.
          */
         @Test
         void fieldToFieldUnsupportedOperatorStillThrows() {
@@ -1924,7 +1940,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: {@code R.attr.aBool == false} is not carried; the
-         * corpus reaches the boolean column bare ({@code root-bare-bool}).
+         * corpus reaches the boolean column bare ({@code logic/bare-attribute/boolean}).
          */
         @Test
         void equalBoolFalse() {
@@ -1951,7 +1967,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code size-filter-count} carries {@code == 1}; the
+         * <strong>Corpus gap.</strong> #509: {@code size/equals/filtered-collection} carries {@code == 1}; the
          * other operators and the value-first mirror are not carried.
          */
         @Test
@@ -2030,7 +2046,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: {@code null in R.attr.x} over a scalar column is not
-         * carried; the corpus's null needles are over relations ({@code in-null-elem-rel}).
+         * carried; the corpus's null needles are over relations ({@code null/in/null-literal-in-resource-list}).
          */
         @Test
         void nullNeedleAgainstScalarFieldIsIsNull() {
@@ -2103,8 +2119,8 @@ class SpringDataQueryPlanAdapterTest {
     class OperandOrderSemantics {
 
         /**
-         * <strong>Corpus gap.</strong> #509: The corpus carries {@code vf-le}, {@code vf-ge},
-         * {@code vf-lt} and {@code vf-ne}; value-first {@code gt} is not carried.
+         * <strong>Corpus gap.</strong> #509: The corpus carries {@code comparison/less-or-equal/value-first}, {@code comparison/greater-or-equal/value-first},
+         * {@code comparison/less-than/value-first} and {@code comparison/not-equals/value-first}; value-first {@code gt} is not carried.
          */
         @Test
         void gtValueFirstMeansFieldLessThan() {
@@ -2114,7 +2130,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code vf-size} spells {@code 0 < size(...)}; the
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/value-first} spells {@code 0 < size(...)}; the
          * {@code 1 > size(...)} mirror, which lowers to NOT EXISTS, is not carried.
          */
         @Test
@@ -2146,7 +2162,7 @@ class SpringDataQueryPlanAdapterTest {
     class TernaryIfExpressions {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code ternary-bare} has two comparison branches; a
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/boolean-branches} has two comparison branches; a
          * constant boolean branch is not carried.
          */
         @Test
@@ -2179,7 +2195,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code ternary-negated} carries the negation; the
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/negated} carries the negation; the
          * ternary comparison under {@code and}, {@code or} and a double negation is not carried.
          */
         @Test
@@ -2263,7 +2279,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code nan-ord-inf} reaches the constant-vs-constant
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/infinity-from-ternary} reaches the constant-vs-constant
          * fold through a ternary; the other fold cases are not carried. They are spelled here as
          * direct constant comparisons, which the planner itself would fold; only the ternary form
          * could reach the adapter.
@@ -2305,7 +2321,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code p-not-ternary-null} negates a ternary
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/negated-missing-attribute-condition} negates a ternary
          * COMPARISON; the negated bare ternary with a NULL condition column is not carried.
          */
         @Test
@@ -2354,7 +2370,7 @@ class SpringDataQueryPlanAdapterTest {
     class MultiHopRelationChains {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code w1-size-chain} carries the emptiness shortcut
+         * <strong>Corpus gap.</strong> #509: {@code relation/size/non-empty-to-one-chain} carries the emptiness shortcut
          * over the chain; an arbitrary count of flattened elements is not carried.
          */
         @Test
@@ -2452,7 +2468,7 @@ class SpringDataQueryPlanAdapterTest {
     class BracketLikeEscaping {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code like-bracket} and {@code hier-bracket} carry
+         * <strong>Corpus gap.</strong> #509: {@code string/starts-with/bracket-in-needle} and {@code hierarchy/descendent-of/bracket-in-path} carry
          * the shape, but no CI leg runs SQL Server, where {@code [} starts a character class even
          * with an ESCAPE clause. On the other databases the escape changes nothing, so it is
          * checked on the pattern.
@@ -2478,7 +2494,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code cr-contains} and its siblings run over a corpus
+         * <strong>Corpus gap.</strong> #509: {@code string/contains/value-first} and its siblings run over a corpus
          * whose aString is never NULL, so the NULL-needle denial has no discriminating seed there.
          */
         @Test
@@ -2499,7 +2515,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: {@code in} whose second attribute is a scalar is not
-         * carried; {@code in-var-var} maps a relation.
+         * carried; {@code membership/in/field-in-resource-list} maps a relation.
          */
         @Test
         void scalarSecondOperandThrowsNamedError() {
@@ -2529,7 +2545,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code arith-sub} carries one subtraction;
+         * <strong>Corpus gap.</strong> #509: {@code arithmetic/subtract/field-minus-constant} carries one subtraction;
          * constant-minus-column under an ordering is not carried.
          */
         @Test
@@ -2547,7 +2563,7 @@ class SpringDataQueryPlanAdapterTest {
 
         /**
          * <strong>Corpus gap.</strong> #509: Arithmetic nested inside arithmetic is not carried;
-         * {@code arith-both} puts one operation on each side.
+         * {@code arithmetic/add/on-both-sides} puts one operation on each side.
          */
         @Test
         void nestedArithmetic() {
@@ -2589,7 +2605,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code nan-ord-ternary} reaches {@code gt} with NaN on
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/nan-from-ternary} reaches {@code gt} with NaN on
          * the left through a ternary; {@code ge}, {@code lt} and {@code le} are not carried. The
          * direct constant form here would be folded by the planner; only a ternary could send it.
          */
@@ -2605,7 +2621,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code nan-ord-le} carries {@code le} with NaN on the
+         * <strong>Corpus gap.</strong> #509: {@code comparison/less-or-equal/nan-from-ternary-on-both-sides} carries {@code le} with NaN on the
          * right; the other three operators are not carried.
          */
         @Test
@@ -2621,7 +2637,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code nan-ord-inf} carries {@code gt} against an
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/infinity-from-ternary} carries {@code gt} against an
          * infinity; the remaining operators and the infinity-versus-infinity ordering are not
          * carried.
          */
@@ -2666,8 +2682,8 @@ class SpringDataQueryPlanAdapterTest {
     class TimestampComparisons {
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code ts-window}, {@code ts-eq}, {@code ts-eq-offset}
-         * and {@code ts-ne} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
+         * <strong>Corpus gap.</strong> #509: {@code timestamp/less-than/relative-window}, {@code timestamp/equals/literal-instant}, {@code timestamp/equals/literal-instant-non-utc-offset}
+         * and {@code timestamp/not-equals/literal-instant} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
          * {@code ge} are not carried.
          */
         @Test
@@ -2684,7 +2700,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code ts-vf} carries value-first {@code gt} alone.
+         * <strong>Corpus gap.</strong> #509: {@code timestamp/greater-than/relative-window-value-first} carries value-first {@code gt} alone.
          */
         @Test
         void allSixOperatorsValueFirstAreMirroredNotInverted() {

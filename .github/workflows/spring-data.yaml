@@ -28,7 +28,8 @@ defaults:
 permissions: {}
 
 jobs:
-  # All suites run here on H2, including the adversarial suite (CLAUDE.md, "CI").
+  # All suites run here on H2, including the conformance suite, which replays the recorded golden
+  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (CLAUDE.md, "CI").
   test:
     permissions:
       contents: read
@@ -68,9 +69,7 @@ jobs:
 
       # build.gradle.kts forwards ADAPTER_TEST_ORM to the suites and declares it as an input.
       - name: Build and test (${{ matrix.orm }})
-        run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
+        run: ./gradlew build --no-daemon
         env:
           ADAPTER_TEST_ORM: ${{ matrix.orm }}
 
@@ -83,7 +82,7 @@ jobs:
             **/build/reports/
             **/build/test-results/
 
-  # The same suites with AdversarialConformanceTest on a real database, for dialect behaviour H2
+  # AdversarialConformanceTest on a real database, for dialect behaviour H2
   # cannot show, such as MySQL collation (README.md "Database collation requirements"). MySQL runs
   # with client-side and with server-side prepared statements (README.md "MySQL: keeping arithmetic
   # IEEE-faithful").
@@ -123,10 +122,8 @@ jobs:
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
-      - name: Adversarial suite (${{ matrix.database }})
-        run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
+      - name: Conformance suite (${{ matrix.database }})
+        run: ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
           ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}

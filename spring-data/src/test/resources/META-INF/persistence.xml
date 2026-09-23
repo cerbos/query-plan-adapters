@@ -60,8 +60,7 @@
         </properties>
     </persistence-unit>
 
-    <!-- SpringDataTranslatorTest: no JDBC connection. Literals are inlined so the rendered SQL
-         shows the operands. The suite overrides the dialect per rendering. -->
+    <!-- Offline suites (OptionsTest, RefusalTypesTest): no JDBC connection. -->
     <persistence-unit name="translator-pu" transaction-type="RESOURCE_LOCAL">
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>

@@ -302,7 +302,7 @@ Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWi
 constant is compared in Java — because a literal-vs-literal comparison would use the **connection**
 collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by default.
 
-CI runs the differential suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
+CI runs the conformance suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
 the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
 
 ```bash
@@ -367,17 +367,25 @@ consulted.
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict
-evaluation modes using 29 hostile seed rows on H2, PostgreSQL, and MySQL. This Spring Data
-implementation defines the reference semantics that the other adapters follow.
+The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 29 seed rows on
+H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
+recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
+golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
+total but not as passed:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 265 of the 320 reference conformance actions |
-| Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (a boolean's text is decided in Java instead), CEL's `+` over strings (against a constant and between two columns), `mod`, a positional read of a list of any element type, list equality over a `map()` projection, and a hierarchy with an empty delimiter (66 actions) |
-| Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` includes NULL rows where CEL's null value says it should; undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows; pinned separately as an upstream divergence. Write `R.attr.x != null` instead (see [Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)) |
+| core | 26 / 26 |
+| extended | 58 / 80 |
+| adversarial | 180 / 227 |
+
+Every case that does not pass is listed with its reason in
+[`conformance-ledger.json`](conformance-ledger.json): 68 are `unsupported`, where the adapter
+throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
+when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
+is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
+[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)).
 
 Other guarantees:
 
@@ -387,18 +395,10 @@ Other guarantees:
   true (in 0.54 it was an error and stayed denied under negation).
 - Bare comparisons between temporal columns throw: the database compares instants while CEL compares
   the attribute strings. Use `timestamp()` for instant comparison.
-- `cr-div-then-add` and `cr-div-then-add-ne` throw: CEL carries NaN through the surrounding
-  arithmetic and SQL has no such value.
-- Every fail-closed message is pinned in `conformance/actions.json` and asserted by the conformance
-  run.
-
-Two suites read the classification. `AdversarialConformanceTest` plans each action against a real
-PDP (30-second deadline per call) and compares returned rows with `check()`;
-`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` selects the PDP mode, and CI runs both.
-`SpringDataTranslatorTest` translates the same actions offline from `conformance/wire-fixtures/`
-and asserts the **SQL** against `golden/expectations.json` — 261 recorded statements and 66
-refusals, one per action, whose union must equal the corpus. The golden SQL catches rewrites that
-agree on all 29 seeds but would change results on rows nobody seeded.
+- A null comparison against an attribute declared
+  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` throws; declared `EXPLICIT`,
+  `eq`, `ne` and `in` include NULL rows where CEL's null value says they should
+  (cerbos/query-plan-adapters#302, #308).
 
 ## Mapping hazards
 
@@ -421,7 +421,7 @@ drop rows the PDP permits. **Do not re-declare them.**
 | Subtype discrimination | **Reproduced by Hibernate** | An association typed to a `@DiscriminatorValue` subclass is restricted to it; one typed to the base type sees siblings, as the application does |
 | To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key has no unique constraint. Add the constraint |
 | Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns; Hibernate resolves `@JoinColumns` |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-hop2-or-exists` and siblings) | None — a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)); a dotted to-one `jpaPath` is a LEFT join so a disjunction's other branch still holds |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/or/two-hops-or-collection-exists` and siblings) | None — a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)); a dotted to-one `jpaPath` is a LEFT join so a disjunction's other branch still holds |
 
 The "Reproduced by Hibernate" rows are claims about Hibernate — see the
 [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where)
@@ -465,7 +465,7 @@ Set `useServerPrepStmts=true` in the JDBC URL if any of these apply:
 - `hibernate.boot.allow_jdbc_metadata_access=false` with only `hibernate.dialect` set (the
   version-gated registration is skipped).
 
-CI's MySQL leg runs client-side mode so `p-double-frac` catches a regression;
+CI's MySQL leg runs client-side mode so `arithmetic/multiply/inexact-fraction-equals` catches a regression;
 `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true` runs it server-side. Both must pass.
 
 ### Timestamp comparisons: plan-time `now()`, and only unambiguous column types
@@ -502,8 +502,8 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 An **upstream Cerbos planner issue that affects every adapter**: the planner folds
 `has(R.attr.aOptionalString)` to `KIND_ALWAYS_ALLOWED`, but `check()` denies resources missing the
 attribute. Translating the plan faithfully returns rows with a NULL column that `check()` would deny.
-`AdversarialConformanceTest#upstreamHasFoldOverGrantTripwire` pins the divergence and fails when an
-upstream image fixes it.
+The corpus records it as a planner divergence on `null/has/missing-attribute`, and the conformance
+suite skips that case for the PDP versions it names.
 
 **Workaround (PDP-verified):**
 
@@ -620,7 +620,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 - Membership against a scalar **field** mapping (`R.attr.aNumber in ["5", 2]`) drops such a constant
   the same way; with none left it is false for a present value and still denied for a missing one.
   H2 used to coerce `'5'` onto the numeric column and return a row the PDP denies — an over-grant
-  fix, fewer rows (`in-scalar-number-vs-string`).
+  fix, fewer rows (`type-mismatch/in/number-field-in-mixed-literal-list`).
 - **Breaking** — `toSpecification(...)` returns `Specification<T>` directly; the `Result<T>` wrapper
   is gone. Drop the second `.toSpecification()` call, and use `planResult.isAlwaysDenied()` to skip
   the database. Raises the Spring Data JPA floor to 3.5.2
@@ -638,7 +638,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
   instead of emitting a filter. Default still 5
   ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).
 - **Breaking** — `hierarchy(R.attr.scope, "")` (empty delimiter) throws. The old `LIKE` also matched
-  the path itself (`hier-empty-delim` returned a row the PDP denies).
+  the path itself (`hierarchy/descendent-of/empty-delimiter` returned a row the PDP denies).
 - **Breaking** — bare comparisons between temporal columns throw; use `timestamp()`.
 - A negated column-needle match (`!R.attr.a.contains(R.attr.b)`) no longer returns rows whose needle
   is NULL — an over-grant fix, fewer rows
@@ -663,7 +663,7 @@ from the repository root with `demo/scripts/run-example.sh spring-data`.
 ## Build
 
 JDK 17+. Gradle comes from the committed wrapper. The suites read `../conformance/`, so build in a
-checkout of the **whole repository**; the differential suite needs Docker (it starts containers):
+checkout of the **whole repository**; the conformance suite needs Docker on PostgreSQL and MySQL:
 
 ```bash
 # From spring-data/:
@@ -672,9 +672,8 @@ checkout of the **whole repository**; the differential suite needs Docker (it st
 
 | Variable | Values | Selects |
 |---|---|---|
-| `ADAPTER_TEST_DB` | `h2` (default), `postgres`, `mysql` | Database for the differential suite |
+| `ADAPTER_TEST_DB` | `h2` (default), `postgres`, `mysql` | Database for the conformance suite |
 | `ADAPTER_TEST_ORM` | `baseline` (default), `next` | Hibernate 6.6 / Spring Data JPA 3.5, or Hibernate 7 / Spring Data JPA 4 (declared in [`build.gradle.kts`](build.gradle.kts)); unknown values fail |
-| `ADAPTER_TEST_STRICT_EVALUATION` | `false` (default), `true` | PDP strict evaluation mode |
 | `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
 
@@ -686,15 +685,14 @@ that overload there; the guard still fires on any `CriteriaDelete`.
 
 | Suite | Role | Needs |
 |---|---|---|
-| `SpringDataTranslatorTest` | **Translator unit test**: every [corpus](../conformance) action translated from its wire fixture, SQL asserted against [`golden/expectations.json`](golden/expectations.json) | nothing — no PDP, no database |
 | `SpringDataQueryPlanAdapterTest` | Call contract: malformed operands, overrides, mapping validation, macro depth, bulk-delete guard, plus corpus-gap shapes | H2 in-process |
 | `RepositorySurfaceTest` | Spring Data glue: `findAll` / `count` / paging, de-duplication, composition | H2 in-process |
-| `AdversarialConformanceTest` | Differential: real PDP plans, rows compared with `check()` per action | Docker (pinned PDP, plus PostgreSQL/MySQL when selected) |
+| `RefusalTypesTest` | Which refusal type each refused corpus case and each malformed plan throws | nothing — no database |
+| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](conformance-ledger.json) | H2 in-process, or Docker for PostgreSQL/MySQL |
 
 ```bash
-./gradlew test                            # all four
-./gradlew goldenUpdate                    # rewrite golden/expectations.json
-ADAPTER_TEST_DB=postgres ./gradlew test   # differential suite on PostgreSQL
+./gradlew test                            # every suite
+ADAPTER_TEST_DB=postgres ./gradlew test   # conformance suite on PostgreSQL
 ADAPTER_TEST_DB=mysql ./gradlew test      # … on MySQL (see "Database collation requirements")
 ADAPTER_TEST_ORM=next ./gradlew test      # every suite under Hibernate 7 / Spring Data JPA 4
 ```
@@ -703,25 +701,3 @@ The PostgreSQL and MySQL images are pinned by tag and digest in [`POSTGRES_IMAGE
 and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them;
 `conformance/scripts/validate-corpus.sh` checks them).
 
-### The golden expectations
-
-`golden/expectations.json` is this adapter's [golden expectation](../conformance/README.md#golden-expectations)
-file: the SQL it must emit for each corpus action, rewritten by `./gradlew goldenUpdate` and reviewed as
-a diff (`./gradlew test` never regenerates). Refused actions have no entry; their messages are pinned in
-`conformance/actions.json`. Each entry is the rendered Specification minus the
-`select distinct re1_0.id from resources re1_0` preamble — root `joins` (only where a to-one hop
-emits one, always asserted to be `left join`) and the `where` clause — for H2, PostgreSQL and MySQL,
-with literals inlined:
-
-```jsonc
-"rel-bool-hop": {
-  "joins": { "h2": "left join adversarial_parent p1_0 on re1_0.id=p1_0.resource_id", … },
-  "where": { "h2": "p1_0.a_bool=true", "postgresql": "p1_0.a_bool=true", "mysql": "p1_0.a_bool=1" }
-}
-```
-
-The file declares `"hibernate": "6.6"`, because Hibernate's renderer (a `compileOnly` dependency the
-consumer brings) shapes the bytes. `goldenUpdate` refuses to run under another major; on the `next`
-leg `SpringDataTranslatorTest` instead asserts a pinned divergence list in both directions — Hibernate
-7's `MySQLDialect` renders boolean literals as `true` where 6.6 rendered `1`, on MySQL only. See
-`conformance/README.md`, "When the generator is an input".

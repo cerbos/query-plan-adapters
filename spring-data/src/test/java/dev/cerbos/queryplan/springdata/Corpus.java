@@ -5,13 +5,9 @@
 
 package dev.cerbos.queryplan.springdata;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.core.util.DefaultIndenter;
-import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
-import com.fasterxml.jackson.core.util.Separators;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.google.protobuf.util.JsonFormat;
 
@@ -20,22 +16,21 @@ import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Reads the shared {@code conformance/} corpus and this adapter's golden expectations. Holds what
- * {@link SpringDataTranslatorTest} and {@link AdversarialConformanceTest} must share, including
- * the {@link AttributeMapping}, so both suites test the same query.
+ * Reads the shared {@code conformance/} corpus (the recorded goldens, the dataset and the PDP
+ * tags) and this adapter's {@code conformance-ledger.json}, and holds the one
+ * {@link AttributeMapping} every conformance case is translated with.
  *
  * <p>Every adapter has its own copy of this loader on purpose; do not extract a shared one. See
  * {@code docs/adr/0007-adapters-share-data-not-code.md}.
@@ -44,247 +39,148 @@ final class Corpus {
 
     private Corpus() {}
 
-    /** This adapter's key in the corpus files. */
-    static final String ADAPTER = "spring-data";
-
-    private static final ObjectMapper JSON = new ObjectMapper();
+    /**
+     * Reads floats as doubles, never as {@code BigDecimal}, so a recorded {@code -0.0} keeps its
+     * sign on the way to protobuf.
+     */
+    private static final ObjectMapper JSON = new ObjectMapper()
+            // A duplicated ledger key would otherwise keep only its last entry.
+            .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
     static Path conformanceDir() {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
-    // -- conformance/actions.json ---------------------------------------------------------------
-
-    /** An {@code expectedUnsupported} entry. {@code messages} is keyed by adapter name. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
-
-    /** A {@code nullRepresentationOmitted} entry, rejected by every adapter under OMITTED. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record NullRepresentationOmitted(String action, String reason, Map<String, String> messages) {}
-
-    /**
-     * An {@code adapterUnsupported} or {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring the error must contain; it is absent on the second, which does not throw.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record AdapterUnsupported(String action, String reason, String message) {}
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record KnownDivergence(String action, String reason, List<String> adapters) {}
-
-    /** An action whose oracle is always {@code "empty"} or {@code "total"}. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record DegenerateOracle(String action, String oracle, String reason) {}
-
-    /**
-     * Declare every group in actions.json here. Jackson silently drops an undeclared field, and
-     * its actions would vanish from every test.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ActionsFile(
-            List<String> conformance,
-            Map<String, List<AdapterUnsupported>> adapterUnsupported,
-            Map<String, List<AdapterUnsupported>> adapterSupportedExpected,
-            List<UnsupportedShape> expectedUnsupported,
-            List<NullRepresentationOmitted> nullRepresentationOmitted,
-            List<KnownDivergence> knownDivergences,
-            List<DegenerateOracle> degenerateOracles) {
-
-        List<AdapterUnsupported> adapterUnsupportedFor(String adapter) {
-            return adapterUnsupported == null
-                    ? List.of()
-                    : adapterUnsupported.getOrDefault(adapter, List.of());
-        }
-
-        List<AdapterUnsupported> adapterSupportedExpectedFor(String adapter) {
-            return adapterSupportedExpected == null
-                    ? List.of()
-                    : adapterSupportedExpected.getOrDefault(adapter, List.of());
-        }
-
-        /** Every action the corpus declares, in any group. */
-        Set<String> manifestActions() {
-            Set<String> manifest = new TreeSet<>(conformance);
-            expectedUnsupported.forEach(u -> manifest.add(u.action()));
-            nullRepresentationOmitted.forEach(n -> manifest.add(n.action()));
-            knownDivergences.forEach(d -> manifest.add(d.action()));
-            return manifest;
-        }
-
-        /** Degenerate oracles, action to {@code "empty"} or {@code "total"}. */
-        Map<String, String> degenerateOracleShapes() {
-            if (degenerateOracles == null) {
-                throw new IllegalStateException(
-                        "actions.json declares no degenerateOracles: the degeneracy sweep would"
-                                + " exempt nothing and fail every by-construction oracle");
-            }
-            Map<String, String> shapes = new TreeMap<>();
-            for (DegenerateOracle entry : degenerateOracles) {
-                if (!"empty".equals(entry.oracle()) && !"total".equals(entry.oracle())) {
-                    throw new IllegalStateException("degenerateOracles." + entry.action()
-                            + " declares oracle '" + entry.oracle()
-                            + "': it must be \"empty\" or \"total\"");
-                }
-                if (shapes.put(entry.action(), entry.oracle()) != null) {
-                    throw new IllegalStateException(
-                            "degenerateOracles lists '" + entry.action() + "' twice");
-                }
-            }
-            return shapes;
-        }
-
-        Set<String> skippedDivergences(String adapter) {
-            return knownDivergences.stream()
-                    .filter(d -> d.adapters().contains(adapter))
-                    .map(KnownDivergence::action)
-                    .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
-        }
-    }
-
-    static ActionsFile actionsFile() {
+    static JsonNode readJson(Path file) {
         try {
-            return JSON.readValue(
-                    conformanceDir().resolve("actions.json").toFile(), ActionsFile.class);
+            return JSON.readTree(file.toFile());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    /**
-     * The substring the error must contain. Fails when none is pinned, so an unrelated error
-     * cannot pass as the declared refusal.
-     */
-    static String requireMessage(String label, String message) {
-        if (message == null || message.isEmpty()) {
-            throw new IllegalStateException("actions.json pins no throw message for " + label
-                    + ": the throw suite would accept a failure for any reason");
+    static <T> T readJson(Path file, Class<T> type) {
+        try {
+            return JSON.readValue(file.toFile(), type);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
-        return message;
     }
 
-    /** Actions this adapter oracle-compares: conformance minus its own unsupported, plus promotions. */
-    static Stream<String> oracleActions(ActionsFile actions, String adapter) {
-        Set<String> unsupported = actions.adapterUnsupportedFor(adapter).stream()
-                .map(AdapterUnsupported::action)
-                .collect(java.util.stream.Collectors.toSet());
-        return Stream.concat(
-                actions.conformance().stream().filter(a -> !unsupported.contains(a)),
-                actions.adapterSupportedExpectedFor(adapter).stream()
-                        .map(AdapterUnsupported::action).sorted());
+    // -- the PDPs and their goldens ---------------------------------------------------------------
+
+    /** The tags of {@code pdp-versions.json}, current first. */
+    static List<String> pdpTags() {
+        JsonNode versions = readJson(conformanceDir().resolve("pdp-versions.json"));
+        return List.of(versions.get("current").get("tag").asText(),
+                versions.get("previous").get("tag").asText());
     }
 
-    /**
-     * Actions this adapter must refuse, with their messages: its {@code adapterUnsupported} plus
-     * {@code expectedUnsupported} minus its promotions. {@code nullRepresentationOmitted} is not
-     * included because those actions translate under the default null representation.
-     */
-    static Map<String, String> throwingActions(ActionsFile actions, String adapter) {
-        Set<String> promoted = actions.adapterSupportedExpectedFor(adapter).stream()
-                .map(AdapterUnsupported::action)
-                .collect(java.util.stream.Collectors.toSet());
-        Map<String, String> throwing = new TreeMap<>();
-        for (AdapterUnsupported entry : actions.adapterUnsupportedFor(adapter)) {
-            throwing.put(entry.action(), requireMessage(
-                    "adapterUnsupported." + adapter + "." + entry.action(), entry.message()));
-        }
-        for (UnsupportedShape entry : actions.expectedUnsupported()) {
-            if (promoted.contains(entry.action())) {
-                continue;
-            }
-            throwing.put(entry.action(), requireMessage(
-                    "expectedUnsupported." + entry.action() + ".messages." + adapter,
-                    entry.messages() == null ? null : entry.messages().get(adapter)));
-        }
-        return throwing;
+    /** The current PDP's tag. */
+    static String currentTag() {
+        return pdpTags().get(0);
     }
 
-    /** The {@code nullRepresentationOmitted} probes, each with the message its rejection must carry. */
-    static List<NullRepresentationOmitted> nullRepresentationThrows(ActionsFile actions) {
-        return actions.nullRepresentationOmitted();
-    }
-
-    static String nullOmittedMessage(NullRepresentationOmitted entry, String adapter) {
-        return requireMessage(
-                "nullRepresentationOmitted." + entry.action() + ".messages." + adapter,
-                entry.messages() == null ? null : entry.messages().get(adapter));
-    }
-
-    // -- conformance/wire-fixtures/ -------------------------------------------------------------
-
-    /**
-     * The value substituted for {@code __NOW_MINUS_24H__} in the wire fixtures. The planner folds
-     * {@code now() - duration("24h")} to a literal, so the fixture script replaces it with a
-     * placeholder. It has nanosecond precision because the PDP emits nanoseconds; it ends up in
-     * the golden expectations.
-     */
-    static final String PLANNED_AT = "2026-08-11T09:13:39.123456789Z";
-
-    private static final String NOW_MINUS_24H = "__NOW_MINUS_24H__";
-
-    /** Every action the corpus has a golden wire fixture for, sorted. */
-    static List<String> wireFixtureActions() {
-        try (Stream<Path> files = Files.list(conformanceDir().resolve("wire-fixtures"))) {
-            return files.map(p -> p.getFileName().toString())
-                    .filter(name -> name.endsWith(".json"))
-                    .map(name -> name.substring(0, name.length() - ".json".length()))
+    /** Every golden file recorded for {@code tag}, sorted by case id. */
+    static List<JsonNode> goldens(String tag) {
+        Path dir = conformanceDir().resolve("golden").resolve(tag);
+        try (Stream<Path> files = Files.walk(dir)) {
+            return files.filter(p -> p.toString().endsWith(".json"))
                     .sorted()
+                    .map(Corpus::readJson)
                     .toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    /**
-     * The plan the pinned PDP produced for {@code action}. The fixture is the PDP's HTTP response,
-     * so it is decoded with protobuf's JSON mapping.
-     */
-    static PlanResourcesResponse planFromWireFixture(String action) {
-        return planFromWireFixture(action, PLANNED_AT);
+    /** One golden file by case id, for example {@code string/equals/case-sensitive}. */
+    static JsonNode golden(String tag, String caseId) {
+        return readJson(conformanceDir().resolve("golden").resolve(tag).resolve(caseId + ".json"));
     }
 
-    static PlanResourcesResponse planFromWireFixture(String action, String plannedAt) {
-        Path fixture = conformanceDir().resolve("wire-fixtures").resolve(action + ".json");
+    /** The recorded plan of {@code caseId} under the current PDP. */
+    static PlanResourcesResponse plan(String caseId) {
+        return plan(golden(currentTag(), caseId));
+    }
+
+    private static final String NOW_MINUS_24H = "__NOW_MINUS_24H__";
+
+    /** Nanosecond precision, as the PDP writes the literal it folds {@code now()} into. */
+    private static final DateTimeFormatter RFC3339_NANOS =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.nnnnnnnnn'Z'")
+                    .withZone(ZoneOffset.UTC);
+
+    /**
+     * A golden's {@code plan} (the {@code PlanResources} filter, decoded with protobuf's JSON
+     * mapping), with {@code __NOW_MINUS_24H__} filled in.
+     */
+    static PlanResourcesResponse plan(JsonNode golden) {
+        JsonNode plan = golden.get("plan");
+        if (plan == null || plan.isNull()) {
+            throw new IllegalStateException(golden.get("id") + " records no plan");
+        }
+        String nowMinus24h = RFC3339_NANOS.format(Instant.now().minus(Duration.ofHours(24)));
+        PlanResourcesFilter.Builder filter = PlanResourcesFilter.newBuilder();
         try {
-            JsonNode filter = JSON.readTree(fixture.toFile()).get("filter");
-            if (filter == null) {
-                throw new IllegalStateException(fixture + " carries no filter");
-            }
-            PlanResourcesFilter.Builder builder = PlanResourcesFilter.newBuilder();
-            JsonFormat.parser().merge(
-                    filter.toString().replace(NOW_MINUS_24H, plannedAt), builder);
-            return PlanResourcesResponse.newBuilder().setFilter(builder).build();
+            JsonFormat.parser().merge(plan.toString().replace(NOW_MINUS_24H, nowMinus24h), filter);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+        return PlanResourcesResponse.newBuilder().setFilter(filter).build();
+    }
+
+    // -- spring-data/conformance-ledger.json ------------------------------------------------------
+
+    /**
+     * One ledger entry. {@code pdp}, when present, limits it to those PDP tags. Unknown keys fail
+     * the read, so a misspelt {@code pdp} cannot widen an entry to every tag.
+     */
+    record LedgerEntry(String status, String reason, String issue, List<String> pdp) {
+        boolean appliesTo(String tag) {
+            return pdp == null || pdp.contains(tag);
+        }
+    }
+
+    private record Ledger(String adapter, Map<String, LedgerEntry> cases) {}
+
+    static Map<String, LedgerEntry> ledger() {
+        Path file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json");
+        Ledger ledger = readJson(file, Ledger.class);
+        if (!"spring-data".equals(ledger.adapter()) || ledger.cases() == null) {
+            throw new IllegalStateException(file + " is not the spring-data ledger");
+        }
+        return ledger.cases();
     }
 
     // -- the corpus mapped onto the JPA model ---------------------------------------------------
 
-    /** The corpus's attribute mapping, used by both corpus suites. */
+    /**
+     * The one mapping every case is translated with. Each scalar {@code resources.json} omits when
+     * its column is NULL declares {@link NullAttributeRepresentation#OMITTED}; {@code owner} and
+     * {@code coOwner}, which send an explicit null, declare {@link NullAttributeRepresentation#EXPLICIT}.
+     */
     static final Map<String, AttributeMapping> MAPPING = Map.ofEntries(
-            // The primary key, not under `attr` (the `id-*` actions).
             Map.entry("request.resource.id", AttributeMapping.field("id")),
             Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
             Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
             Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
-            Map.entry("request.resource.attr.aDouble", AttributeMapping.field("aDouble")),
-            Map.entry("request.resource.attr.aOptionalString", AttributeMapping.field("aOptionalString")),
-            // ISO-date string column for the p-* actions.
+            Map.entry("request.resource.attr.aDouble", omitted("aDouble")),
+            Map.entry("request.resource.attr.aOptionalString", omitted("aOptionalString")),
+            // An ISO-date string column.
             Map.entry("request.resource.attr.createdBy", AttributeMapping.field("createdBy")),
-            // Delimited hierarchy path for the hier-* actions.
-            Map.entry("request.resource.attr.scope", AttributeMapping.field("scope")),
-            // Temporal columns for the ts-* actions.
-            Map.entry("request.resource.attr.createdAt", AttributeMapping.field("createdAt")),
-            Map.entry("request.resource.attr.updatedAt", AttributeMapping.field("updatedAt")),
+            // A delimited hierarchy path.
+            Map.entry("request.resource.attr.scope", omitted("scope")),
+            Map.entry("request.resource.attr.createdAt", omitted("createdAt")),
+            Map.entry("request.resource.attr.updatedAt", omitted("updatedAt")),
             Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
-            // The to-one chain (the `rel-*` actions). A dotted path through a to-one association
-            // is an implicit inner join, so a row with no parent is excluded even under negation.
+            // The to-one chain. Associations are LEFT-joined, so an absent parent leaves only its
+            // own comparison UNKNOWN.
             Map.entry("request.resource.attr.parent.aBool", AttributeMapping.field("parent.aBool")),
             Map.entry("request.resource.attr.parent.aString", AttributeMapping.field("parent.aString")),
             Map.entry("request.resource.attr.parent.aNumber", AttributeMapping.field("parent.aNumber")),
             Map.entry("request.resource.attr.parent.aOptionalString",
-                    AttributeMapping.field("parent.aOptionalString")),
+                    omitted("parent.aOptionalString")),
             Map.entry("request.resource.attr.parent.inner.aBool",
                     AttributeMapping.field("parent.inner.aBool")),
             Map.entry("request.resource.attr.parent.inner.aString",
@@ -292,9 +188,9 @@ final class Corpus {
             Map.entry("request.resource.attr.parent.inner.aNumber",
                     AttributeMapping.field("parent.inner.aNumber")),
             Map.entry("request.resource.attr.parent.inner.aOptionalString",
-                    AttributeMapping.field("parent.inner.aOptionalString")),
-            // `owner` and `coOwner` reuse the aOptionalString and scope columns, but the oracle
-            // sends an explicit null for a NULL column instead of omitting the attribute.
+                    omitted("parent.inner.aOptionalString")),
+            // `owner` and `coOwner` reuse the aOptionalString and scope columns, but send a NULL
+            // column as an explicit null instead of omitting the attribute.
             Map.entry("request.resource.attr.owner",
                     AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT)),
             Map.entry("request.resource.attr.coOwner",
@@ -314,14 +210,13 @@ final class Corpus {
                     "name", AttributeMapping.field("name"),
                     "subCategories", AttributeMapping.relation("subCategories", Map.of(
                             "name", AttributeMapping.field("name"),
-                            // Third macro level, for the macro-depth3-* actions.
                             "labels", AttributeMapping.relation("labels", Map.of(
                                     "name", AttributeMapping.field("name")
                             ))
                     ))
             ))),
             // A single object on the check side, but two collection hops here (categories, then
-            // subCategories). Checks that a chained path joins through every hop.
+            // subCategories), so a chained path joins through every hop.
             Map.entry("request.resource.attr.mainCategory", AttributeMapping.relation("categories", Map.of(
                     "name", AttributeMapping.field("name"),
                     "subCategories", AttributeMapping.relation("subCategories", Map.of(
@@ -332,126 +227,15 @@ final class Corpus {
             )))
     );
 
-    /**
-     * {@link #MAPPING} without per-attribute null conventions, so only the call-level option
-     * applies. Used to check that every action with a null literal is rejected under OMITTED.
-     */
+    private static AttributeMapping omitted(String jpaPath) {
+        return AttributeMapping.field(jpaPath, NullAttributeRepresentation.OMITTED);
+    }
+
+    /** {@link #MAPPING} without per-attribute null conventions, so only the call-level option applies. */
     static final Map<String, AttributeMapping> MAPPING_WITHOUT_NULL_CONVENTIONS =
-            MAPPING.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+            MAPPING.entrySet().stream().collect(Collectors.toUnmodifiableMap(
                     Map.Entry::getKey,
                     e -> e.getValue() instanceof AttributeMapping.Field f
                             ? AttributeMapping.field(f.jpaPath())
                             : e.getValue()));
-
-    // -- spring-data/golden/expectations.json ---------------------------------------------------
-
-    /** Free-text commentary on an entry. Never compared. */
-    static final String NOTE_KEY = "note";
-
-    /**
-     * The Hibernate version that rendered the golden SQL. Hibernate's renderer changes the
-     * output, so the file records it. The {@code next} CI leg runs the following major. See
-     * {@code conformance/README.md}, "When the generator is an input".
-     */
-    static final String HIBERNATE_MINOR = "6.6";
-
-    /** The command that rewrites the golden file, recorded in it. */
-    static final String GOLDEN_REGENERATE_COMMAND = "./gradlew goldenUpdate";
-
-    static Path goldenFile() {
-        return Path.of(System.getProperty("user.dir"), "golden", "expectations.json").normalize();
-    }
-
-    /**
-     * The golden expectations by action, with notes removed. Fails if the header names another
-     * adapter or Hibernate version.
-     */
-    static Map<String, ObjectNode> readGoldenExpectations() {
-        JsonNode contents;
-        try {
-            contents = JSON.readTree(goldenFile().toFile());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        String adapter = contents.path("adapter").asText(null);
-        if (!ADAPTER.equals(adapter)) {
-            throw new IllegalStateException(goldenFile() + " declares adapter \"" + adapter
-                    + "\", not \"" + ADAPTER + "\"");
-        }
-        String hibernate = contents.path("hibernate").asText(null);
-        if (!HIBERNATE_MINOR.equals(hibernate)) {
-            throw new IllegalStateException(goldenFile() + " declares Hibernate \"" + hibernate
-                    + "\", not \"" + HIBERNATE_MINOR + "\"");
-        }
-        Map<String, ObjectNode> recorded = new LinkedHashMap<>();
-        for (Map.Entry<String, JsonNode> entry : contents.get("expectations").properties()) {
-            ObjectNode value = ((ObjectNode) entry.getValue()).deepCopy();
-            value.remove(NOTE_KEY);
-            recorded.put(entry.getKey(), value);
-        }
-        return recorded;
-    }
-
-    /**
-     * Rewrites the golden file, sorted by action and keeping existing notes. Called only by
-     * {@code ./gradlew goldenUpdate}. A missing file is created. Refuses to run under a Hibernate
-     * version other than {@value #HIBERNATE_MINOR}, since another renderer writes different SQL.
-     */
-    static void writeGoldenExpectations(Map<String, ObjectNode> expectations) {
-        String running = org.hibernate.Version.getVersionString();
-        if (!running.startsWith(HIBERNATE_MINOR + ".")) {
-            throw new IllegalStateException(goldenFile() + " is generated under Hibernate "
-                    + HIBERNATE_MINOR + ", and " + running + " is on the classpath. Regenerating"
-                    + " here would rewrite every entry the two renderers spell differently and"
-                    + " label it " + HIBERNATE_MINOR + ".");
-        }
-        // Skip header validation: the old file may carry an outdated header, and its notes
-        // should still be kept.
-        Map<String, String> notes = new LinkedHashMap<>();
-        if (Files.exists(goldenFile())) {
-            JsonNode existing;
-            try {
-                existing = JSON.readTree(goldenFile().toFile());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-            for (Map.Entry<String, JsonNode> entry : existing.path("expectations").properties()) {
-                if (entry.getValue().has(NOTE_KEY)) {
-                    notes.put(entry.getKey(), entry.getValue().get(NOTE_KEY).asText());
-                }
-            }
-        }
-
-        ObjectNode root = JSON.createObjectNode();
-        root.put("adapter", ADAPTER);
-        root.put("hibernate", HIBERNATE_MINOR);
-        root.put("regenerate", GOLDEN_REGENERATE_COMMAND);
-        ObjectNode body = root.putObject("expectations");
-        for (String action : new TreeSet<>(expectations.keySet())) {
-            ObjectNode entry = JSON.createObjectNode();
-            if (notes.containsKey(action)) {
-                entry.put(NOTE_KEY, notes.get(action));
-            }
-            entry.setAll(expectations.get(action));
-            body.set(action, entry);
-        }
-
-        try {
-            Files.createDirectories(goldenFile().getParent());
-            Files.writeString(goldenFile(), JSON.writer(prettyPrinter()).writeValueAsString(root)
-                    + "\n", StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    /** Two-space indent, no space before a colon, LF line endings. */
-    private static DefaultPrettyPrinter prettyPrinter() {
-        DefaultIndenter indenter = new DefaultIndenter("  ", "\n");
-        return new DefaultPrettyPrinter()
-                .withObjectIndenter(indenter)
-                .withArrayIndenter(indenter)
-                .withSeparators(new Separators()
-                        .withObjectFieldValueSpacing(Separators.Spacing.AFTER));
-    }
 }
