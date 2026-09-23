@@ -11,6 +11,12 @@ on:
     tags:
       - elasticsearch-java/v*
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: elasticsearch-java-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: elasticsearch-java
@@ -64,10 +70,18 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
+          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
+          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
+          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          cache: gradle
+          cache-dependency-path: elasticsearch-java/**/*.gradle*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
+          # setup-java owns the cache above; two caches over one Gradle home conflict.
+          cache-disabled: true
           # Pinned rather than taking the runner's floating preinstall, and to the same version
           # the `example` job below pins and the adapter's README documents building with — so a
           # Gradle major landing on the runner image cannot turn this job red for a reason that is
@@ -142,10 +156,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
+          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
+          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
+          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          cache: gradle
+          cache-dependency-path: elasticsearch-java/**/*.gradle*
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
+          # setup-java owns the cache above; two caches over one Gradle home conflict.
+          cache-disabled: true
           # Pinned rather than taking the runner's floating preinstall, and to the same version the
           # `test` job pins: this job's assertions are about resolution and publication, the two
           # things a Gradle major is most likely to change the behaviour of. The version matches the

@@ -11,6 +11,12 @@ on:
     tags:
       - ent/v*
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: ent-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: ent
@@ -68,16 +74,20 @@ jobs:
       # PostgreSQL and MySQL testcontainers, so every dialect this adapter claims through
       # WithDialect is actually exercised. Three dialect legs share one PDP and one plan pass;
       # the timeout allows for the extra container start.
+      # No -race here, unlike the unit suite above: the harness drives the translator from a single
+      # goroutine, so the detector has nothing of this module's to check, and it more than doubled
+      # the wall time of the two most expensive steps in the job. Concurrency the adapter does
+      # exercise lives in the unit suite's t.Parallel tests, which keep it.
       - name: Adversarial conformance suite (default evaluation)
         env:
           ADAPTER_TEST_STRICT_EVALUATION: "false"
-        run: go test -race -count=1 -run TestAdversarialConformance -timeout 30m ./...
+        run: go test -count=1 -run TestAdversarialConformance -timeout 30m ./...
 
       - name: Adversarial conformance suite (strict evaluation)
         if: ${{ !cancelled() }}
         env:
           ADAPTER_TEST_STRICT_EVALUATION: "true"
-        run: go test -race -count=1 -run TestAdversarialConformance -timeout 30m ./...
+        run: go test -count=1 -run TestAdversarialConformance -timeout 30m ./...
 
   # The example application: the adapter used the way a consumer uses it, against the shared demo
   # domain. It covers the one thing the job above structurally cannot — the usage shapes. That

@@ -12,6 +12,11 @@ on:
 
 permissions: {}
 
+# Cancel a pull request's superseded runs; other triggers always finish.
+concurrency:
+  group: sqlalchemy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: sqlalchemy
