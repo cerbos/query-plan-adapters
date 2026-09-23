@@ -60,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ol>
  *   <li><strong>A branch CEL itself cannot reach.</strong> No policy compiles to it, or no plan
  *       carries it: an operator CEL does not have ({@code isSet}), a comparison CEL's type checker
- *       rejects (a fractional {@code size()} equality, a timestamp against a number), an operand
+ *       rejects (a timestamp against a number), an operand
  *       shape the planner never emits (a wrong arity, a bare string where {@code timestamp()}
  *       always wraps one), or a constant-only sub-expression the planner folds away before the
  *       wire — the corpus's own fixtures are the proof of that last one: {@code p-startswith-concat}
@@ -492,115 +492,6 @@ class SpringDataQueryPlanAdapterTest {
         assertConditionThrows(
                 exprOp("isSet", bval(true), bval(false)),
                 "isSet");
-    }
-
-    /**
-     * The equality half of the fractional {@code size()} thresholds. CEL rejects {@code ==} and
-     * {@code !=} between an int and a double ("found no matching overload for '_==_' applied to
-     * '(int, double)'"), so no policy can make the planner emit these; the ordering half is
-     * reachable — cross-type numeric ORDERING compiles — and sits under the corpus-gap banner
-     * as {@link FractionalSizeThresholds}.
-     */
-    @Nested
-    class FractionalSizeEquality {
-
-        private ResourceEntity seeded() {
-            ResourceEntity r = new ResourceEntity("size-frac-seed-1");
-            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
-            return r;
-        }
-
-        private Operand sizeCmp(String op, double threshold) {
-            return exprOp(op,
-                    exprOp("size", var("request.resource.attr.ownedBy")),
-                    nval(threshold));
-        }
-
-        @Test
-        void eqFractionalIsAlwaysFalse() {
-            // size == 2.5 can never hold for an integral count; truncation made it eq 2.
-            withResource(seeded(), () -> assertEquals(0, runCount(sizeCmp("eq", 2.5))));
-        }
-
-        @Test
-        void neFractionalIsAlwaysTrue() {
-            // size != 2.5 always holds; truncation made it ne 2 (false for the seeded row).
-            withResource(seeded(), () -> assertEquals(1, runCount(sizeCmp("ne", 2.5))));
-        }
-
-        @Test
-        void stringSizeFractionalNeExcludesNullColumn() {
-            // size(string) != 1.5 is vacuously true for any PRESENT string, but a NULL
-            // column is a missing attribute → CEL error → deny. Always-true would leak it.
-            Operand cond = exprOp("ne",
-                    exprOp("size", var("request.resource.attr.aOptionalString")),
-                    nval(1.5));
-            ResourceEntity withValue = new ResourceEntity("size-frac-str-1");
-            withValue.setaOptionalString("ab");
-            ResourceEntity withNull = new ResourceEntity("size-frac-str-2");
-            withNull.setaOptionalString(null);
-            withResource(withValue, () -> withResource(withNull, () ->
-                    assertEquals(1, runCount(cond))));
-            // eq fractional over a string length is always false, NULL or not.
-            Operand eqCond = exprOp("eq",
-                    exprOp("size", var("request.resource.attr.aOptionalString")),
-                    nval(1.5));
-            ResourceEntity another = new ResourceEntity("size-frac-str-3");
-            another.setaOptionalString("ab");
-            withResource(another, () -> assertEquals(0, runCount(eqCond)));
-        }
-
-    }
-
-    /**
-     * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
-     * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
-     * so no policy can make the planner emit these and no corpus action reaches them — the
-     * collapse branch is defensive code a consumer can still drive with a hand-built plan,
-     * and this is its only proving ground (cerbos/query-plan-adapters#333).
-     *
-     * <p>A COUNT is never fractional, so the comparison is statically decided — but not
-     * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
-     * under both polarities, so the collapse has to be tri-state like every other chained
-     * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
-     * were TRUE for the parentless row and returned it.
-     */
-    @Test
-    void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
-        var fin = new SubCategoryEntity("chain-sub-f1", "finance");
-        var biz = new CategoryEntity("chain-cat-f1", "business");
-        biz.setSubCategories(List.of(fin));
-        ResourceEntity parented = new ResourceEntity("chain-r-f1");
-        parented.setCategories(List.of(biz));
-        // No categories at all: the chain's leading hop is absent, so CEL denies this row
-        // whatever the collapse decides.
-        ResourceEntity orphan = new ResourceEntity("chain-r-f2");
-
-        Operand size = exprOp("size", var(CHAIN));
-        Operand matching = exprOp("size",
-                exprOp("filter", var(CHAIN),
-                        lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
-
-        withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
-                withResource(orphan, () -> {
-                    // ne f collapses to always-TRUE: the parented row only, never the orphan.
-                    assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
-                    assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
-                    // eq f collapses to always-FALSE: neither row.
-                    assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
-                    assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
-
-                    // The discriminating arms. A two-valued `hops AND constant` makes both
-                    // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
-                    assertEquals(0, runChainCount(
-                            exprOp("not", exprOp("ne", size, nval(1.5)))));
-                    assertEquals(0, runChainCount(
-                            exprOp("not", exprOp("ne", matching, nval(1.5)))));
-                    assertEquals(1, runChainCount(
-                            exprOp("not", exprOp("eq", size, nval(1.5)))));
-                    assertEquals(1, runChainCount(
-                            exprOp("not", exprOp("eq", matching, nval(1.5)))));
-                }));
     }
 
     @Test
@@ -1672,6 +1563,120 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
+    /**
+     * The equality half of the fractional {@code size()} thresholds. CEL's type checker rejects
+     * {@code ==} and {@code !=} between an int and a double, but {@code size(x) != dyn(1.5)}
+     * compiles and the planner drops the {@code dyn()}, shipping {@code ne(size(x), 1.5)} — so
+     * these ARE policy-reachable. The corpus carries the negated string-length half
+     * ({@code size-frac-ne-not}, {@code size-frac-eq-not}); the collection count is not carried.
+     */
+    @Nested
+    class FractionalSizeEquality {
+
+        private ResourceEntity seeded() {
+            ResourceEntity r = new ResourceEntity("size-frac-seed-1");
+            r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
+            return r;
+        }
+
+        private Operand sizeCmp(String op, double threshold) {
+            return exprOp(op,
+                    exprOp("size", var("request.resource.attr.ownedBy")),
+                    nval(threshold));
+        }
+
+        /** <strong>Corpus gap.</strong> Fractional {@code ==} over a collection is not carried. */
+        @Test
+        void eqFractionalIsAlwaysFalse() {
+            // size == 2.5 can never hold for an integral count; truncation made it eq 2.
+            withResource(seeded(), () -> assertEquals(0, runCount(sizeCmp("eq", 2.5))));
+        }
+
+        /** <strong>Corpus gap.</strong> Fractional {@code !=} over a collection is not carried. */
+        @Test
+        void neFractionalIsAlwaysTrue() {
+            // size != 2.5 always holds; truncation made it ne 2 (false for the seeded row).
+            withResource(seeded(), () -> assertEquals(1, runCount(sizeCmp("ne", 2.5))));
+        }
+
+        /**
+         * <strong>Corpus gap.</strong> {@code size-frac-ne-not} and {@code size-frac-eq-not} carry
+         * the negated string-length forms; the positive polarity is not carried.
+         */
+        @Test
+        void stringSizeFractionalNeExcludesNullColumn() {
+            // size(string) != 1.5 is vacuously true for any PRESENT string, but a NULL
+            // column is a missing attribute → CEL error → deny. Always-true would leak it.
+            Operand cond = exprOp("ne",
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(1.5));
+            ResourceEntity withValue = new ResourceEntity("size-frac-str-1");
+            withValue.setaOptionalString("ab");
+            ResourceEntity withNull = new ResourceEntity("size-frac-str-2");
+            withNull.setaOptionalString(null);
+            withResource(withValue, () -> withResource(withNull, () ->
+                    assertEquals(1, runCount(cond))));
+            // eq fractional over a string length is always false, NULL or not.
+            Operand eqCond = exprOp("eq",
+                    exprOp("size", var("request.resource.attr.aOptionalString")),
+                    nval(1.5));
+            ResourceEntity another = new ResourceEntity("size-frac-str-3");
+            another.setaOptionalString("ab");
+            withResource(another, () -> assertEquals(0, runCount(eqCond)));
+        }
+
+    }
+
+    /**
+     * <strong>Corpus gap.</strong> The FRACTIONAL threshold over a chain. CEL's type checker
+     * rejects {@code ==}/{@code !=} between an int and a double, but {@code dyn(1.5)} reaches
+     * it (see {@link FractionalSizeEquality}); no corpus action carries the chain or
+     * {@code size(filter(...))} form yet (cerbos/query-plan-adapters#333).
+     *
+     * <p>A COUNT is never fractional, so the comparison is statically decided — but not
+     * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
+     * under both polarities, so the collapse has to be tri-state like every other chained
+     * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
+     * were TRUE for the parentless row and returned it.
+     */
+    @Test
+    void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
+        var fin = new SubCategoryEntity("chain-sub-f1", "finance");
+        var biz = new CategoryEntity("chain-cat-f1", "business");
+        biz.setSubCategories(List.of(fin));
+        ResourceEntity parented = new ResourceEntity("chain-r-f1");
+        parented.setCategories(List.of(biz));
+        // No categories at all: the chain's leading hop is absent, so CEL denies this row
+        // whatever the collapse decides.
+        ResourceEntity orphan = new ResourceEntity("chain-r-f2");
+
+        Operand size = exprOp("size", var(CHAIN));
+        Operand matching = exprOp("size",
+                exprOp("filter", var(CHAIN),
+                        lambda("s", exprOp("eq", var("s.name"), sval("finance")))));
+
+        withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
+                withResource(orphan, () -> {
+                    // ne f collapses to always-TRUE: the parented row only, never the orphan.
+                    assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
+                    assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
+                    // eq f collapses to always-FALSE: neither row.
+                    assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
+                    assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
+
+                    // The discriminating arms. A two-valued `hops AND constant` makes both
+                    // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
+                    assertEquals(0, runChainCount(
+                            exprOp("not", exprOp("ne", size, nval(1.5)))));
+                    assertEquals(0, runChainCount(
+                            exprOp("not", exprOp("ne", matching, nval(1.5)))));
+                    assertEquals(1, runChainCount(
+                            exprOp("not", exprOp("eq", size, nval(1.5)))));
+                    assertEquals(1, runChainCount(
+                            exprOp("not", exprOp("eq", matching, nval(1.5)))));
+                }));
+    }
+
     // -- Fractional size() thresholds: COUNT/LENGTH are integral, so a fractional constant f
     // can never be hit exactly. Correct semantics: eq → always-false; ne → always-true (but a
     // NULL string column is a missing attribute → CEL error → deny); ge/gt f → ge ceil(f);
@@ -1791,9 +1796,9 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code size-huge-lt} carries {@code <} at 2^32 over a corpus
-         * whose aString is never NULL, so the NULL exclusion this pins has no discriminating seed
-         * there.
+         * <strong>Corpus gap.</strong> {@code size-huge-lt} carries {@code <} at 2^32 and
+         * {@code size-huge-lt-not} its negation over the nullable aOptionalString; {@code le} and
+         * the 2^31 boundary are not carried.
          */
         @Test
         void ltLeAboveIntMaxIncludePresentAndExcludeNull() {

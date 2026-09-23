@@ -418,10 +418,13 @@ the shape — it does not cover the property.
 
 Three kinds of material legitimately live only in a unit test, and they are not equal:
 
-1. **A branch CEL itself cannot reach.** A fractional `size()` equality is a type error, so no
-   policy can drive it and there is no corpus action to substitute for. Prove the branch cannot be
-   planned (compile the shape and quote the type error), then pin it and say so in
-   `conformance/README.md`; do not infer unreachability from the adapter's own code. Permanent.
+1. **A branch CEL itself cannot reach.** An operator CEL does not have (`isSet`) cannot come from
+   any policy, so there is no corpus action to substitute for. Prove the branch cannot be planned
+   (compile the shape and quote the error), then pin it and say so in `conformance/README.md`; do
+   not infer unreachability from the adapter's own code. A type-checker error alone is not that
+   proof: `dyn()` defers the check to runtime and the planner drops the wrapper, which is how
+   `size(x) != dyn(1.5)` reaches a fractional `size()` equality long recorded as unreachable
+   (`size-frac-ne-not`). Try the `dyn()` spelling before calling a shape kind 1. Permanent.
 2. **A caller-supplied argument the corpus structurally cannot vary.** `actions.json` classifies
    each action against *one* mapping per adapter, so an `OperatorFunction` override, a second mapper
    form, `allowPostFilter`, a per-call `nullAttributeRepresentation`, or `maxMacroDepth` has no

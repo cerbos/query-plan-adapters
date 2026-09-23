@@ -472,7 +472,7 @@ this compatibility snapshot. Each PDP call has a 30-second deadline, so a stalle
 | Classification | Coverage |
 | --- | --- |
 | Oracle-tested | 139 reference conformance actions plus regex and timestamp probes (141 actions) |
-| Fail-closed | 172 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (181 actions total) |
+| Fail-closed | 178 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (187 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. An explicitly-null value and a missing field are the same document to every query the DSL can express, so the equality family over attributes in `explicitNullAttributes` throws instead of answering narrowly (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -484,16 +484,16 @@ those in [Unsupported shapes](#unsupported-shapes). Every fail-closed message is
 `conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, plus the **distribution of
-refusals over the sites in the walk that raise them**. 182 of the corpus's 324 shapes are refused
-here — the 181 fail-closed actions plus `null-eq-missing` — across 29 sites, with 82 reaching the
+refusals over the sites in the walk that raise them**. 188 of the corpus's 330 shapes are refused
+here — the 187 fail-closed actions plus `null-eq-missing` — across 29 sites, with 82 reaching the
 computed-operand refusal:
 
 | Rejection site | Actions |
 | --- | --- |
 | computed leaf operand | 82 |
 | field-to-field | 22 |
+| count over an undeclared collection | 12 |
 | explicit null | 8 |
-| count over an undeclared collection | 6 |
 | count threshold | 5 |
 | constant receiver | 4 |
 | negated exists over a collection | 4 |

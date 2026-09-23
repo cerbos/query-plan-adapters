@@ -324,13 +324,26 @@ Mongoose does not share that defect — its ternary is a single `$cond` — but 
 collection action reaches it; probing it needs a chained **scalar** attribute (see "The real to-one
 relation").
 
-**The fractional-threshold collapse is the one branch the corpus cannot reach.** CEL rejects
-`==`/`!=` between `int` and `double` ("found no matching overload for `_==_` applied to
-`(int, double)`"), so no policy can plan a fractional equality against `size()`, and the ordering
-spellings (`>= 1.5`, `<= 1.5`) round to an integer threshold. An adapter that folds the fractional
-equality to a constant must still guard it — `hops AND constant` is two-valued and readmits
-parentless rows under a negation — and only its unit tests can prove that (#333). This is kind 1 in
-`CLAUDE.md`, "What a translator unit test may pin".
+**The fractional-threshold collapse is reachable, through `dyn()`.** CEL's type checker rejects
+`==`/`!=` between `int` and `double` ("found no matching overload for `_!=_` applied to
+`(int, double)`"), which was long read as "no policy can plan a fractional equality against
+`size()`". It can: `size(x) != dyn(1.5)` defers the check to runtime heterogeneous equality, and the
+planner drops the `dyn()` wrapper, so the wire carries a bare `ne(size(x), 1.5)` (see
+`wire-fixtures/size-frac-ne-not.json`). An adapter that folds the fractional equality to a constant
+must still guard it — `hops AND constant` is two-valued and readmits parentless rows under a
+negation (#333), and a string column's `IS NOT NULL` or bare FALSE readmits NULL rows the same way.
+`size-frac-ne-not` and `size-frac-eq-not` carry the string-length half; the chain and
+`size(filter(...))` halves are still only in unit tests, and they are kind 3 (a corpus gap), not
+kind 1, in `CLAUDE.md`, "What a translator unit test may pin".
+
+**A statically decided `size(string)` must stay UNKNOWN for a NULL column.** A threshold outside
+int range (`< 5000000000`, `> -5000000000`) and a fractional equality are decided for every
+*present* string, so adapters fold them. A NULL column is a missing attribute, and `size()` of it
+is a CEL error that denies under both polarities; a fold to `col IS NOT NULL` negates to
+`col IS NULL`, and a fold to a constant FALSE negates to TRUE, and both readmit the NULL rows.
+`size-huge-gt`/`size-huge-lt` could not see this — `aString` is never NULL — so the six
+`size-*-not` actions ask it over `aOptionalString`, each OR-ed with `aNumber > 10` so the oracle is
+non-degenerate: a2/a4/a8 are the NULL rows an unguarded fold readmits.
 
 ### Shapes that live only in a unit test
 
@@ -387,7 +400,7 @@ assertion cannot measure. The empty hierarchy delimiter is now covered by `hier-
 with *Corpus gap.*):
 
 - **Kind 1.** Permanent. An operator CEL does not have (`isSet`), a comparison the type checker
-  rejects (fractional `size()` equality, a timestamp against a number), an operand shape the planner
+  rejects (a timestamp against a number), an operand shape the planner
   never emits (wrong arity, a bare string where `timestamp()` always wraps one, a leaf with a third
   operand), and constant-only sub-expressions the planner folds before the wire — proved by the
   corpus's own fixtures: `p-startswith-concat` arrives with `"100" + "%"` folded and `in-empty`
@@ -400,7 +413,8 @@ with *Corpus gap.*):
   three typed refusals and `Options` immutability.
 - **Kind 3.** Bridges tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414),
   grouped as the banners group them: `size(collection)` against arbitrary, fractional and
-  out-of-int-range thresholds; empty-list intersection over a direct scalar, relation or map
+  out-of-int-range thresholds, and fractional `size()` equality over a collection, a chain and
+  `size(filter(...))` (reachable through `dyn()`, see "The absent to-one parent"); empty-list intersection over a direct scalar, relation or map
   projection (the new action covers an absent to-one parent); value-first and relation structured
   comparisons; suffix and integral `add` solve forms; CEL primitive and minor-operator shapes;
   collection-macro composition; value-first operand orders beyond the corpus's; the ternary

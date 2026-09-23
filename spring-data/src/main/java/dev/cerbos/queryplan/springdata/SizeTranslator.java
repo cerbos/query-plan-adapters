@@ -176,10 +176,13 @@ final class SizeTranslator {
         if (!String.class.equals(path.getJavaType())) {
             return tri.unknown();
         }
-        // Every "vacuously true" arm below still requires IS NOT NULL, never an unconditional
-        // 1=1: a NULL column is a missing attribute → CEL error → deny.
+        // Every statically decided arm below is still conditional on the column: a NULL column
+        // is a missing attribute, size() of it is a CEL error, and the row is denied under BOTH
+        // polarities. So neither a two-valued IS NOT NULL (negated to IS NULL) nor a constant
+        // FALSE (negated to TRUE) will do: each arm is UNKNOWN for a NULL column (see
+        // presentStringFold).
         if (threshold.decided() != null) {
-            return threshold.decided() ? cb.isNotNull(path) : cb.disjunction();
+            return presentStringFold(path, threshold.decided());
         }
         // cb.length(...) is Expression<Integer>, so the threshold must fit in an int. An
         // unguarded narrowing cast wraps thresholds outside int range (2147483648 →
@@ -190,8 +193,8 @@ final class SizeTranslator {
             // LENGTH(s) < 2^31 for every present string: eq/gt/ge can never hold; lt/le/ne
             // always hold for a present string.
             return switch (threshold.op()) {
-                case "eq", "gt", "ge" -> cb.disjunction();
-                case "lt", "le", "ne" -> cb.isNotNull(path);
+                case "eq", "gt", "ge" -> presentStringFold(path, false);
+                case "lt", "le", "ne" -> presentStringFold(path, true);
                 default -> throw Refusals.malformed(
                         "Unsupported size comparison operator: " + threshold.op());
             };
@@ -200,14 +203,27 @@ final class SizeTranslator {
             // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
             // present string; eq/lt/le can never hold.
             return switch (threshold.op()) {
-                case "gt", "ge", "ne" -> cb.isNotNull(path);
-                case "eq", "lt", "le" -> cb.disjunction();
+                case "gt", "ge", "ne" -> presentStringFold(path, true);
+                case "eq", "lt", "le" -> presentStringFold(path, false);
                 default -> throw Refusals.malformed(
                         "Unsupported size comparison operator: " + threshold.op());
             };
         }
         return compareCount(cb.length(path.as(String.class)), threshold.op(),
                 (int) threshold.value());
+    }
+
+    /**
+     * A {@code size(string)} comparison decided statically for every present string: the
+     * constant {@code holds}, but UNKNOWN when the column is NULL (a missing attribute, which
+     * CEL errors on). The column is the unknown witness of
+     * {@link TriPredicate#baseUnlessUnknown}, so {@code NOT} of the fold still excludes the NULL
+     * rows — {@code IS NOT NULL} and a bare FALSE both negate to TRUE for them. The corpus's
+     * {@code size-huge-*-not} and {@code size-frac-*-not} actions pin both halves.
+     */
+    private Predicate presentStringFold(Path<?> path, boolean holds) {
+        return tri.baseUnlessUnknown(holds ? cb.conjunction() : cb.disjunction(),
+                () -> cb.isNull(path));
     }
 
     /**

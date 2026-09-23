@@ -1335,9 +1335,9 @@ resourcePolicy:
 
     # ==================== fractional size() thresholds ====================
     # COUNT is integral: >= 1.5 must round UP to >= 2 (truncation to >= 1 over-includes).
-    # Only the ORDERING operators are probeable end to end — CEL rejects ==/!= between int
-    # and double (no matching overload), so the planner can never emit a fractional eq/ne
-    # against size(); the defensive adapter collapse for those is unit-tested only.
+    # CEL's type checker rejects ==/!= between int and double (no matching overload), but
+    # `dyn(1.5)` defers that to runtime and the planner drops the wrapper — so a fractional
+    # eq/ne against size() IS plannable (see size-frac-ne-not / size-frac-eq-not below).
     - actions: ["cr-size-frac-ge"]
       effect: EFFECT_ALLOW
       roles: ["USER"]
@@ -1350,12 +1350,12 @@ resourcePolicy:
     # been exercised where there is no hop to require. Over a chain the rounded threshold and
     # the absent-parent guard interact, and each arm probes a different half of that.
     #
-    # The `eq`/`ne` COLLAPSE is deliberately not probed here — it cannot be: CEL rejects
-    # `size(...) == 1.5` with "found no matching overload for '_==_' applied to '(int, double)'",
-    # so no policy can make the planner emit it. An adapter that folds the collapse to a
-    # constant must still guard it under a chain (`hops AND constant` is two-valued and
-    # readmits parentless rows under an outer NOT), but only that adapter's unit tests can
-    # reach it. See conformance/README.md, "The absent to-one parent".
+    # The `eq`/`ne` COLLAPSE is not probed over a chain yet. CEL rejects `size(...) == 1.5`
+    # with "found no matching overload for '_==_' applied to '(int, double)'", but
+    # `size(...) == dyn(1.5)` plans to the same wire node, so this is a corpus gap, not an
+    # unreachable branch. An adapter that folds the collapse to a constant must still guard it
+    # under a chain (`hops AND constant` is two-valued and readmits parentless rows under an
+    # outer NOT). See conformance/README.md, "The absent to-one parent".
 
     # `>= 1.5` rounds UP to `>= 2`. No seed holds a parent with two or more subCategories, so
     # the oracle is EMPTY by construction and this arm cannot discriminate the hop guard — what
@@ -1402,6 +1402,68 @@ resourcePolicy:
       condition:
         match:
           expr: 'size(R.attr.aString) < 4294967296'
+
+    # The always-true size(string) arms UNDER NEGATION, over a NULLABLE column. A decided
+    # threshold (a fractional `!=`) and a threshold outside int range (`< huge`, `> -huge`) are
+    # true for every PRESENT string, so an adapter folds them statically — but a NULL column is a
+    # missing attribute, and size() of it is a CEL error that denies under BOTH polarities. A
+    # two-valued `col IS NOT NULL` fold negates to `col IS NULL` and readmits exactly those rows.
+    # aString is never NULL, so size-huge-* cannot see this; aOptionalString is NULL on
+    # a2/a4/a8/c2/e1. The negated arm is false for every present string, so on its own the
+    # oracle would be empty by construction: the `|| aNumber > 10` disjunct makes it
+    # non-degenerate (error || true absorbs to true in CEL, UNKNOWN OR TRUE is TRUE in SQL).
+    # Oracle: b6/c1/c2/d1/d2/e1/f1/g1/h1–h7. An IS NULL fold also returns a2/a4/a8.
+    - actions: ["size-huge-lt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+
+    # The same fold below int range: `> -huge` holds for every present string.
+    - actions: ["size-huge-neg-gt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) > -5000000000) || R.attr.aNumber > 10'
+
+    # The same fold for a DECIDED threshold: no integral length equals 1.5, so `!= 1.5` holds
+    # for every present string. `size(x) != 1.5` is an (int, double) type error, but `dyn()`
+    # defers the check to runtime heterogeneous equality and the planner drops the wrapper: the
+    # wire carries `ne(size(x), 1.5)`, so a fractional size() equality IS policy-reachable.
+    - actions: ["size-frac-ne-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) != dyn(1.5)) || R.attr.aNumber > 10'
+
+    # The ALWAYS-FALSE folds under negation. `== 1.5`, `> huge` and `< -huge` hold for no present
+    # string, so an adapter folds them to a constant FALSE — which NOT flips to TRUE for a NULL
+    # column just as surely as it flips IS NOT NULL to IS NULL. Here the negated arm is TRUE for
+    # every present string, so the oracle is every row with aOptionalString set plus c2/e1
+    # (aNumber > 10); a2/a4/a8 are the NULL rows a bare FALSE readmits.
+    - actions: ["size-frac-eq-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+
+    - actions: ["size-huge-gt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) > 5000000000) || R.attr.aNumber > 10'
+
+    - actions: ["size-huge-neg-lt-not"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(size(R.attr.aOptionalString) < -5000000000) || R.attr.aNumber > 10'
 
     # ==================== constant NaN / ±Infinity ordering ====================
     # CEL 0.30 (Cerbos 0.55) returns false for ordering comparisons involving NaN.
