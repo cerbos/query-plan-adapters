@@ -345,8 +345,8 @@ export function degenerateOracleMap(
  *
  * The message is what turns "it threw" into "it threw for the declared reason": without it a
  * mapper typo or an unrelated validation satisfies the assertion just as well as the limitation
- * the corpus documents. This adapter is the largest consumer of that distinction — 252 of the
- * corpus's 301 shapes are fail-closed here, so a bare throw assertion would prove almost nothing
+ * the corpus documents. This adapter is the largest consumer of that distinction — 257 of the
+ * corpus's 306 shapes are fail-closed here, so a bare throw assertion would prove almost nothing
  * (cerbos/query-plan-adapters#326).
  */
 export type ThrowingAction = readonly [
