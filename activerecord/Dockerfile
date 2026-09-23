@@ -1,13 +1,10 @@
-# The test image for the ActiveRecord adapter.
-#
-# The harnesses read the shared corpus at ../conformance/. Thus you must mount the root
-# directory of the repository and not only this directory. Refer to docker-compose.yaml and to
-# the instructions in CLAUDE.md.
-ARG RUBY_VERSION=3.4
+# Test image for the ActiveRecord adapter.
+# Mount the whole repository, not just this directory: the suites read ../conformance/.
+# See docker-compose.yaml.
+ARG RUBY_VERSION=4.0
 FROM ruby:${RUBY_VERSION}-slim-bookworm
 
-# The version of ActiveRecord to use. CI tests the first version and the last version of the
-# range in the gemspec. On your computer, the default value is sufficient.
+# CI sets this to each end of the gemspec's range. The default is fine locally.
 ARG ACTIVERECORD_VERSION=8.0
 ENV ACTIVERECORD_VERSION=${ACTIVERECORD_VERSION}
 
@@ -23,8 +20,7 @@ ENV BUNDLE_PATH=/bundle \
 
 WORKDIR /repo/activerecord
 
-# Install the gems in a layer of their own. Thus a change to the source does not cause a new
-# installation of the gems.
+# Install gems in their own layer so source changes don't reinstall them.
 COPY Gemfile cerbos-activerecord.gemspec ./
 COPY lib/cerbos/active_record/version.rb lib/cerbos/active_record/version.rb
 RUN bundle install

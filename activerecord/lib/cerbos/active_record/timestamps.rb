@@ -5,7 +5,9 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Reads the +timestamp()+ literals in a query plan.
+    # Reads the `timestamp()` literals in a query plan.
+    #
+    # @private
     module Timestamps
       RFC3339 = /\A
         (?!0000)(\d{4})-(\d{2})-(\d{2})[Tt]
@@ -14,8 +16,8 @@ module Cerbos
         (?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)
       \z/x
 
-      # ActiveRecord puts a Time into SQL with a maximum of six decimal places. Each database
-      # that this adapter supports keeps a datetime with six decimal places or fewer.
+      # ActiveRecord binds a Time with at most six fractional digits, and every supported
+      # database stores at most six.
       MAX_SUBSECOND_DIGITS = 6
 
       module_function
@@ -36,14 +38,12 @@ module Cerbos
         end
       end
 
-      # Examines the decimal places of the literal.
+      # Raises if the literal has non-zero digits past the sixth fractional place.
       #
-      # If a literal has more than six decimal places, ActiveRecord removes the last digits
-      # when it puts the literal into SQL. Thus the query compares with a different instant
-      # from the instant in the policy. The planner makes such a literal for +now()+, and thus
-      # this is a real shape and not only a theoretical one. The adapter must raise an error.
+      # ActiveRecord would truncate them, so the query would compare against a different
+      # instant than the policy. The planner emits such literals for `now()`.
       #
-      # @api private
+      # @private
       def assert_representable_precision(literal)
         digits = RFC3339.match(literal)[4].to_s
         return if digits.length <= MAX_SUBSECOND_DIGITS

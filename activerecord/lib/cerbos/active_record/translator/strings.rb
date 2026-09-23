@@ -3,8 +3,10 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # +contains+, +startsWith+ and +endsWith+, and the checks for a string operand. See
+      # `contains`, `startsWith` and `endsWith`, and the checks for a string operand. See
       # {StringMatcher} for the LIKE escaping.
+      #
+      # @private
       module Strings
         private
 

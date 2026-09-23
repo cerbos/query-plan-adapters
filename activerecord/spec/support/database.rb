@@ -11,13 +11,11 @@ module Database
     ActiveRecord::Base.establish_connection(
       adapter: "sqlite3",
       database: ":memory:",
-      # Only one connection. Thus the PRAGMA below applies to each query of the suite.
+      # One connection, so the PRAGMA below applies to every query.
       pool: 1
     )
-    # CEL compares strings with attention to the case of the letters. The LIKE operator of
-    # SQLite does not do this with its default configuration. Without this PRAGMA, the test
-    # `contains("a_b")` would also find `xA_by`. Then the rows in the corpus for the collation
-    # would agree for an incorrect reason.
+    # CEL string matching is case-sensitive; SQLite's LIKE is not by default. Without this,
+    # `contains("a_b")` would also match `xA_by` and the collation seeds would pass by accident.
     ActiveRecord::Base.connection.execute("PRAGMA case_sensitive_like = ON")
   end
 end

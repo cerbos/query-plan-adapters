@@ -38,7 +38,7 @@ gem "cerbos-activerecord",
 
 Requirements:
 
-- Ruby 3.2+
+- Ruby 3.3+
 - ActiveRecord `>= 7.1, < 9.0` (CI tests 7.1 and 8.0)
 - Cerbos PDP after v0.40
 - The [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby) (`cerbos` gem) is the expected
@@ -363,26 +363,7 @@ reflection and can detect them there.
 
 ## Behaviour changes
 
-- Membership in a relation mapped by member field, and `hasIntersection` with it, drop every
-  literal whose CEL type differs from the member column's: `"2" in aNumberList` is false, where
-  SQLite's REAL affinity read `'2'` as the number 2 and matched. The `IN` list for a scalar column
-  drops them the same way, so `aNumber in ["5", 2]` is `a_number IN (2)`. Filters get narrower;
-  nothing that translated now throws.
-- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): size and string
-  operators reject numeric and boolean columns.
-- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): comparisons on
-  raw temporal columns require a `timestamp()` wrapper, because SQL discards the RFC 3339 spelling.
-- **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): nested list
-  membership is refused before SQL rendering.
-- ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)) Negated scalar-list macros,
-  omitted scalar membership, hierarchy prefix shortcuts and NaN ordering now preserve CEL's
-  null/error behaviour through negation.
-- ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)) Comparisons between known
-  different scalar types follow CEL equality and missing-value rules instead of letting SQL coerce
-  (e.g. `"0"` to a number). Two declared explicit nulls still compare equal.
-- Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
-  true. Under Cerbos 0.54 it was an evaluation error and stayed denied under negation. Missing
-  attributes and other evaluation errors are unchanged.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Example application
 
@@ -399,11 +380,13 @@ Everything runs in Docker; you do not need Ruby locally. The PDP version comes f
 ./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/translator_spec.rb           # offline: no PDP, no database server
 ./scripts/golden-update.sh                          # rewrite golden/expectations.json
-RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
-./scripts/lint.sh
+RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
+./scripts/lint.sh                                   # RuboCop on Standard, via `rake lint`
+./scripts/docs.sh                                   # YARD, failing on a warning or an undocumented object
 ```
 
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
+Specs run in random order; rerun a failure with the seed RSpec prints (`--seed N`).
 
 | Suite | What it covers | Needs |
 | --- | --- | --- |

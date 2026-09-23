@@ -24,55 +24,56 @@ require_relative "translator/strings"
 
 module Cerbos
   module ActiveRecord
-    # Goes through a query plan after a normalise operation, and makes the equivalent Arel
-    # predicate.
+    # Walks a normalised query plan and builds the equivalent Arel predicate.
     #
-    # Two rules control almost all the decisions in this class:
+    # Two rules drive most decisions:
     #
-    # * *The order on the wire is the order in the source.* The planner keeps the order of the
-    #   operands in the policy. Thus <tt>1 < R.attr.x</tt> comes as
-    #   <tt>lt(value(1), variable(x))</tt>. This adapter makes the comparison in the same
-    #   order (+1 < x+), and that SQL is already correct. Some adapters made a different
-    #   assumption: that a column is always first. They moved the operands to get that order,
-    #   and thus they turned the directional comparisons around
-    #   (cerbos/query-plan-adapters#257).
+    # * **Operand order is source order.** `1 < R.attr.x` arrives as
+    #   `lt(value(1), variable(x))` and becomes `1 < x`. Never swap operands to put the column
+    #   first; that flipped comparisons in other adapters (cerbos/query-plan-adapters#257).
     #
-    # * *An error is not a false.* CEL denies a resource if the evaluation of its condition
-    #   makes an error. A missing attribute is one cause. An element without a field is
-    #   another. The UNKNOWN value of SQL has the same behaviour: a predicate does not select
-    #   it, and the negation of that predicate does not select it. This translation keeps
-    #   UNKNOWN and does not change it into a boolean. For this reason, the collection macros
-    #   become CASE expressions and not only EXISTS subqueries.
+    # * **An error is not false.** CEL denies when evaluation errors (missing attribute,
+    #   missing field). SQL UNKNOWN behaves the same: excluded by a predicate and by its
+    #   negation. So UNKNOWN is kept, not coerced to a boolean, which is why collection macros
+    #   become CASE expressions, not just EXISTS.
     #
-    # This file holds the walk over the plan and the table of operators. Each family of
-    # operators is a module in +translator/+, included below.
+    # This file holds the plan walk and the operator table. Each operator family is a module
+    # in `translator/`.
+    #
+    # @see Cerbos::ActiveRecord.query_plan_to_relation
     class Translator
-      # The adapter must not resolve the operands of these operators before the operator runs.
-      # Each of these operators does one of two things: it connects an iterator variable to a
-      # scope, or it must keep UNKNOWN through a branch.
+      # Operators whose operands must not be resolved first: they bind an iterator variable or
+      # must carry UNKNOWN through a branch.
       STRUCTURAL_OPERATORS = %w[and or not if lambda exists all exists_one filter map].freeze
 
+      # The comparison operators.
       COMPARISONS = %w[eq ne lt gt le ge].freeze
 
+      # The arithmetic operators, except `div`, and their SQL operators.
       ARITHMETIC = {"add" => "+", "sub" => "-", "mult" => "*", "mod" => "%"}.freeze
 
+      # String operators that become `LIKE`, and where each adds a wildcard.
       STRING_MATCHES = {
         "contains" => {prefix: true, suffix: true},
         "startsWith" => {prefix: false, suffix: true},
         "endsWith" => {prefix: true, suffix: false}
       }.freeze
 
+      # The values that `null_attribute_representation` accepts. See
+      # {AttributeMapping::NULL_REPRESENTATIONS}.
       NULL_REPRESENTATIONS = AttributeMapping::NULL_REPRESENTATIONS
 
-      # The operators that CEL evaluates to a definite boolean over a null value, and thus the
-      # only ones that the declared convention of an attribute can settle. Everything else — a
-      # collection macro, `hasIntersection`, a string match — keeps the convention of the call,
-      # because the declaration says nothing about the meaning of its null there.
+      # Operators CEL evaluates to a definite boolean over null, so the only ones an
+      # attribute's declared convention affects. All others use the call's convention.
       EQUALITY_FAMILY = %w[eq ne in].freeze
 
+      # The ActiveRecord column types that hold a CEL string.
       STRING_COLUMN_TYPES = %i[string text].freeze
+      # The ActiveRecord column types that hold a whole number.
       INTEGER_COLUMN_TYPES = %i[integer bigint].freeze
+      # The ActiveRecord column types that hold a CEL number.
       NUMERIC_COLUMN_TYPES = %i[integer bigint float decimal].freeze
+      # The ActiveRecord column types that hold an instant.
       TEMPORAL_COLUMN_TYPES = %i[datetime timestamp timestamptz time date].freeze
 
       include Arithmetic
@@ -84,18 +85,17 @@ module Cerbos
       include NullConventions
       include Strings
 
-      # An operator that the adapter resolves the operands of before it runs, and that an
-      # operator override can therefore replace. +arity+ is how many operands it takes (+nil+
-      # for any number). +translation+ gets the resolved operands and runs on the translator.
+      # An operator whose operands are resolved first, so an override can replace it.
+      # `translation` runs on the translator with the resolved operands.
+      #
+      # @attr arity [Integer, Range<Integer>, nil] the operand count (`nil` for any).
+      # @attr translation [Proc] the translation of the resolved operands.
       Operator = Struct.new(:arity, :translation)
 
-      # Every operator that is not structural. Adding one is one entry here, plus the method
-      # that it calls.
+      # Every non-structural operator. To add one, add an entry here and its method.
       #
-      # The arity is checked before the translation runs. A plan that carries more operands
-      # than the operator takes is malformed, and this adapter accepts a plan from any source.
-      # If it read only the positions it expected, an extra operand would disappear and the
-      # filter would be wider than the condition.
+      # Arity is checked first: silently dropping an extra operand from a malformed plan could
+      # widen the filter.
       OPERATORS = {
         **COMPARISONS.to_h { |name|
           [name, Operator.new(2, ->(left, right) { compare(name, left, right) })]
@@ -121,10 +121,21 @@ module Cerbos
         "overlaps" => Operator.new(2, ->(left, right) { overlaps(left, right) })
       }.freeze
 
-      # Operand counts, derived from OPERATORS. Kept because the constant was reachable before
-      # OPERATORS replaced it.
+      # Operand counts from OPERATORS. Kept for compatibility with code that used it before.
       ARITY = OPERATORS.filter_map { |name, operator| [name, operator.arity] if operator.arity }.to_h.freeze
 
+      # Create a translator.
+      #
+      # @param model [Class] the model to filter.
+      # @param attributes [Hash{String, Symbol => AttributeMapping::Field, AttributeMapping::Relation}]
+      #   the attribute map.
+      # @param operator_overrides [Hash{String, Symbol => #call}] the operator overrides.
+      # @param null_attribute_representation [Symbol, String] the fallback NULL convention.
+      #
+      # @raise [ArgumentError] when `null_attribute_representation` is not in
+      #   {NULL_REPRESENTATIONS}, or an override names one of {STRUCTURAL_OPERATORS}.
+      #
+      # @see Cerbos::ActiveRecord.query_plan_to_relation
       def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :explicit)
         @model = model
         @attributes = attributes.transform_keys(&:to_s)
@@ -151,21 +162,45 @@ module Cerbos
       attr_reader :model, :attributes, :operator_overrides, :dialect, :matcher,
         :null_attribute_representation
 
-      # @param plan [Object] anything {Plan.normalise} accepts
-      # @return [ActiveRecord::Relation]
+      # @!attribute [r] model
+      #   @return [Class] the model to filter.
+
+      # @!attribute [r] attributes
+      #   @return [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}] the
+      #     attribute map.
+
+      # @!attribute [r] operator_overrides
+      #   @return [Hash{String => #call}] the operator overrides.
+
+      # @!attribute [r] null_attribute_representation
+      #   @return [:explicit, :omitted] the fallback NULL convention.
+
+      # @!attribute [r] dialect
+      #   @private
+
+      # @!attribute [r] matcher
+      #   @private
+
+      # Translate a query plan into a relation over {#model}.
+      #
+      # @param plan [Object] the query plan, in any shape
+      #   {Cerbos::ActiveRecord.query_plan_to_relation} accepts.
+      #
+      # @return [ActiveRecord::Relation] a filtered relation.
+      # @return [ActiveRecord::Relation] `model.none` if the plan always denies.
+      # @return [ActiveRecord::Relation] `model.all` if the plan always allows.
+      #
+      # @raise [Error] when the adapter cannot translate the plan correctly.
       def translate(plan)
         normalised = Plan.normalise(plan)
         return model.none if normalised.always_denied?
         return model.all if normalised.always_allowed?
 
-        # Always, and not only under `:omitted`. The option of the call is now the fallback:
-        # an attribute can declare `:omitted` while the call declares `:explicit`.
+        # Always check: an attribute can declare `:omitted` even when the call is `:explicit`.
         assert_no_null_operands(normalised.condition)
 
         @aliaser = Relations::Aliaser.new
-        # The keys are object identities. Each column that the adapter resolves is a new Arel
-        # node, and that same node goes through the translation without a change. Thus
-        # identity is the correct comparison here.
+        # Keyed by identity: each resolved column is a fresh Arel node passed through unchanged.
         @column_types = {}.compare_by_identity
         @timestamp_operands = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
@@ -173,50 +208,46 @@ module Cerbos
         model.where(predicate(normalised.condition, environment))
       end
 
-      # @api private
+      # @private
       attr_reader :aliaser
 
-      # @api private
+      # @private
       def register_column_type(node, owner_model, column_name)
         type = owner_model.columns_hash[column_name.to_s]&.type
         @column_types[node] = type if type
         node
       end
 
-      # @api private
+      # @private
       def column_type(node)
         @column_types[node]
       end
 
-      # Records the convention that the mapping of an attribute declares, against the identity
-      # of the Arel node that the attribute resolved to. The declaration arrives with the
-      # mapping, but the operators see only resolved values, so the node carries it across.
+      # Records an attribute's declared NULL convention against its resolved Arel node, since
+      # operators only see resolved values.
       #
-      # @api private
+      # @private
       def register_null_representation(node, representation)
         @null_representations[node] = representation if representation
         node
       end
 
-      # True if this node came from an attribute that the caller declares it sends as an
-      # explicit null. An attribute that declares `:omitted`, and one that declares nothing,
-      # are both false: only `:explicit` puts a null VALUE into CEL, and thus only `:explicit`
-      # needs a comparison that is definite.
+      # True if the node's attribute declares `:explicit`. Only then does CEL see a null value,
+      # so only then is a definite comparison needed.
       #
-      # @api private
+      # @private
       def explicit_null?(node)
         @null_representations[node] == :explicit
       end
 
-      # @api private
+      # @private
       def root_table
         model.arel_table
       end
 
-      # Resolves an operand to a value. The value is an Arel node, a Ruby constant, or one of
-      # the intermediate {Values} that the operator around it uses.
+      # Resolves an operand to an Arel node, a Ruby constant, or an intermediate {Values} value.
       #
-      # @api private
+      # @private
       def evaluate(node, environment)
         case node
         when Plan::Value then node.value
@@ -255,10 +286,8 @@ module Cerbos
             "such as filter() and map() evaluate to a list, not to a boolean"
         end
 
-        # A boolean column alone is a correct CEL condition. But the `where` method of
-        # ActiveRecord refuses a column reference alone, and PostgreSQL needs a boolean
-        # expression and not a value. A comparison with TRUE has the same result, and this is
-        # also true for NULL.
+        # A bare boolean column is valid CEL, but `where` rejects a bare column and PostgreSQL
+        # wants a boolean expression. `= TRUE` gives the same result, NULL included.
         return ArelSupport.comparison("eq", value, true) if column_type(value) == :boolean
 
         ArelSupport.to_predicate(value)
@@ -266,10 +295,8 @@ module Cerbos
 
       # --- structural operators -------------------------------------------------------
 
-      # An `and` with no operands would give TRUE, and thus the filter would permit every row.
-      # The Cerbos planner does not make that shape, but this adapter accepts a plan from any
-      # source. A plan that lost its operands — an incomplete JSON body, a bad conversion —
-      # must not become "permit everything". Thus an empty operand list is an error.
+      # An empty `and` would be TRUE and allow every row. The planner never emits it, but a
+      # truncated or mangled plan might, so it is an error.
       def combine(operator, operands, environment)
         if operands.empty?
           raise InvalidPlanError, "#{operator} has no operands"
@@ -286,13 +313,11 @@ module Cerbos
         ArelSupport.not_node(predicate(operands.first, environment))
       end
 
-      # +if(condition, then, else)+.
+      # `if(condition, then, else)`.
       #
-      # The CASE that this method makes has no ELSE clause. This is necessary. If the
-      # condition is UNKNOWN, because of a NULL column or a missing attribute, CEL makes an
-      # error and denies the row. A CASE without a WHEN clause that agrees gives NULL. Thus
-      # the row stays out of the result, and it also stays out when a NOT operator is around
-      # the CASE. An +ELSE+ clause would put those rows into the else branch.
+      # No ELSE on purpose. An UNKNOWN condition (NULL column, missing attribute) is a CEL
+      # error and a deny. With no matching WHEN the CASE is NULL, so the row is excluded even
+      # under NOT. An ELSE would let it in.
       def ternary(operands, environment)
         unless operands.length == 3
           raise InvalidPlanError, "if takes exactly three operands, got #{operands.length}"
@@ -302,8 +327,7 @@ module Cerbos
         then_value = evaluate(operands[1], environment)
         else_value = evaluate(operands[2], environment)
 
-        # An arm with a value that is not finite must not go to the database. Thus the
-        # translator keeps the ternary, and the comparison around it calculates each branch.
+        # A non-finite arm must not reach SQL, so defer to the enclosing comparison.
         if deferred_value?(then_value) || deferred_value?(else_value)
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
@@ -313,8 +337,8 @@ module Cerbos
         branches(condition, then_value, else_value)
       end
 
-      # +CASE WHEN c THEN a WHEN NOT c THEN b END+, with no ELSE clause, so an UNKNOWN
-      # condition gives NULL and not the else branch. See {#ternary}.
+      # `CASE WHEN c THEN a WHEN NOT c THEN b END`. No ELSE, so UNKNOWN gives NULL. See
+      # {#ternary}.
       def branches(condition, then_value, else_value)
         ArelSupport.case_node(
           [[condition, then_value], [ArelSupport.not_node(condition), else_value]]
@@ -370,14 +394,13 @@ module Cerbos
           value.is_a?(Values::MappedCollection)
       end
 
-      # A value that may be NaN or an Infinity. It stays out of SQL until a comparison
-      # calculates it. See {Values::IEEEConstant}.
+      # A value that may be NaN or Infinity, kept out of SQL until a comparison resolves it.
+      # See {Values::IEEEConstant}.
       def deferred_value?(value)
         value.is_a?(Values::IEEEConstant) || value.is_a?(Values::ConditionalValue)
       end
 
-      # Refuses a collection, then a value that may not be finite, in any of +values+: the
-      # operands of an operator that needs plain scalars.
+      # Refuses collections, then possibly non-finite values, for operators that need scalars.
       def require_scalars(operator, *values)
         values.each { |value| reject_collection(operator, value) }
         values.each { |value| reject_deferred(operator, value) }

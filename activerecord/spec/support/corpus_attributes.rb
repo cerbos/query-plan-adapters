@@ -1,14 +1,7 @@
 # frozen_string_literal: true
 
-# The one attribute map this adapter is classified against.
-#
-# Both corpus suites read it: the conformance harness, which plans against a real PDP and
-# compares rows, and the translator unit test, which replays conformance/wire-fixtures/ offline.
-# conformance/actions.json classifies each action against ONE mapping per adapter, so the two
-# suites disagreeing about the mapping would make the classification true of neither.
-#
-# This is sharing WITHIN one adapter, which is what ADR 0007 asks for. The thing that must not
-# be extracted is the corpus LOADER, and that stays duplicated per adapter on purpose.
+# The one attribute map this adapter is classified against in conformance/actions.json.
+# The conformance harness and the translator unit test both use it, so they cannot disagree.
 module CorpusAttributes
   def self.field(path, **kwargs) = Cerbos::ActiveRecord.field(path, **kwargs)
 
@@ -24,34 +17,22 @@ module CorpusAttributes
     "request.resource.attr.scope" => field("scope"),
     "request.resource.attr.createdAt" => field("created_at"),
     "request.resource.attr.updatedAt" => field("updated_at"),
-    # `owner` and `coOwner` alias the columns that `aOptionalString` and `scope` also map,
-    # under the OTHER null convention: the oracle sends a real null attribute for them and
-    # does not remove it. The declaration here is what makes the equality family definite for
-    # these two attributes and leaves every other mapping alone
-    # (cerbos/query-plan-adapters#308).
+    # `owner` and `coOwner` alias the `aOptionalString` and `scope` columns under the explicit
+    # null convention: the oracle sends a real null for them (#308).
     "request.resource.attr.owner" => field("a_optional_string", null_representation: :explicit),
-    # The explicit-null alias of the `scope` column, and the second half of `null-value-f2f`.
-    # `scope` itself is omitted when NULL, so the corpus holds the same column under both
-    # conventions and the field-to-field test has two explicit nulls to compare. It is NOT a
-    # second alias of `a_optional_string`: a column compared with itself is TRUE for every
-    # seed, and the degeneracy guard refuses a total oracle.
+    # The second half of `null-value-f2f`, which compares two explicit nulls. Not another
+    # alias of `a_optional_string`: a column compared with itself is always TRUE, and the
+    # degeneracy guard rejects a total oracle.
     "request.resource.attr.coOwner" => field("scope", null_representation: :explicit),
-    # obj.inner is not a true nested column. It uses the same column as aString. The
-    # spring-data, prisma and sqlalchemy harnesses use the same substitute for the p-struct
-    # test.
+    # Not a real nested column: it reuses aString's column, as other harnesses do.
     "request.resource.attr.obj.inner" => field("a_string"),
 
-    # The primary key as an attribute. `R.id` reaches the wire as its own variable and not as
-    # `R.attr.*`, so it needs a mapping of its own.
+    # `R.id` arrives as its own variable, not under `R.attr`, so it needs its own mapping.
     "request.resource.id" => field("id"),
 
-    # The one REAL to-one relation of the corpus (ADR 0005), and the counterpart of
-    # `obj.inner` above: this one IS a join. A path with dots through a to-one association
-    # becomes a correlated scalar subquery, and each hop is required to exist — an absent
-    # parent gives NULL, which matches the missing-path error that check() denies with.
-    #
-    # No declaration of a null convention here. A NULL column one hop out is a MISSING
-    # attribute for check(), and SQL UNKNOWN denies under both polarities in the same way.
+    # The corpus's one real to-one relation (ADR 0005). Unlike `obj.inner`, this is a join:
+    # each hop becomes a scalar subquery, and a missing parent gives NULL, which denies like
+    # check()'s missing-path error. No null convention needed: NULL denies either way.
     "request.resource.attr.parent.aBool" => field("parent.a_bool"),
     "request.resource.attr.parent.aString" => field("parent.a_string"),
     "request.resource.attr.parent.aNumber" => field("parent.a_number"),
@@ -65,21 +46,17 @@ module CorpusAttributes
     "request.resource.attr.tags" => relation(
       :tags, fields: {"id" => field("tag_id"), "name" => field("name")}
     ),
-    # The scalar values of tags[].name. A NULL name stays in the list as a null element.
+    # tags[].name as a list. A NULL name stays in the list as a null element.
     "request.resource.attr.tagNames" => relation(:tags, member_field: "name"),
 
-    # The number and boolean scalar lists, mapped the same way as `tagNames`. Every corpus
-    # action that reads them indexes them, and a relation mapping has no element order, so the
-    # translator refuses each one at `index`. They are mapped anyway: an unmapped attribute is
-    # refused one step earlier, with a message about the attribute map, and the classification
-    # would then rest on the harness and not on the mechanism its reason names.
+    # Every action on these lists indexes them, and a relation has no order, so the translator
+    # refuses them at `index`. Mapped anyway so the refusal names that reason and not a
+    # missing mapping.
     "request.resource.attr.aNumberList" => relation(:number_list_elements, member_field: "value"),
     "request.resource.attr.aBoolList" => relation(:bool_list_elements, member_field: "value"),
 
     "request.resource.attr.categories" => relation(:categories, fields: {
-      # The category itself carries a name, and a lambda body can read it
-      # (`rel-hop2-or-exists`). Only the sub-category name was mapped before that action
-      # existed.
+      # Read by a lambda body in `rel-hop2-or-exists`.
       "name" => field("name"),
       "subCategories" => relation(:sub_categories, fields: {
         "name" => field("name"),
@@ -87,24 +64,20 @@ module CorpusAttributes
       })
     }),
 
-    # The same two hops, but from the root and written as a chain: `mainCategory` is one
-    # relation, and `subCategories`/`subNames` are nested relations in its fields. Each seed
-    # holds at most one category, so the check side sees `mainCategory` as ONE object, and 16
-    # of the seeds have no category and thus no attribute at all.
+    # The same two hops as a chain from the root. Each seed has at most one category, so
+    # check() sees one object; a seed with none gets no attribute.
     #
-    # The nesting is deliberate. A flat `has_many :through` under the full name with dots gives
-    # the same joins, but it does not say which hop is the parent. Then an absent parent and a
-    # parent with no children look the same, and `all`, `!exists` and every count over the
-    # chain give back the 16 rows that the PDP denies (w1-*-chain, #309/#315/#316).
+    # Nested on purpose. A flat `has_many :through` cannot tell a missing parent from a parent
+    # with no children, so `all`, `!exists` and counts would return the category-less rows the
+    # PDP denies (w1-*-chain, #309).
     "request.resource.attr.mainCategory" => relation(:categories, fields: {
       "subCategories" => relation(:sub_categories, fields: {"name" => field("name")}),
       "subNames" => relation(:sub_categories, member_field: "name")
     })
   }.freeze
 
-  # The same map with every per-attribute declaration removed, so a test can make the
-  # convention of the call reach every attribute. It is DERIVED from the map above and is not
-  # written out a second time: a new attribute cannot arrive in one and not the other.
+  # The same map without per-attribute declarations, so a per-call convention reaches every
+  # attribute. Derived, so it cannot drift from ATTRIBUTES.
   UNDECLARED = ATTRIBUTES.transform_values { |mapping|
     mapping.is_a?(Cerbos::ActiveRecord::AttributeMapping::Field) ? field(mapping.path) : mapping
   }.freeze

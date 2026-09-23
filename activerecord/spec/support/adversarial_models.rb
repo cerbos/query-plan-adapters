@@ -2,9 +2,8 @@
 
 require "time"
 
-# These tables are only for this suite. Thus each difficult row from the corpus is possible:
-# NULL element columns, names that are the same or that are a mirror of each other, LIKE
-# metacharacters, empty strings and empty collections.
+# Tables for the adversarial suite, able to hold every hostile corpus row: NULL elements,
+# duplicate or mirrored names, LIKE metacharacters, empty strings and empty collections.
 module AdversarialModels
   module_function
 
@@ -33,15 +32,11 @@ module AdversarialModels
         t.datetime :updated_at
       end
 
-      # The one REAL to-one relation of the corpus (ADR 0005). `parent` and `parent.inner` are
-      # separate rows that a join reaches. `obj.inner` looks the same in a policy and is not a
-      # join at all: every harness maps it to the `a_string` column of the row itself. The two
-      # stay beside each other so a reader can see which of the two dotted attributes makes a
-      # join.
+      # The corpus's one real to-one relation (ADR 0005): `parent` and `parent.inner` are
+      # joined rows. (`obj.inner` looks similar but maps to the row's own `a_string`.)
       #
-      # The unique index on the foreign key is what makes each level to-ONE. Without it,
-      # ActiveRecord would still accept the mapping and the adapter would make a subquery that
-      # can give more than one row.
+      # The unique foreign-key index makes each level to-one. Without it the subquery could
+      # return more than one row.
       create_table :adversarial_parents, id: false, force: true do |t|
         t.string :id, null: false, primary_key: true
         t.boolean :a_bool, null: false
@@ -66,11 +61,9 @@ module AdversarialModels
         t.string :resource_id, null: false
       end
 
-      # `aNumberList` and `aBoolList`, the homogeneous scalar lists, as child rows the way a
-      # relational schema holds a list: one row per element, a nullable value (a null element
-      # is a value, as it is in `tagNames`), and the element's position. The position is the
-      # one thing `aNumberList[0]` needs and the one thing a relation mapping cannot carry,
-      # which is why every corpus action that reads these lists is refused at `index`.
+      # `aNumberList` and `aBoolList` as child rows: one per element, with a nullable value
+      # and a position. A relation mapping cannot use the position, so every action on these
+      # lists (e.g. `aNumberList[0]`) is refused at `index`.
       create_table :adversarial_number_list_elements, force: true do |t|
         t.integer :position, null: false
         t.float :value
@@ -103,9 +96,8 @@ module AdversarialModels
     end
   end
 
-  # Each row gets its own category graph, with one category for each sub-name. The prisma and
-  # sqlalchemy harnesses make the same shape. Thus no two resources use the same relation
-  # rows.
+  # Each row gets its own category graph (one category per sub-name), so no two resources
+  # share relation rows.
   def seed!
     ConformanceCorpus::SEEDS.each do |seed|
       id = seed.fetch("id")
@@ -123,9 +115,8 @@ module AdversarialModels
         updated_at: ConformanceCorpus.updated_at(seed)&.then { |iso| Time.iso8601(iso) }
       )
 
-      # The to-one chain, with one owned row for each level. A seed with no parent gets no row
-      # at all, and that is what makes the absent-parent hazard possible through a SCALAR and
-      # not only through the collection of mainCategory.
+      # One row per level. A seed with no parent gets no row, which tests the absent-parent
+      # case through a scalar, not only through mainCategory.
       parent_seed = ConformanceCorpus.parent_seed_of(seed)
       if parent_seed
         parent_id = "#{id}-parent"
@@ -216,10 +207,8 @@ end
 
 class AdvResource < ActiveRecord::Base
   self.table_name = "adversarial_resources"
-  # Here `created_at` is an attribute from the corpus. It is not the time of the creation of
-  # the row. Without this line, the automatic timestamps of ActiveRecord would write over the
-  # value from the corpus. That includes the NULL on a3, which the three-valued-logic tests
-  # need.
+  # `created_at` is corpus data. Automatic timestamps would overwrite it, including the NULL
+  # on a3 that the three-valued-logic tests need.
   self.record_timestamps = false
   has_many :tags, class_name: "AdvTag", foreign_key: :resource_id, primary_key: :id
   has_many :number_list_elements,
@@ -227,8 +216,6 @@ class AdvResource < ActiveRecord::Base
   has_many :bool_list_elements,
     class_name: "AdvBoolListElement", foreign_key: :resource_id, primary_key: :id
   has_many :categories, class_name: "AdvCategory", foreign_key: :resource_id, primary_key: :id
-  # A to-ONE association, so the adapter maps `parent.<column>` as a path with dots and makes a
-  # correlated scalar subquery. A `has_many` here would make the adapter refuse the mapping,
-  # which is the point of the unique index on the foreign key.
+  # To-one, so `parent.<column>` becomes a scalar subquery. The adapter refuses a `has_many`.
   has_one :parent, class_name: "AdvParent", foreign_key: :resource_id, primary_key: :id
 end
