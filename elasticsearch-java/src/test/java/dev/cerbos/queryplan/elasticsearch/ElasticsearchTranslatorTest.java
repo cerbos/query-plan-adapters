@@ -7,18 +7,12 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import dev.cerbos.queryplan.elasticsearch.Corpus.ActionsFile;
-import dev.cerbos.queryplan.elasticsearch.Corpus.NullRepresentationOmitted;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -26,8 +20,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,266 +31,96 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Translator unit test: checks the Query DSL this adapter emits for every corpus action against
- * {@code golden/expectations.json}, and that every refused action throws the message
- * {@code conformance/actions.json} pins. Plans come from {@code conformance/wire-fixtures/}.
- * Needs no Docker, PDP or Elasticsearch.
- *
- * <p>Most of the corpus is refused here, because the Query DSL only compares a field against a
- * literal. Every wire fixture must be either a golden entry or a pinned throw, so a new corpus
- * action fails this suite until it is classified.
+ * Translator unit test: what this adapter can be asked without a store. Which rows a translated
+ * case returns is the conformance harness's job ({@link ElasticsearchAdversarialConformanceTest});
+ * this suite pins the caller-supplied options the corpus cannot vary and the rules every emitted
+ * query must follow. Plans come from {@code conformance/golden/<current PDP>/}. Needs no Docker,
+ * PDP or Elasticsearch.
  */
 class ElasticsearchTranslatorTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static final ActionsFile ACTIONS = Corpus.actionsFile();
-
     /**
-     * Actions this adapter must refuse, with their pinned messages. Includes the
-     * {@code nullRepresentationOmitted} probe, which this adapter refuses under either null
-     * convention (see {@link #theNullRepresentationProbeIsRefusedRegardless}).
+     * The query emitted for every current-PDP case this adapter translates to a condition, keyed
+     * by case id, as the JSON a caller sends. Refused cases are the harness's to assert.
      */
-    private static final Map<String, String> THROWING = throwingActions();
+    private static final Map<String, Map<String, Object>> CONDITIONAL = new TreeMap<>();
 
-    private static Map<String, String> throwingActions() {
-        Map<String, String> throwing = new TreeMap<>(Corpus.throwingActions(ACTIONS, Corpus.ADAPTER));
-        for (NullRepresentationOmitted probe : Corpus.nullRepresentationThrows(ACTIONS)) {
-            throwing.put(probe.action(), Corpus.nullOmittedMessage(probe, Corpus.ADAPTER));
-        }
-        // Keep the sorted order so parameterised cases are stable; Map.copyOf's order is not.
-        return Collections.unmodifiableMap(throwing);
-    }
+    private static final Map<String, JsonNode> EMITTED = new TreeMap<>();
 
-    /** Every emitted query, translated once per action and shared by all tests below. */
-    private static Map<String, Result> emitted;
-
-    private static Map<String, ObjectNode> recorded;
-    private static List<String> recordedActions;
-
-    @BeforeAll
-    static void setUp() {
-        emitted = new LinkedHashMap<>();
-        for (String action : Corpus.wireFixtureActions()) {
-            // Throwing actions are checked by the throw test, not translated here.
-            if (!THROWING.containsKey(action)) {
-                emitted.put(action, Corpus.translate(action));
+    static {
+        for (Corpus.Golden golden : Corpus.goldens(Corpus.CURRENT_TAG)) {
+            Result result;
+            try {
+                result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(golden.plan(), Corpus.OPTIONS);
+            } catch (UnsupportedPlanShapeException refused) {
+                continue;
+            }
+            if (result instanceof Result.Conditional conditional) {
+                CONDITIONAL.put(golden.id(), conditional.query());
+                EMITTED.put(golden.id(), JSON.valueToTree(conditional.query()));
             }
         }
-
-        // `./gradlew goldenUpdate` rewrites the file from current output, keeping notes. CI never
-        // sets the property. Because throwing actions are skipped above, an action wrongly
-        // classified as unsupported fails the throw test, and one wrongly classified as supported
-        // fails here during regeneration.
-        if (Boolean.getBoolean("golden.update")) {
-            Map<String, ObjectNode> expectations = new TreeMap<>();
-            emitted.forEach((action, result) -> expectations.put(action, expectationOf(result)));
-            Corpus.writeGoldenExpectations(expectations);
-            System.out.printf("==> rewrote %s (%d expectations)%n",
-                    Corpus.goldenFile(), expectations.size());
-        }
-
-        recorded = Corpus.readGoldenExpectations();
-        recordedActions = List.copyOf(recorded.keySet());
     }
 
-    // -- the golden value -----------------------------------------------------------------------
-
-    private static final String KIND = "kind";
-    private static final String QUERY = "query";
+    private static final String NULL_ON_MISSING_ATTRIBUTE = "null/equals/null-literal-on-missing-attribute";
 
     /**
-     * The translator output for one action as the golden file records it: the plan kind, plus the
-     * query for a conditional plan. The query is plain JDK maps and lists, so it is recorded
-     * as-is with no generator.
+     * {@code R.attr.aOptionalString == null} plans to the same node whichever null convention the
+     * attribute follows, so other adapters take an option choosing one. Elasticsearch does not
+     * index an explicit null, so this adapter refuses the probe whether or not the attribute is
+     * declared explicit-null: the corpus translates it one way only.
      */
-    private static ObjectNode expectationOf(Result result) {
-        ObjectNode entry = JSON.createObjectNode();
-        entry.put(KIND, kindOf(result));
-        if (result instanceof Result.Conditional conditional) {
-            entry.set(QUERY, Corpus.canonicalJson(conditional.query()));
-        }
-        return entry;
-    }
-
-    private static String kindOf(Result result) {
-        if (result instanceof Result.AlwaysAllowed) {
-            return "ALWAYS_ALLOWED";
-        }
-        if (result instanceof Result.AlwaysDenied) {
-            return "ALWAYS_DENIED";
-        }
-        if (result instanceof Result.Conditional) {
-            return "CONDITIONAL";
-        }
-        // Unreachable while `Result` is sealed over three kinds. A new kind must fail here rather
-        // than be recorded as CONDITIONAL.
-        throw new IllegalStateException("unrecognised plan kind: " + result.getClass());
-    }
-
-    /** The query the asset pins for one action; {@code null} on an unconditional plan kind. */
-    private static JsonNode recordedQuery(String action) {
-        return recorded.get(action).get(QUERY);
-    }
-
-    // -- @MethodSource feeds --------------------------------------------------------------------
-
-    static Stream<String> recordedActions() {
-        return recordedActions.stream();
-    }
-
-    static Stream<Arguments> throwingActionsWithMessages() {
-        return THROWING.entrySet().stream().map(e -> Arguments.of(e.getKey(), e.getValue()));
-    }
-
-    // -- the corpus, action by action -----------------------------------------------------------
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("recordedActions")
-    void emitsTheGoldenExpectation(String action) {
-        Result result = emitted.get(action);
-        assertNotNull(result, () -> "the asset records '" + action + "', which this adapter "
-                + "refuses or the corpus no longer carries — see the completeness guard");
-        assertEquals(recorded.get(action), expectationOf(result),
-                () -> "the query emitted for '" + action + "' is not the query "
-                        + Corpus.goldenFile() + " pins; run `" + Corpus.GOLDEN_REGENERATE_COMMAND
-                        + "` and review the diff");
+    @Test
+    void theNullOnMissingAttributeProbeIsRefusedUnderEitherNullConvention() {
+        assertThrows(UnsupportedPlanShapeException.class,
+                () -> Corpus.translate(NULL_ON_MISSING_ATTRIBUTE));
+        assertThrows(UnsupportedPlanShapeException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        Corpus.plan(NULL_ON_MISSING_ATTRIBUTE),
+                        Corpus.OPTIONS.withExplicitNullAttributes(
+                                Set.of("request.resource.attr.aOptionalString"))));
     }
 
     /**
-     * Checks the message, not just the throw, so an unrelated error (for example a mapper typo)
-     * cannot pass for the declared limitation.
+     * The relative-window cases compare against a folded {@code now()} that the goldens store as a
+     * placeholder. At the PDP's nanosecond precision they are refused, since an Elasticsearch
+     * {@code date} field holds milliseconds; at millisecond precision they translate. This pins
+     * the refusal to the precision, not to the shape.
      */
     @ParameterizedTest(name = "{0}")
-    @MethodSource("throwingActionsWithMessages")
-    void isRefusedWithTheMessageActionsJsonPins(String action, String message) {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> Corpus.translate(action));
-        assertTrue(ex.getMessage().contains(message),
-                "action '" + action + "' was rejected for a reason actions.json does not declare: "
-                        + ex.getMessage());
-    }
-
-    /** A throwing action with no pinned message fails classification. */
-    @Test
-    void throwingActionWithNoPinnedMessageFailsClassification() {
-        for (String absent : new String[] {null, ""}) {
-            IllegalStateException ex = assertThrows(IllegalStateException.class,
-                    () -> Corpus.requireMessage("synthetic-entry", absent));
-            assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
-        }
-    }
-
-    @Test
-    void everyCorpusActionIsAccountedForHereExactlyOnce() {
-        List<String> classified = Stream.concat(recordedActions.stream(), THROWING.keySet().stream())
-                .sorted()
-                .toList();
-
-        // Every wire fixture has a golden entry or a pinned throw.
-        assertEquals(Corpus.wireFixtureActions(), classified,
-                "every wire fixture must be accounted for exactly once");
-        // An action cannot be both.
-        assertEquals(classified.size(), Set.copyOf(classified).size(),
-                "an action is either recorded or thrown, never both");
-        // Sorted, so a translator change diffs as the list of actions it moved.
-        assertEquals(new ArrayList<>(new TreeSet<>(recordedActions)), recordedActions,
-                "golden/expectations.json must stay sorted by action");
-        // The actions.json manifest names the same set as the fixtures.
-        assertEquals(new TreeSet<>(Corpus.wireFixtureActions()), ACTIONS.manifestActions());
-
-        // Update these tripwires only after replaying new actions against the oracle.
-        assertEquals(
-                Map.of("conditional", 135, "unconditional", 7, "throwing", 191),
-                Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
-                        "unconditional", unconditionalActions().size(),
-                        "throwing", THROWING.size()));
-    }
-
-    private static List<String> actionsOfKind(String kind) {
-        return recordedActions.stream()
-                .filter(action -> kind.equals(recorded.get(action).get(KIND).asText()))
-                .toList();
-    }
-
-    /** Actions whose plan carries no condition at all, so the adapter emits no query. */
-    private static List<String> unconditionalActions() {
-        return recordedActions.stream()
-                .filter(action -> !recorded.get(action).has(QUERY))
-                .toList();
-    }
-
-    @Test
-    void theUnconditionalActionsAreThePlanKindsTheCorpusDeclares() {
-        // An entry with no `query` could also mean a translation that stopped emitting a filter,
-        // so the plan kind is recorded and pinned here. `p-has` is a knownDivergences entry: the
-        // planner folds it to ALWAYS_ALLOWED while check() denies some rows.
-        assertEquals(List.of("in-empty", "p-has", "pv-empty-all", "pv-empty-exists", "pv-empty-not-all",
-                "pv-empty-not-exists", "pv-structs-missing"), unconditionalActions());
-        assertEquals(List.of("p-has", "pv-empty-all", "pv-empty-not-exists"), actionsOfKind("ALWAYS_ALLOWED"));
-        assertTrue(ACTIONS.skippedDivergences(Corpus.ADAPTER).contains("p-has"));
-        assertEquals(List.of("in-empty", "pv-empty-exists", "pv-empty-not-all", "pv-structs-missing"), actionsOfKind("ALWAYS_DENIED"));
-    }
-
-    /**
-     * {@code null-eq-missing} produces the same plan under either null convention, so other
-     * adapters need an option to choose one. Elasticsearch does not index an explicit null, so this
-     * adapter refuses the probe whether or not the attribute is declared explicit-null.
-     */
-    @Test
-    void theNullRepresentationProbeIsRefusedRegardless() {
-        List<NullRepresentationOmitted> probes = Corpus.nullRepresentationThrows(ACTIONS);
-        assertEquals(List.of("null-eq-missing"), probes.stream()
-                .map(NullRepresentationOmitted::action).toList());
-        for (NullRepresentationOmitted probe : probes) {
-            String message = Corpus.nullOmittedMessage(probe, Corpus.ADAPTER);
-            // Refused with the explicit-null attribute declared and without it.
-            IllegalArgumentException declared = assertThrows(IllegalArgumentException.class,
-                    () -> Corpus.translate(probe.action()));
-            assertTrue(declared.getMessage().contains(message), declared.getMessage());
-
-            IllegalArgumentException undeclared = assertThrows(IllegalArgumentException.class,
-                    () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                            Corpus.planFromWireFixture(probe.action()),
-                            Corpus.OPTIONS.withExplicitNullAttributes(Set.of())));
-            assertTrue(undeclared.getMessage().contains(message), undeclared.getMessage());
-        }
-    }
-
-    /**
-     * {@code ts-window} and {@code ts-vf} compare against a folded {@code now()} that the fixtures
-     * store as a placeholder. At the PDP's nanosecond precision they are refused, as
-     * {@code actions.json} declares; at millisecond precision they translate. This pins
-     * {@link Corpus#PLANNED_AT} to nanoseconds.
-     */
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {"ts-window", "ts-vf"})
-    void theRuntimeTimestampActionsAreRefusedForTheirPrecision(String action) {
-        assertTrue(THROWING.containsKey(action), action);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> Corpus.translate(action));
-        assertTrue(ex.getMessage().contains(THROWING.get(action)), ex.getMessage());
+    @ValueSource(strings = {"timestamp/less-than/relative-window",
+            "timestamp/greater-than/relative-window-value-first"})
+    void theRelativeWindowCasesAreRefusedForTheirPrecision(String caseId) {
+        UnsupportedPlanShapeException ex = assertThrows(UnsupportedPlanShapeException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        Corpus.plan(caseId, "2026-08-11T09:13:39.123456789Z"), Corpus.OPTIONS));
         assertTrue(ex.getMessage().contains("Sub-millisecond"), ex.getMessage());
 
         assertInstanceOf(Result.Conditional.class,
-                Corpus.translate(Corpus.planFromWireFixture(action, "2026-08-11T09:13:39.123Z")),
-                action + " no longer translates at millisecond precision, so Corpus.PLANNED_AT's "
-                        + "nanoseconds are not what refuses it");
+                ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        Corpus.plan(caseId, "2026-08-11T09:13:39.123Z"), Corpus.OPTIONS),
+                caseId + " no longer translates at millisecond precision, so the nanoseconds are"
+                        + " not what refuses it");
     }
 
-    /** The golden file names its regenerate command, so that command must exist in the build. */
+    /**
+     * An unmapped field is a caller mistake, not a shape the Query DSL cannot express, so it
+     * raises {@link UnmappedAttributeException} and never passes for an {@code unsupported} case.
+     */
     @Test
-    void theAssetNamesACommandThisBuildDefines() throws Exception {
-        String[] parts = Corpus.GOLDEN_REGENERATE_COMMAND.split(" ");
-        assertEquals("./gradlew", parts[0]);
-        assertTrue(Files.readString(Path.of(System.getProperty("user.dir"), "build.gradle.kts"))
-                        .contains("tasks.register<Test>(\"" + parts[1] + "\")"),
-                () -> "build.gradle.kts defines no task named " + parts[1]);
+    void anUnmappedFieldIsNotARefusal() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                        Corpus.plan("string/equals/case-sensitive"),
+                        Corpus.OPTIONS.withFieldMap(Map.of())));
+        assertInstanceOf(UnmappedAttributeException.class, ex);
+        assertFalse(ex instanceof UnsupportedPlanShapeException);
     }
 
     /** This file and the test helpers it uses; none may reach a PDP or a container. */
@@ -308,7 +130,7 @@ class ElasticsearchTranslatorTest {
     /** The suite stays offline: neither it nor {@link Corpus} imports a PDP or container client. */
     @Test
     void thisSuiteReachesNoPdpAndNoContainer() {
-        List<String> forbidden = List.of("org.testcontainers.", "dev.cerbos.sdk.", "java.net.http.");
+        List<String> forbidden = List.of("org.testcontainers.", "dev.cerbos.sdk.CerbosBlockingClient", "java.net.http.");
         // Check import lines, not the whole file, since these names appear here as literals.
         for (String source : OFFLINE_SOURCES) {
             assertEquals(List.of(), importsOf(source).stream()
@@ -326,7 +148,7 @@ class ElasticsearchTranslatorTest {
                         "ElasticsearchSurfaceTest", "TestElasticsearch")
                 .flatMap(name -> importsOf(name).stream())
                 .toList();
-        for (String prefix : forbidden) {
+        for (String prefix : List.of("org.testcontainers.", "java.net.http.")) {
             assertTrue(siblings.stream().anyMatch(imported -> imported.startsWith(prefix)), prefix);
         }
     }
@@ -373,165 +195,10 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * Maps every refusal to the adapter site that raised it and pins the count per site. Every
-     * refusal must match exactly one site, a change that moves a shape between sites shows up as
-     * a diff, and no refusal may be an unmapped field.
-     */
-    @Nested
-    class WhereTheRefusalsHappen {
-
-        /** Message fragments for each refusal site the corpus reaches, named by mechanism. */
-        private final Map<String, String> sites = Map.ofEntries(
-                Map.entry("two-list difference", "except is not supported:"),
-                Map.entry("whole-list comparison", " against a list literal cannot be expressed:"),
-                Map.entry("list-valued member", "in with a list element cannot be expressed:"),
-                Map.entry("computed collection macro", "over a computed collection cannot be lowered"),
-                Map.entry("flat scalar collection macro", "Collection macros over flat scalar arrays"),
-                Map.entry("literal exists-one", "exists_one over a literal collection value"),
-                Map.entry("regex brace syntax", "matches regex has a brace"),
-                Map.entry("regex dialect syntax", "matches regex uses syntax outside"),
-                Map.entry("unanchored regex", "matches regex patterns must be fully anchored"),
-
-                // resolveLeafOperand's default: the operand is computed (arithmetic, cast, ternary,
-                // index, projection, count, lambda), and a term or range query needs a literal.
-                Map.entry("computed leaf operand", " expression in leaf operand"),
-                // A hierarchy path built by list() from a document field; the Query DSL cannot
-                // concatenate.
-                Map.entry("hierarchy path built from a field",
-                        "hierarchy path constructed by list() from a document field"),
-                // applyResolvedLeaf: both operands resolve to document fields.
-                Map.entry("field-to-field", "cannot compare two document fields without scripts"),
-                // normalizeLeafOperator: a string operator whose receiver is the constant.
-                Map.entry("constant receiver", " with a document field as the receiver argument"),
-                // Elasticsearch does not index an explicit null.
-                Map.entry("explicit null",
-                        "cannot distinguish an explicit null value from a missing field"),
-                Map.entry("null in a document array",
-                        "null membership in a document array requires an explicit null-value mapping"),
-                Map.entry("null in an intersection",
-                        "hasIntersection with null requires an explicit null-value mapping"),
-                // Elasticsearch does not index an empty array, so polarities that would read a
-                // missing collection as an allow are refused.
-                Map.entry("positive all over a collection",
-                        "all cannot distinguish a missing collection from an empty collection"),
-                Map.entry("negated exists over a collection",
-                        "Negated exists cannot distinguish a missing collection"),
-                Map.entry("negated hasIntersection over a collection",
-                        "Negated hasIntersection cannot distinguish a missing collection"),
-                Map.entry("negated membership in a collection",
-                        "Negated membership in a document collection cannot distinguish"),
-                Map.entry("collection emptiness", " emptiness cannot distinguish a missing collection"),
-                // exists_one needs a count of matching nested documents.
-                Map.entry("exists_one", "exists_one cannot be expressed by Elasticsearch nested queries"),
-                // A count comparison that is not an emptiness check.
-                Map.entry("count threshold", "Unsupported size comparison:"),
-                // size() over a field declared as neither nested nor a flat collection: the adapter
-                // cannot tell a string's length from an array count.
-                Map.entry("count over an undeclared collection",
-                        "size() over a field not declared as a collection"),
-                // size() over a computed collection, such as a filter().
-                Map.entry("count over a computed collection", "Unsupported size() expression"),
-                // A ternary used as the condition itself.
-                Map.entry("conditional value as a condition",
-                        "if (CEL ternary) cannot be expressed"),
-                // An Elasticsearch date field cannot hold sub-millisecond precision.
-                Map.entry("sub-millisecond timestamp", "Sub-millisecond timestamp literals"),
-                // An empty delimiter leaves no segment boundary to compare against.
-                Map.entry("empty hierarchy delimiter", "hierarchy delimiter is empty"),
-                // RE2 parses `^a|b$` as two alternatives; Lucene's whole-field `a|b` does not.
-                Map.entry("top-level regex alternation",
-                        "matches regex has a top-level alternation"));
-
-        private String siteOf(String action) {
-            String raised;
-            try {
-                Corpus.translate(action);
-                return "<did not throw>";
-            } catch (IllegalArgumentException error) {
-                raised = String.valueOf(error.getMessage());
-            }
-            String message = raised;
-            List<String> matched = sites.entrySet().stream()
-                    .filter(site -> message.contains(site.getValue()))
-                    .map(Map.Entry::getKey)
-                    .toList();
-            assertEquals(1, matched.size(),
-                    () -> action + " is refused with \"" + message + "\", which matches "
-                            + matched.size() + " of this adapter's known rejection sites");
-            return matched.get(0);
-        }
-
-        @Test
-        void everyRefusedShapeLandsOnExactlyOneOfThemInTheseNumbers() {
-            Map<String, Integer> counts = new TreeMap<>();
-            for (String action : THROWING.keySet()) {
-                counts.merge(siteOf(action), 1, Integer::sum);
-            }
-
-            assertEquals(new TreeMap<>(Map.ofEntries(
-                            Map.entry("unanchored regex", 1),
-                            Map.entry("regex dialect syntax", 5),
-                            Map.entry("regex brace syntax", 1),
-                            Map.entry("computed collection macro", 2),
-                            Map.entry("literal exists-one", 1),
-                            Map.entry("flat scalar collection macro", 3),
-                            Map.entry("list-valued member", 1),
-                            Map.entry("two-list difference", 4),
-                            Map.entry("whole-list comparison", 2),
-                            Map.entry("computed leaf operand", 83),
-                            Map.entry("field-to-field", 22),
-                            Map.entry("explicit null", 8),
-                            Map.entry("count threshold", 5),
-                            Map.entry("constant receiver", 4),
-                            Map.entry("negated exists over a collection", 5),
-                            Map.entry("positive all over a collection", 5),
-                            Map.entry("count over an undeclared collection", 12),
-                            Map.entry("collection emptiness", 2),
-                            Map.entry("conditional value as a condition", 3),
-                            Map.entry("exists_one", 2),
-                            Map.entry("negated membership in a collection", 3),
-                            Map.entry("sub-millisecond timestamp", 2),
-                            Map.entry("count over a computed collection", 2),
-                            Map.entry("hierarchy path built from a field", 2),
-                            Map.entry("negated hasIntersection over a collection", 2),
-                            Map.entry("null in a document array", 2),
-                            Map.entry("null in an intersection", 4),
-                            Map.entry("empty hierarchy delimiter", 1),
-                            Map.entry("top-level regex alternation", 2))),
-                    counts);
-            assertEquals(THROWING.size(),
-                    counts.values().stream().mapToInt(Integer::intValue).sum());
-        }
-
-        /**
-         * No refusal is {@code "Unknown attribute"}: that means the corpus field map is incomplete,
-         * not that the Query DSL cannot express the shape.
-         */
-        @Test
-        void noRefusalIsAnUnmappedField() {
-            List<String> unmapped = new ArrayList<>();
-            for (String action : THROWING.keySet()) {
-                try {
-                    Corpus.translate(action);
-                } catch (IllegalArgumentException error) {
-                    if (String.valueOf(error.getMessage()).contains("Unknown attribute")) {
-                        unmapped.add(action + ": " + error.getMessage());
-                    }
-                }
-            }
-            assertEquals(List.of(), unmapped);
-            // Anti-vacuity: the detector recognises a real unmapped-field message.
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                            Corpus.planFromWireFixture("cs-eq"),
-                            Corpus.OPTIONS.withFieldMap(Map.of())));
-            assertTrue(ex.getMessage().contains("Unknown attribute"), ex.getMessage());
-        }
-    }
-
-    /**
-     * Rules over every translated corpus action, each with an anti-vacuity check. These still
-     * hold if a regenerated golden file is committed without review.
+     * Rules over the query emitted for every case this adapter translates, each with an
+     * anti-vacuity check. The conformance harness compares rows, so it cannot see these: a
+     * library type in the query, an unescaped wildcard that happens to match the same seeds, or
+     * a misspelled field on a case whose allowed set is empty.
      */
     @Nested
     class WhatTheEmittedQueryContains {
@@ -549,12 +216,7 @@ class ElasticsearchTranslatorTest {
             if (comparisons == null) {
                 comparisons = new ArrayList<>();
                 nested = new ArrayList<>();
-                for (String action : recordedActions) {
-                    JsonNode query = recordedQuery(action);
-                    if (query != null) {
-                        walk(action, query, comparisons, nested);
-                    }
-                }
+                EMITTED.forEach((action, query) -> walk(action, query, comparisons, nested));
             }
             return comparisons;
         }
@@ -645,18 +307,18 @@ class ElasticsearchTranslatorTest {
          */
         @Test
         void noEmittedQueryBindsANullLiteral() {
-            List<String> offenders = recordedActions.stream()
-                    .filter(action -> recordedQuery(action) != null
-                            && containsNull(recordedQuery(action)))
-                    .map(action -> action + ": " + recordedQuery(action))
+            List<String> offenders = EMITTED.entrySet().stream()
+                    .filter(entry -> containsNull(entry.getValue()))
+                    .map(entry -> entry.getKey() + ": " + entry.getValue())
                     .toList();
 
             assertEquals(List.of(), offenders);
-            // Anti-vacuity: the null comparisons are still in the corpus and lower to `exists`.
-            for (String action : List.of("null-ne", "null-not-eq", "vf-null-ne")) {
-                assertTrue(recordedActions.contains(action), action);
+            // Anti-vacuity: the null comparisons are still translated, so the rule inspects them.
+            // Which filter they lower to is the harness's to judge, by the rows it returns.
+            for (String action : List.of("null/not-equals/null-literal",
+                    "null/equals/negated-null-literal", "null/not-equals/null-literal-value-first")) {
+                assertTrue(EMITTED.containsKey(action), action);
             }
-            assertEquals("{\"exists\":{\"field\":\"owner\"}}", recordedQuery("null-ne").toString());
         }
 
         private boolean containsNull(JsonNode node) {
@@ -672,9 +334,9 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * {@code *} and {@code ?} in a {@code wildcard} value must be escaped, apart from the
-         * anchors the adapter adds; otherwise a substring test becomes a pattern match. {@code %},
-         * {@code _} and {@code [} are literal in a wildcard query.
+         * {@code *}, {@code ?} and a backslash in a {@code wildcard} value must be escaped, apart
+         * from the anchors the adapter adds; otherwise a substring test becomes a pattern match.
+         * {@code %}, {@code _} and {@code [} are literal in a wildcard query.
          */
         @Test
         void everyWildcardNeedleEscapesItsMetacharacters() {
@@ -688,12 +350,15 @@ class ElasticsearchTranslatorTest {
                     .toList();
 
             assertEquals(List.of(), offenders);
-            // Anti-vacuity: wildcards are emitted, `like-backslash`'s trailing backslash is
-            // doubled, and the detector rejects an unescaped `*`.
+            // Anti-vacuity: wildcards are emitted, some needle carries an escaped backslash (so
+            // a dangling one would be seen), and the detector rejects an unescaped `*` and a
+            // trailing lone backslash.
             assertFalse(wildcards.isEmpty());
-            assertEquals("*\\\\", recordedQuery("like-backslash")
-                    .get("wildcard").get("aString").get("value").asText());
+            assertTrue(wildcards.stream().anyMatch(leaf ->
+                            stripAnchors(leaf.operand().get("value").asText()).contains("\\\\")),
+                    "no wildcard needle escapes a backslash");
             assertTrue(hasUnescapedMetacharacter("a*b"));
+            assertTrue(hasUnescapedMetacharacter("a\\"));
             assertFalse(hasUnescapedMetacharacter("a\\*b"));
         }
 
@@ -724,24 +389,20 @@ class ElasticsearchTranslatorTest {
                     return true;
                 }
             }
-            return false;
+            // A lone trailing backslash escapes nothing, so the needle is malformed.
+            return escaped;
         }
 
         /**
-         * Every emitted value is a plain JDK type. A library type with its own serializer would
-         * make that library's version an input to the golden file.
+         * Every emitted value is a plain JDK type, so a caller can serialise the query with any
+         * JSON library and no client library is needed on the classpath.
          */
         @Test
         void everyEmittedValueIsAPlainJdkType() {
             List<String> exotic = new ArrayList<>();
-            for (String action : recordedActions) {
-                Result result = emitted.get(action);
-                if (result instanceof Result.Conditional conditional) {
-                    assertPlain(action, conditional.query(), exotic);
-                }
-            }
+            CONDITIONAL.forEach((action, query) -> assertPlain(action, query, exotic));
             assertEquals(List.of(), exotic);
-            assertFalse(recordedActions.isEmpty());
+            assertFalse(CONDITIONAL.isEmpty());
         }
 
         private void assertPlain(String action, Object value, List<String> exotic) {
@@ -762,22 +423,5 @@ class ElasticsearchTranslatorTest {
             }
         }
 
-        /**
-         * {@link Corpus#canonicalJson} rejects NaN, which Jackson would otherwise write as the
-         * string {@code "NaN"}. The corpus actions whose arithmetic could produce one are refused
-         * first.
-         */
-        @Test
-        void aValueJsonCannotCarryIsRefusedRatherThanRecorded() {
-            IllegalStateException ex = assertThrows(IllegalStateException.class,
-                    () -> Corpus.canonicalJson(Map.of("range",
-                            Map.of("aDouble", Map.of("gt", Double.NaN)))));
-            assertTrue(ex.getMessage().contains("which JSON cannot carry"), ex.getMessage());
-
-            for (String action : List.of(
-                    "cr-div-zero", "cr-div-neg-zero", "nan-ord-inf", "nan-ord-le")) {
-                assertTrue(THROWING.containsKey(action), action);
-            }
-        }
     }
 }

@@ -7,7 +7,7 @@ package dev.cerbos.queryplan.elasticsearch;
 
 /**
  * Exception factories, and the refusals raised from more than one place so each message is
- * written once. The messages are pinned in {@code conformance/actions.json}.
+ * written once.
  */
 final class Refusals {
 
