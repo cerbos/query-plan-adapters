@@ -3,24 +3,21 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # +add+, +sub+, +mult+, +mod+ and +div+.
+      # `add`, `sub`, `mult`, `mod` and `div`.
       #
-      # CEL arithmetic on attributes uses doubles, so a division by zero is not an error: it
-      # gives NaN or an Infinity. SQL cannot hold those values. The translator keeps them as
-      # {Values::IEEEConstant} and {Values::ConditionalValue} until the comparison around them
-      # calculates each branch.
+      # CEL divides doubles, so x / 0 gives NaN or Infinity, which SQL cannot hold. These stay
+      # as {Values::IEEEConstant} and {Values::ConditionalValue} until a comparison resolves them.
+      #
+      # @private
       module Arithmetic
         private
 
         def arithmetic(operator, left, right)
-          # A division that can give a value which is not finite stays as branches until a
-          # comparison calculates it. More arithmetic on those branches has no SQL equivalent,
-          # so the adapter raises instead of making an incorrect filter.
+          # Arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
 
-          # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
-          # `'a' + 'b'` is an addition of numbers, and it changes both sides into 0. Thus string
-          # operands need the concatenation operation of the dialect.
+          # SQLite and MySQL treat `'a' + 'b'` as numeric (0), so strings need the dialect's
+          # concatenation.
           if operator == "add" && (string_valued?(left) || string_valued?(right))
             return left + right if left.is_a?(::String) && right.is_a?(::String)
 
@@ -34,9 +31,7 @@ module Cerbos
           ArelSupport.infix(ARITHMETIC.fetch(operator), left, right)
         end
 
-        # Cerbos sends each number as a double, and CEL arithmetic on attributes uses doubles.
-        # Thus the division must also use doubles. If it did not, SQLite and PostgreSQL would do
-        # an integer division and change +5 / 2+ into +2+.
+        # Divides as doubles, like CEL. Otherwise SQLite and PostgreSQL make `5 / 2` into `2`.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
 
@@ -44,8 +39,7 @@ module Cerbos
             return divide_constants(numerator.to_f, denominator.to_f)
           end
 
-          # A constant denominator that is not zero can never divide by zero. Thus a plain
-          # division is exact, and it keeps the SQL small.
+          # A non-zero constant denominator is safe as a plain division.
           if denominator.is_a?(Numeric) && !denominator.to_f.zero?
             return ArelSupport.infix("/", as_double(numerator), denominator.to_f)
           end
@@ -59,23 +53,15 @@ module Cerbos
           numerator / denominator
         end
 
-        # A division by zero is not an error in CEL, because CEL arithmetic on attributes uses
-        # doubles. IEEE-754 gives NaN for 0/0, +Infinity for a positive numerator, and -Infinity
-        # for a negative one. SQL cannot hold those three values, and NULL is not equal to any of
-        # them: `NaN != 1.0` is TRUE in CEL, but `NULL != 1.0` is UNKNOWN in SQL, and thus a
-        # NULL would remove a row that the PDP permits.
-        #
-        # The translator keeps the three cases as branches. The comparison around the division
-        # then calculates each branch, in the same way as any other constant that is not finite.
+        # Division by zero in CEL gives NaN (0/0) or +/-Infinity. SQL NULL is no substitute:
+        # `NaN != 1.0` is TRUE in CEL but `NULL != 1.0` is UNKNOWN, which drops a permitted row.
+        # So keep the cases as branches for the enclosing comparison to resolve.
         def divide_with_zero_denominator(numerator, denominator)
-          # The denominator is a constant zero, so the sign of that zero is known.
+          # Constant zero: its sign is known.
           return zero_denominator_value(numerator, zero_sign(denominator)) if denominator.is_a?(Numeric)
 
-          # The denominator is row-dependent. SQL cannot tell -0.0 from 0.0 — both satisfy
-          # `= 0` and no portable function reads the sign bit — so the sign of an Infinity is
-          # unknowable here. The one shape that stays safe is a division of a value by itself:
-          # the denominator can only be zero when the numerator is zero too, which gives NaN,
-          # and NaN has no sign question.
+          # Column denominator: SQL cannot tell -0.0 from 0.0, so the Infinity's sign is
+          # unknown. Only x / x is safe: a zero there always gives NaN, which has no sign.
           unless numerator == denominator
             raise UnsupportedOperatorError,
               "Cannot divide by a column that may be zero: IEEE-754 keeps the sign of a zero, " \
@@ -90,8 +76,7 @@ module Cerbos
           )
         end
 
-        # IEEE-754 keeps the sign of a zero. `2.0 / -0.0` is -Infinity, not +Infinity, because the
-        # sign of the result is the sign of the numerator against the sign of the denominator.
+        # IEEE-754 zeros are signed: `2.0 / -0.0` is -Infinity.
         def zero_sign(denominator)
           (1.0 / denominator.to_f).negative? ? -1.0 : 1.0
         end

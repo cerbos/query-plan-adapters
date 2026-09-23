@@ -6,19 +6,22 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Changes an association mapping into a correlated subquery scope. The scope holds the
-    # tables with their aliases, the joins between those tables, and the predicates that
-    # connect the subquery to the row in the query around it.
+    # Turns an association mapping into a correlated subquery scope: aliased tables, their
+    # joins, and the predicates tying the subquery to the outer row.
     #
-    # Each scope gets new table aliases. This is necessary and not only a preference. A policy
-    # can put a macro on an association inside another macro on the same association. If the
-    # inner subquery had no alias, it would connect to its own row and not to the outer row.
+    # Every scope gets fresh aliases. A macro nested inside another on the same association
+    # would otherwise correlate to its own row instead of the outer one.
+    #
+    # @private
     module Relations
-      # One association hop. It has the table with its alias, and the predicates that connect
-      # that table to the tables before it.
+      # One association hop: the aliased table and the predicates joining it to the previous one.
+      #
+      # @private
       Hop = Struct.new(:table, :predicates, :model)
 
-      # Makes table aliases that are all different, for one translation.
+      # Makes unique table aliases within one translation.
+      #
+      # @private
       class Aliaser
         def initialize
           @counter = 0
@@ -30,8 +33,9 @@ module Cerbos
         end
       end
 
-      # A collection after the adapter resolves it. The adapter can change it into an EXISTS
-      # subquery or a COUNT subquery.
+      # A resolved collection, renderable as an EXISTS or COUNT subquery.
+      #
+      # @private
       class Scope
         def initialize(hops:, model:, mapping: nil, guard_hops: [])
           @hops = hops
@@ -42,14 +46,13 @@ module Cerbos
 
         attr_reader :hops, :mapping, :model, :guard_hops
 
-        # The table with its alias for the last hop. The member columns are on this table.
+        # The aliased table of the last hop, which holds the member columns.
         def table
           hops.last.table
         end
 
-        # The predicates that connect this scope to the query around it. They belong in the
-        # WHERE clause of the subquery and not in a join. Thus the subquery correlates and it
-        # does not make a cross join.
+        # Predicates tying this scope to the outer query. They go in the subquery's WHERE, not a
+        # join, so it correlates instead of cross-joining.
         def correlation
           hops.first.predicates
         end
@@ -64,47 +67,37 @@ module Cerbos
           table[field]
         end
 
-        # Makes +SELECT 1 FROM ... WHERE <correlation> [AND <conditions>]+ in an EXISTS node.
+        # Makes `SELECT 1 FROM ... WHERE <correlation> [AND <conditions>]` in an EXISTS node.
         def exists(*conditions)
-          # The adapter gives the AST to the EXISTS node and not the manager. A SelectManager
-          # makes its own parentheses, and +EXISTS ((SELECT ...))+ is an expression in
-          # parentheses and not a subquery.
+          # Pass the AST, not the manager: a SelectManager adds its own parentheses, and
+          # `EXISTS ((SELECT ...))` is not a subquery.
           Arel::Nodes::Exists.new(select_manager(hops, Arel.sql("1"), conditions).ast)
         end
 
-        # Makes +(SELECT COUNT(*) FROM ... WHERE <correlation> [AND <conditions>])+ as a
+        # Makes `(SELECT COUNT(*) FROM ... WHERE <correlation> [AND <conditions>])` as a
         # scalar value.
         def count(*conditions)
           Arel::Nodes::Grouping.new(select_manager(hops, Arel.star.count, conditions).ast)
         end
 
-        # Makes +(SELECT <column> FROM ... WHERE <correlation>)+ as a scalar value. A field
-        # path with dots through to-one associations uses this. A scalar subquery cannot
-        # increase the number of rows in the result. A JOIN can do that.
+        # Makes `(SELECT <column> FROM ... WHERE <correlation>)` as a scalar value, for dotted
+        # to-one field paths. Unlike a JOIN, it cannot add rows.
         def scalar(column_name)
           Arel::Nodes::Grouping.new(select_manager(hops, table[column_name], []).ast)
         end
 
-        # Makes +CASE WHEN EXISTS (<the hops before the collection>) THEN <expression> END+.
+        # Makes `CASE WHEN EXISTS (<the hops before the collection>) THEN <expression> END`.
         #
-        # CEL cannot read a field from a list, so each part before the last part of a path is
-        # a to-ONE parent. When that parent is absent, the application sends no attribute, CEL
-        # makes a missing-path error, and the decision is a deny. A subquery from the resource
-        # row cannot see the difference: an absent parent and a parent with no children both
-        # give no rows. Then +all+ reads TRUE, +!exists+ reads TRUE and the count reads 0, and
-        # each one of those gives back rows that the PDP denies
-        # (cerbos/query-plan-adapters#309).
+        # Every hop before the collection is a to-one parent. If the parent is missing, CEL
+        # errors and denies, but a plain subquery sees "no children": `all` is TRUE, `!exists`
+        # is TRUE and the count is 0, all returning denied rows (cerbos/query-plan-adapters#309).
         #
-        # The CASE has no ELSE clause. Thus an absent parent gives NULL, and +NOT NULL+ is also
-        # NULL, so the row stays out of the result under both polarities. Every operator that
-        # reads a chain must come through here and not only the collection macros: a plain
-        # EXISTS has two values, so it is FALSE for an absent parent and its negation is TRUE.
-        # That is how membership and +hasIntersection+ (#315) and the negated count
-        # +!(size(chain) > 0)+ (#316) still gave back every row without a parent after the
-        # macros alone were corrected.
+        # No ELSE, so a missing parent gives NULL, which stays excluded under NOT too. Every
+        # operator reading a chain must use this, not just the macros: a plain EXISTS is FALSE
+        # for a missing parent, so its negation is TRUE (#315, #316).
         #
-        # +guard_hops+ is empty for a relation that the caller mapped directly. Such a relation
-        # keeps the meaning of an empty collection: +!tags.exists(...)+ over zero tags is TRUE.
+        # `guard_hops` is empty for a directly mapped relation, where an empty collection is
+        # real: `!tags.exists(...)` over zero tags is TRUE.
         def guarded(expression)
           return expression if guard_hops.empty?
 
@@ -144,10 +137,8 @@ module Cerbos
             "#{owner_model.name} has no association #{mapping.association.inspect}"
         end
 
-        # A collection mapping needs a collection. ActiveRecord does not make the database
-        # enforce that a `has_one` has only one row. Thus the association gives one row and
-        # Cerbos sees one element, while a subquery would examine every row with that foreign
-        # key, and the two answers differ.
+        # Require a collection. The database does not enforce `has_one`, so Cerbos could see one
+        # element while a subquery sees every row with that foreign key.
         unless reflection.collection?
           raise UnsupportedAssociationError,
             "Association #{mapping.association.inspect} on #{owner_model.name} is a " \
@@ -159,20 +150,15 @@ module Cerbos
         Scope.new(hops: hops, mapping: mapping, model: hops.last.model)
       end
 
-      # Resolves a relation that the plan reaches THROUGH another relation, for the attribute
-      # path +R.attr.mainCategory.subCategories+. The caller writes the chain as a nested
-      # +fields:+ mapping, and each step becomes one more set of hops in the same correlated
-      # subquery.
+      # Resolves a relation reached through another, e.g. `R.attr.mainCategory.subCategories`,
+      # written as a nested `fields:` mapping. Each step adds hops to the same subquery.
       #
-      # The nesting is what makes the hop requirement visible to the adapter, and this is the
-      # reason to prefer it over one +has_many :through+ under the full name with dots. Both
-      # give the same joins, but only the nested form says which hops are the parent and which
-      # hop is the collection. A +through:+ association can also be a plain join table that
-      # Cerbos never sees, where an empty collection is a real empty collection. See
-      # {Scope#guarded}.
+      # Prefer nesting over one `has_many :through`: the joins are the same, but only nesting
+      # says which hops are the parent and which is the collection. A `through:` may be a
+      # plain join table, where empty really is empty. See {Scope#guarded}.
       #
       # @param outer_scope [Scope] the relation that holds the nested mapping
-      # @return [Scope] the full chain, which requires the hops of +outer_scope+ to exist
+      # @return [Scope] the full chain, which requires the hops of `outer_scope` to exist
       def chain(outer_scope:, mapping:, aliaser:)
         inner = build(
           owner_model: outer_scope.model,
@@ -189,12 +175,9 @@ module Cerbos
         )
       end
 
-      # Resolves a chain of to-one associations for an {AttributeMapping::Field} path with
-      # dots.
+      # Resolves the to-one chain of a dotted {AttributeMapping::Field} path.
       #
-      # The adapter refuses a collection here. It does not select one row of the collection by
-      # itself. A scalar comparison with "one of the elements" is not the request of the
-      # policy.
+      # Collections are refused: the adapter will not pick one element for a scalar comparison.
       #
       # @return [Scope]
       def build_path(owner_model:, owner_table:, association_names:, aliaser:)
@@ -223,7 +206,7 @@ module Cerbos
         Scope.new(hops: hops, model: model)
       end
 
-      # @api private
+      # @private
       def hops_for(reflection, owner_table, owner_model, aliaser)
         assert_no_scope(reflection, owner_model)
 
@@ -238,15 +221,13 @@ module Cerbos
         [direct_hop(reflection, owner_table, owner_model, aliaser)]
       end
 
-      # A scope on an association removes rows from it, and thus from the attributes that
-      # Cerbos sees. This adapter cannot put those conditions onto the alias that it makes for
-      # the correlated subquery, so the filter would select rows that the decision did not.
+      # An association scope hides rows from Cerbos, and the adapter cannot re-apply it to its
+      # alias, so the filter would disagree with the decision.
       #
-      # The check is here and not in +direct_hop+ because a `through` association carries its
-      # own scope, and +hops_for+ opens such an association into its parts before it reaches
-      # +direct_hop+. The scope of the outer association would then be lost.
+      # Checked here, not in `direct_hop`, because `hops_for` splits a `through` association
+      # into parts first and would lose its own scope.
       #
-      # @api private
+      # @private
       def assert_no_scope(reflection, owner_model)
         return unless reflection.scope
 
@@ -256,12 +237,10 @@ module Cerbos
           "generates; map the attribute onto an unscoped association instead"
       end
 
-      # ActiveRecord gives an array for a key that has more than one column. Such an array
-      # would reach +table[...]+ and become one quoted name, and the query would then fail with
-      # "no such column". The adapter refuses the association here instead, with a message that
-      # says why.
+      # A composite key comes back as an array, which `table[...]` would quote as one bogus
+      # column name. Refuse it here with a clear message instead.
       #
-      # @api private
+      # @private
       def assert_single_key(reflection, owner_model, *keys)
         return if keys.none?(Array)
 
@@ -271,12 +250,10 @@ module Cerbos
           "express a composite key. Give an operator override for this attribute."
       end
 
-      # Refuses an association whose target rows the correlated subquery cannot select on its
-      # own: a polymorphic target, a subclass in a single-table hierarchy, and a model with a
-      # default scope. Each of them filters the association in a way that the plain alias of the
-      # target table does not.
+      # Refuses targets a plain table alias cannot select correctly: polymorphic, STI subclass,
+      # or default-scoped models.
       #
-      # @api private
+      # @private
       # @return [Class] the target model
       def assert_plain_target(reflection, owner_model)
         if reflection.respond_to?(:polymorphic?) && reflection.polymorphic?
@@ -288,14 +265,9 @@ module Cerbos
 
         target = reflection.klass
 
-        # An association that points at a subclass in a single-table hierarchy also filters on
-        # the inheritance column. Without that condition the subquery would find the rows of a
-        # sibling class or of the base class, which are absent from the association and thus
-        # from the attributes that Cerbos evaluates.
-        #
-        # The adapter does not add the condition itself. The set of subclasses depends on which
-        # of them Ruby has loaded, so the condition could be short and the filter would then
-        # disagree in the other direction.
+        # An STI subclass association also filters on the type column; without it the subquery
+        # would see sibling or base-class rows Cerbos never sees. The adapter does not add that
+        # condition because the subclass list depends on what Ruby has loaded.
         if target.respond_to?(:finder_needs_type_condition?) && target.finder_needs_type_condition?
           raise UnsupportedAssociationError,
             "#{target.name} is a subclass in a single-table hierarchy. Its association also " \
@@ -305,9 +277,7 @@ module Cerbos
             "override."
         end
 
-        # A default scope on the model removes rows from the association, and thus from the
-        # attributes that Cerbos sees. The subquery below reads the table and does not apply
-        # that scope, so the two answers would differ.
+        # A default scope hides rows from Cerbos, but the subquery reads the raw table.
         if target.respond_to?(:default_scopes) && target.default_scopes.any?
           raise UnsupportedAssociationError,
             "#{target.name} has a default scope, whose conditions this adapter cannot put " \
@@ -319,7 +289,7 @@ module Cerbos
         target
       end
 
-      # @api private
+      # @private
       def direct_hop(reflection, owner_table, owner_model, aliaser)
         target = assert_plain_target(reflection, owner_model)
 
@@ -333,8 +303,7 @@ module Cerbos
           predicates << table[reflection.foreign_key].eq(
             owner_table[reflection.active_record_primary_key]
           )
-          # An `as:` association uses a type column to select its rows. Without a condition on
-          # that column, the subquery also finds the rows of a different owner class.
+          # An `as:` association also needs its type column, or it matches other owner classes.
           if reflection.type
             predicates << table[reflection.type].eq(owner_model.polymorphic_name)
           end

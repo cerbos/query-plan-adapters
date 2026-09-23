@@ -1,39 +1,23 @@
 # frozen_string_literal: true
 
-# What the adapter can be asked WITHOUT a corpus action, and nothing that has one.
+# Tests for what the corpus cannot ask. Read CLAUDE.md, "What a translator unit test may pin",
+# before adding here. Three kinds:
 #
-# Read CLAUDE.md, "What a translator unit test may pin", before adding to this file. Most of it
-# is kind 2 — **a caller-supplied argument the corpus structurally cannot vary**, and permanent.
-# conformance/actions.json classifies each action against ONE attribute map per adapter, so an
-# operator override, a second mapper form, a per-call `null_attribute_representation` and the
-# association shapes this adapter refuses to guess at have no corpus spelling at all: the corpus
-# asks what a POLICY produces, not what a caller passes. The association block is the largest of
-# them and the reason this file is worth its length — `has_many :through`, a scoped association,
-# single-table inheritance, a polymorphic `belongs_to` and a composite primary key are
-# ActiveRecord MODEL shapes, and no policy can describe one.
+# * Caller-supplied arguments (kind 2, permanent): operator overrides, mapper forms, the
+#   per-call null representation, and ActiveRecord model shapes (through, scoped, STI,
+#   polymorphic, composite keys). The corpus uses one mapping, so it cannot vary these.
+# * Plans the planner never emits: empty `and`, wrong operand count, unknown kind. The adapter
+#   accepts plans from any source, so these must fail closed.
+# * Cast and division refusals the corpus also covers, kept here to pin which operand type
+#   raises. Not a substitute for the corpus actions.
 #
-# Two other kinds are here, and they are not the same thing:
+# Anything the golden file already pins does not belong here. New shapes go in the corpus.
 #
-# * **Shapes CEL cannot reach.** A plan whose `and` carries no operands, an operator with the
-#   wrong operand count, an unrecognised plan kind. The planner never emits one, so the corpus
-#   is built from real plans and cannot carry them — but this adapter accepts a plan from any
-#   source, and a plan that lost or gained an operand must not widen the filter. Permanent.
-# * **Refusals the corpus also carries, kept for the MECHANISM rather than the shape.** The cast
-#   and division blocks below drive their refusals through purpose-built columns
-#   (`EdgeDocument`), so each message names the operand type that raised it; the corpus proves
-#   the same shapes end to end against its own mapping. These are not a substitute for those
-#   actions and must never become one.
-#
-# What is NOT here, deliberately: anything the golden asset already pins byte-for-byte. Operand
-# order and LIKE escaping used to live here and were removed once
-# golden/expectations.json recorded the emitted SQL — `vf-le` and `like-percent` pin those exact
-# clauses, and spec/translator_spec.rb states the ESCAPE rule over the whole corpus. A shape
-# belongs in conformance/policies/adversarial.yaml, never here.
-#
-# Needs no PDP and no database server: the models are SQLite in memory.
+# No PDP or database server needed (SQLite in memory).
 
 RSpec.describe Cerbos::ActiveRecord do
-  before(:all) do
+  # Memoized: the schema is built once.
+  before do
     AdversarialModels.establish!
     EdgeCaseModels.establish!
   end
@@ -55,11 +39,11 @@ RSpec.describe Cerbos::ActiveRecord do
   def value(constant) = {"value" => constant}
 
   ATTRS = {
-    "request.resource.attr.aString" => Cerbos::ActiveRecord.field("a_string"),
-    "request.resource.attr.aNumber" => Cerbos::ActiveRecord.field("a_number"),
-    "request.resource.attr.aBool" => Cerbos::ActiveRecord.field("a_bool"),
-    "request.resource.attr.tags" => Cerbos::ActiveRecord.relation(
-      :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
+    "request.resource.attr.aString" => described_class.field("a_string"),
+    "request.resource.attr.aNumber" => described_class.field("a_number"),
+    "request.resource.attr.aBool" => described_class.field("a_bool"),
+    "request.resource.attr.tags" => described_class.relation(
+      :tags, member_field: "name", fields: {"name" => described_class.field("name")}
     )
   }.freeze
 
@@ -83,12 +67,7 @@ RSpec.describe Cerbos::ActiveRecord do
         .to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /Unrecognised query plan kind/)
     end
 
-    # An `and` with no operands would give TRUE, and thus the filter would permit every row.
-    # The planner does not make that shape, but a plan that lost its operands on the way here
-    # must not become "permit everything".
-    # A plan that carries an extra operand is malformed. If the adapter read only the positions
-    # it expected, the extra operand would disappear and the filter would be wider than the
-    # condition. A malformed plan must fail closed.
+    # Reading only the expected positions would drop the extra operand and widen the filter.
     it "rejects an operator that carries the wrong number of operands" do
       expect {
         translate(conditional(expression("eq",
@@ -102,6 +81,7 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::InvalidPlanError, /size takes 1 operands/)
     end
 
+    # An empty `and` is TRUE and would allow every row.
     it "rejects an and or an or with no operands" do
       %w[and or].each do |operator|
         expect { translate(conditional(expression(operator))) }
@@ -115,26 +95,19 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # The four transports a plan can arrive over, held to ONE answer.
-  #
-  # No corpus action can ask this: the harness only ever hands the adapter an SDK object and the
-  # translator unit test only ever hands it a parsed wire fixture, so the REST/protobuf shape and
-  # the duck-typed one are executed nowhere else. Every case below compares against the Hash
-  # decoding of the same condition rather than a written-down id set — a hand-written set is the
-  # thing conformance/ exists to abolish, and it would also have to be rewritten whenever the
-  # seeds move.
+  # Every plan format must give the same answer. The protobuf and duck-typed formats are not
+  # used anywhere else. Each case compares with the Hash form, not a hand-written id list.
   describe "accepted plan shapes" do
     let(:condition) do
       expression("eq", variable("request.resource.attr.aString"), value("one"))
     end
 
-    # The reference answer, and its own anti-vacuity guard: if this became empty or total, every
-    # comparison below would agree and prove nothing.
-    let(:reference_ids) do
-      ids = translate(conditional(condition)).pluck(:id).sort
-      expect(ids).not_to be_empty
-      expect(ids.size).to be < ConformanceCorpus::SEEDS.size
-      ids
+    let(:reference_ids) { translate(conditional(condition)).pluck(:id).sort }
+
+    # An empty or total reference would make every comparison below pass.
+    it "has a reference answer that is neither empty nor total" do
+      expect(reference_ids).not_to be_empty
+      expect(reference_ids.size).to be < ConformanceCorpus::SEEDS.size
     end
 
     it "accepts a protobuf-style response wrapping the plan in filter" do
@@ -150,11 +123,7 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(translate(plan).pluck(:id).sort).to eq(reference_ids)
     end
 
-    # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the usual source of
-    # plans. Thus these tests use its output types directly and do not use a substitute. The
-    # differential suites already use real responses from the client. This test holds the
-    # contract with a name. Thus a change in the SDK makes this test fail, and it does not make
-    # an unclear failure in a harness.
+    # Uses the real Ruby SDK types, so an SDK change fails here with a clear name.
     def sdk_plan(kind, condition)
       Cerbos::Output::PlanResources.new(
         request_id: "test", kind: kind, condition: condition,
@@ -229,9 +198,7 @@ RSpec.describe Cerbos::ActiveRecord do
 
   describe "casts that SQL cannot make the way CEL does" do
     it "raises for int() over a string column" do
-      # CEL reads a whole string or makes an error, and Cerbos then denies the row. SQLite
-      # reads the digits at the front, so CAST('1junk' AS INTEGER) is 1 and the filter would
-      # keep a row that the PDP denies.
+      # CEL errors on '1junk' and denies; SQLite casts it to 1 and would keep the row.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("gt",
@@ -242,9 +209,7 @@ RSpec.describe Cerbos::ActiveRecord do
         /int\(\) applied to a :string column/)
     end
 
-    # The two operands fail for two different reasons, so each message names only its own. A
-    # message that named both would not show which mechanism stopped the translation, which is
-    # what the corpus pins these messages for (cerbos/query-plan-adapters#326).
+    # Each operand type has its own message, so it is clear which one refused (#326).
     it "raises for int() over a double column, naming the rounding difference" do
       expect {
         described_class.query_plan_to_relation(
@@ -290,9 +255,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "does not treat two omitted attributes as equal" do
-      # A NULL column sends no attribute under this convention. Two NULL columns are then two
-      # MISSING attributes, and CEL raises rather than finding them equal, so the PDP denies
-      # the row. Plain equality gives UNKNOWN and keeps the row out.
+      # Two missing attributes make CEL error and deny. Plain SQL equality gives UNKNOWN,
+      # which also denies.
       sql = described_class.query_plan_to_relation(
         plan: plan, model: EdgeDocument, attributes: mapping,
         null_attribute_representation: :omitted
@@ -302,8 +266,8 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   describe "membership with a column inside the list" do
-    # `null in [R.attr.x]` is true when the column is null. An earlier version built
-    # `NULL IN (x)`, which is always UNKNOWN, and Arel could not even render it.
+    # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
+    # UNKNOWN.
     it "translates a null needle against a list holding a column" do
       relation = described_class.query_plan_to_relation(
         plan: conditional(expression("in", value(nil),
@@ -311,7 +275,7 @@ RSpec.describe Cerbos::ActiveRecord do
         model: EdgeDocument,
         attributes: {"s" => field("title")}
       )
-      expect(relation.to_sql).to match(/"title" IS NULL/)
+      expect(relation.to_sql).to include('"title" IS NULL')
     end
   end
 
@@ -349,23 +313,18 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # A path such as `R.attr.parent.children` reaches a collection THROUGH a to-one parent. CEL
-  # cannot read a field from a list, so an absent parent is a missing path and Cerbos denies the
-  # row. A subquery from the resource row sees the same empty result for an absent parent and
-  # for a parent with no children, and thus `all`, `!exists` and every count over the chain
-  # would give back the rows that the PDP denies (cerbos/query-plan-adapters#309/#315/#316).
-  #
-  # The caller writes the chain as a nested `fields:` mapping, and that nesting is what tells
-  # the adapter which hops are the parent. The corpus proves the behaviour end to end with the
-  # w1-*-chain actions; these tests hold each polarity on a small model.
+  # For `R.attr.parent.children`, a missing parent is a missing path and CEL denies. A naive
+  # subquery cannot tell that from a parent with no children, so `all`, `!exists` and counts
+  # would return denied rows (#309). The nested `fields:` mapping marks the parent hop.
+  # The corpus covers this with w1-*-chain; these tests check each polarity.
   describe "a collection reached through a parent hop" do
     CHAIN_ATTRIBUTES = {
-      "request.resource.attr.tag" => Cerbos::ActiveRecord.relation(:tags, fields: {
-        "labels" => Cerbos::ActiveRecord.relation(
-          :labels, fields: {"name" => Cerbos::ActiveRecord.field("name")}
+      "request.resource.attr.tag" => described_class.relation(:tags, fields: {
+        "labels" => described_class.relation(
+          :labels, fields: {"name" => described_class.field("name")}
         ),
-        "labelNames" => Cerbos::ActiveRecord.relation(:labels, member_field: "name"),
-        "name" => Cerbos::ActiveRecord.field("name")
+        "labelNames" => described_class.relation(:labels, member_field: "name"),
+        "name" => described_class.field("name")
       })
     }.freeze
 
@@ -387,14 +346,13 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "keeps the row without a parent out of a negated existential" do
-      # "two" has the parent and no matching label, so it belongs in the result. "negative" has
-      # no tag at all, and it must stay out under this polarity as well.
+      # "two" has a parent with no match, so it is in. "negative" has no parent, so it is out.
       expect(chain_titles(expression("not", label_lambda("exists"))))
         .to eq(%w[two])
     end
 
-    # The guard removes only the row with NO parent. "two" has the parent and an empty label
-    # list, which is a real empty collection, and `all` over it is vacuously TRUE in CEL too.
+    # Only the parentless row is removed. "two" has an empty label list, and `all` over it is
+    # TRUE in CEL too.
     it "keeps the row without a parent out of a universal, and keeps the childless one in" do
       expect(chain_titles(label_lambda("all"))).to eq(%w[zero two])
     end
@@ -422,10 +380,9 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(chain_titles(expression("not", intersection))).to eq(%w[two])
     end
 
-    # A relation that the caller mapped directly keeps the meaning of an empty collection. Only
-    # a chain has a parent hop to require.
+    # A directly mapped relation has no parent hop, so an empty collection stays empty.
     it "leaves a direct relation with the vacuous truth of an empty collection" do
-      titles = Cerbos::ActiveRecord.query_plan_to_relation(
+      titles = described_class.query_plan_to_relation(
         plan: conditional(expression("all",
           variable("request.resource.attr.tags"),
           expression("lambda",
@@ -436,7 +393,7 @@ RSpec.describe Cerbos::ActiveRecord do
         }
       ).order(:id).pluck(:title)
 
-      # "negative" has no tags, so `all` over the empty collection is TRUE, as it is in CEL.
+      # "negative" has no tags, so `all` is TRUE, as in CEL.
       expect(titles).to eq(%w[zero negative])
     end
 
@@ -485,10 +442,8 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedAssociationError, /collection association/)
     end
 
-    # Each of these was found by an adversarial review. In every case the association gives
-    # fewer rows than the table holds, so the attributes that Cerbos evaluates and the rows
-    # that a plain subquery finds do not agree, and the filter selected a row that the
-    # decision did not.
+    # In each case the association returns fewer rows than a plain subquery would find, so
+    # the filter could allow rows Cerbos denies.
     it "raises for a scope on the association, including a through chain" do
       expect {
         described_class.query_plan_to_relation(
@@ -512,8 +467,7 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "raises for a has_one mapped as a collection" do
-      # ActiveRecord does not make the database enforce that a has_one has only one row, so
-      # the association gives one row while a subquery would examine every row.
+      # The database does not enforce one row for a has_one; a subquery would see them all.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("exists", variable("c"),
@@ -525,8 +479,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "raises for an association that points at a subclass in a single-table hierarchy" do
-      # Such an association also filters on the inheritance column. Without that condition the
-      # subquery would find the rows of the base class, which the association never gives.
+      # The association filters on the type column; without it the subquery would find
+      # base-class rows too.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("exists", variable("c"),
@@ -538,7 +492,7 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "accepts an association that points at the base class of a hierarchy" do
-      # ActiveRecord adds no type condition there, so the subquery already agrees.
+      # No type condition here, so the subquery already agrees.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("in", value("x"), variable("c"))),
@@ -549,9 +503,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "raises for an association that joins on more than one column" do
-      # ActiveRecord gives an array for the keys of such an association. Before the guard the
-      # array reached table[...] and became one quoted name, and the query then failed with
-      # "no such column" instead of the adapter refusing the mapping.
+      # The keys are an array. Without the guard they became one quoted column name and the
+      # query failed with "no such column".
       reflection = EdgeCpkParent.reflect_on_association(:kids)
       skip "this ActiveRecord does not give composite keys" unless reflection.foreign_key.is_a?(Array)
 
@@ -577,8 +530,7 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "discriminates on the type column for an `as:` association" do
-      # Without the condition on the type column, the subquery would also find the comments of
-      # a different owner class that has the same id.
+      # Otherwise it would also find comments of another owner class with the same id.
       sql = described_class.query_plan_to_relation(
         plan: conditional(expression("in", value("hello"), variable("c"))),
         model: EdgeDocument,
@@ -590,11 +542,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # A division by zero is not an error in CEL: arithmetic on attributes uses doubles, and
-  # IEEE-754 gives NaN or an Infinity. An earlier version of this adapter made the result NULL
-  # with NULLIF. That is correct for an ordered comparison, but not for `!=`: `NaN != 1.0` is
-  # TRUE in CEL, while `NULL != 1.0` is UNKNOWN in SQL. Thus the filter removed a row that the
-  # PDP permits. A live PDP confirmed the difference before this test was written.
+  # CEL division by zero gives NaN or Infinity, not an error. Turning it into NULL is wrong
+  # for `!=`: `NaN != 1.0` is TRUE in CEL but `NULL != 1.0` is UNKNOWN in SQL.
   describe "division by a row-dependent denominator" do
     def divide_compare(operator, constant)
       described_class.query_plan_to_relation(
@@ -606,12 +555,12 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "keeps the NaN row for a not-equal comparison" do
-      # 0/0 is NaN, and NaN is not equal to any value, so CEL permits the zero row.
+      # 0/0 is NaN, which is not equal to anything, so the zero row is allowed.
       expect(divide_compare("ne", 1.0)).to eq(%w[zero])
     end
 
     it "removes the NaN row from an ordered comparison" do
-      # NaN has no order against any value, so the comparison is false for the zero row.
+      # NaN is not ordered, so the comparison is false for the zero row.
       expect(divide_compare("gt", 0.5)).to eq(%w[two negative])
     end
 
@@ -641,9 +590,7 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "keeps the sign of a negative zero denominator" do
-      # IEEE-754 keeps the sign of a zero, so 2.0 / -0.0 is -Infinity and -3.0 / -0.0 is
-      # +Infinity. A PDP confirmed this before the fix: the adapter returned the positive row
-      # where Cerbos allows only the negative one.
+      # Zero keeps its sign: 2.0 / -0.0 is -Infinity and -3.0 / -0.0 is +Infinity.
       relation = described_class.query_plan_to_relation(
         plan: conditional(expression("gt",
           expression("div", variable("n"), value(-0.0)), value(0.0))),
@@ -654,9 +601,8 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "refuses a division by a column that may be zero" do
-      # The sign of a zero column cannot be read in SQL, so the sign of the Infinity is
-      # unknown. Only a division of a value by itself stays safe, because then a zero
-      # denominator means a zero numerator, which gives NaN.
+      # SQL cannot read the sign of a zero column, so the Infinity's sign is unknown. Only
+      # x/x is safe: a zero there is always 0/0, which is NaN.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("gt",
@@ -699,8 +645,7 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "raises for a sub-microsecond timestamp literal" do
-      # The planner makes nanoseconds for now(). ActiveRecord would remove the last digits of
-      # that value, and thus it would change the instant in the comparison.
+      # now() has nanoseconds. ActiveRecord would truncate them and change the instant.
       expect { Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sub-microsecond/)
     end
@@ -732,8 +677,7 @@ RSpec.describe Cerbos::ActiveRecord do
           "matches" => ->(column, _pattern) { Arel::Nodes::Equality.new(column, Arel::Nodes.build_quoted("one")) }
         }
       )
-      # The override answered, not the default translation: `matches` has no default here and
-      # would otherwise raise, and the rows are the ones its equality selects.
+      # `matches` has no default and would raise, so these rows come from the override.
       expect(relation.pluck(:a_string)).to eq(["one"])
     end
 
@@ -765,10 +709,9 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # The convention of a NULL column belongs to the attribute, and the option of the call is
-  # only its fallback (cerbos/query-plan-adapters#308, ADR 0004). A declaration of `:explicit`
-  # makes `eq`, `ne` and `in` definite, because CEL holds a null VALUE under that convention
-  # while SQL answers UNKNOWN and an UNKNOWN keeps the row out under BOTH polarities.
+  # A per-attribute null convention overrides the per-call option (#308, ADR 0004). With
+  # `:explicit`, CEL sees a null value, so `eq`, `ne` and `in` need a definite answer where
+  # SQL would give UNKNOWN.
   describe "a declared null convention" do
     let(:declared) do
       {
@@ -808,12 +751,11 @@ RSpec.describe Cerbos::ActiveRecord do
 
     it "guards a declared column in an equality against a constant" do
       sql = declared_sql(expression("eq", variable("e"), value("x")))
-      expect(sql).to match(/"title" IS NOT NULL/)
+      expect(sql).to include('"title" IS NOT NULL')
     end
 
     it "guards a declared column under a negated equality" do
-      # `null != "x"` is TRUE in CEL. Plain `NOT ("title" = 'x')` stays UNKNOWN and loses the
-      # row, so the guard has to sit INSIDE the negation.
+      # `null != "x"` is TRUE in CEL but UNKNOWN in SQL, so the guard goes inside the NOT.
       sql = declared_sql(expression("ne", variable("e"), value("x")))
       expect(sql).to match(/NOT.*"title" IS NOT NULL/m)
     end
@@ -822,16 +764,16 @@ RSpec.describe Cerbos::ActiveRecord do
       sql = declared_sql(
         expression("in", variable("e"), expression("list", value("x"), value("y")))
       )
-      expect(sql).to match(/"title" IS NOT NULL/)
-      expect(sql).to match(/IN \(/)
+      expect(sql).to include('"title" IS NOT NULL')
+      expect(sql).to include("IN (")
     end
 
     it "leaves a membership alone when the list already carries a null" do
-      # A null element already forces the `IS NULL` branch, which is definite by itself.
+      # A null element adds an `IS NULL` branch, which is already definite.
       sql = declared_sql(
         expression("in", variable("e"), expression("list", value("x"), value(nil)))
       )
-      expect(sql).not_to match(/"title" IS NOT NULL/)
+      expect(sql).not_to include('"title" IS NOT NULL')
     end
 
     it "matches two nulls when both columns declare the convention" do
@@ -848,15 +790,13 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "leaves the order operators alone" do
-      # A null receiver raises a no-overload error in CEL, which denies under both polarities.
-      # UNKNOWN already does that, so a guard here would change the meaning.
+      # CEL errors on a null here and denies either way, as UNKNOWN does. No guard needed.
       sql = declared_sql(expression("lt", variable("e"), value("x")))
-      expect(sql).not_to match(/IS NOT NULL/)
+      expect(sql).not_to include("IS NOT NULL")
     end
 
     it "keeps an operator override rather than restructuring around it" do
-      # `eq` and `ne` RESTRUCTURE the comparison, so to add the guard would discard the
-      # translation of the caller in silence.
+      # Adding the guard would silently replace the caller's translation.
       sql = described_class.query_plan_to_relation(
         plan: conditional(expression("eq", variable("e"), value("x"))),
         model: EdgeDocument,
@@ -865,13 +805,13 @@ RSpec.describe Cerbos::ActiveRecord do
           "eq" => ->(left, right) { Arel::Nodes::NotEqual.new(left, Arel::Nodes.build_quoted(right)) }
         }
       ).to_sql
-      expect(sql).to match(/"title" != /)
-      expect(sql).not_to match(/IS NOT NULL/)
+      expect(sql).to include('"title" != ')
+      expect(sql).not_to include("IS NOT NULL")
     end
 
     it "does not apply the convention of the call to an attribute that declares nothing" do
-      # `u` declares nothing, so the `:omitted` of the call reaches it and the null constant
-      # is refused. The declared attributes above are unaffected.
+      # `u` declares nothing, so the call's `:omitted` applies and the null is refused.
+      # Declared attributes are unaffected.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("eq", variable("u"), value(nil))),
@@ -897,17 +837,15 @@ RSpec.describe Cerbos::ActiveRecord do
         expression("lambda",
           expression("eq", variable("t.name"), value("public")), variable("t"))))).to_sql
 
-      expect(sql).to match(/EXISTS \(SELECT 1 FROM/)
-      # The subquery reads an ALIAS of the association table and never the table itself, so a
-      # macro nested inside it has a name to correlate to.
+      expect(sql).to include("EXISTS (SELECT 1 FROM")
+      # The subquery uses an alias, so a nested macro has a name to correlate to.
       expect(sql).to match(/"adversarial_tags" "cerbos_adversarial_tags_\d+"/)
-      expect(sql).not_to match(/FROM "adversarial_tags" WHERE/)
+      expect(sql).not_to include('FROM "adversarial_tags" WHERE')
     end
 
-    # The shared corpus never nests a macro over the SAME association inside itself. Without
-    # a new alias for each scope, the inner subquery would correlate to its own row and not to
-    # the element of the outer scope. Then the condition would be true for each row that has
-    # one tag, and thus it would permit rows that Cerbos denies.
+    # Corpus gap (#509): no corpus action nests a macro over the same association. Without a
+    # fresh alias per scope, the inner subquery would compare a tag with itself and allow
+    # denied rows. Delete this test once the corpus action lands.
     it "correlates a macro nested over the same association to the outer element" do
       inner = expression("exists", variable("request.resource.attr.tags"),
         expression("lambda",
@@ -917,17 +855,13 @@ RSpec.describe Cerbos::ActiveRecord do
         variable("request.resource.attr.tags"),
         expression("lambda", inner, variable("t"))))).to_sql
 
-      # Two different aliases, and the inner subquery compares against the OUTER one. Matched
-      # structurally rather than by name: the numbering is an implementation detail, and
-      # spelling it here would fail on an unrelated change to how scopes are counted.
+      # Two different aliases. Matched by pattern, since the numbering may change.
       comparison = sql[/"(cerbos_adversarial_tags_\d+)"\."name" != "(cerbos_adversarial_tags_\d+)"\."name"/, 0]
       expect(comparison).not_to be_nil
       inner_alias, outer_alias = comparison.scan(/cerbos_adversarial_tags_\d+/)
       expect(inner_alias).not_to eq(outer_alias)
 
-      # And the outer alias is the one the enclosing EXISTS introduced, so the inner subquery
-      # correlates to the outer ELEMENT rather than to its own row. Without that, the condition
-      # is true for every row holding one tag and returns rows the PDP denies.
+      # The outer alias belongs to the enclosing EXISTS, so the inner one correlates to it.
       expect(sql).to match(/EXISTS \(SELECT 1 FROM "adversarial_tags" "#{outer_alias}".*#{inner_alias}/m)
     end
 

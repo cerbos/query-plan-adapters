@@ -1,29 +1,18 @@
 # frozen_string_literal: true
 
-# The reader and the writer for golden/expectations.json — the filter this adapter is pinned to
-# emit for each corpus action (conformance/README.md, "Golden expectations").
+# Reads and writes golden/expectations.json: the filter this adapter emits for each corpus
+# action (conformance/README.md, "Golden expectations").
 #
-# Like spec/support/conformance_corpus.rb this code is duplicated across adapters ON PURPOSE
-# (ADR 0007). Do not extract it into conformance/, do not import another adapter's copy, and do
-# not add a drift check between them. What the adapters share is the DATA — the wire fixtures,
-# the seeds, the classification ledger. The golden expectations are not shared data at all: they
-# are this adapter's own output, and they live here rather than under conformance/ for that
-# reason.
+# Duplicated across adapters on purpose (ADR 0007). Do not extract or share it.
 module GoldenExpectations
   FILE = File.expand_path("../../golden/expectations.json", __dir__)
 
   ADAPTER = "activerecord"
   REGENERATE = "./scripts/golden-update.sh"
 
-  # The ActiveRecord major the file was generated under, and the reason this asset carries a
-  # generator key at all (conformance/README.md, "When the generator is an input").
-  #
-  # The recorded value is not the translator's return value: the translator returns an
-  # ActiveRecord::Relation, and what is written down is that relation RENDERED. Arel and the
-  # connection adapter do the rendering, so the ActiveRecord version is an input to the bytes in
-  # the same way SQLAlchemy's compiler is to sqlalchemy's asset. CI runs both ends of the range
-  # the gemspec declares, so the other leg asserts a pinned divergence list rather than the
-  # bytes — see spec/translator_spec.rb.
+  # The ActiveRecord version the file was generated under. The file records the relation
+  # rendered as SQL, and ActiveRecord does the rendering, so its version changes the output.
+  # The other CI leg asserts a pinned divergence list instead (spec/translator_spec.rb).
   GOLDEN_ACTIVERECORD_MAJOR = "8.0"
 
   # Commentary. Never compared, and carried across a regeneration.
@@ -53,8 +42,7 @@ module GoldenExpectations
     contents.fetch("expectations").transform_values { |entry| entry.except(NOTE_KEY) }
   end
 
-  # The notes of the file about to be overwritten. Header validation is deliberately skipped:
-  # the file may legitimately carry an older header, and that is what a header change looks like.
+  # Notes from the file about to be overwritten. The header is not checked: it may be older.
   def notes
     return {} unless File.exist?(FILE)
 

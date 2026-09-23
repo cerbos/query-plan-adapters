@@ -4,38 +4,44 @@ require_relative "errors"
 
 module Cerbos
   module ActiveRecord
-    # Maps one Cerbos attribute reference to the ActiveRecord model. The attribute reference
-    # is the +variable+ name in a query plan, for example
-    # <tt>"request.resource.attr.ownerId"</tt>. The mapping is a scalar {Field} or a
-    # collection {Relation}.
+    # Maps a plan `variable` name (e.g. `"request.resource.attr.ownerId"`) to the model, as a
+    # scalar {Field} or a collection {Relation}.
     #
-    #   MAPPING = {
-    #     "request.resource.attr.ownerId"    => Cerbos::ActiveRecord.field("owner_id"),
-    #     "request.resource.attr.department" => Cerbos::ActiveRecord.field("owner.department"),
-    #     "request.resource.attr.tags"       => Cerbos::ActiveRecord.relation(
-    #       :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
-    #     )
-    #   }
+    #     MAPPING = {
+    #       "request.resource.attr.ownerId"    => Cerbos::ActiveRecord.field("owner_id"),
+    #       "request.resource.attr.department" => Cerbos::ActiveRecord.field("owner.department"),
+    #       "request.resource.attr.tags"       => Cerbos::ActiveRecord.relation(
+    #         :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
+    #       )
+    #     }
     #
-    # If the attribute map does not contain a plan variable, the adapter raises
-    # {UnmappedAttributeError}. It also raises that error if the operator around the variable
-    # cannot use the mapping. The adapter never selects a column by itself.
+    # An unmapped variable, or a mapping its operator cannot use, raises
+    # {UnmappedAttributeError}. The adapter never guesses a column.
     module AttributeMapping
-      # How the caller sends a NULL column to Cerbos. See
-      # {Cerbos::ActiveRecord.field} and {Cerbos::ActiveRecord.query_plan_to_relation}.
+      # How the caller sends a NULL column to Cerbos. See {Cerbos::ActiveRecord.field}.
       NULL_REPRESENTATIONS = %i[explicit omitted].freeze
 
       # A scalar mapping.
       #
-      # +path+ is a column on the model. It can also be a path with dots through +belongs_to+
-      # or +has_one+ associations, for example <tt>"owner.department"</tt>. The adapter
-      # translates such a path into a correlated scalar subquery. Thus the path cannot
-      # increase the number of rows in the result.
+      # `path` is a column, or a dotted path through `belongs_to` / `has_one` associations
+      # (e.g. `"owner.department"`). A path becomes a correlated scalar subquery, so it cannot
+      # add rows.
       #
-      # +null_representation+ declares how the caller sends THIS column when it is NULL. It
-      # overrides the +null_attribute_representation+ of the call for this attribute only.
-      # A mapping that declares nothing keeps the value of the call.
+      # `null_representation` overrides the call's `null_attribute_representation` for this
+      # attribute; `nil` keeps the call's value.
+      #
+      # Make one with {Cerbos::ActiveRecord.field}.
+      #
+      # @attr path [String] the column, or a dotted path through to-one associations.
+      # @attr null_representation [Symbol, nil] `:explicit`, `:omitted`, or `nil` for the
+      #   convention of the call.
       Field = Struct.new(:path, :null_representation) do
+        # Specify a scalar mapping.
+        #
+        # @param path [String, Symbol] the column, or a dotted path through to-one associations.
+        # @param null_representation [Symbol, String, nil] `:explicit`, `:omitted`, or `nil`.
+        #
+        # @raise [ArgumentError] when `path` is `nil` or `null_representation` is invalid.
         def initialize(path:, null_representation: nil)
           raise ArgumentError, "path is required" if path.nil?
 
@@ -57,20 +63,30 @@ module Cerbos
 
       # A collection mapping.
       #
-      # +association+ is the name of a +has_many+ or +has_one+ association on the model that
-      # owns it. A +through:+ chain is also permitted. The adapter opens such a chain into
-      # joins in one correlated subquery.
+      # `association` is a collection association on the owning model. `through:` chains
+      # become joins in one correlated subquery. Map a `has_one` as a dotted {Field} path.
       #
-      # +member_field+ replaces the element when the policy uses the collection as a list of
-      # simple values. Thus <tt>"urgent" in R.attr.tags</tt> compares with <tt>tag.name</tt>
-      # and not with the +Tag+ record.
+      # `member_field` is the column used when the collection is a list of plain values, so
+      # `"urgent" in R.attr.tags` compares `tag.name`, not the `Tag` record.
       #
-      # +fields+ maps the member names in the bodies of lambdas. For example,
-      # <tt>R.attr.tags.exists(t, t.name == "x")</tt> needs <tt>"name"</tt>. An entry in
-      # +fields+ can be a relation. This is how the adapter resolves a chain with more than
-      # one hop, for example
-      # <tt>R.attr.categories.exists(c, c.subCategories.exists(s, ...))</tt>.
+      # `fields` maps member names used in lambda bodies, e.g. `"name"` for
+      # `R.attr.tags.exists(t, t.name == "x")`. An entry can be a relation, for multi-hop
+      # chains like `R.attr.categories.exists(c, c.subCategories.exists(s, ...))`.
+      #
+      # Make one with {Cerbos::ActiveRecord.relation}.
+      #
+      # @attr association [Symbol] the association name.
+      # @attr member_field [String, nil] the column for a bare element value.
+      # @attr fields [Hash{String => Field, Relation}] the member mappings for lambda bodies.
       Relation = Struct.new(:association, :member_field, :fields) do
+        # Specify a collection mapping.
+        #
+        # @param association [String, Symbol] the association name.
+        # @param member_field [String, Symbol, nil] the column for a bare element value.
+        # @param fields [Hash{String, Symbol => Field, Relation}] the member mappings for lambda
+        #   bodies.
+        #
+        # @raise [ArgumentError] when `association` is `nil` or a `fields` value is not a mapping.
         def initialize(association:, member_field: nil, fields: {})
           raise ArgumentError, "association is required" if association.nil?
 
@@ -91,26 +107,47 @@ module Cerbos
 
     # Makes a scalar {AttributeMapping::Field} mapping.
     #
-    # @param path [String, Symbol] a column name, or a path with dots through to-one
-    #   associations
-    # @param null_representation [Symbol, nil] +:explicit+ if the caller sends this column as
-    #   an attribute whose value is null when the column is NULL, +:omitted+ if the caller
-    #   sends no attribute at all then. The default, +nil+, keeps the value that the call
-    #   gives. Declare it to make +eq+, +ne+ and +in+ against this column agree with the PDP
-    #   for the rows where it is NULL (cerbos/query-plan-adapters#308).
+    # @param path [String, Symbol] a column, or a dotted path through to-one associations.
+    # @param null_representation [Symbol, nil] how a NULL column is sent: `:explicit` (as a
+    #   null value) or `:omitted` (not sent). `nil` (default) uses the call's value. Declaring
+    #   it makes `eq`, `ne` and `in` match the PDP on NULL rows
+    #   (cerbos/query-plan-adapters#308).
+    #
     # @return [AttributeMapping::Field]
+    #
+    # @raise [ArgumentError] when `path` is `nil` or `null_representation` is invalid.
+    #
+    # @example A column on the model
+    #   Cerbos::ActiveRecord.field("owner_id")
+    #
+    # @example A column on a to-one parent, sent as an explicit null
+    #   Cerbos::ActiveRecord.field("owner.department", null_representation: :explicit)
     def self.field(path, null_representation: nil)
       AttributeMapping::Field.new(path: path, null_representation: null_representation)
     end
 
     # Makes a collection {AttributeMapping::Relation} mapping.
     #
-    # @param association [String, Symbol] the association name on the model that owns it
-    # @param member_field [String, Symbol, nil] the member column that replaces a simple
-    #   element value
+    # @param association [String, Symbol] the association name on the model that owns it.
+    # @param member_field [String, Symbol, nil] the column for a bare element value.
     # @param fields [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
-    #   the member names that the bodies of lambdas use
+    #   the member mappings for lambda bodies.
+    #
     # @return [AttributeMapping::Relation]
+    #
+    # @raise [ArgumentError] when `association` is `nil` or a `fields` value is not a mapping.
+    #
+    # @example Tags compared by name
+    #   Cerbos::ActiveRecord.relation(
+    #     :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
+    #   )
+    #
+    # @example A chain through a parent
+    #   Cerbos::ActiveRecord.relation(:categories, fields: {
+    #     "subCategories" => Cerbos::ActiveRecord.relation(:sub_categories, fields: {
+    #       "name" => Cerbos::ActiveRecord.field("name")
+    #     })
+    #   })
     def self.relation(association, member_field: nil, fields: {})
       AttributeMapping::Relation.new(association: association, member_field: member_field, fields: fields)
     end

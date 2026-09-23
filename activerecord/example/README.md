@@ -13,7 +13,7 @@ From the repository root:
 demo/scripts/run-example.sh activerecord
 ```
 
-Needs Docker with compose (for the PDP), `jq`, and Ruby 3.2+ with `gem` and `bundle`. The runner
+Needs Docker with compose (for the PDP), `jq`, and Ruby 3.3+ with `gem` and `bundle`. The runner
 starts the pinned PDP over `demo/policies/`, sets `CERBOS_HOST`, runs `run.sh`, and diffs the JSON
 it prints against `demo/expected.json`.
 

@@ -3,7 +3,9 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # +hierarchy()+ and the operators over it: +ancestorOf+, +descendentOf+ and +overlaps+.
+      # `hierarchy()` and the operators over it: `ancestorOf`, `descendentOf` and `overlaps`.
+      #
+      # @private
       module Hierarchies
         private
 
@@ -25,8 +27,7 @@ module Cerbos
           unless left.is_a?(Values::Hierarchy) && right.is_a?(Values::Hierarchy)
             raise UnsupportedOperatorError, "Hierarchy operators need hierarchy() operands"
           end
-          # A hierarchy from a list is already in segments. Thus its delimiter has no meaning,
-          # and a comparison with a path that has a different delimiter is correct.
+          # A list-built hierarchy is already split, so its delimiter does not matter.
           if left.segments.nil? && right.segments.nil? && left.delimiter != right.delimiter
             raise UnsupportedOperatorError,
               "Hierarchy operands use different delimiters: " \
@@ -34,14 +35,12 @@ module Cerbos
           end
         end
 
-        # A hierarchy from a list is compared segment by segment, and so is the other side.
+        # If either side is list-built, compare both segment by segment.
         def segment_wise?(left, right)
           !left.segments.nil? || !right.segments.nil?
         end
 
-        # Gives the segments of a hierarchy. It must be possible to know them during the
-        # translation: a column is a string with a delimiter until the query runs, and SQL cannot
-        # divide it into segments.
+        # The segments of a hierarchy, known at translation time. SQL cannot split a column.
         def require_segments(hierarchy)
           return hierarchy.segments if hierarchy.segments
           return hierarchy.value.split(hierarchy.delimiter, -1) if hierarchy.value.is_a?(::String)
@@ -51,7 +50,7 @@ module Cerbos
             "whose segments are known when the query is built; this one is a column"
         end
 
-        # Each segment of +above+ equals the segment in the same position in +below+.
+        # Each segment of `above` equals the segment in the same position in `below`.
         def segments_equal(above, below)
           ArelSupport.and_node(
             above.each_with_index.map { |segment, index| as_predicate(compare("eq", segment, below[index])) }
@@ -74,8 +73,7 @@ module Cerbos
           if segment_wise?(ancestor, descendent)
             above = require_segments(ancestor)
             below = require_segments(descendent)
-            # An ancestor is a shorter path, and each of its segments agrees with the segment in
-            # the same position in the other path.
+            # An ancestor is a shorter path whose segments all match.
             return false if above.length >= below.length
 
             return segments_equal(above, below)
@@ -90,9 +88,8 @@ module Cerbos
           end
 
           if below.is_a?(::String)
-            # A descendant that is a constant has a known and limited set of ancestors. The
-            # adapter compares them exactly. A LIKE operation would need an escape character for
-            # its metacharacters.
+            # A constant descendant has a fixed set of ancestors: match them exactly rather
+            # than use LIKE, which would need escaping.
             parts = below.split(delimiter, -1)
             prefixes = (1...parts.length).map { |i| parts[0, i].join(delimiter) }
             return scalar_membership(above, prefixes)

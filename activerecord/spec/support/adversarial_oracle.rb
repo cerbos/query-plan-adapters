@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# The oracle part of the differential harness. For each row, it asks the same PDP that made
-# the query plan if the action is permitted. The attributes in that question are the same as
-# the data in the row. No person writes the expected results for either side.
+# The oracle: asks the PDP that made the plan whether each row is allowed, using the row's own
+# data as attributes. No expected results are hand-written.
 module AdversarialOracle
   module_function
 
@@ -10,9 +9,8 @@ module AdversarialOracle
     @client ||= Cerbos::Client.new(ENV.fetch("CERBOS_HOST", "cerbos:3593"), tls: false)
   end
 
-  # The principal goes through without a change. An allowlist of keys here would drop the
-  # attribute that a new action discriminates on from the plan and from the oracle at the same
-  # time, and the action would then agree with itself and prove nothing.
+  # Passed through verbatim. An allowlist would drop a new attribute from both the plan and the
+  # oracle, and the action would pass without proving anything.
   def principal
     ConformanceCorpus::PRINCIPAL.transform_keys(&:to_sym)
   end
@@ -31,15 +29,11 @@ module AdversarialOracle
     )
   end
 
-  # A NULL in the database is a missing attribute for the check call. If a condition uses a
-  # missing attribute, CEL makes an error, and Cerbos denies the row. SQL has the same
-  # three-valued logic when a NULL is in a comparison. Note that `NOT (NULL = x)` stays
-  # UNKNOWN and does not become TRUE.
+  # A NULL column is sent as a missing attribute. CEL errors on it and Cerbos denies, which
+  # matches SQL's UNKNOWN (`NOT (NULL = x)` is still UNKNOWN, not TRUE).
   #
-  # `owner`, `coOwner`, `tagNames`, `aNumberList` and `aBoolList` are the exceptions. They hold
-  # explicit nulls, because a CEL membership test finds a difference between a null element and
-  # a missing element, and because the equality family answers a null VALUE definitely while a
-  # missing attribute denies under both polarities (cerbos/query-plan-adapters#308).
+  # Exceptions: `owner`, `coOwner`, `tagNames`, `aNumberList` and `aBoolList` send explicit
+  # nulls. CEL treats a null value differently from a missing one (#308).
   def check_resource(seed)
     attr = {
       "aBool" => seed.fetch("aBool"),
@@ -49,20 +43,19 @@ module AdversarialOracle
       "obj" => {"inner" => seed.fetch("aString")},
       "tags" => seed.fetch("tags").map { |tag| tag_attr(tag) },
       "owner" => seed.fetch("aOptionalString"),
-      # The explicit-null alias of the `scope` column. `scope` below is omitted when it is
-      # NULL, so the same column reaches the PDP under both conventions.
+      # Explicit-null alias of `scope`, which is omitted when NULL. Same column, both
+      # conventions.
       "coOwner" => ConformanceCorpus.scope(seed),
       "tagNames" => seed.fetch("tags").map { |tag| tag.fetch("name") },
-      # Verbatim, null elements and element order included: `[null, 2]` on a6 is a list whose
-      # first element is the null VALUE, and `null == 2` is false rather than an error.
+      # Verbatim, nulls and order kept: on a6, `[null, 2]` starts with a null value, and
+      # `null == 2` is false, not an error.
       "aNumberList" => seed.fetch("aNumberList"),
       "aBoolList" => seed.fetch("aBoolList"),
       "categories" => seed.fetch("subCategoryNames").map { |name| category_attr(seed, name) }
     }
 
-    # The real to-one chain (ADR 0005). A level that does not exist sends NO attribute, so CEL
-    # raises a missing-path error and check() denies — the same rule the root row follows for a
-    # NULL column.
+    # The real to-one chain (ADR 0005). A missing level sends no attribute, so check() denies,
+    # like a NULL column on the root row.
     parent_seed = ConformanceCorpus.parent_seed_of(seed)
     if parent_seed
       parent_attr = ConformanceCorpus.relation_attr(parent_seed)
@@ -85,10 +78,8 @@ module AdversarialOracle
     updated_at = ConformanceCorpus.updated_at(seed)
     attr["updatedAt"] = updated_at unless updated_at.nil?
 
-    # mainCategory shows the category graph of the row as one nested object. The seed code
-    # makes a maximum of one category for each row. A row without a category gets no attribute.
-    # Thus CEL denies it because the attribute is missing. The adapter also keeps that row out
-    # of the result, because its chain of joins is empty.
+    # The row's category graph as one object (each row has at most one category). A row with
+    # no category gets no attribute, so CEL denies it; the adapter's join finds nothing either.
     unless seed.fetch("subCategoryNames").empty?
       attr["mainCategory"] = {
         "name" => "business",

@@ -5,3 +5,6 @@ vendor/bundle/
 *.gem
 *.sqlite3
 tmp/
+/.yardoc/
+/doc/
+/.env
