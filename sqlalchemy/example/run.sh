@@ -52,7 +52,7 @@ echo "==> built $(basename "${WHEEL}") and $(basename "${SDIST}")" >&2
 #    from their `files` allowlist and Go from nested-module exclusion; ADR 0002 asks for Python
 #    and Java to check it deliberately, because neither has an equivalent.
 #
-#    It holds today because pdm-pep517 includes the package directory and `tests/` and nothing
+#    It holds today because pdm-backend includes the package directory and `tests/` and nothing
 #    else — a default, which is exactly the kind of fact that stops being true without anyone
 #    noticing. `[tool.pdm] includes` in ../pyproject.toml would change it silently.
 #

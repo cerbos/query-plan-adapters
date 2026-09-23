@@ -10,7 +10,7 @@ into a [SQLAlchemy](https://docs.sqlalchemy.org/) `Select`, for use with the
 pip install cerbos-sqlalchemy
 ```
 
-- Python >= 3.8
+- Python >= 3.10
 - SQLAlchemy >= 1.4 (1.4 and 2.x are both tested)
 - Cerbos Python SDK (`cerbos`) >= 0.10.4; Cerbos PDP > v0.16
 - Either SDK client: the HTTP `CerbosClient` or the gRPC client (see [Transports](#transports))

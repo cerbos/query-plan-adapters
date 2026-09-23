@@ -8,7 +8,7 @@ dependencies = [
     "sqlalchemy>=1.4",
     "cerbos>=0.10.4",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -29,12 +29,8 @@ testcontainers = [
 ]
 
 [build-system]
-requires = ["pdm-pep517>=1.0.0"]
-build-backend = "pdm.pep517.api"
-
-[tool]
-
-[tool.pdm]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
 
 [tool.pdm.version]
 source = "scm"
@@ -50,7 +46,7 @@ test = [
     "aiosqlite>=0.17",
 ]
 lint = [
-    "black>=22.6.0",
+    "ruff>=0.11.13",
     "isort>=5.10.1",
 ]
 tools = [
@@ -64,9 +60,23 @@ test = "pytest"
 # diff is the review. CI never sets GOLDEN_UPDATE, so a translator change that moves the
 # emitted SQL fails there whatever anyone ran locally.
 "golden:update" = {cmd = "pytest tests/test_translator.py", env = {"GOLDEN_UPDATE" = "1"}}
-isort = {cmd = "isort ."}
-black = {cmd = "black ."}
-format = {composite = ["isort", "black"]}
+isort = {cmd = "isort src tests example"}
+ruff_format = {cmd = "ruff format src tests example"}
+lint = {cmd = "ruff check --fix src tests example"}
+format = {composite = ["isort", "ruff_format"]}
+
+[tool.pyprojectx]
+pdm = "pdm"
+ruff = "ruff"
+isort = "isort"
+
+[tool.pyprojectx.aliases]
+install = "pdm install -G :all"
+run = "pdm run"
+test = "pdm run test"
+lint = "pdm lint"
+format = "pdm format"
+outdated = "pdm update --outdated"
 
 [tool.isort]
 profile = 'black'

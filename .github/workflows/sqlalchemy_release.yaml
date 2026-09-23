@@ -32,7 +32,7 @@ jobs:
       - run: pdm install -G testcontainers
 
       - name: Set PDM version env
-        run: echo "PDM_PEP517_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
+        run: echo "PDM_BUILD_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
 
       - run: pdm build
 
