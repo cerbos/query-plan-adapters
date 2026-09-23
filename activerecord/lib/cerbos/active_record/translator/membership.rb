@@ -27,6 +27,11 @@ module Cerbos
           condition =
             if explicit_null?(value)
               null_equality(member, value)
+            elsif cross_type_literal?(value, member_kind(scope))
+              # `"2" in [2]` is false in CEL, whose equality is heterogeneous. SQL would coerce
+              # one side onto the other's type: SQLite's REAL affinity reads the literal '2' as
+              # the number 2, and it holds a boolean element as the integer 1.
+              false
             else
               ArelSupport.comparison("eq", member, value)
             end
@@ -47,6 +52,19 @@ module Cerbos
           # The usual shape: a column against a list of constants. An IN clause reads better than
           # a chain of equality tests.
           if ArelSupport.arel_node?(needle) && members.none? { |member| ArelSupport.arel_node?(member) }
+            # `R.attr.aNumber in ["5", 2]` is false for the string in CEL, whose equality is
+            # heterogeneous. Inside IN, SQLite's NUMERIC affinity reads '5' as the number 5, so
+            # the adapter drops each constant the column's kind can never equal, as it does for
+            # the member column of a relation.
+            kind = scalar_kind(needle)
+            members = members.reject { |member| cross_type_literal?(member, kind) }
+            if members.empty?
+              return false if explicit_null?(needle)
+
+              # A missing attribute is still an error, so `!(x in ["5"])` must not grant it.
+              return unknown_if_any([ArelSupport.is_null(needle)], false)
+            end
+
             present = members.compact
 
             predicates = []
@@ -83,6 +101,20 @@ module Cerbos
           ArelSupport.to_predicate(compare("eq", needle, member))
         end
 
+        # The CEL kind of the bare values in a relation mapped by +member_field+, read from the
+        # column that holds them; nil when the column's type is not one the adapter classifies.
+        def member_kind(scope)
+          kind_of_column_type(scope.model.columns_hash[scope.mapping.member_field.to_s]&.type)
+        end
+
+        # A constant whose CEL kind differs from the elements' can never equal one of them.
+        def cross_type_literal?(value, kind)
+          return false if kind.nil? || !constant?(value)
+
+          literal_kind = scalar_kind(value)
+          !literal_kind.nil? && literal_kind != kind
+        end
+
         def has_intersection(left, right)
           # hasIntersection gives the same result if the operands change sides. The planner
           # keeps the order of the source. Thus the list of literals can come on each side.
@@ -93,6 +125,9 @@ module Cerbos
           when Values::Collection
             # As with membership: a bare EXISTS is FALSE for an absent parent, so
             # `!hasIntersection(chain, [...])` would be TRUE for it (#315).
+            # A literal of another type than the elements never intersects, as in membership.
+            kind = member_kind(left.scope)
+            values = values.reject { |value| cross_type_literal?(value, kind) }
             left.scope.guarded(
               left.scope.exists(scalar_membership(left.scope.member_column, values))
             )

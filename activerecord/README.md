@@ -333,7 +333,7 @@ else; CI runs both, each against a PDP configured with the same mode.
 
 | Classification | Coverage |
 | --- | --- |
-| Tested against the oracle | 236 corpus actions |
+| Tested against the oracle | 250 corpus actions |
 | Fail-closed | 72 actions: 61 that this adapter cannot express, and the 11 that the reference adapter does not support either. Each must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
 | Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
 | Known difference in the planner | The Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED`, but `checkResource` denies rows where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` instead of `has(R.attr.x)` for database attributes |
@@ -363,6 +363,11 @@ reflection and can detect them there.
 
 ## Behaviour changes
 
+- Membership in a relation mapped by member field, and `hasIntersection` with it, drop every
+  literal whose CEL type differs from the member column's: `"2" in aNumberList` is false, where
+  SQLite's REAL affinity read `'2'` as the number 2 and matched. The `IN` list for a scalar column
+  drops them the same way, so `aNumber in ["5", 2]` is `a_number IN (2)`. Filters get narrower;
+  nothing that translated now throws.
 - **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): size and string
   operators reject numeric and boolean columns.
 - **Breaking** ([#414](https://github.com/cerbos/query-plan-adapters/issues/414)): comparisons on

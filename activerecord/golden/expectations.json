@@ -179,6 +179,18 @@
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_string\" = ''"
     },
+    "eq-bool-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((CASE WHEN (\"adversarial_resources\".\"a_bool\") IS NULL THEN NULL ELSE FALSE END) OR \"adversarial_resources\".\"a_number\" = 5)"
+    },
+    "eq-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((CASE WHEN (\"adversarial_resources\".\"a_number\") IS NULL THEN NULL ELSE FALSE END) OR \"adversarial_resources\".\"a_number\" = 2)"
+    },
+    "eq-string-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((CASE WHEN (\"adversarial_resources\".\"a_string\") IS NULL THEN NULL ELSE FALSE END) OR \"adversarial_resources\".\"a_number\" = 5)"
+    },
     "exists-on-empty": {
       "kind": "KIND_CONDITIONAL",
       "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" = 'public') THEN TRUE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\" = 'public') IS NULL) THEN NULL ELSE FALSE END)"
@@ -186,6 +198,10 @@
     "exists-one-multi": {
       "kind": "KIND_CONDITIONAL",
       "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\" = 'public') IS NULL) THEN NULL ELSE (SELECT COUNT(*) FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" = 'public') = 1 END)"
+    },
+    "exists-tag-name-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (CASE WHEN (\"cerbos_adversarial_tags_1\".\"name\") IS NULL THEN NULL ELSE FALSE END)) THEN TRUE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (CASE WHEN (\"cerbos_adversarial_tags_1\".\"name\") IS NULL THEN NULL ELSE FALSE END) IS NULL) THEN NULL ELSE FALSE END) OR \"adversarial_resources\".\"a_number\" = 5)"
     },
     "f2f-contains": {
       "kind": "KIND_CONDITIONAL",
@@ -207,6 +223,10 @@
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_number\" > 1"
     },
+    "hasint-bool-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(EXISTS (SELECT 1 FROM \"adversarial_bool_list_elements\" \"cerbos_adversarial_bool_list_elements_1\" WHERE \"cerbos_adversarial_bool_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND FALSE) OR \"adversarial_resources\".\"a_number\" = 5)"
+    },
     "hasint-map-null": {
       "kind": "KIND_CONDITIONAL",
       "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\") IS NULL) THEN NULL WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\" IN ('public') OR \"cerbos_adversarial_tags_1\".\"name\" IS NULL)) THEN TRUE ELSE FALSE END)"
@@ -219,9 +239,17 @@
       "kind": "KIND_CONDITIONAL",
       "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\") IS NULL) THEN NULL WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" IN ('public', 'other')) THEN TRUE ELSE FALSE END)"
     },
+    "hasint-map-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(CASE WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\") IS NULL) THEN NULL WHEN EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" IN ('public')) THEN TRUE ELSE FALSE END)"
+    },
     "hasint-null-vf": {
       "kind": "KIND_CONDITIONAL",
       "where": "EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND (\"cerbos_adversarial_tags_1\".\"name\" IN ('public') OR \"cerbos_adversarial_tags_1\".\"name\" IS NULL))"
+    },
+    "hasint-number-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "EXISTS (SELECT 1 FROM \"adversarial_number_list_elements\" \"cerbos_adversarial_number_list_elements_1\" WHERE \"cerbos_adversarial_number_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_number_list_elements_1\".\"value\" IN (3))"
     },
     "hier-ancestor-cf": {
       "kind": "KIND_CONDITIONAL",
@@ -291,6 +319,10 @@
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_string\" != \"adversarial_resources\".\"id\""
     },
+    "in-bool-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(EXISTS (SELECT 1 FROM \"adversarial_bool_list_elements\" \"cerbos_adversarial_bool_list_elements_1\" WHERE \"cerbos_adversarial_bool_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND FALSE) OR \"adversarial_resources\".\"a_number\" = 5)"
+    },
     "in-empty": {
       "kind": "KIND_ALWAYS_DENIED",
       "where": "(1=0)"
@@ -327,9 +359,21 @@
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((EXISTS (SELECT 1 FROM \"adversarial_tags\" \"cerbos_adversarial_tags_1\" WHERE \"cerbos_adversarial_tags_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_tags_1\".\"name\" IS NULL)))"
     },
+    "in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "EXISTS (SELECT 1 FROM \"adversarial_number_list_elements\" \"cerbos_adversarial_number_list_elements_1\" WHERE \"cerbos_adversarial_number_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_number_list_elements_1\".\"value\" = 2)"
+    },
+    "in-number-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "(EXISTS (SELECT 1 FROM \"adversarial_number_list_elements\" \"cerbos_adversarial_number_list_elements_1\" WHERE \"cerbos_adversarial_number_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND FALSE) OR \"adversarial_resources\".\"a_number\" = 5)"
+    },
     "in-numbers": {
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_number\" IN (2, 3, 5)"
+    },
+    "in-scalar-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "\"adversarial_resources\".\"a_number\" IN (2)"
     },
     "in-single": {
       "kind": "KIND_CONDITIONAL",
@@ -439,6 +483,10 @@
       "kind": "KIND_CONDITIONAL",
       "where": "(\"adversarial_resources\".\"a_bool\" = 1 AND \"adversarial_resources\".\"a_number\" >= 0 AND \"adversarial_resources\".\"a_string\" != 'one')"
     },
+    "ne-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "((CASE WHEN (\"adversarial_resources\".\"a_number\") IS NULL THEN NULL ELSE NOT ((FALSE)) END) AND \"adversarial_resources\".\"a_number\" > 3)"
+    },
     "neg-number": {
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_number\" < -1"
@@ -487,6 +535,10 @@
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((CASE WHEN \"adversarial_resources\".\"a_bool\" = 1 THEN NULL WHEN NOT ((\"adversarial_resources\".\"a_bool\" = 1)) THEN (CASE WHEN (\"adversarial_resources\".\"a_string\") IS NULL THEN NULL ELSE FALSE END) END))"
     },
+    "not-null-in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "NOT ((EXISTS (SELECT 1 FROM \"adversarial_number_list_elements\" \"cerbos_adversarial_number_list_elements_1\" WHERE \"cerbos_adversarial_number_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_number_list_elements_1\".\"value\" IS NULL)))"
+    },
     "not-startswith": {
       "kind": "KIND_CONDITIONAL",
       "where": "NOT ((\"adversarial_resources\".\"a_string\" LIKE (REPLACE(REPLACE(REPLACE(REPLACE(\"adversarial_resources\".\"a_optional_string\", '\\', '\\\\'), '%', '\\%'), '_', '\\_'), '[', '\\[') || '%') ESCAPE '\\'))"
@@ -502,6 +554,10 @@
     "null-eq-missing": {
       "kind": "KIND_CONDITIONAL",
       "where": "\"adversarial_resources\".\"a_optional_string\" IS NULL"
+    },
+    "null-in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "where": "EXISTS (SELECT 1 FROM \"adversarial_number_list_elements\" \"cerbos_adversarial_number_list_elements_1\" WHERE \"cerbos_adversarial_number_list_elements_1\".\"resource_id\" = \"adversarial_resources\".\"id\" AND \"cerbos_adversarial_number_list_elements_1\".\"value\" IS NULL)"
     },
     "null-ne": {
       "kind": "KIND_CONDITIONAL",
