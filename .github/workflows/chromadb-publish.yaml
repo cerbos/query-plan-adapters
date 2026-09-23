@@ -44,6 +44,9 @@ jobs:
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
+          # Without a token the action fetches the release under GitHub's stricter anonymous
+          # rate limit, and that download is the step that has failed a run with no code change.
+          github_token: ${{ github.token }}
           version: v${{ steps.cerbos.outputs.version }}
 
       # Ensure npm 11.5.1 or later is installed
