@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for the mapping helpers a caller wires into ``operator_override_fns``.
 
 The adversarial harness is the semantic proof of ``require_hops`` — every chained
@@ -7,9 +10,10 @@ could quietly break: the guard is a ``CASE`` with no ``ELSE``, and a direct rela
 gets no guard at all.
 """
 
-from cerbos_sqlalchemy import require_hops
 from sqlalchemy import Column, Integer, MetaData, String, Table, literal, select
 from sqlalchemy.sql.elements import Case
+
+from cerbos_sqlalchemy import require_hops
 
 _metadata = MetaData()
 resource = Table(

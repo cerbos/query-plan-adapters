@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Adversarial differential conformance harness (cerbos/query-plan-adapters#263).
 
 Every action in the shared repo-level ``conformance/`` corpus is planned against a
@@ -33,7 +36,7 @@ import math
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Set, Union
+from typing import Any
 
 import pytest
 from cerbos.engine.v1 import engine_pb2
@@ -67,18 +70,18 @@ from corpus import (
 )
 from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Value
-
-from cerbos_sqlalchemy import CollectionColumn, get_query
 from sqlalchemy import create_engine, event, insert, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeMeta
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
+from cerbos_sqlalchemy import CollectionColumn, get_query
+
 SEEDS_FILE = read_corpus_json("seeds.json")
 DERIVED_FILE = read_corpus_json("derived-fields.json")
 MANIFEST = parse_actions_file(read_corpus_json("actions.json"))
 
-SEEDS: List[Dict[str, Any]] = SEEDS_FILE["seeds"]
+SEEDS: list[dict[str, Any]] = SEEDS_FILE["seeds"]
 RESOURCE_KIND: str = SEEDS_FILE["resourceKind"]
 
 # -- corpus coverage guards -------------------------------------------------
@@ -139,9 +142,9 @@ PRINCIPAL_ATTR_KEYS = {
 
 def _assert_keys(
     label: str,
-    got: Set[str],
-    want: Set[str],
-    optional: Set[str] = frozenset(),
+    got: set[str],
+    want: set[str],
+    optional: set[str] = frozenset(),
 ) -> None:
     unconsumed = got - want - optional
     if unconsumed:
@@ -194,13 +197,13 @@ for _index, _seed in enumerate(SEEDS):
 
 # SEEDS_FILE["principal"] is the parsed JSON object, handed to the SDK untouched,
 # so its keys are the corpus key set on both levels.
-_PRINCIPAL: Dict[str, Any] = SEEDS_FILE["principal"]
+_PRINCIPAL: dict[str, Any] = SEEDS_FILE["principal"]
 _assert_keys("seeds.json principal", set(_PRINCIPAL), PRINCIPAL_KEYS)
 _assert_keys("seeds.json principal.attr", set(_PRINCIPAL["attr"]), PRINCIPAL_ATTR_KEYS)
 for _attr_key, _attr_value in _PRINCIPAL["attr"].items():
     _assert_principal_attr_shape(f"seeds.json principal.attr.{_attr_key}", _attr_value)
 
-DERIVED: Dict[str, Dict[str, Any]] = DERIVED_FILE["derived"]
+DERIVED: dict[str, dict[str, Any]] = DERIVED_FILE["derived"]
 _assert_keys("derived-fields.json fields", set(DERIVED_FILE["fields"]), DERIVED_KEYS)
 if set(DERIVED) != {seed["id"] for seed in SEEDS}:
     raise AssertionError(
@@ -300,7 +303,7 @@ def _require_declarative_base() -> None:
 
 
 # Legacy model -> its DeclarativeBase twin, mapped onto the same `Table`.
-MODERN_MODELS: Dict[Any, Any] = {}
+MODERN_MODELS: dict[Any, Any] = {}
 try:
     from sqlalchemy.orm import DeclarativeBase
 except ImportError:  # SQLAlchemy 1.4
@@ -356,7 +359,7 @@ def _modern_mapping():
 # empty or total BY CONSTRUCTION, in which case it must be exactly that. A
 # degenerate oracle is one the differential cannot fail against — a PDP that
 # denies everything would otherwise pass every empty-oracle comparison.
-DEGENERATE_ORACLES: Dict[str, str] = MANIFEST.degenerate_oracles
+DEGENERATE_ORACLES: dict[str, str] = MANIFEST.degenerate_oracles
 
 # Shapes this adapter refuses to translate: they have no oracle comparison for
 # the sweep to guard, and stay here as PDP/policy liveness probes for a group the
@@ -429,7 +432,7 @@ DEGENERACY_LIVENESS_PROBES += (
 )
 
 
-def _derived_for(seed: Dict[str, Any]) -> Dict[str, Any]:
+def _derived_for(seed: dict[str, Any]) -> dict[str, Any]:
     entry = DERIVED.get(seed["id"])
     if entry is None:
         raise AssertionError(
@@ -438,26 +441,26 @@ def _derived_for(seed: Dict[str, Any]) -> Dict[str, Any]:
     return entry
 
 
-def _iso_for(seed: Dict[str, Any]) -> str:
+def _iso_for(seed: dict[str, Any]) -> str:
     """Deterministic ISO instant per seed for the timestamp probe (see
     conformance/README.md): split around the probe's 2025-01-01 threshold."""
     return _derived_for(seed)["createdBy"]
 
 
-def _double_for(seed: Dict[str, Any]):
+def _double_for(seed: dict[str, Any]):
     return _derived_for(seed)["aDouble"]
 
 
-def _timestamp_for(seed: Dict[str, Any], field: str = "createdAt"):
+def _timestamp_for(seed: dict[str, Any], field: str = "createdAt"):
     value = _derived_for(seed)[field]
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
-def _scope_for(seed: Dict[str, Any]):
+def _scope_for(seed: dict[str, Any]):
     return _derived_for(seed)["scope"]
 
 
-def _labels_for(seed: Dict[str, Any]):
+def _labels_for(seed: dict[str, Any]):
     return _derived_for(seed)["labels"]
 
 
@@ -470,7 +473,7 @@ def _labels_for(seed: Dict[str, Any]):
 # and a filter that returned the parent instead of the child cannot agree with
 # the oracle by accident.
 
-_SEEDS_BY_ID: Dict[str, Dict[str, Any]] = {seed["id"]: seed for seed in SEEDS}
+_SEEDS_BY_ID: dict[str, dict[str, Any]] = {seed["id"]: seed for seed in SEEDS}
 
 
 def _parent_seed_of(seed):
@@ -485,9 +488,9 @@ def _parent_seed_of(seed):
     return parent
 
 
-def _relation_attr(seed: Dict[str, Any]) -> Dict[str, Any]:
+def _relation_attr(seed: dict[str, Any]) -> dict[str, Any]:
     """The four scalars as check() attributes: a NULL column is MISSING, one hop out."""
-    attr: Dict[str, Any] = {
+    attr: dict[str, Any] = {
         "aBool": seed["aBool"],
         "aString": seed["aString"],
         "aNumber": seed["aNumber"],
@@ -739,10 +742,10 @@ def adv_async_url(tmp_path_factory):
     return f"sqlite+aiosqlite:///{path}"
 
 
-def _async_filtered_ids(url: str, query) -> Set[str]:
+def _async_filtered_ids(url: str, query) -> set[str]:
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-    async def run() -> Set[str]:
+    async def run() -> set[str]:
         engine = create_async_engine(url)
 
         @event.listens_for(engine.sync_engine, "connect")
@@ -795,22 +798,22 @@ def _plan(client, action: str):
     return client.plan_resources(action, _principal(), ResourceDesc(RESOURCE_KIND))
 
 
-def _tag_attr(tag: Dict[str, Any]) -> Dict[str, Any]:
+def _tag_attr(tag: dict[str, Any]) -> dict[str, Any]:
     """A NULL tag name in the DB is a MISSING element attribute on the check side."""
-    attr: Dict[str, Any] = {"id": tag["id"]}
+    attr: dict[str, Any] = {"id": tag["id"]}
     if tag["name"] is not None:
         attr["name"] = tag["name"]
     return attr
 
 
-def _label_attr(name: Any) -> Dict[str, Any]:
+def _label_attr(name: Any) -> dict[str, Any]:
     """A NULL label name in the DB is a MISSING element attribute."""
     return {"name": name} if name is not None else {}
 
 
-def _check_resource(seed: Dict[str, Any]) -> Resource:
+def _check_resource(seed: dict[str, Any]) -> Resource:
     """Cerbos attributes mirroring exactly what the seeded DB row holds."""
-    attr: Dict[str, Any] = {
+    attr: dict[str, Any] = {
         "aBool": seed["aBool"],
         "aString": seed["aString"],
         "aNumber": seed["aNumber"],
@@ -880,10 +883,10 @@ def _check_resource(seed: Dict[str, Any]) -> Resource:
 # One PDP per module and one principal, so an action's decisions cannot change between
 # calls: memoizing them is what lets every leg compare every action for the price of a
 # plan and a query rather than a check() per seed row.
-_ORACLE_CACHE: Dict[str, Set[str]] = {}
+_ORACLE_CACHE: dict[str, set[str]] = {}
 
 
-def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
+def _oracle_allowed_ids(client: CerbosClient, action: str) -> set[str]:
     if action not in _ORACLE_CACHE:
         _ORACLE_CACHE[action] = {
             seed["id"]
@@ -893,7 +896,7 @@ def _oracle_allowed_ids(client: CerbosClient, action: str) -> Set[str]:
     return set(_ORACLE_CACHE[action])
 
 
-def _assert_oracle_shape(action: str, oracle: Set[str]) -> None:
+def _assert_oracle_shape(action: str, oracle: set[str]) -> None:
     """The sweep: a compared action's oracle must be able to fail the differential.
 
     Runs on the oracle the comparison already computed, so it costs no PDP round trip.
@@ -952,7 +955,7 @@ def _adapter_filtered_ids(
     collection_columns=COLLECTION_COLUMNS,
     table=AdvResource,
     attr_map=ATTR_MAP,
-) -> Set[str]:
+) -> set[str]:
     plan = _plan(client, action)
     query = get_query(
         plan,
@@ -1408,7 +1411,7 @@ class TestAdversarialConformance:
         )
         stored = {row.id: (row.parent, row.inner) for row in adv_conn.execute(joined)}
 
-        def a_string_of(seed) -> Union[str, None]:
+        def a_string_of(seed) -> str | None:
             return None if seed is None else seed["aString"]
 
         assert stored == {

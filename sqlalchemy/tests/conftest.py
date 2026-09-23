@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Fixtures for the offline suites: a throwaway in-memory schema, in both model styles.
 
 No PDP is started anywhere in this file. It used to start one per module, over two
@@ -13,7 +16,6 @@ pinned and loaded with ``conformance/policies/``
 from importlib.metadata import version
 
 import pytest
-
 from sqlalchemy import (
     Boolean,
     Column,

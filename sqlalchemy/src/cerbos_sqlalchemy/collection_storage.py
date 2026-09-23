@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Declared collection storage: CEL ``size()``, constant indexing and literal membership.
 
 A collection attribute has no portable translation until the caller says how it is stored. The
@@ -35,8 +38,6 @@ on; any other dialect raises ``CompileError`` rather than guessing. Every piece 
 a construct's clause arguments, never in a Python attribute, which is what makes
 ``inherit_cache = True`` safe: the statement cache keys on exactly what the SQL depends on.
 """
-
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass

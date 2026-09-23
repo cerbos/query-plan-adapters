@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The default lowering of every plan operator the adapter translates without help.
 
 ``OPERATOR_FNS`` at the bottom is the registry, and the operator tables beside it say how the
@@ -6,14 +9,13 @@ alone: a handler, a registry entry, and -- if it takes one operand, or its opera
 swapped -- an entry in the matching table.
 """
 
-from __future__ import annotations
-
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Any, Callable, Dict, NoReturn, Tuple
+from typing import Any, NoReturn
 
 from sqlalchemy import (
     ARRAY,
@@ -471,8 +473,7 @@ def _parse_rfc3339(value: str) -> datetime:
     digits = match.group(4) or ""
     if len(digits) > 6 and any(d != "0" for d in digits[6:]):
         raise ValueError(
-            "Timestamp literal precision exceeds the exact microsecond range: "
-            f"{value}"
+            f"Timestamp literal precision exceeds the exact microsecond range: {value}"
         )
     try:
         normalized = _EXCESS_RFC3339_PRECISION.sub(r"\1", value)
@@ -520,7 +521,7 @@ def _hierarchy(value: Any, delimiter: Any) -> Hierarchy:
     return Hierarchy(value, delimiter)
 
 
-def _matching_hierarchies(left: Any, right: Any) -> Tuple[Hierarchy, Hierarchy]:
+def _matching_hierarchies(left: Any, right: Any) -> tuple[Hierarchy, Hierarchy]:
     if not isinstance(left, Hierarchy) or not isinstance(right, Hierarchy):
         raise ValueError("Hierarchy operator requires hierarchy() operands")
     if left.delimiter != right.delimiter:
@@ -622,7 +623,7 @@ UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp
 #: Directional operators mirror when their operands swap sides; symmetric operators are
 #: unchanged. The planner preserves policy source order, so `1 < R.attr.x` arrives as
 #: lt(value(1), variable(x)) and must translate as `x > 1`, not `x < 1` (#257).
-MIRRORED_OPERATORS: Dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": "le"}
+MIRRORED_OPERATORS: dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": "le"}
 
 #: Operators whose semantics don't depend on which operand holds the column:
 #: `eq`/`ne` are symmetric, value-first `in` (`value in R.attr.list`) still

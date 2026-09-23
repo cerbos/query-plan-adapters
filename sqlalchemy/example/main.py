@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Example application for ``cerbos-sqlalchemy``, run against the shared demo domain.
 
 This is NOT a test of what the adapter translates -- ``../tests/test_adversarial_conformance.py``
@@ -22,15 +25,15 @@ Prints one JSON document to stdout; everything a human might want to read goes t
 import json
 import os
 import sys
-from typing import Any, Dict, List, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.grpc.client import CerbosClient
-
-from cerbos_sqlalchemy import get_query
 from sqlalchemy import Boolean, Engine, Select, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+
+from cerbos_sqlalchemy import get_query
 
 ADAPTER = "sqlalchemy"
 RESOURCE_KIND = "document"
@@ -68,7 +71,7 @@ class Document(Base):
 
 class SeedPrincipal(TypedDict):
     id: str
-    roles: List[str]
+    roles: list[str]
 
 
 class SeedApplicationFilter(TypedDict):
@@ -88,9 +91,9 @@ class SeedDocument(TypedDict):
 
 
 class Seeds(TypedDict):
-    principals: List[SeedPrincipal]
+    principals: list[SeedPrincipal]
     applicationFilter: SeedApplicationFilter
-    documents: List[SeedDocument]
+    documents: list[SeedDocument]
 
 
 def read_seeds() -> Seeds:
@@ -178,7 +181,7 @@ class Shapes:
         self._client = client
         self._engine = engine
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Every shape, keyed the way ``demo/expected.json`` keys them."""
         return {
             "filtered": {
@@ -205,7 +208,7 @@ class Shapes:
 
     # -- the five usage shapes --
 
-    def filtered(self, principal_id: str, action: str) -> Dict[str, Any]:
+    def filtered(self, principal_id: str, action: str) -> dict[str, Any]:
         """Shapes 1, 2 and 3: a plain filtered list. The adapter's ``Select`` is the whole query."""
         plan = self._plan(principal_id, action)
         return {
@@ -215,7 +218,7 @@ class Shapes:
 
     def paginated(
         self, principal_id: str, action: str, page_size: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Shape 4: ``.limit()``/``.offset()`` applied on top of the adapter's ``Select``.
 
         Reported as page SIZES plus the sorted union of the ids, never as per-page order:
@@ -227,8 +230,8 @@ class Shapes:
         plan = self._plan(principal_id, action)
         query = get_query(plan, Document, ATTR_MAP).order_by(Document.id)
 
-        page_sizes: List[int] = []
-        ids: List[str] = []
+        page_sizes: list[int] = []
+        ids: list[str] = []
         offset = 0
         while True:
             page = self._ids(query.limit(page_size).offset(offset))
@@ -247,7 +250,7 @@ class Shapes:
             "ids": sorted(ids),
         }
 
-    def composed(self, principal_id: str, action: str) -> Dict[str, Any]:
+    def composed(self, principal_id: str, action: str) -> dict[str, Any]:
         """Shape 5: the adapter's ``Select`` ANDed with the application's own predicate.
 
         Ordinary ``.where()`` chaining -- SQLAlchemy conjoins the criteria a ``Select`` already
@@ -283,7 +286,7 @@ class Shapes:
             engine_pb2.PlanResourcesInput.Resource(kind=RESOURCE_KIND),
         )
 
-    def _ids(self, query: Select[Any]) -> List[str]:
+    def _ids(self, query: Select[Any]) -> list[str]:
         """Run one query in its own session, the way a request-scoped application would.
 
         Sorted, because ``demo/expected.json`` is: a SELECT with no ORDER BY has no defined row

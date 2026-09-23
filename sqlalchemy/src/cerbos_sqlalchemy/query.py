@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """``get_query``: the public entry point, its types, and the validation of its arguments.
 
 The translation itself lives in private modules: ``_plan`` decodes the wire, ``_operators``
@@ -5,27 +8,22 @@ holds every default operator lowering, ``_null_conventions`` the NULL-column con
 ``_translator`` walks the condition tree.
 """
 
-from __future__ import annotations
-
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    FrozenSet,
-    List,
-    Protocol,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-    overload,
-)
+from collections.abc import Callable
+from typing import Any, ClassVar, Protocol, TypeVar, overload
 
 from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesFilterKind, PlanResourcesResponse
 from google.protobuf.json_format import MessageToDict
+from sqlalchemy import Column, Table, select
+from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
+from sqlalchemy.sql import Select
+from sqlalchemy.sql.expression import (
+    BinaryExpression,
+    ColumnElement,
+    ColumnOperators,
+    FromClause,
+)
 
 from cerbos_sqlalchemy._null_conventions import (
     NullAttributeRepresentation,
@@ -49,15 +47,6 @@ from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - historically 
     collection_size,
     indexed_equality,
     require_index_position,
-)
-from sqlalchemy import Column, Table, select
-from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
-from sqlalchemy.sql import Select
-from sqlalchemy.sql.expression import (
-    BinaryExpression,
-    ColumnElement,
-    ColumnOperators,
-    FromClause,
 )
 
 try:  # SQLAlchemy >= 2.0
@@ -84,10 +73,10 @@ _ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 
 # A 2.0-style model's metaclass (`DeclarativeAttributeIntercept`) is *not* a
 # `DeclarativeMeta`, so the legacy member alone does not admit it.
-GenericTable = Union[Table, DeclarativeMeta, Type[DeclarativeBase]]
-GenericColumn = Union[Column, InstrumentedAttribute]
-GenericExpression = Union[BinaryExpression, ColumnOperators]
-OperatorFnMap = Dict[str, Callable[[GenericColumn, Any], GenericExpression]]
+GenericTable = Table | DeclarativeMeta | type[DeclarativeBase]
+GenericColumn = Column | InstrumentedAttribute
+GenericExpression = BinaryExpression | ColumnOperators
+OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
 # We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
 _DENY_KINDS = frozenset(
@@ -108,8 +97,8 @@ _UNOVERRIDABLE_OPERATORS = frozenset({"and", "or", "not", "if"})
 
 
 def _validate_collection_columns(
-    collection_columns: Union[Dict[str, CollectionColumn], None],
-) -> Dict[str, CollectionColumn]:
+    collection_columns: dict[str, CollectionColumn] | None,
+) -> dict[str, CollectionColumn]:
     declared_collections = dict(collection_columns or {})
     for attribute, declared in declared_collections.items():
         if not isinstance(declared, CollectionColumn):
@@ -121,7 +110,7 @@ def _validate_collection_columns(
 
 
 def _plan_condition(
-    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,
 ) -> Operand:
     return parse_operand(
         MessageToDict(query_plan.filter.condition)
@@ -141,10 +130,10 @@ def _table_name(t: GenericTable) -> str:
 
 def _variables_outside_overrides(
     operand: Operand,
-    override_operators: FrozenSet[str],
-    declared: FrozenSet[str],
+    override_operators: frozenset[str],
+    declared: frozenset[str],
     override_owned: bool = False,
-) -> FrozenSet[str]:
+) -> frozenset[str]:
     """Find variables that still require an ordinary table mapping.
 
     An override owns its complete operand subtree: it may turn foreign columns
@@ -169,7 +158,7 @@ def _variables_outside_overrides(
     children = operand.operands
     if declared_collection_name(operand, declared) is not None:
         children = children[1:]
-    variables: FrozenSet[str] = frozenset()
+    variables: frozenset[str] = frozenset()
     for child in children:
         variables |= _variables_outside_overrides(
             child, override_operators, declared, owns_children
@@ -179,11 +168,11 @@ def _variables_outside_overrides(
 
 def _require_table_mapping(
     table: GenericTable,
-    attr_map: Dict[str, GenericColumn],
-    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None],
-    overrides: Union[Dict[str, Any], None],
+    attr_map: dict[str, GenericColumn],
+    table_mapping: list[tuple[GenericTable, GenericExpression]] | None,
+    overrides: dict[str, Any] | None,
     condition: Operand,
-    declared_collections: Dict[str, CollectionColumn],
+    declared_collections: dict[str, CollectionColumn],
 ) -> None:
     """Refuse a column on a table that is neither the queried one nor joined in.
 
@@ -241,7 +230,7 @@ def _require_table_mapping(
     required_tables -= {_table_name(mapped_table) for mapped_table, _ in table_mapping}
     if required_tables:
         raise TypeError(
-            "positional argument 'table_mapping' missing mapping for table(s): '{0}'".format(
+            "positional argument 'table_mapping' missing mapping for table(s): '{}'".format(
                 "', '".join(sorted(required_tables))
             )
         )
@@ -249,20 +238,18 @@ def _require_table_mapping(
 
 # An ORM model class carries its row type; a Core `Table` does not. Overloading on
 # that distinction lets callers infer the model rather than annotate the result.
+# The `Select[...]` return types are quoted: `Select` is not subscriptable on early 1.4 releases.
 @overload
 def get_query(
-    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
-    table: Type[_ORMModel],
-    attr_map: Dict[str, GenericColumn],
-    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
-    operator_override_fns: Union[OperatorFnMap, None] = ...,
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    table: type[_ORMModel],
+    attr_map: dict[str, GenericColumn],
+    table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
+    operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
-    attribute_null_representation: Union[
-        Dict[str, NullAttributeRepresentation], None
-    ] = ...,
-    collection_columns: Union[Dict[str, CollectionColumn], None] = ...,
-) -> Select[Tuple[_ORMModel]]:
-    ...
+    attribute_null_representation: dict[str, NullAttributeRepresentation] | None = ...,
+    collection_columns: dict[str, CollectionColumn] | None = ...,
+) -> "Select[tuple[_ORMModel]]": ...
 
 
 # Everything else `GenericTable` admits — a Core `Table`, and a legacy model
@@ -271,32 +258,27 @@ def get_query(
 # overloads would be narrower than the union they replaced.
 @overload
 def get_query(
-    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: Dict[str, GenericColumn],
-    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = ...,
-    operator_override_fns: Union[OperatorFnMap, None] = ...,
+    attr_map: dict[str, GenericColumn],
+    table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
+    operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
-    attribute_null_representation: Union[
-        Dict[str, NullAttributeRepresentation], None
-    ] = ...,
-    collection_columns: Union[Dict[str, CollectionColumn], None] = ...,
-) -> Select[Any]:
-    ...
+    attribute_null_representation: dict[str, NullAttributeRepresentation] | None = ...,
+    collection_columns: dict[str, CollectionColumn] | None = ...,
+) -> "Select[Any]": ...
 
 
 def get_query(
-    query_plan: Union[PlanResourcesResponse, response_pb2.PlanResourcesResponse],  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
+    query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: Dict[str, GenericColumn],
-    table_mapping: Union[List[Tuple[GenericTable, GenericExpression]], None] = None,
-    operator_override_fns: Union[OperatorFnMap, None] = None,
+    attr_map: dict[str, GenericColumn],
+    table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
+    operator_override_fns: OperatorFnMap | None = None,
     null_attribute_representation: NullAttributeRepresentation = "explicit",
-    attribute_null_representation: Union[
-        Dict[str, NullAttributeRepresentation], None
-    ] = None,
-    collection_columns: Union[Dict[str, CollectionColumn], None] = None,
-) -> Select[Any]:
+    attribute_null_representation: dict[str, NullAttributeRepresentation] | None = None,
+    collection_columns: dict[str, CollectionColumn] | None = None,
+) -> "Select[Any]":
     """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
 
     ``null_attribute_representation`` declares how the caller represents a NULL

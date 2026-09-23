@@ -1,13 +1,14 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The plan's condition tree: decoding it from the wire, and the queries asked of its shape.
 
 Both SDK clients' spellings are normalised here, once, into three node types, so nothing
 downstream has to know which transport a plan came through.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Any, FrozenSet, Tuple, Union
+from typing import Any
 
 _INT64_MAX = 2**63 - 1
 _INT64_MIN = -(2**63)
@@ -35,10 +36,10 @@ class Variable:
 @dataclass(frozen=True)
 class Expr:
     operator: str
-    operands: Tuple[Operand, ...]
+    operands: tuple["Operand", ...]
 
 
-Operand = Union[Value, Variable, Expr]
+Operand = Value | Variable | Expr
 
 
 def _widen_integral_literals(node: Any) -> Any:
@@ -138,9 +139,7 @@ def substitute_lambda_variable(
     )
 
 
-def declared_collection_name(
-    expression: Expr, declared: FrozenSet[str]
-) -> Union[str, None]:
+def declared_collection_name(expression: Expr, declared: frozenset[str]) -> str | None:
     """The attribute ``expression`` reads through its declared storage, if it reads one."""
     if expression.operator not in COLLECTION_STORAGE_OPERATORS:
         return None

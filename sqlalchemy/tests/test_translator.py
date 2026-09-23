@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Translator unit test: for every action in the shared ``../conformance/`` corpus, the SQL
 this adapter emits. Offline — no Cerbos sidecar, no container, no database.
 
@@ -54,6 +57,7 @@ import math
 import os
 import re
 from datetime import datetime, timezone
+from typing import ClassVar
 
 import pytest
 from corpus import (
@@ -87,10 +91,10 @@ from corpus import (
     wire_fixture_actions,
     write_golden_expectations,
 )
-
-from cerbos_sqlalchemy import CollectionColumn, get_query
 from sqlalchemy import any_, exists, literal, select
 from sqlalchemy.exc import CompileError
+
+from cerbos_sqlalchemy import CollectionColumn, get_query
 
 ACTIONS_FILE = parse_actions_file(read_corpus_json("actions.json"))
 
@@ -755,13 +759,17 @@ class TestDeclaredCollectionStorage:
             ),
             (
                 "index-scalar-list",
-                "(to_jsonb(adversarial_resource.tag_names_array) -> 0) "
-                "= to_jsonb(CAST(%(param_1)s AS TEXT))",
+                (
+                    "(to_jsonb(adversarial_resource.tag_names_array) -> 0) "
+                    "= to_jsonb(CAST(%(param_1)s AS TEXT))"
+                ),
             ),
             (
                 "index-scalar-list-null",
-                "jsonb_typeof((to_jsonb(adversarial_resource.tag_names_array) -> 0)) "
-                "= 'null'",
+                (
+                    "jsonb_typeof((to_jsonb(adversarial_resource.tag_names_array) -> 0)) "
+                    "= 'null'"
+                ),
             ),
         ],
     )
@@ -938,7 +946,7 @@ class TestTransportDecoding:
     """
 
     #: Every corpus action whose translation the two decodings agree on completely.
-    AGREEING = [
+    AGREEING: ClassVar[list[str]] = [
         action
         for action in wire_fixture_actions()
         if action not in {"cr-div-neg-zero", "nan-ord-inf"}

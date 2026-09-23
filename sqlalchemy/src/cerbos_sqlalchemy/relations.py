@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Helpers for the parts of a mapping this adapter cannot own.
 
 ``get_query`` has no relation model. A collection-valued attribute reaches its rows
@@ -12,9 +15,8 @@ the same way. This module holds that part.
 See "Mapping hazards" in the README, and ``conformance/README.md``.
 """
 
-from __future__ import annotations
-
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import case, exists, literal, select
 

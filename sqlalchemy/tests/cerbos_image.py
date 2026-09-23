@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The pinned Cerbos PDP image, defined once for every suite in this harness.
 
 Both the unit suite (``conftest.py``) and the adversarial conformance suite start their own PDP

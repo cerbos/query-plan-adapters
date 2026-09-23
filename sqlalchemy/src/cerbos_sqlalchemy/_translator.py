@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The walk from a parsed plan condition to a SQLAlchemy boolean expression.
 
 ``get_query`` validates its arguments and hands the condition to ``Translator``. Two mutually
@@ -7,9 +10,12 @@ module decides only which operands each operator is handed, in which order, and 
 caller's override, a declared collection or a NULL convention takes precedence.
 """
 
-from __future__ import annotations
+from collections.abc import Callable
+from typing import Any, NoReturn
 
-from typing import Any, Callable, Dict, NoReturn, Tuple, Union
+from sqlalchemy import DateTime, and_, case, false, not_, or_, true
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql.expression import ColumnElement
 
 from cerbos_sqlalchemy._null_conventions import (
     EQUALITY_FAMILY,
@@ -45,9 +51,6 @@ from cerbos_sqlalchemy.collection_storage import (
     indexed_equality,
     require_index_position,
 )
-from sqlalchemy import DateTime, and_, case, false, not_, or_, true
-from sqlalchemy.orm import InstrumentedAttribute
-from sqlalchemy.sql.expression import ColumnElement
 
 _BOOLEAN_OPERATORS = frozenset({"and", "or", "not"})
 _MEMBERSHIP_OPERATORS = frozenset({"in", "hasIntersection"})
@@ -88,10 +91,10 @@ def require_boolean(translated: Any, position: str) -> Any:
 class Translator:
     def __init__(
         self,
-        attr_map: Dict[str, Any],
-        overrides: Dict[str, Callable[[Any, Any], Any]],
-        null_conventions: Dict[str, NullAttributeRepresentation],
-        declared_collections: Dict[str, CollectionColumn],
+        attr_map: dict[str, Any],
+        overrides: dict[str, Callable[[Any, Any], Any]],
+        null_conventions: dict[str, NullAttributeRepresentation],
+        declared_collections: dict[str, CollectionColumn],
     ) -> None:
         self._attr_map = attr_map
         # Never None, and never holding a None entry: `get_query` drops those, so an
@@ -190,7 +193,7 @@ class Translator:
         return or_(*predicates) if operator == "exists" else and_(*predicates)
 
     def _try_fold_value_list_macro(
-        self, operator: str, operands: Tuple[Operand, ...]
+        self, operator: str, operands: tuple[Operand, ...]
     ) -> Any:
         """Return the folded predicate for a value-list macro, else None.
 
@@ -206,14 +209,12 @@ class Translator:
 
     # -- declared collection storage -------------------------------------------------------
 
-    def _declared_collection(self, expression: Expr) -> Union[CollectionColumn, None]:
+    def _declared_collection(self, expression: Expr) -> CollectionColumn | None:
         """The declared storage ``expression`` reads, when it is ``size``/``index`` of one."""
         name = declared_collection_name(expression, self._declared_names)
         return None if name is None else self._declared_collections[name]
 
-    def _declared_index(
-        self, operand: Operand
-    ) -> Union[Tuple[CollectionColumn, int], None]:
+    def _declared_index(self, operand: Operand) -> tuple[CollectionColumn, int] | None:
         """``(storage, position)`` when ``operand`` indexes a declared collection, else None."""
         if not isinstance(operand, Expr) or operand.operator != "index":
             return None
@@ -226,10 +227,10 @@ class Translator:
             require_index_position(None)
         return declared, require_index_position(operand.operands[1].value)
 
-    def _reads_declared_index(self, operands: Tuple[Operand, ...]) -> bool:
+    def _reads_declared_index(self, operands: tuple[Operand, ...]) -> bool:
         return any(self._declared_index(child) is not None for child in operands)
 
-    def _indexed_comparison(self, operator: str, operands: Tuple[Operand, ...]) -> Any:
+    def _indexed_comparison(self, operator: str, operands: tuple[Operand, ...]) -> Any:
         """``collection[i] == literal`` or ``!=``: the only comparisons an element supports.
 
         Anything else over an element is refused. An ordering, a membership or a nested value
@@ -268,9 +269,7 @@ class Translator:
             raise ValueError(f"size takes 1 operand, got {len(expression.operands)}")
         return collection_size(declared)
 
-    def _storage_only_collection(
-        self, operand: Operand
-    ) -> Union[CollectionColumn, None]:
+    def _storage_only_collection(self, operand: Operand) -> CollectionColumn | None:
         """The declared storage of an attribute ``attr_map`` does not map, else None.
 
         Membership reads a declaration only for such an attribute. One ``attr_map`` also maps
@@ -285,7 +284,7 @@ class Translator:
             return self._declared_collections[operand.name]
         return None
 
-    def _declared_membership(self, operator: str, operands: Tuple[Operand, ...]) -> Any:
+    def _declared_membership(self, operator: str, operands: tuple[Operand, ...]) -> Any:
         """``literal in collection`` or ``hasIntersection`` over a declared collection, else None.
 
         Only a scalar literal element, or a literal list of them, is translated: an element that
@@ -298,7 +297,7 @@ class Translator:
         if not any(found is not None for found in declared):
             return None
         if operator == "in":
-            needle, collection = operands
+            needle, _ = operands
             if declared[1] is None or not isinstance(needle, Value):
                 raise ValueError(MEMBERSHIP_REFUSAL)
             if isinstance(needle.value, (list, dict)):
@@ -314,7 +313,7 @@ class Translator:
         return collection_membership(declared[position], values.value)
 
     @staticmethod
-    def _refuse_undeclared_index(collection: Union[Operand, None]) -> NoReturn:
+    def _refuse_undeclared_index(collection: Operand | None) -> NoReturn:
         if isinstance(collection, Variable):
             raise ValueError(
                 f"Index storage shape is undeclared for '{collection.name}': declare it "
@@ -328,7 +327,7 @@ class Translator:
 
     # -- value positions -------------------------------------------------------------------
 
-    def _ternary(self, operands: Tuple[Operand, ...]) -> Any:
+    def _ternary(self, operands: tuple[Operand, ...]) -> Any:
         """``if(cond, then, else)``; the condition may be an expression or a bare leaf.
 
         Three-valued logic: when the condition is UNKNOWN (e.g. a NULL column), CEL raises
@@ -346,7 +345,7 @@ class Translator:
             return ConditionalValue(condition, then_value, else_value)
         return case((condition, then_value), (not_(condition), else_value))
 
-    def _binary_value(self, operator: str, operands: Tuple[Operand, ...]) -> Any:
+    def _binary_value(self, operator: str, operands: tuple[Operand, ...]) -> Any:
         """add/sub/mult/div/mod, plus any caller override, over two resolved operands.
 
         Operands are passed in wire (source) order, which is significant for
@@ -585,5 +584,5 @@ class Translator:
         )
 
 
-def _all_leaves(operands: Tuple[Operand, ...]) -> bool:
+def _all_leaves(operands: tuple[Operand, ...]) -> bool:
     return all(isinstance(operand, (Variable, Value)) for operand in operands)

@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Caller-option and malformed-plan contracts for ``get_query``.
 
 Hand-built plans here isolate inputs a policy cannot vary, such as operator overrides
@@ -14,10 +17,10 @@ from cerbos.sdk.model import (
     PlanResourcesFilterKind,
     PlanResourcesResponse,
 )
-
-from cerbos_sqlalchemy import get_query
 from sqlalchemy import Boolean, DateTime, String, column, create_engine, literal, table
 from sqlalchemy.dialects import postgresql
+
+from cerbos_sqlalchemy import get_query
 
 
 def _default_resp_params():
@@ -762,8 +765,7 @@ class TestGetQueryOverrides:
             operator_override_fns={
                 # The override deliberately consumes the foreign marker and
                 # rewrites it to a predicate on the root table.
-                "eq": lambda _column, value: resource_table.ownedBy
-                == str(value)
+                "eq": lambda _column, value: resource_table.ownedBy == str(value)
             },
         )
 
@@ -824,7 +826,7 @@ class TestGetQueryOverrides:
         query = get_query(plan_resource_resp, resource_table, attr)
         res = conn.execute(query).fetchall()
         assert len(res) == 2
-        assert all(map(lambda x: x.name in {"resource1", "resource2"}, res))
+        assert all(x.name in {"resource1", "resource2"} for x in res)
 
     def test_unrecognised_response_attribute(self, resource_table):
         unknown_attribute = "request.resource.attr.foo"

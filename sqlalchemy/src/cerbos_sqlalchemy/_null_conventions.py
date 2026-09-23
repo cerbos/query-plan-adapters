@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """How a caller represents a NULL column, and what that does to a comparison.
 
 The planner emits the same ``eq(attr, null)`` node whichever convention the caller uses, so
@@ -5,13 +8,12 @@ The planner emits the same ``eq(attr, null)`` node whichever convention the call
 attribute (``attribute_null_representation``). See cerbos/query-plan-adapters#302 and #308.
 """
 
-from __future__ import annotations
+from typing import Any, Literal
 
-from typing import Any, Dict, Literal, Tuple, Union
+from sqlalchemy import and_, case, literal, not_, or_
 
 from cerbos_sqlalchemy._operators import scalar_kind
 from cerbos_sqlalchemy._plan import Expr, Operand, Value, Variable
-from sqlalchemy import and_, case, literal, not_, or_
 
 # How the caller represents a NULL column when building the attributes it sends
 # to check(). See get_query() and
@@ -29,9 +31,9 @@ EQUALITY_FAMILY = frozenset({"eq", "ne", "in"})
 
 def validate_representations(
     null_attribute_representation: Any,
-    attribute_null_representation: Union[Dict[str, Any], None],
-    attr_map: Dict[str, Any],
-) -> Dict[str, NullAttributeRepresentation]:
+    attribute_null_representation: dict[str, Any] | None,
+    attr_map: dict[str, Any],
+) -> dict[str, NullAttributeRepresentation]:
     """Check both options and return the per-attribute declarations (empty when absent)."""
     if null_attribute_representation not in _REPRESENTATIONS:
         raise ValueError(
@@ -62,7 +64,7 @@ def _carries_null_operand(operand: Operand) -> bool:
     return isinstance(value, list) and any(member is None for member in value)
 
 
-def _compared_attribute_and_literal(node: Operand) -> Union[Tuple[str, Value], None]:
+def _compared_attribute_and_literal(node: Operand) -> tuple[str, Value] | None:
     """Destructure a binary comparison between a plan variable and a literal.
 
     Returns ``(variable_name, literal_operand)`` in either operand order, or
@@ -94,7 +96,7 @@ def _null_operand_error(operator: str) -> ValueError:
 
 def assert_no_null_comparison_operands(
     node: Operand,
-    declarations: Dict[str, NullAttributeRepresentation],
+    declarations: dict[str, NullAttributeRepresentation],
     fallback: str,
 ) -> None:
     """Reject every null literal operand under the ``omitted`` representation.

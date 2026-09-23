@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The parts of the shared ``../conformance/`` corpus both of this adapter's suites read.
 
 ``test_adversarial_conformance.py`` plans against a real PDP and executes the translated
@@ -29,17 +32,15 @@ Test-only: it lives under ``tests/`` and never reaches the published package.
 import json
 import math
 import os
+from collections.abc import Sequence
 from datetime import datetime
 from importlib.metadata import version as sqlalchemy_version
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+from typing import Any
 
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesResponse
 from cerbos_image import CONFORMANCE_DIR
 from google.protobuf.json_format import ParseDict
-
-from cerbos_sqlalchemy import CollectionColumn, require_hops
-from cerbos_sqlalchemy.query import OPERATOR_FNS
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -63,6 +64,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base
+
+from cerbos_sqlalchemy import CollectionColumn, require_hops
+from cerbos_sqlalchemy.query import OPERATOR_FNS
 
 ADAPTER = "sqlalchemy"
 
@@ -109,29 +113,29 @@ def read_corpus_json(name: str) -> Any:
 class ActionsFile:
     """``conformance/actions.json``, read group by group rather than duck-typed."""
 
-    def __init__(self, raw: Dict[str, Any]) -> None:
-        self.adapters: List[str] = _require_list(raw, "adapters")
-        self.conformance: List[str] = _require_list(raw, "conformance")
-        self.adapter_unsupported: Dict[str, List[Dict[str, Any]]] = _require_dict(
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.adapters: list[str] = _require_list(raw, "adapters")
+        self.conformance: list[str] = _require_list(raw, "conformance")
+        self.adapter_unsupported: dict[str, list[dict[str, Any]]] = _require_dict(
             raw, "adapterUnsupported"
         )
-        self.adapter_supported_expected: Dict[
-            str, List[Dict[str, Any]]
-        ] = _require_dict(raw, "adapterSupportedExpected")
-        self.expected_unsupported: List[Dict[str, Any]] = _require_list(
+        self.adapter_supported_expected: dict[str, list[dict[str, Any]]] = (
+            _require_dict(raw, "adapterSupportedExpected")
+        )
+        self.expected_unsupported: list[dict[str, Any]] = _require_list(
             raw, "expectedUnsupported"
         )
-        self.null_representation_omitted: List[Dict[str, Any]] = _require_list(
+        self.null_representation_omitted: list[dict[str, Any]] = _require_list(
             raw, "nullRepresentationOmitted"
         )
-        self.known_divergences: List[Dict[str, Any]] = _require_list(
+        self.known_divergences: list[dict[str, Any]] = _require_list(
             raw, "knownDivergences"
         )
-        self.degenerate_oracles: Dict[str, str] = _degenerate_oracles(
+        self.degenerate_oracles: dict[str, str] = _degenerate_oracles(
             _require_list(raw, "degenerateOracles")
         )
 
-    def manifest_actions(self) -> Set[str]:
+    def manifest_actions(self) -> set[str]:
         """Every action the corpus classifies, across every group."""
         return (
             set(self.conformance)
@@ -140,7 +144,7 @@ class ActionsFile:
             | {entry["action"] for entry in self.known_divergences}
         )
 
-    def skipped_divergences(self, adapter: str) -> Set[str]:
+    def skipped_divergences(self, adapter: str) -> set[str]:
         return {
             entry["action"]
             for entry in self.known_divergences
@@ -148,14 +152,14 @@ class ActionsFile:
         }
 
 
-def _require_list(raw: Dict[str, Any], key: str) -> List[Any]:
+def _require_list(raw: dict[str, Any], key: str) -> list[Any]:
     value = raw.get(key)
     if not isinstance(value, list):
         raise AssertionError(f"actions.json {key} must be an array")
     return value
 
 
-def _require_dict(raw: Dict[str, Any], key: str) -> Dict[str, Any]:
+def _require_dict(raw: dict[str, Any], key: str) -> dict[str, Any]:
     value = raw.get(key)
     if not isinstance(value, dict):
         raise AssertionError(f"actions.json {key} must be an object")
@@ -165,7 +169,7 @@ def _require_dict(raw: Dict[str, Any], key: str) -> Dict[str, Any]:
 DEGENERATE_ORACLE_SHAPES = ("empty", "total")
 
 
-def _degenerate_oracles(entries: List[Any]) -> Dict[str, str]:
+def _degenerate_oracles(entries: list[Any]) -> dict[str, str]:
     """``degenerateOracles`` as ``action -> "empty" | "total"``.
 
     The corpus-level allowlist of actions whose check() oracle is empty or total BY
@@ -173,7 +177,7 @@ def _degenerate_oracles(entries: List[Any]) -> Dict[str, str]:
     which the harness sweeps; a shape outside the two values would silently exempt an
     action from that sweep, so it is a loud failure here instead.
     """
-    oracles: Dict[str, str] = {}
+    oracles: dict[str, str] = {}
     for index, entry in enumerate(entries):
         label = f"actions.json degenerateOracles[{index}]"
         if not isinstance(entry, dict) or not isinstance(entry.get("action"), str):
@@ -189,7 +193,7 @@ def _degenerate_oracles(entries: List[Any]) -> Dict[str, str]:
     return oracles
 
 
-def parse_actions_file(raw: Dict[str, Any]) -> ActionsFile:
+def parse_actions_file(raw: dict[str, Any]) -> ActionsFile:
     return ActionsFile(raw)
 
 
@@ -218,9 +222,9 @@ class Classification:
 
     def __init__(
         self,
-        oracle_actions: List[str],
-        throwing_actions: List[Tuple[str, str]],
-        supported_expected: Set[str],
+        oracle_actions: list[str],
+        throwing_actions: list[tuple[str, str]],
+        supported_expected: set[str],
     ) -> None:
         self.oracle_actions = oracle_actions
         #: ``(action, pinned message substring)``, sorted.
@@ -243,7 +247,7 @@ def classify_actions_for_adapter(manifest: ActionsFile, adapter: str) -> Classif
             (
                 entry["action"],
                 require_message(
-                    f'adapterUnsupported.{adapter}.{entry["action"]}',
+                    f"adapterUnsupported.{adapter}.{entry['action']}",
                     entry.get("message"),
                 ),
             )
@@ -253,7 +257,7 @@ def classify_actions_for_adapter(manifest: ActionsFile, adapter: str) -> Classif
             (
                 entry["action"],
                 require_message(
-                    f'expectedUnsupported.{entry["action"]}.messages.{adapter}',
+                    f"expectedUnsupported.{entry['action']}.messages.{adapter}",
                     entry.get("messages", {}).get(adapter),
                 ),
             )
@@ -266,7 +270,7 @@ def classify_actions_for_adapter(manifest: ActionsFile, adapter: str) -> Classif
 
 def null_representation_throws(
     manifest: ActionsFile, adapter: str
-) -> List[Tuple[str, str, str]]:
+) -> list[tuple[str, str, str]]:
     """The ``nullRepresentationOmitted`` actions as ``(action, reason, message)``.
 
     Every adapter must reject these -- the two NULL conventions are indistinguishable on the
@@ -278,7 +282,7 @@ def null_representation_throws(
             entry["action"],
             entry["reason"],
             require_message(
-                f'nullRepresentationOmitted.{entry["action"]}.messages.{adapter}',
+                f"nullRepresentationOmitted.{entry['action']}.messages.{adapter}",
                 entry.get("messages", {}).get(adapter),
             ),
         )
@@ -301,7 +305,7 @@ PLANNED_AT = "2026-08-11T09:13:39.123456789Z"
 _NOW_MINUS_24H = "__NOW_MINUS_24H__"
 
 
-def wire_fixture_actions() -> List[str]:
+def wire_fixture_actions() -> list[str]:
     """Every action the corpus has a golden wire fixture for, sorted."""
     return sorted(
         name[: -len(".json")]
@@ -318,7 +322,7 @@ def _substitute_planned_at(node: Any, planned_at: str) -> Any:
     return planned_at if node == _NOW_MINUS_24H else node
 
 
-def _fixture_response_dict(action: str, planned_at: str) -> Dict[str, Any]:
+def _fixture_response_dict(action: str, planned_at: str) -> dict[str, Any]:
     with open(os.path.join(WIRE_FIXTURES_DIR, f"{action}.json"), encoding="utf-8") as f:
         fixture = json.load(f)
     return {
@@ -368,7 +372,7 @@ def grpc_plan_from_wire_fixture(
 NOTE_KEY = "note"
 
 
-def read_golden_expectations() -> Dict[str, Dict[str, Any]]:
+def read_golden_expectations() -> dict[str, dict[str, Any]]:
     """The golden expectations, keyed by action, each split into ``note`` and the value.
 
     ``adapter`` is checked rather than ignored: the file is a flat map of action names, so a
@@ -396,7 +400,7 @@ def read_golden_expectations() -> Dict[str, Dict[str, Any]]:
     return recorded
 
 
-def write_golden_expectations(expectations: Dict[str, Dict[str, Any]]) -> None:
+def write_golden_expectations(expectations: dict[str, dict[str, Any]]) -> None:
     """Rewrite the golden expectations, carrying every existing ``note`` across.
 
     Only ever called under ``GOLDEN_UPDATE=1`` (``pdm run golden:update``). Regeneration is
@@ -424,7 +428,7 @@ def write_golden_expectations(expectations: Dict[str, Dict[str, Any]]) -> None:
     # file about to be overwritten may legitimately carry an older header -- that is what a
     # header change looks like -- and refusing to carry the commentary across because of one
     # would make every such change silently drop it.
-    notes: Dict[str, str] = {}
+    notes: dict[str, str] = {}
     if os.path.exists(GOLDEN_FILE):
         with open(GOLDEN_FILE, encoding="utf-8") as f:
             for action, entry in json.load(f).get("expectations", {}).items():
@@ -581,10 +585,10 @@ class _Relation:
     def __init__(
         self,
         description: str,
-        correlation: List[Any],
-        correlate_targets: List[Any],
+        correlation: list[Any],
+        correlate_targets: list[Any],
         member_field=None,
-        hop_correlation: Union[List[Any], None] = None,
+        hop_correlation: list[Any] | None = None,
     ):
         self.description = description
         self.correlation = correlation
@@ -1117,7 +1121,7 @@ def json_parameter(label: str, value: Any) -> Any:
     )
 
 
-def render(query, dialect_name: str) -> Tuple[str, Dict[str, Any]]:
+def render(query, dialect_name: str) -> tuple[str, dict[str, Any]]:
     """Compile ``query`` for one dialect, as ``(statement, parameters)``.
 
     The WHOLE ``Select`` is compiled, never the bare ``WHERE`` clause, because correlation is
@@ -1152,7 +1156,7 @@ def statement_preamble() -> str:
     return " ".join(str(select(AdvResource).compile(dialect=dialect("sqlite"))).split())
 
 
-def where_clause(statement: str) -> Union[str, None]:
+def where_clause(statement: str) -> str | None:
     """The part of a rendered statement after ``WHERE``, or ``None`` when there is none."""
     preamble = statement_preamble()
     if statement == preamble:
@@ -1165,7 +1169,7 @@ def where_clause(statement: str) -> Union[str, None]:
     return statement[len(marker) :]
 
 
-def statement_from(where: Union[str, None]) -> str:
+def statement_from(where: str | None) -> str:
     """The inverse of :func:`where_clause`, so the recorded value is checkable both ways."""
     preamble = statement_preamble()
     return preamble if where is None else f"{preamble} WHERE {where}"

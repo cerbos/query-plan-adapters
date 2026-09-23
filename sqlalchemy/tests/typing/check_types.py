@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """Static conformance for `get_query`'s public signature.
 
 Checked by pyright (see `sqlalchemy/pyrightconfig.json`), not by pytest — the
@@ -15,15 +18,15 @@ declare `__table__` on mapped classes, so none of these inferences hold there �
 1.4 callers get the untyped `Select[Any]` overload, exactly as before #181.
 """
 
-from typing import Any, Tuple, cast
+from typing import Any, cast
 
 from cerbos.sdk.model import PlanResourcesResponse
-from typing_extensions import assert_type
-
-from cerbos_sqlalchemy import get_query
 from sqlalchemy import Column, Integer, MetaData, String, Table
 from sqlalchemy.orm import DeclarativeBase, declarative_base
 from sqlalchemy.sql import Select
+from typing_extensions import assert_type
+
+from cerbos_sqlalchemy import get_query
 
 LegacyBase = declarative_base()
 
@@ -50,11 +53,11 @@ plan = cast(PlanResourcesResponse, None)
 
 
 # A 2.0 `DeclarativeBase` model is accepted and keeps its row type (#181).
-assert_type(get_query(plan, ModernModel, {}), Select[Tuple[ModernModel]])
+assert_type(get_query(plan, ModernModel, {}), Select[tuple[ModernModel]])
 
 # So is a legacy `declarative_base()` model — the two share no base class, which
 # is why the bound is structural.
-assert_type(get_query(plan, LegacyModel, {}), Select[Tuple[LegacyModel]])
+assert_type(get_query(plan, LegacyModel, {}), Select[tuple[LegacyModel]])
 
 # A Core `Table` carries no row type, so it resolves to the untyped overload.
 assert_type(get_query(plan, core_table, {}), Select[Any])
