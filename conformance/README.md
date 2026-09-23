@@ -15,7 +15,7 @@ filter returns rows the PDP denies; a throw is a bug report.
 conformance/scripts/validate-corpus.sh           # corpus integrity, offline; runs in every adapter's CI
 conformance/scripts/regenerate-wire-fixtures.sh  # after a policy edit or a PDP bump (Docker, curl, jq)
 conformance/scripts/check-evaluation-modes.sh    # engine probes in both strictEvaluation modes (Docker)
-# Each adapter's harness: npm run test:adversarial, pdm run test, go test ./..., gradle test (see CLAUDE.md)
+# Each adapter's harness: npm run test:adversarial, pdm run test, go test ./..., ./gradlew test (see CLAUDE.md)
 ```
 
 Common tasks:

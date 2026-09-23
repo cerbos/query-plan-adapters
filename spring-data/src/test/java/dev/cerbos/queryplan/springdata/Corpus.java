@@ -356,7 +356,7 @@ final class Corpus {
     static final String HIBERNATE_MINOR = "6.6";
 
     /** The command that rewrites the golden file, recorded in it. */
-    static final String GOLDEN_REGENERATE_COMMAND = "gradle goldenUpdate";
+    static final String GOLDEN_REGENERATE_COMMAND = "./gradlew goldenUpdate";
 
     static Path goldenFile() {
         return Path.of(System.getProperty("user.dir"), "golden", "expectations.json").normalize();
@@ -394,7 +394,7 @@ final class Corpus {
 
     /**
      * Rewrites the golden file, sorted by action and keeping existing notes. Called only by
-     * {@code gradle goldenUpdate}. A missing file is created. Refuses to run under a Hibernate
+     * {@code ./gradlew goldenUpdate}. A missing file is created. Refuses to run under a Hibernate
      * version other than {@value #HIBERNATE_MINOR}, since another renderer writes different SQL.
      */
     static void writeGoldenExpectations(Map<String, ObjectNode> expectations) {

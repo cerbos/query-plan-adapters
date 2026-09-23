@@ -72,7 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * MySQL, asserted against {@code golden/expectations.json}. Plans come from
  * {@code conformance/wire-fixtures/}. Offline: no PDP, no Docker, no database connection.
  *
- * <p>Regenerate the asset with {@code gradle goldenUpdate}; see {@code conformance/README.md},
+ * <p>Regenerate the asset with {@code ./gradlew goldenUpdate}; see {@code conformance/README.md},
  * "Golden expectations".
  */
 class SpringDataTranslatorTest {
@@ -126,7 +126,7 @@ class SpringDataTranslatorTest {
             }
         }
 
-        // `gradle goldenUpdate` sets golden.update and rewrites the asset from what the
+        // `./gradlew goldenUpdate` sets golden.update and rewrites the asset from what the
         // translator emits now. CI never sets it.
         if (Boolean.getBoolean("golden.update")) {
             Map<String, ObjectNode> expectations = new TreeMap<>();
@@ -548,7 +548,7 @@ class SpringDataTranslatorTest {
     @Test
     void theAssetNamesACommandThisBuildDefines() throws Exception {
         String[] parts = Corpus.GOLDEN_REGENERATE_COMMAND.split(" ");
-        assertEquals("gradle", parts[0]);
+        assertEquals("./gradlew", parts[0]);
         assertTrue(Files.readString(java.nio.file.Path.of(
                         System.getProperty("user.dir"), "build.gradle.kts"))
                 .contains("tasks.register<Test>(\"" + parts[1] + "\")"),

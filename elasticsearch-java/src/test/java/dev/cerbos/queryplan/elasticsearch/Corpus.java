@@ -410,7 +410,7 @@ final class Corpus {
     static final String NOTE_KEY = "note";
 
     /** The command that rewrites the golden file. */
-    static final String GOLDEN_REGENERATE_COMMAND = "gradle goldenUpdate";
+    static final String GOLDEN_REGENERATE_COMMAND = "./gradlew goldenUpdate";
 
     static Path goldenFile() {
         return Path.of(System.getProperty("user.dir"), "golden", "expectations.json").normalize();
@@ -494,7 +494,7 @@ final class Corpus {
 
     /**
      * Rewrites the golden expectations, keeping every existing {@code note}. Called only under
-     * {@code -Dgolden.update=true} ({@code gradle goldenUpdate}); CI never sets it.
+     * {@code -Dgolden.update=true} ({@code ./gradlew goldenUpdate}); CI never sets it.
      *
      * <p>A missing file is allowed here, so a new file can be bootstrapped.
      */

@@ -101,7 +101,7 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   clause on each of the three dialects CI executes, with criteria literals
   inlined. It records what the differential oracle cannot see — two queries can
   agree on all 22 seeds and disagree on the row a consumer has. Regenerated
-  with `gradle goldenUpdate`, never by CI, and reviewed as a diff.
+  with `./gradlew goldenUpdate`, never by CI, and reviewed as a diff.
 - **Options** — the one immutable record holding everything a caller tells the
   adapter: the mapping, the operator overrides, the call-level NULL convention,
   and the macro-depth bound. Collections are copied on construction and each

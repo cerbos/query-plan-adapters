@@ -626,20 +626,13 @@ demo/scripts/run-example.sh elasticsearch-java
 
 ### Building
 
-Gradle 8.x (CI pins 8.12) and JDK 17+; sources compile with `options.release = 17`. There is no
-Gradle wrapper — run `gradle build --no-daemon` from this directory, from a checkout of the **whole
-repository** (the suites read `../conformance/`). Without a local Gradle, use the Gradle image with
-the repository root mounted and the Docker socket passed through:
-
-```bash
-docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
-  -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
-```
+JDK 17+; sources compile with `options.release = 17`. Gradle comes from the committed wrapper. Run
+`./gradlew build` from this directory, in a checkout of the **whole repository** (the suites read
+`../conformance/`). The container-backed suites need Docker.
 
 ### Testing
 
-`gradle build` runs all four suites:
+`./gradlew build` runs all four suites:
 
 | Suite | What it asserts | Needs |
 |---|---|---|
@@ -653,7 +646,7 @@ by the suites and by [`example/run.sh`](example/run.sh). To run against the next
 example does not do (its client must match the baseline major):
 
 ```bash
-ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE gradle test --no-daemon
+ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE ./gradlew test
 ```
 
 ### Regenerating the golden expectations
@@ -665,8 +658,7 @@ so it declares no generator version. It is reviewed as a diff, never hand-edited
 regenerates it:
 
 ```bash
-docker run --rm -v "$(pwd)":/repo -w /repo/elasticsearch-java \
-  gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+./gradlew goldenUpdate
 ```
 
 Format and rationale: `conformance/README.md`, "Golden expectations".

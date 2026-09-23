@@ -91,7 +91,7 @@ class ElasticsearchTranslatorTest {
             }
         }
 
-        // `gradle goldenUpdate` rewrites the file from current output, keeping notes. CI never
+        // `./gradlew goldenUpdate` rewrites the file from current output, keeping notes. CI never
         // sets the property. Because throwing actions are skipped above, an action wrongly
         // classified as unsupported fails the throw test, and one wrongly classified as supported
         // fails here during regeneration.
@@ -295,7 +295,7 @@ class ElasticsearchTranslatorTest {
     @Test
     void theAssetNamesACommandThisBuildDefines() throws Exception {
         String[] parts = Corpus.GOLDEN_REGENERATE_COMMAND.split(" ");
-        assertEquals("gradle", parts[0]);
+        assertEquals("./gradlew", parts[0]);
         assertTrue(Files.readString(Path.of(System.getProperty("user.dir"), "build.gradle.kts"))
                         .contains("tasks.register<Test>(\"" + parts[1] + "\")"),
                 () -> "build.gradle.kts defines no task named " + parts[1]);

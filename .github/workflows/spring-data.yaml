@@ -13,91 +13,75 @@ on:
 
 defaults:
   run:
+    shell: bash
     working-directory: spring-data
 
+permissions: {}
+
 jobs:
-  # Every suite runs in this one job — the translator unit test, which needs nothing, the two
-  # H2-backed suites, and the adversarial suite on H2, which starts a pinned PDP through
-  # Testcontainers. There is no separate adversarial job (CLAUDE.md, "CI").
+  # All suites run here on H2, including the adversarial suite (CLAUDE.md, "CI").
   test:
+    permissions:
+      contents: read
     strategy:
-      # The ORM dimension only discriminates the renderer, and a failed forward-compatibility leg
-      # is a finding of its own; the default fail-fast would cancel the baseline leg mid-corpus and
-      # report it as neither a pass nor a failure.
+      # A failed `next` leg should not cancel the baseline leg.
       fail-fast: false
       matrix:
         java-version: ["17", "21"]
-        # The ORM version set build.gradle.kts resolves — both sets are declared there, once, and
-        # this dimension is a list of NAMES, so no version is restated here.
-        #
-        # `baseline` is Hibernate 6.6 / Spring Data JPA 3.5: the line the golden asset was rendered
-        # under, and the line example/ runs on Spring Boot 3.5. `next` is the next major of each
-        # (Hibernate 7 / Spring Data JPA 4, the pair Spring Boot 4 manages) — the forward-
-        # compatibility leg, test-only until example/ moves to Boot 4, and the spring-data analogue
-        # of elasticsearch-java's ELASTICSEARCH_NEXT_IMAGE. It exists because `hibernate-core` is
-        # `compileOnly`: a consumer brings their own renderer, and before this leg a consumer on
-        # Hibernate 7 was proved nowhere. On it the translator suite asserts a pinned divergence
-        # list rather than the asset's bytes (SpringDataTranslatorTest,
-        # `theAssetDeclaresTheRendererThatWroteIt`).
+        # ORM version sets declared in build.gradle.kts. `next` is Hibernate 7 / Spring Data JPA 4.
         orm: [baseline, next]
-        # The ORM dimension discriminates the renderer, not the JDK: off the baseline JDK the
-        # second ORM leg would replay byte-identical translator work against a renderer the
-        # baseline JDK leg already covers. Excluding it keeps the coverage and drops a runner.
+        # The ORM leg only needs the baseline JDK.
         exclude:
           - orm: next
             java-version: "21"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+          cache: gradle
+          cache-dependency-path: |
+            spring-data/**/*.gradle*
+            spring-data/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          # Pinned rather than taking the runner's floating preinstall, and to the same version
-          # the `example` job below pins and the adapter's README documents building with — so a
-          # Gradle major landing on the runner image cannot turn this job red for a reason that is
-          # not the change under review, and a failure here reproduces locally on that version.
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # ADAPTER_TEST_ORM names a version set in build.gradle.kts, which forwards it to the suites as
-      # the `adapter.test.orm` system property and declares it as a task input — so the two legs run
-      # the same build against different renderers, and neither can be reported UP-TO-DATE on the
-      # other's result.
+      # build.gradle.kts forwards ADAPTER_TEST_ORM to the suites and declares it as an input.
       - name: Build and test (${{ matrix.orm }})
         run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*AdversarialConformanceTest' --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_ORM: ${{ matrix.orm }}
 
-  # Runs the full suite with AdversarialConformanceTest (the differential check()-oracle)
-  # backed by a real database via Testcontainers instead of in-memory H2. Guards against
-  # dialect divergences H2 cannot surface — most importantly the collation over-grant
-  # documented in spring-data/README.md "Database collation requirements": the MySQL leg
-  # creates its schema with utf8mb4_0900_bin; the suite's mixed-case seeds fail the
-  # oracle comparison on MySQL's default case-insensitive collation, and its soft-hyphen
-  # seed (h6) on the case-sensitive but not byte-exact utf8mb4_0900_as_cs.
-  #
-  # The MySQL leg runs TWICE: once with Connector/J's default client-side prepared
-  # statements (pins the adapter's `cast(... as double)` rendering — under the
-  # MySQLDialect decimal(53,20) cast, interpolated DECIMAL literals would evaluate the
-  # adapter's IEEE double arithmetic exactly and p-double-frac would fail; see the README
-  # "MySQL: keeping arithmetic IEEE-faithful" gotcha) and once with
-  # useServerPrepStmts=true (typed binds — the mode customers may opt into).
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for Java ${{ matrix.java-version }} (${{ matrix.orm }})"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
+
+  # The same suites with AdversarialConformanceTest on a real database, for dialect behaviour H2
+  # cannot show, such as MySQL collation (README.md "Database collation requirements"). MySQL runs
+  # with client-side and with server-side prepared statements (README.md "MySQL: keeping arithmetic
+  # IEEE-faithful").
   test-database:
+    permissions:
+      contents: read
     strategy:
-      # Each store leg is a finding of its own — a MySQL collation over-grant says nothing about
-      # PostgreSQL — and the default fail-fast would cancel the other legs mid-corpus and report
-      # them as neither a pass nor a failure.
+      # Each store leg is a separate finding.
       fail-fast: false
       matrix:
         include:
@@ -108,74 +92,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # This job runs AdversarialConformanceTest against a real database, so it consumes the
-      # shared corpus exactly as the `test` job does — a corrupt corpus must fail here as a
-      # corpus error, not as an unexplained oracle mismatch on Postgres or MySQL.
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            spring-data/**/*.gradle*
+            spring-data/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          # Pinned for the same reason as in `test`: the runner's preinstall floats, and a Gradle
-          # major landing there must not turn a store leg red for a reason that is not the change
-          # under review. Same version the README documents building with.
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Build and test (${{ matrix.database }})
         run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*AdversarialConformanceTest' --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
           ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
 
-  # The example application. What it covers that nothing above does is exactly two things:
-  #
-  #   1. The PUBLISHED package surface. Every test in `test` and `test-database` compiles against
-  #      the adapter's own source set, so its POM and Gradle module metadata — dependency scopes
-  #      included — are executed nowhere. The example resolves `dev.cerbos:cerbos-spring-data`
-  #      from mavenLocal as a real Maven coordinate instead (it used to be a Gradle composite
-  #      build, which substitutes the source tree and hides that entirely). See
-  #      docs/adr/0002-examples-install-the-packed-artifact.md; cerbos-sdk-java declaring
-  #      protobuf at runtime-only scope is the shape of bug this exists for.
-  #   2. ORM usage shapes past a single flat filtered query — pagination through
-  #      `findAll(Specification, Pageable)` and its separate COUNT query, and the adapter's
-  #      Specification composed with the application's own.
-  #
-  # It is NOT the repository's only end-to-end live-PDP row-set verification, which this comment
-  # claimed until cerbos/query-plan-adapters#359. Every conformance harness plans against a
-  # live PDP over gRPC, translates, executes against a real store, and compares the returned ids
-  # against per-row check() — including this adapter's, on H2, PostgreSQL and MySQL.
-  #
-  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
-  # non-major bump, and that is the path a Spring Boot or Spring Data JPA regression takes into
-  # `main` today: the bump arrives as one PR touching this adapter's manifest and the example's,
-  # and this job, being a check on that PR, is what blocks the automerge when the new ORM breaks
-  # real usage. Moving it to a nightly run or a workflow of its own silently restores that gap.
-  #
-  # Two example programs share one Gradle build here, and both run below: the demo-domain program
-  # against the shared corpus in demo/, and the photo-sharing application that predates it, whose
-  # smoke scripts assert row sets and PDP audit records across three resource kinds. The demo
-  # domain is a floor, not a ceiling — ADR 0001 — so the second one stays.
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for ${{ matrix.database }}${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
+
+  # The example installs the published artifact and exercises pagination and Specification
+  # composition, which no suite above does. See docs/adr/0002-examples-install-the-packed-artifact.md.
+  # It runs two programs: the demo-domain one and the photo-sharing app with its smoke scripts.
+  # Keep this job in this workflow: it is what blocks Renovate's automerge of a breaking bump.
   example:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Both example programs reach a pinned PDP — the photo-sharing app through this adapter's
-      # own example/docker-compose.yml, the demo-domain one through demo/docker-compose.yml — and
-      # these two scripts are what assert those pins still equal conformance/CERBOS_VERSION and
-      # conformance/CERBOS_IMAGE_DIGEST. Without them the run below would happily execute the
-      # whole end-to-end flow against a drifted PDP.
+      # Check the PDP pins in both compose files before running against them.
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
@@ -183,40 +150,41 @@ jobs:
         run: ../demo/scripts/validate-demo.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            spring-data/**/*.gradle*
+            spring-data/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          # The example's Spring Boot 3.5.x Gradle plugin is validated against Gradle 8.x
-          # (smoke.sh's documented prerequisite), not the runner's floating preinstall.
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # The example resolves the adapter as a coordinate, so it has to exist in mavenLocal before
-      # anything under example/ compiles. Each of the three scripts below publishes it for itself
-      # — they have to, to be one command on a laptop — but `Build example` is a bare `gradle`
-      # invocation and this is its half of that prerequisite.
+      # The example resolves the adapter from mavenLocal.
       - name: Publish the adapter to mavenLocal
-        run: gradle publishToMavenLocal --no-daemon
+        run: ./gradlew publishToMavenLocal --no-daemon
 
       - name: Build example
-        run: gradle -p example build --no-daemon
+        run: ./gradlew -p example build --no-daemon
 
-      # The PDP here is a container the runner starts from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — an example must reach
-      # the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh spring-data
 
       - name: Run smoke test
         run: ./example/scripts/smoke.sh
 
-      # Full-stack regression tripwire: every scenario pins a historical adapter bug
-      # (PRs #273, #274, #275, #279, #285, #286) that would have returned a different
-      # row set — or an HTTP 500 — before its fix. See "Edge-case regression
-      # scenarios" in example/README.md.
+      # Each scenario pins a fixed adapter bug; see "Edge-case regression scenarios" in
+      # example/README.md.
       - name: Run edge-case regression smoke test
         run: ./example/scripts/smoke-edge-cases.sh
+
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for the example"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
