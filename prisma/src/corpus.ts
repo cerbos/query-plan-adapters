@@ -441,6 +441,29 @@ export const MAPPER: Record<string, MapperConfig> = {
       fields: { name: { field: "name", valueType: "string", nullable: true  } },
     },
   },
+  // The two homogeneous scalar lists, one owned row per element, projected the way `tagNames`
+  // is. `valueType` sits on the list mapping itself because that is where a membership test reads
+  // it: a literal of another type (`"2" in aNumberList`) is refused rather than bound, since CEL's
+  // heterogeneous equality answers it false and a store that coerces would not. The element column
+  // is nullable because a6 and a4 hold a null element, which is a VALUE in CEL.
+  "request.resource.attr.aNumberList": {
+    valueType: "number",
+    relation: {
+      name: "numberList",
+      type: "many",
+      field: "value",
+      fields: { value: { field: "value", valueType: "number", nullable: true } },
+    },
+  },
+  "request.resource.attr.aBoolList": {
+    valueType: "boolean",
+    relation: {
+      name: "boolList",
+      type: "many",
+      field: "value",
+      fields: { value: { field: "value", valueType: "boolean", nullable: true } },
+    },
+  },
   "request.resource.attr.categories": {
     relation: {
       name: "categories",

@@ -277,7 +277,9 @@ The adapter cannot set a collation or a pragma from inside a `where`.
 - **SQLite:** no `COLLATE NOCASE` on mapped fields, **and** `PRAGMA case_sensitive_like = ON` on
   every connection. `contains`/`startsWith`/`endsWith` lower to `LIKE`, which is ASCII
   case-insensitive on SQLite regardless of column collation. The pragma is per connection, not per
-  schema. Without it the adapter over-grants the corpus's `cs-contains`, `cs-startswith` and
+  schema, and Prisma 6's query engine pools SQLite connections, so one `$executeRawUnsafe` reaches
+  only one of them: pin `connection_limit=1` in the datasource url, as this repository's Prisma 6
+  SQLite leg does. Without it the adapter over-grants the corpus's `cs-contains`, `cs-startswith` and
   `cs-endswith` actions.
 
 See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity).
@@ -352,8 +354,8 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 181 reference actions |
-| Fail-closed | 116 reference actions plus the 11 reference-unsupported shapes (127 actions total) |
+| Oracle-tested | 184 reference actions |
+| Fail-closed | 127 reference actions plus the 11 reference-unsupported shapes (138 actions total) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute sent as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare `nullAttributeRepresentation: "explicit"` on the mapper entry, or `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
@@ -361,7 +363,11 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 The fail-closed set is: `LIKE` needles Prisma cannot escape, cross-model field references, relation
 counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()`
 thresholds, and the reference probes for regex, ordered indexing, `timestamp()` over a string
-field, `mod`, a positional read of a scalar list, and list equality over a `map()` projection. Each
+field, `mod`, a positional read of a scalar list, list equality over a `map()` projection, and
+any comparison or membership test (`==`, `!=`, `in`, `hasIntersection`) whose literal has another
+type than the field's mapped `valueType` — on a scalar column (`R.attr.aNumber == "5"`), a relation
+field (`R.attr.tags.exists(t, t.name == 0)`) or a relation-backed list (`"2" in
+R.attr.aNumberList`) — which CEL answers by type and a coercing store would not. Each
 one's error message is pinned in [`conformance/actions.json`](../conformance/actions.json) and
 asserted by the conformance run.
 
@@ -420,6 +426,10 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Breaking:** `hasIntersection` over a relation-backed list checks its literals against the
+  `valueType` declared on the list's mapper entry, as `in` already did, and throws `in value type
+  does not match mapped <type> field` on a mismatch. It used to drop the declared type and hand the
+  literal to Prisma.
 - **Breaking ([#495](https://github.com/cerbos/query-plan-adapters/issues/495)):** relation element
   columns are now guarded as nullable unless declared `nullable: false` (previously opt-in with
   `nullable: true`, which over-granted on NULL elements). Nullable columns left undeclared now return

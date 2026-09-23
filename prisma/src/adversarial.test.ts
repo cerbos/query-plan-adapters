@@ -141,9 +141,9 @@ interface Seed {
   aString: string;
   aNumber: number;
   aOptionalString: string | null;
-  /** Sent to check() only; see `asCheckResource` for why no column holds it. */
+  /** One AdversarialNumberListElement row per element, null elements included. */
   aNumberList: (number | null)[];
-  /** Sent to check() only; see `asCheckResource` for why no column holds it. */
+  /** One AdversarialBoolListElement row per element, null elements included. */
   aBoolList: (boolean | null)[];
   tags: Tag[];
   subCategoryNames: string[];
@@ -176,15 +176,6 @@ const SEED_KEYS = [
   "tags",
   "subCategoryNames",
   "parentSeedId",
-] as const;
-
-/**
- * The seed fields that reach check() and no column. Each is sound to leave unstored only while
- * every action reading it is refused before a filter exists, which a test below asserts.
- */
-const UNSTORED_SEED_ATTRIBUTES = [
-  "request.resource.attr.aNumberList",
-  "request.resource.attr.aBoolList",
 ] as const;
 
 /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
@@ -509,6 +500,26 @@ const DEGENERACY_LIVENESS_PROBES = [
   "index-bool-list-not-eq",
   "index-bool-list-vs-number",
   "index-number-list-vs-bool",
+  // Membership in a number or boolean list with a literal of the other type. CEL's heterogeneous
+  // equality answers `"2" == 2` false; the mapped valueType refuses the literal before a filter
+  // exists rather than handing it to a store that might coerce it (SQLite and MySQL store a
+  // boolean as the integer 1). The mixed intersection list is refused whole, although its 3 is
+  // well typed.
+  "in-number-list-vs-string",
+  "in-bool-list-vs-string",
+  "hasint-number-list-vs-string",
+  "hasint-bool-list-vs-string",
+  // The same refusal on a scalar column or a relation field: the literal's type is checked against
+  // the mapped valueType, and a mismatch is refused before a filter exists rather than bound for
+  // the store to coerce (SQLite and MySQL compare '5' = 5 as true; MySQL reads a non-numeric
+  // string as 0). Each probe's `or` refuses its well-typed aNumber == 5 branch with it.
+  "eq-number-vs-string",
+  "ne-number-vs-string",
+  "eq-bool-vs-string",
+  "eq-string-vs-number",
+  "in-scalar-number-vs-string",
+  "exists-tag-name-vs-number",
+  "hasint-map-vs-number",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -640,6 +651,8 @@ beforeAll(async () => {
   await prisma.adversarialSubCategory.deleteMany();
   await prisma.adversarialCategory.deleteMany();
   await prisma.adversarialTag.deleteMany();
+  await prisma.adversarialNumberListElement.deleteMany();
+  await prisma.adversarialBoolListElement.deleteMany();
   await prisma.adversarialResource.deleteMany();
 
   // Distinct sub-category/category graphs per seed so no rows share relations by accident.
@@ -658,7 +671,14 @@ beforeAll(async () => {
         scope: scopeFor(seed),
         createdAt: timestampFor(seed),
         updatedAt: derivedFor(seed).updatedAt,
-        // aNumberList and aBoolList have no column: see asCheckResource.
+        // One row per element, null elements included: membership is all a filter asks of
+        // either list, so the element's position is not stored.
+        numberList: {
+          create: seed.aNumberList.map((value) => ({ value })),
+        },
+        boolList: {
+          create: seed.aBoolList.map((value) => ({ value })),
+        },
         tags: {
           create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })),
         },
@@ -728,12 +748,9 @@ function asCheckResource(seed: Seed): Resource {
     coOwner: scopeFor(seed),
     tagNames: seed.tags.map((tag) => tag.name),
     // Verbatim, null elements included: a null element is a VALUE in CEL, not a missing attribute,
-    // which is what index-number-list-not-eq's a6 and index-bool-list-not-eq's a4 witness. These
-    // two are consumed here and nowhere else. Every shape over them is refused — `index` has no
-    // Prisma filter form, so the translator throws before it resolves the list — and holding them
-    // would cost a Json column or a new model on every schema (SQLite and MySQL have no scalar
-    // lists) for data no filter reads. The test "the list fields the store does not hold are read
-    // only by refused actions" is what keeps that true as the corpus grows.
+    // which is what index-number-list-not-eq's a6 and index-bool-list-not-eq's a4 witness. The
+    // store holds the same elements as child rows (numberList, boolList); only membership reads
+    // them, since every positional read is refused before the list is resolved.
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,
     obj: { inner: seed.aString },
@@ -893,19 +910,6 @@ function planCarriesNullLiteral(operand: unknown): boolean {
   return Array.isArray(operands) && operands.some(planCarriesNullLiteral);
 }
 
-/** Whether any variable anywhere in the plan is one of `names`. */
-function planReadsVariable(operand: unknown, names: readonly string[]): boolean {
-  if (typeof operand !== "object" || operand === null) return false;
-  const node = operand as Record<string, unknown>;
-  const name = node["name"];
-  if (typeof name === "string") return names.includes(name);
-  const operands = node["operands"];
-  return (
-    Array.isArray(operands) &&
-    operands.some((child) => planReadsVariable(child, names))
-  );
-}
-
 describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // Anti-vacuity for the store split: every other assertion in this file is identical on every
   // leg, so a PostgreSQL leg that silently fell back to SQLite would pass the entire suite while
@@ -960,6 +964,30 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
         wrongCasePrefix: [],
         trailingSpace: [],
       });
+    }
+  );
+
+  // The SQLite leg's precondition, by name: `PRAGMA case_sensitive_like` (beforeAll) holds per
+  // CONNECTION, so it must reach every connection a query can land on. Prisma 6 pooled SQLite
+  // connections until its schema pinned `connection_limit=1`, and the pragma then governed one of
+  // them; concurrent queries are what spread onto the rest, so the same case-variant LIKE is issued
+  // many times at once. Under the pool most of these returned c1 ("One").
+  (STORE_NAME === "sqlite" ? test : test.skip)(
+    "the SQLite leg's LIKE is case-sensitive on every connection",
+    async () => {
+      const results = await Promise.all(
+        Array.from({ length: 32 }, () =>
+          prisma.adversarialResource.findMany({
+            where: { aString: { contains: "one" } },
+            select: { id: true },
+          })
+        )
+      );
+      // Guard the guard: the needle has to match something, or no row could be the case variant.
+      expect(results[0]?.length).toBeGreaterThan(0);
+      expect(
+        results.filter((rows) => rows.some((row) => row.id === "c1")).length
+      ).toBe(0);
     }
   );
 
@@ -1047,7 +1075,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     }
   );
 
-  test("manifest assigns all 310 policy actions exactly one Prisma outcome", () => {
+  test("manifest assigns all 324 policy actions exactly one Prisma outcome", () => {
     const oracle = new Set(ORACLE_ACTIONS);
     const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
     const nullOmitted = new Set(
@@ -1063,10 +1091,10 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(310);
+    expect(MANIFEST_ACTIONS.size).toBe(324);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
-    expect(THROWING_ACTIONS).toHaveLength(127);
+    expect(THROWING_ACTIONS).toHaveLength(138);
     expect(misclassified).toEqual([]);
     expect(
       [...PRISMA_SUPPORTED_EXPECTED].filter(
@@ -1234,34 +1262,6 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       }
     }
     expect(notRejected).toEqual([]);
-  });
-
-  // aNumberList and aBoolList reach check() and no column (asCheckResource says why). A translated
-  // action reading either would run against a row that does not hold the list, so leaving them
-  // unstored is sound only while every such action throws. Planned live over the whole manifest,
-  // like the null guard above, so an action added later that reads either field is held to it.
-  test("the list fields the store does not hold are read only by refused actions", async () => {
-    const readers: string[] = [];
-    for (const action of [...MANIFEST_ACTIONS].sort()) {
-      const queryPlan = await cerbos.planResources({
-        principal: principal(),
-        resource: { kind: seedsFile.resourceKind },
-        action,
-      });
-      if (
-        queryPlan.kind === PlanKind.CONDITIONAL &&
-        planReadsVariable(queryPlan.condition, UNSTORED_SEED_ATTRIBUTES)
-      ) {
-        readers.push(action);
-      }
-    }
-
-    // Guard the guard: a walk that stopped finding the variables would make the check vacuous.
-    expect(readers).toEqual(
-      expect.arrayContaining(["index-number-list", "index-bool-list"])
-    );
-    const throwing = new Set(THROWING_ACTIONS.map(([action]) => action));
-    expect(readers.filter((action) => !throwing.has(action))).toEqual([]);
   });
 
   test("pins the upstream has() planner over-grant", async () => {

@@ -16,7 +16,7 @@ datasource db {
 }
 
 model AdversarialResource {
-  id              String                @id
+  id              String                         @id
   aBool           Boolean
   aString         String
   aNumber         Int
@@ -29,6 +29,8 @@ model AdversarialResource {
   tags            AdversarialTag[]
   categories      AdversarialCategory[]
   parent          AdversarialParent?
+  numberList      AdversarialNumberListElement[]
+  boolList        AdversarialBoolListElement[]
 }
 
 // Owned one-to-many child row (unlike the shared, globally-unique Tag model) so hostile seeds
@@ -88,4 +90,24 @@ model AdversarialInner {
   aOptionalString String?
   parent          AdversarialParent @relation(fields: [parentId], references: [id])
   parentId        String            @unique
+}
+
+// The corpus's two homogeneous scalar lists (conformance/seeds.json `aNumberList`, `aBoolList`),
+// one owned row per element, the same shape `tagNames` projects out of AdversarialTag. A child
+// model rather than a scalar list because SQLite and MySQL have no array columns, and because a
+// PostgreSQL scalar list cannot hold a NULL element, which a6 and a4 carry. Only membership is
+// asked of these rows (the in-*-list and hasint-*-list actions); the element's position is not
+// stored, since every positional read (index-*-list) is refused before the list is resolved.
+model AdversarialNumberListElement {
+  id         String              @id @default(cuid())
+  value      Float?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialBoolListElement {
+  id         String              @id @default(cuid())
+  value      Boolean?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
 }
