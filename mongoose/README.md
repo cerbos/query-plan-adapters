@@ -88,7 +88,7 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | `field` | Document path for this attribute. |
 | `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. |
 | `valueParser` | Converts plan literals before they reach the filter (for example string → `ObjectId`). Applied to `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `in` values, and inside relation `fields`. |
-| `valueType` | The stored scalar type. Declare numeric and string fields so Mongoose does not cast a mismatched CEL literal into the field's type. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
+| `valueType` | The stored scalar type. Declare number, string and boolean fields — top-level, and inside relation `fields` — so Mongoose does not cast a mismatched CEL literal into the field's type: without it, `R.attr.flag == "true"` is sent as `true` and matches. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
 | `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). |
 | `relation.fields` | Mappings for properties inside the relation, as referenced by lambda variables (`tag.name`). |
 | `relation.requiresParent` | Document path of an optional to-one parent an array is reached through, so `size(chain)` on a document with no parent yields null instead of 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration. |
@@ -102,8 +102,8 @@ shaped like the plan paths, opt in per reference with an entry that names no `fi
 
 ```ts
 const mapper: Mapper = {
-  "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "title" },
+  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
+  "request.resource.attr.aString": { field: "title", valueType: "string" },
   "request.principal.attr.department": { field: "principalDepartment" },
 };
 ```
@@ -264,7 +264,9 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 207 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (211 actions) |
+| Oracle-tested | 221 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (225 actions) |
+| Literal of another type than a declared field | `R.attr.aNumber == "5"`, `R.attr.aBool == "true"`, `R.attr.aString == 0`, `R.attr.aNumber in ["5", 2]`, and the same over a typed subdocument field (`t.name == 0`, `hasIntersection(tags.map(t, t.name), ["public", 0])`) are answered as CEL answers them — `==` and membership false, `!=` true where the field is present — because Mongoose casts a query literal to the schema type (`"5"` is sent as `5`). This needs the field's `valueType`; the literal of the declared type stays a plain, indexable leaf. No seed tag name spells a number, so on MongoDB the subdocument probes return the same rows under the cast filter; the translator unit test pins the uncast one |
+| Membership in a native array field | `x in R.attr.list` and `hasIntersection(R.attr.list, [...])` over an array stored on the document (not a relation) are answered inside `$expr` with `$literal` needles, because Mongoose casts a query-level literal to the schema's element type (`{ list: "2" }` is sent as `2` over `[Number]`) while CEL's `"2" in [2]` is false |
 | Fail-closed | 90 reference actions plus the 7 reference-unsupported shapes (97 actions total) |
 | Operand types the plan does not carry | CEL overloads `+` on strings and a plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** it cannot be decided, and MongoDB's `$add` accepts only numbers and dates, so the shape is refused at translation rather than aborting the query on the server (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares that a stored null is a missing attribute; the global option is the backstop for mappings that do not declare it |
@@ -297,6 +299,11 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- **Breaking:** value-first membership and `hasIntersection` over a native array field (a mapper
+  entry with no `relation`) emit an `$expr` instead of `{ list: x }` / `{ list: { $in: [...] } }`.
+  The old filter over-granted whenever the literal's type differed from the schema's element type,
+  since Mongoose cast it first. The new filter is an aggregation expression, so MongoDB cannot
+  answer it from a multikey index on that field. Relation-mapped collections are unchanged.
 - **Breaking** — an unmapped reference throws `No mapper entry for <reference>` instead of being
   used verbatim as a document path, which made `$ne`/`$nor` match every document. Callers relying
   on the fallback (including passing no mapper) must add entries
@@ -312,6 +319,12 @@ asserts that, since five of the rows below depend on it.
   longer matches documents where the subdocument is absent (over-grant fix); a bare boolean read
   through a to-one hop now translates instead of throwing "Bare collection variables are
   unsupported" ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- A literal of another type than a field's declared `valueType` is kept away from Mongoose's cast
+  in every position, not only in `==`/`!=` at the top level: it is dropped from a field-in-list
+  `$in` and from `hasIntersection` values, answers value-first membership over a relation false,
+  and answers `==`/`!=` inside `$elemMatch` as `{ $in: [] }` / `{ $exists: true }` (MongoDB
+  refuses `$expr` there). Previously `R.attr.n in ["5", 2]` matched `n == 5` and
+  `tags.exists(t, t.name == 0)` matched a tag named `"0"` (over-grant fix). Nothing newly throws.
 - `hasIntersection` accepts the value-first operand order (`hasIntersection(["a","b"], R.attr.list)`)
   instead of throwing "Invalid operands". Widening only
   ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).

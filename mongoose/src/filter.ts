@@ -19,7 +19,7 @@ import {
 } from "./guards";
 import { buildHierarchyFilter } from "./hierarchy";
 import type { HierarchyOperator } from "./hierarchy";
-import type { MongooseFilter } from "./index";
+import type { Mapper, MongooseFilter } from "./index";
 import { LAMBDA_BINDING_OPERATORS, foldLiteralCollection } from "./lambda";
 import {
   applyValueParser,
@@ -381,19 +381,31 @@ const translateComparison = (
   const effectiveOperator =
     variableOperand === leftOperand ? operator : MIRRORED_COMPARISON[operator];
   // A constant of a different scalar type than the declared field never equals it.
-  const config = resolveMapperConfig(variableOperand.name, mapper);
   if (
     (effectiveOperator === "eq" || effectiveOperator === "ne") &&
-    config?.valueType &&
-    config.valueType !== "dateTime" &&
-    valueOperand.value !== null &&
-    typeof valueOperand.value !== config.valueType &&
-    !config.valueParser
+    !canEqualDeclaredType(variableOperand.name, valueOperand.value, mapper)
   ) {
-    return withNullableGuards(
-      { $expr: { $eq: [effectiveOperator === "ne", true] } },
-      [variableOperand],
-      mapper,
+    if (ctx.scope.kind === "root") {
+      return withNullableGuards(
+        { $expr: { $eq: [effectiveOperator === "ne", true] } },
+        [variableOperand],
+        mapper,
+      );
+    }
+    // MongoDB refuses `$expr` inside `$elemMatch` ("$expr can only be applied to the top-level
+    // document"), so an element predicate states the answer as a leaf on the element's own
+    // field: nothing is in an empty list, and `!=` holds wherever the field is present (and,
+    // when nullable, non-null).
+    return emitLeafComparison(
+      ctx,
+      variableOperand.name,
+      effectiveOperator === "eq" ? { $in: [] } : { $exists: true },
+      {
+        nullable:
+          effectiveOperator === "ne" &&
+          isNullableReference(variableOperand.name, mapper),
+        requireExists: false,
+      },
     );
   }
   return emitValueComparison(
@@ -426,9 +438,11 @@ const translateIn = (
       ctx,
       leftOperand.name,
       {
-        $in: rightOperand.value.map((value) =>
-          applyValueParser(leftOperand.name, value, ctx.mapper),
-        ),
+        $in: withoutUnequalConstants(
+          leftOperand.name,
+          rightOperand.value,
+          ctx.mapper,
+        ).map((value) => applyValueParser(leftOperand.name, value, ctx.mapper)),
       },
       rightOperand.value,
       "a null element in an `in` list",
@@ -441,12 +455,37 @@ const translateIn = (
     );
   }
   if (isValue(leftOperand) && isVariable(rightOperand)) {
+    if (
+      !canEqualDeclaredType(rightOperand.name, leftOperand.value, ctx.mapper)
+    ) {
+      // No element of the declared type equals this needle. An empty `$in` answers false in
+      // either scope, where `{ $eq: needle }` would be cast by Mongoose into a match.
+      return emitLeafComparison(
+        ctx,
+        rightOperand.name,
+        { $in: [] },
+        { nullable: false, requireExists: false },
+      );
+    }
+    const needle = applyValueParser(
+      rightOperand.name,
+      leftOperand.value,
+      ctx.mapper,
+    );
+    const uncast = emitUncastListMembership(
+      ctx,
+      rightOperand.name,
+      [needle],
+      carriesNullOperand(leftOperand.value),
+      "a null needle in a mapped-collection `in`",
+    );
+    if (uncast) {
+      return uncast;
+    }
     return emitValueComparison(
       ctx,
       rightOperand.name,
-      {
-        $eq: applyValueParser(rightOperand.name, leftOperand.value, ctx.mapper),
-      },
+      { $eq: needle },
       leftOperand.value,
       "a null needle in a mapped-collection `in`",
     );
@@ -454,6 +493,59 @@ const translateIn = (
 
   throw new Error(
     "in supports only field-in-value-list or value-in-mapped-collection shapes",
+  );
+};
+
+/**
+ * `needle in field` / `hasIntersection(field, needles)` over a list stored as a native array on the
+ * document itself — not a relation — answered by the server's own element equality, out of
+ * Mongoose's reach.
+ *
+ * A query-level `{ field: needle }` or `{ field: { $in: needles } }` is cast by Mongoose to the
+ * schema type of the array's elements before it is sent: over a `[Number]` array `"2"` becomes
+ * `2`, over a `[Boolean]` array `"true"` becomes `true`, over a `[String]` array `2` becomes `"2"`.
+ * CEL's equality is heterogeneous — `"2" in [2]` is false — so the cast filter returns rows the PDP
+ * denies. The plan carries no element type, so the literal cannot be checked here instead.
+ *
+ * Mongoose casts an `$expr` `$in` only when its array operand is a bare field path, so the array
+ * is read through `$cond`/`$isArray` — which also makes a missing or non-array field an empty
+ * list (no match) rather than a server error — and each needle is wrapped in `$literal`, so a
+ * string spelled like a field path stays a string. Aggregation equality matches numbers across
+ * BSON numeric types and never across types, which is CEL's equality. The `*-list-vs-string`
+ * corpus actions run against typed arrays and over-grant without this.
+ *
+ * Returns undefined for a relation or inside a collection predicate, where the element is a
+ * subdocument field matched through `$elemMatch`, and for an empty needle list, which has
+ * nothing to cast.
+ */
+const emitUncastListMembership = (
+  ctx: TranslateContext,
+  fieldName: string,
+  needles: unknown[],
+  carriesNull: boolean,
+  nullOperandContext: string,
+): MongooseFilter | undefined => {
+  if (ctx.scope.kind !== "root" || needles.length === 0) {
+    return undefined;
+  }
+  const { path, relation } = resolveFieldReference(fieldName, ctx.mapper);
+  if (relation) {
+    return undefined;
+  }
+  if (carriesNull) {
+    assertNullOperandTranslatable(ctx, nullOperandContext);
+  }
+  const field = `$${path.join(".")}`;
+  // A fresh array operand per needle: Mongoose's caster rewrites `$cond` in place.
+  const memberships = needles.map((needle) => ({
+    $in: [{ $literal: needle }, { $cond: [{ $isArray: field }, field, []] }],
+  }));
+  return withNullableGuards(
+    {
+      $expr: memberships.length === 1 ? memberships[0] : { $or: memberships },
+    },
+    [{ name: fieldName }],
+    ctx.mapper,
   );
 };
 
@@ -595,16 +687,85 @@ const translateHasIntersection = (
   if (!Array.isArray(rightOperand.value)) {
     throw new Error("hasIntersection requires an array value");
   }
+  const values = withoutUnequalConstants(
+    leftOperand.name,
+    rightOperand.value,
+    ctx.mapper,
+  );
+  const uncast = emitUncastListMembership(
+    ctx,
+    leftOperand.name,
+    values,
+    carriesNullOperand(values),
+    "a null element in hasIntersection",
+  );
+  if (uncast) {
+    return uncast;
+  }
   return emitLeafComparison(
     ctx,
     leftOperand.name,
-    { $in: rightOperand.value },
+    { $in: values },
     {
       nullable: false,
-      requireExists: rightOperand.value.includes(null),
+      requireExists: values.includes(null),
     },
   );
 };
+
+/**
+ * The scalar type a reference's stored value is declared with — for a relation mapped to one
+ * element field (`relation.field`), that element field's — or undefined when a constant cannot be
+ * checked against it: no `valueType`, a `dateTime` (compared through its own path), or a
+ * `valueParser`, which is the caller's explicit override of the constant.
+ */
+const declaredScalarType = (
+  reference: string,
+  mapper: Mapper,
+): "number" | "string" | "boolean" | undefined => {
+  const config = resolveMapperConfig(reference, mapper);
+  const relation = config?.relation;
+  const typed = relation
+    ? relation.field
+      ? relation.fields?.[relation.field]
+      : undefined
+    : config;
+  if (!typed || typed.valueParser || config?.valueParser) {
+    return undefined;
+  }
+  return typed.valueType === "dateTime" ? undefined : typed.valueType;
+};
+
+/**
+ * False when `constant` is a non-null scalar of another type than the one `reference` declares.
+ *
+ * Mongoose casts a query-level literal to the schema type before it is sent — `"5"` to `5` over a
+ * Number path, `"true"` to `true` over a Boolean, `0` to `"0"` over a String, and the same inside
+ * `$elemMatch` over a typed subdocument field — while CEL's equality is heterogeneous: `5 == "5"`
+ * is false. Answering such a constant here keeps it away from the caster, and leaves a constant of
+ * the declared type in a plain query an index can answer. Without a `valueType` there is nothing
+ * to check against, and Mongoose's cast applies (README, "Mapping hazards").
+ */
+const canEqualDeclaredType = (
+  reference: string,
+  constant: unknown,
+  mapper: Mapper,
+): boolean => {
+  const declared = declaredScalarType(reference, mapper);
+  return (
+    declared === undefined || constant === null || typeof constant === declared
+  );
+};
+
+/** A constant list without the elements `reference`'s declared type can never equal. */
+const withoutUnequalConstants = (
+  reference: string,
+  constants: unknown[],
+  mapper: Mapper,
+): unknown[] =>
+  constants.filter((constant) =>
+    canEqualDeclaredType(reference, constant, mapper),
+  );
 
 /** `hasIntersection(collection.map(e, e.field), [values])`: some element's field is in the list. */
 const translateMapIntersection = (
@@ -647,7 +808,6 @@ const translateMapIntersection = (
   if (!isValue(valuesOperand) || !Array.isArray(valuesOperand.value)) {
     throw new Error("hasIntersection requires an array value");
   }
-  const values = valuesOperand.value;
 
   const { relation } = resolveFieldReference(collectionOperand.name, mapper);
   if (!relation) {
@@ -669,6 +829,12 @@ const translateMapIntersection = (
     projectionOperand.name,
     scopedMapper,
   ).path;
+  // The `$in` below sits inside `$elemMatch`, where Mongoose casts to the element field's type.
+  const values = withoutUnequalConstants(
+    projectionOperand.name,
+    valuesOperand.value,
+    scopedMapper,
+  );
   const matchingElement = {
     [relation.name]: {
       $elemMatch: buildGuardedFieldFilter(

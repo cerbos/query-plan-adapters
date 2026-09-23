@@ -638,7 +638,11 @@ export const MAPPER: Mapper = {
   // mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it belongs
   // instead — against the `id-eq-const` wire fixture in `translator.test.ts`.
   "request.resource.id": { field: "resourceId" },
-  "request.resource.attr.aBool": { field: "aBool" },
+  // The three scalar columns declare their schema type, as the README tells a caller to: Mongoose
+  // casts a query literal to it (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the
+  // declaration is what lets the adapter answer a literal of another type as CEL does instead
+  // (the `*-vs-string` / `*-vs-number` scalar probes).
+  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
   "request.resource.attr.aString": { field: "aString", valueType: "string" },
   "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
   "request.resource.attr.aDouble": { field: "aDouble", nullable: true },
@@ -702,7 +706,9 @@ export const MAPPER: Mapper = {
       type: "many",
       fields: {
         id: { field: "id" },
-        name: { field: "name", nullable: true },
+        // Typed for the same reason as the scalar columns: Mongoose casts inside `$elemMatch`
+        // over a typed subdocument field too (`exists-tag-name-vs-number`).
+        name: { field: "name", nullable: true, valueType: "string" },
       },
     },
   },
@@ -711,7 +717,7 @@ export const MAPPER: Mapper = {
       name: "tags",
       type: "many",
       field: "name",
-      fields: { name: { field: "name" } },
+      fields: { name: { field: "name", valueType: "string" } },
     },
   },
   // Homogeneous scalar lists stored as NATIVE arrays on the document — a plain field, not a
@@ -720,6 +726,8 @@ export const MAPPER: Mapper = {
   // element's BSON type, so `true` is never `1` here and a null element is a null value, as it is
   // to CEL. No `valueType`: an indexed read is compared inside `$expr`, which never consults it
   // (see the `index` case in index.ts for why the literal also stays uncast by Mongoose there).
+  // Membership (`in-number-list` and the `*-list-vs-string` probes) needs no `valueType` either:
+  // a plain field is answered inside `$expr` too (`emitUncastListMembership` in filter.ts).
   "request.resource.attr.aNumberList": { field: "aNumberList" },
   "request.resource.attr.aBoolList": { field: "aBoolList" },
   "request.resource.attr.categories": {

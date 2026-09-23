@@ -74,6 +74,18 @@ const EXPECTED_KINDS: Record<
 };
 
 /**
+ * `needle in <native array field>`, spelled inside `$expr` so Mongoose's query caster never sees
+ * the literal: a query-level `{ aNumberList: "2" }` is cast to `2` against a `[Number]` schema, and
+ * CEL's `"2" in [2]` is false. See `emitUncastListMembership` in filter.ts.
+ */
+const uncastMembership = (field: string, needle: unknown) => ({
+  $in: [
+    { $literal: needle },
+    { $cond: [{ $isArray: `$${field}` }, `$${field}`, []] },
+  ],
+});
+
+/**
  * The filter this adapter emits for every corpus action it can translate, under `MAPPER` and the
  * default (`"explicit"`) null representation.
  *
@@ -1465,6 +1477,19 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       $eq: "",
     },
   },
+  // The scalar cross-type probes. Each literal of another type than the column's declared
+  // `valueType` is answered as CEL answers it — `aBool == "true"` is false — because Mongoose
+  // would cast `{ aBool: "true" }` to `true` and admit every aBool-true row. The literal of the
+  // declared type stays a plain, indexable leaf.
+  "eq-bool-vs-string": {
+    $or: [{ $expr: { $eq: [false, true] } }, { aNumber: { $eq: 5 } }],
+  },
+  "eq-number-vs-string": {
+    $or: [{ $expr: { $eq: [false, true] } }, { aNumber: { $eq: 2 } }],
+  },
+  "eq-string-vs-number": {
+    $or: [{ $expr: { $eq: [false, true] } }, { aNumber: { $eq: 5 } }],
+  },
   "exists-on-empty": {
     tags: {
       $elemMatch: {
@@ -1482,6 +1507,14 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
         ],
       },
     },
+  },
+  // `t.name == 0` over a String subdocument field. Mongoose casts inside `$elemMatch` too, so
+  // `{ name: { $eq: 0 } }` would be sent as `"0"`; the declared `valueType` answers it false
+  // before it gets there, as an empty `$in` because MongoDB refuses `$expr` inside `$elemMatch`.
+  // No seed tag name spells a number, so on MongoDB the corpus returns the same rows under the
+  // cast filter: this pin, not the oracle comparison, is what holds the uncast form in place.
+  "exists-tag-name-vs-number": {
+    $or: [{ tags: { $elemMatch: { name: { $in: [] } } } }, { aNumber: { $eq: 5 } }],
   },
   "f2f-contains": {
     $and: [
@@ -1826,6 +1859,13 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       $gt: 1,
     },
   },
+  // A cross-type needle stays uncast, so "true" matches no boolean element.
+  "hasint-bool-list-vs-string": {
+    $or: [
+      { $expr: uncastMembership("aBoolList", "true") },
+      { aNumber: { $eq: 5 } },
+    ],
+  },
   "hasint-map-null": {
     $and: [
       {
@@ -1916,6 +1956,15 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  // The `0` is dropped rather than sent: over the String `name` field Mongoose would cast it to
+  // `"0"`. As with `exists-tag-name-vs-number`, no seed tag is named `"0"`, so only this pin
+  // discriminates the uncast form on MongoDB.
+  "hasint-map-vs-number": {
+    $and: [
+      { tags: { $not: { $elemMatch: { name: { $eq: null } } } } },
+      { tags: { $elemMatch: { name: { $in: ["public"] } } } },
+    ],
+  },
   "hasint-null-vf": {
     tags: {
       $elemMatch: {
@@ -1932,6 +1981,16 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
           },
         ],
       },
+    },
+  },
+  // One membership per needle: a single `$in` over the literal list would hand Mongoose a list to
+  // cast, and "2" must not become 2 while 3 still matches.
+  "hasint-number-list-vs-string": {
+    $expr: {
+      $or: [
+        uncastMembership("aNumberList", "2"),
+        uncastMembership("aNumberList", 3),
+      ],
     },
   },
   "hier-ancestor-cf": {
@@ -2147,6 +2206,12 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
   },
   // Membership in a map literal: the planner folds it to its key list, so the filter is the one
   // a list literal produces.
+  "in-bool-list-vs-string": {
+    $or: [
+      { $expr: uncastMembership("aBoolList", "true") },
+      { aNumber: { $eq: 5 } },
+    ],
+  },
   "in-map-keys": {
     aString: {
       $in: ["one", "same"],
@@ -2274,9 +2339,22 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  "in-number-list": { $expr: uncastMembership("aNumberList", 2) },
+  "in-number-list-vs-string": {
+    $or: [
+      { $expr: uncastMembership("aNumberList", "2") },
+      { aNumber: { $eq: 5 } },
+    ],
+  },
   "in-numbers": {
     aNumber: {
       $in: [2, 3, 5],
+    },
+  },
+  // `"5"` is dropped from the list: Mongoose would cast it to `5` and admit a1.
+  "in-scalar-number-vs-string": {
+    aNumber: {
+      $in: [2],
     },
   },
   "in-single": {
@@ -2895,6 +2973,11 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  // `!=` against a literal the column cannot equal is true, not `$ne: 5` after a cast, which
+  // would drop a1 — an under-grant.
+  "ne-number-vs-string": {
+    $and: [{ $expr: { $eq: [true, true] } }, { aNumber: { $gt: 3 } }],
+  },
   "neg-number": {
     aNumber: {
       $lt: -1,
@@ -3091,6 +3174,9 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
       },
     ],
   },
+  "not-null-in-number-list": {
+    $nor: [{ $expr: uncastMembership("aNumberList", null) }],
+  },
   // The explicit-null convention: `owner` maps to the same column as `aOptionalString` WITHOUT
   // `nullable`, so a stored null is a value and `== null` selects it. `null-eq-missing` below is
   // the same wire node against the nullable mapping, and the pair is what proves the mapper flag —
@@ -3131,6 +3217,11 @@ const EXPECTED_FILTERS: Record<string, MongooseFilter> = {
         },
       },
     ],
+  },
+  // A null needle over a native array: `$literal: null` in aggregation `$in` matches a stored null
+  // element and nothing else — not a missing field, not an empty list.
+  "null-in-number-list": {
+    $expr: uncastMembership("aNumberList", null),
   },
   "null-ne": {
     $and: [
@@ -7464,7 +7555,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 206, kinds: 7, throwing: 97 });
+    }).toEqual({ filters: 220, kinds: 7, throwing: 97 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no
