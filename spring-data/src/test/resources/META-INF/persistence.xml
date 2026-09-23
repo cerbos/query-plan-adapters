@@ -8,6 +8,8 @@
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.TagEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.NumberListElementEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.BoolListElementEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.CategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.LabelEntity</class>
@@ -36,6 +38,8 @@
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.TagEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.NumberListElementEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.BoolListElementEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.CategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.LabelEntity</class>
@@ -65,6 +69,8 @@
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.TagEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.NumberListElementEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.BoolListElementEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.CategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.LabelEntity</class>
@@ -87,6 +93,8 @@
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.TagEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.NumberListElementEntity</class>
+        <class>dev.cerbos.queryplan.springdata.testmodel.BoolListElementEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.CategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.SubCategoryEntity</class>
         <class>dev.cerbos.queryplan.springdata.testmodel.LabelEntity</class>

@@ -366,6 +366,14 @@ final class Corpus {
             // Scalar projection of tags (defaultMemberField=name) for `null in R.attr.tagNames`;
             // NULL name columns become explicit null list elements on the check side.
             Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
+            // The homogeneous number and boolean lists, one related row per element with a NULL
+            // column for a null element — scalar projections, as tagNames is, so `x in list`
+            // and hasIntersection(list, [...]) compare the element column. Positional reads
+            // (`list[0]`) never resolve these: index() is refused in the leaf operand first.
+            Map.entry("request.resource.attr.aNumberList",
+                    AttributeMapping.relation("aNumberList", "element")),
+            Map.entry("request.resource.attr.aBoolList",
+                    AttributeMapping.relation("aBoolList", "element")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")

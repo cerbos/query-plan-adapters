@@ -292,6 +292,27 @@
         "mysql": "re1_0.a_string=''"
       }
     },
+    "eq-bool-vs-string": {
+      "where": {
+        "h2": "1<>1 and not(re1_0.a_bool is null) or re1_0.a_bool is null and 1=null or re1_0.a_number=5",
+        "postgresql": "1<>1 and not(re1_0.a_bool is null) or re1_0.a_bool is null and 1=null or re1_0.a_number=5",
+        "mysql": "1<>1 and not(re1_0.a_bool is null) or re1_0.a_bool is null and 1=null or re1_0.a_number=5"
+      }
+    },
+    "eq-number-vs-string": {
+      "where": {
+        "h2": "1<>1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null or re1_0.a_number=2",
+        "postgresql": "1<>1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null or re1_0.a_number=2",
+        "mysql": "1<>1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null or re1_0.a_number=2"
+      }
+    },
+    "eq-string-vs-number": {
+      "where": {
+        "h2": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null or re1_0.a_number=5",
+        "postgresql": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null or re1_0.a_number=5",
+        "mysql": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null or re1_0.a_number=5"
+      }
+    },
     "exists-on-empty": {
       "where": {
         "h2": "(select nullif(coalesce(max(case when t1_0.name='public' then 2 when not(t1_0.name='public') then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2",
@@ -304,6 +325,13 @@
         "h2": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
         "postgresql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1",
         "mysql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1"
+      }
+    },
+    "exists-tag-name-vs-number": {
+      "where": {
+        "h2": "(select nullif(coalesce(max(case when 1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null then 2 when not((1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 or re1_0.a_number=5",
+        "postgresql": "(select nullif(coalesce(max(case when 1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null then 2 when not((1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 or re1_0.a_number=5",
+        "mysql": "(select nullif(coalesce(max(case when 1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null then 2 when not((1<>1 and not(t1_0.name is null) or t1_0.name is null and 1=null)) then 0 else 1 end),0),1) from tags t1_0 where re1_0.id=t1_0.resource_id)=2 or re1_0.a_number=5"
       }
     },
     "f2f-contains": {
@@ -341,6 +369,13 @@
         "mysql": "re1_0.a_number>1"
       }
     },
+    "hasint-bool-list-vs-string": {
+      "where": {
+        "h2": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5",
+        "postgresql": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5",
+        "mysql": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5"
+      }
+    },
     "hasint-map-null": {
       "where": {
         "h2": "exists(select 1 from tags t1_0 where t1_0.name in ('public') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null",
@@ -362,11 +397,25 @@
         "mysql": "exists(select 1 from tags t1_0 where t1_0.name in ('public','other') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null"
       }
     },
+    "hasint-map-vs-number": {
+      "where": {
+        "h2": "exists(select 1 from tags t1_0 where t1_0.name in ('public') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null",
+        "postgresql": "exists(select 1 from tags t1_0 where t1_0.name in ('public') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null",
+        "mysql": "exists(select 1 from tags t1_0 where t1_0.name in ('public') and re1_0.id=t1_0.resource_id) and not(exists(select 1 from tags t2_0 where t2_0.name is null and re1_0.id=t2_0.resource_id)) or exists(select 1 from tags t3_0 where t3_0.name is null and re1_0.id=t3_0.resource_id) and 1=null"
+      }
+    },
     "hasint-null-vf": {
       "where": {
         "h2": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)",
         "postgresql": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)",
         "mysql": "exists(select 1 from tags t1_0 where (t1_0.name='public' or t1_0.name is null) and re1_0.id=t1_0.resource_id)"
+      }
+    },
+    "hasint-number-list-vs-string": {
+      "where": {
+        "h2": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=3.0 and re1_0.id=anl1_0.resource_id)",
+        "postgresql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=3.0 and re1_0.id=anl1_0.resource_id)",
+        "mysql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=3.0 and re1_0.id=anl1_0.resource_id)"
       }
     },
     "hier-ancestor-cf": {
@@ -482,6 +531,13 @@
         "mysql": "re1_0.a_string<>re1_0.id"
       }
     },
+    "in-bool-list-vs-string": {
+      "where": {
+        "h2": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5",
+        "postgresql": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5",
+        "mysql": "exists(select 1 from resource_bool_list abl1_0 where 1<>1 and re1_0.id=abl1_0.resource_id) or re1_0.a_number=5"
+      }
+    },
     "in-empty": {
       "note": "KIND_ALWAYS_DENIED renders as `1<>1` rather than as no predicate at all: a null predicate is what ALWAYS_ALLOWED returns, and Spring Data omits the WHERE clause for it.",
       "where": {
@@ -553,11 +609,32 @@
         "mysql": "not(exists(select 1 from tags t1_0 where t1_0.name is null and re1_0.id=t1_0.resource_id))"
       }
     },
+    "in-number-list": {
+      "where": {
+        "h2": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=2.0 and re1_0.id=anl1_0.resource_id)",
+        "postgresql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=2.0 and re1_0.id=anl1_0.resource_id)",
+        "mysql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element=2.0 and re1_0.id=anl1_0.resource_id)"
+      }
+    },
+    "in-number-list-vs-string": {
+      "where": {
+        "h2": "exists(select 1 from resource_number_list anl1_0 where 1<>1 and re1_0.id=anl1_0.resource_id) or re1_0.a_number=5",
+        "postgresql": "exists(select 1 from resource_number_list anl1_0 where 1<>1 and re1_0.id=anl1_0.resource_id) or re1_0.a_number=5",
+        "mysql": "exists(select 1 from resource_number_list anl1_0 where 1<>1 and re1_0.id=anl1_0.resource_id) or re1_0.a_number=5"
+      }
+    },
     "in-numbers": {
       "where": {
         "h2": "re1_0.a_number in (2,3,5)",
         "postgresql": "re1_0.a_number in (2,3,5)",
         "mysql": "re1_0.a_number in (2,3,5)"
+      }
+    },
+    "in-scalar-number-vs-string": {
+      "where": {
+        "h2": "re1_0.a_number in (2)",
+        "postgresql": "re1_0.a_number in (2)",
+        "mysql": "re1_0.a_number in (2)"
       }
     },
     "in-single": {
@@ -751,6 +828,13 @@
         "mysql": "re1_0.a_bool=1 and re1_0.a_number>=0 and re1_0.a_string<>'one'"
       }
     },
+    "ne-number-vs-string": {
+      "where": {
+        "h2": "(1=1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null) and re1_0.a_number>3",
+        "postgresql": "(1=1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null) and re1_0.a_number>3",
+        "mysql": "(1=1 and not(re1_0.a_number is null) or re1_0.a_number is null and 1=null) and re1_0.a_number>3"
+      }
+    },
     "neg-number": {
       "where": {
         "h2": "re1_0.a_number<-1",
@@ -836,6 +920,13 @@
         "mysql": "not((re1_0.a_bool=1 and 1=null or not(re1_0.a_bool=1) and (1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null) or not((re1_0.a_bool=1 or not(re1_0.a_bool=1)))))"
       }
     },
+    "not-null-in-number-list": {
+      "where": {
+        "h2": "not(exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id))",
+        "postgresql": "not(exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id))",
+        "mysql": "not(exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id))"
+      }
+    },
     "not-startswith": {
       "where": {
         "h2": "not(re1_0.a_string like case when re1_0.a_optional_string is null then null else (replace(replace(replace(replace(re1_0.a_optional_string,'\\','\\\\'),'%','\\%'),'_','\\_'),'[','\\[')||'%') end escape '\\')",
@@ -868,6 +959,13 @@
         "h2": "re1_0.a_optional_string is null",
         "postgresql": "re1_0.a_optional_string is null",
         "mysql": "re1_0.a_optional_string is null"
+      }
+    },
+    "null-in-number-list": {
+      "where": {
+        "h2": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id)",
+        "postgresql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id)",
+        "mysql": "exists(select 1 from resource_number_list anl1_0 where anl1_0.list_element is null and re1_0.id=anl1_0.resource_id)"
       }
     },
     "null-ne": {

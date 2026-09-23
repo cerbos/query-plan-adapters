@@ -108,7 +108,9 @@ final class MembershipTranslator {
             if (val == null) {
                 return cb.isNull(path);
             }
-            return cb.equal(path, val);
+            // The eq leaf, not a bare cb.equal: a constant the column's type cannot equal is
+            // CEL's heterogeneous FALSE, which the leaf decides rather than the database.
+            return leaf.defaultLeaf("eq", path, val);
         });
     }
 
@@ -187,13 +189,22 @@ final class MembershipTranslator {
      */
     private Predicate scalarInWithNullElements(Path<?> path, List<?> list) {
         List<?> nonNull = list.stream().filter(Objects::nonNull).toList();
-        if (nonNull.size() == list.size()) {
-            return path.in(list);
+        boolean hasNull = nonNull.size() < list.size();
+        // A constant the column's type cannot equal is CEL's heterogeneous FALSE disjunct
+        // (`5 in ["5", 2]` is decided by the 2 alone), so it never reaches the database —
+        // H2 would coerce '5' onto the numeric column and match 5 (an over-grant).
+        List<?> comparable = comparableTo(path, nonNull);
+        if (comparable.isEmpty()) {
+            if (hasNull) {
+                return cb.isNull(path);
+            }
+            // Every constant dropped: FALSE for a present value, and still UNKNOWN for a
+            // NULL column, exactly as `path IN (...)` would have been, so the negation
+            // cannot readmit a missing attribute (handleIn adds the explicit-null guard).
+            return tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path));
         }
-        if (nonNull.isEmpty()) {
-            return cb.isNull(path);
-        }
-        return cb.or(path.in(nonNull), cb.isNull(path));
+        Predicate membership = path.in(comparable);
+        return hasNull ? cb.or(membership, cb.isNull(path)) : membership;
     }
 
     // -- hasIntersection --
@@ -303,8 +314,11 @@ final class MembershipTranslator {
         List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
         Predicate base = nonNull.isEmpty()
                 ? cb.disjunction()
-                : subqueries.existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
-                        Scope.memberPath(tailJoin, ref.tail(), memberField).in(nonNull));
+                : subqueries.existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
+                    Path<?> member = Scope.memberPath(tailJoin, ref.tail(), memberField);
+                    List<?> comparable = comparableTo(member, nonNull);
+                    return comparable.isEmpty() ? cb.disjunction() : member.in(comparable);
+                });
         return tri.baseUnlessUnknown(
                 base,
                 () -> subqueries.existsSubquery(scope, ref, (sub, tailJoin, rebased) ->
@@ -330,12 +344,34 @@ final class MembershipTranslator {
         boolean hasNull = nonNull.size() < values.size();
         return subqueries.chainContains(scope, ref, (sub, tailJoin, rebased) -> {
             Path<?> field = Scope.memberPath(tailJoin, ref.tail(), null);
-            if (nonNull.isEmpty()) {
-                return cb.isNull(field);
+            List<?> comparable = comparableTo(field, nonNull);
+            if (comparable.isEmpty()) {
+                return hasNull ? cb.isNull(field) : cb.disjunction();
             }
-            Predicate match = nonNull.size() == 1
-                    ? cb.equal(field, nonNull.get(0)) : field.in(nonNull);
+            Predicate match = comparable.size() == 1
+                    ? cb.equal(field, comparable.get(0)) : field.in(comparable);
             return hasNull ? cb.or(match, cb.isNull(field)) : match;
         });
+    }
+
+    /**
+     * The constants a column — a collection's element column, or a scalar attribute's — can
+     * equal, in CEL's sense.
+     *
+     * <p>CEL's equality is heterogeneous: {@code "2" == 2} and {@code "true" == true} are a
+     * definite FALSE, not an error, so {@code "2" in R.attr.aNumberList} is false for every row and
+     * a {@code hasIntersection} literal of the wrong type contributes nothing. Handing such a
+     * constant to the database is wrong either way it goes — H2 coerces {@code '2'} onto a
+     * numeric element column and matches the rows holding 2 (an over-grant), and Hibernate
+     * refuses to build a Boolean-to-String comparison at all. So a constant whose type cannot compare
+     * with the element column is dropped here, which is exactly the FALSE disjunct CEL gives it.
+     * Dropping is sound only because membership is a disjunction over the constants and an
+     * element-to-constant equality between present values is two-valued; callers keep their own
+     * handling of a null constant and of a NULL element column.
+     */
+    private static List<?> comparableTo(Path<?> element, List<?> nonNullValues) {
+        return nonNullValues.stream()
+                .filter(v -> LeafTranslator.compatibleTypes(element.getJavaType(), v.getClass()))
+                .toList();
     }
 }
