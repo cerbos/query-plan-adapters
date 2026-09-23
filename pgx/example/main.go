@@ -5,8 +5,9 @@
 // domain in demo/.
 //
 // This is NOT a test of what the adapter translates — ../adversarial_test.go proves that against a
-// hostile corpus with a live PDP as the oracle, and ../translate_test.go and ../render_test.go pin
-// the SQL it emits. This proves the thing every suite in ../ structurally cannot: the usage shapes.
+// hostile corpus with recorded PDP decisions as the oracle, and ../translate_test.go and
+// ../render_test.go pin the SQL it emits. This proves the thing every suite in ../ structurally
+// cannot: the usage shapes.
 //
 // This adapter hands back SQL TEXT and a slice of arguments rather than an ORM object, so the usage
 // shape that matters most here is composition — the application has to splice the fragment into a

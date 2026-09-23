@@ -15,9 +15,10 @@ import (
 	cerbospgx "github.com/cerbos/query-plan-adapters/pgx"
 )
 
-// Unit tests over hand-built plans, complementing the adversarial suite: the corpus proves
-// semantics against a real PDP but only ever feeds the adapter plans the planner actually emits, so
-// it cannot say what happens to a malformed or hostile one. Everything here runs without Docker.
+// Unit tests over hand-built plans, complementing the conformance suite: the corpus proves
+// semantics against plans recorded from a real PDP, but only ever feeds the adapter plans the
+// planner actually emits, so it cannot say what happens to a malformed or hostile one. Everything
+// here runs without Docker.
 //
 // The translator this file exercises is vendored byte-for-byte into the ent module as well, so the
 // invariants below are deliberately kept in step with ent/translate_test.go — same names, same
@@ -506,8 +507,8 @@ func TestRelationMembershipRespectsNullRepresentation(t *testing.T) {
 // int(1.9) is 1 to CEL while PostgreSQL's plain float-to-bigint cast rounds to 2. It is wrong for
 // a string one: CEL reads a WHOLE string or raises, and an error denies the row, while SQL reads
 // whatever numeric prefix parses. Nothing in the plan says which kind of column the operand is,
-// so the corpus actions cast-int-string / cast-double-string cannot be told apart from
-// cast-int-double at translation time and the whole family fails closed. Re-enabling the numeric
+// so the corpus cases cast/int/malformed-string / cast/double/malformed-string cannot be told
+// apart from cast/int/negative-fraction at translation time and the whole family fails closed. Re-enabling the numeric
 // direction needs a caller-declared numeric ValueType, the way timestamp() already works.
 func TestNumericCastsAreRejected(t *testing.T) {
 	t.Parallel()
@@ -522,11 +523,11 @@ func TestNumericCastsAreRejected(t *testing.T) {
 // TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
 // (cerbos/query-plan-adapters#418). PostgreSQL's own CAST(bool AS text) already says "true", but
 // the vendored translator serves SQLite and MySQL too, where the same CAST says "1", so the column
-// is spelled through a CASE first on every engine. The corpus's cast-string-bool proves the two
-// words against the oracle.
+// is spelled through a CASE first on every engine. The corpus case cast/string/from-boolean proves
+// the two words against the recorded check() decisions.
 //
 // Corpus gap. The IS NULL arm ahead of the column's own test is policy-reachable, and no corpus
-// action reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
+// case reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
 // #469 rather than its home. Without the arm a NULL column falls through to 'false', and
 // `string(x) != "true"` returns a row the PDP denies.
 func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
