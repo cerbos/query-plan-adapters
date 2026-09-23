@@ -358,7 +358,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 261, "unconditional", 3, "throwing", 66),
+                Map.of("conditional", 264, "unconditional", 3, "throwing", 66),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -804,6 +804,14 @@ class SpringDataTranslatorTest {
             }
             // ...and the detector catches the broken rendering.
             assertEquals(2, fromClausesNamingTheResource(uncorrelatedRendering()));
+            // The pinned fresh range variable the exemption above admits is exercised by the
+            // corpus, and only there: without the pin it would count.
+            String nested = emitted.get("nest-same-exists").get("h2");
+            assertTrue(nested.contains("from resources re2_0 join tags")
+                    && nested.contains("re2_0.id=re1_0.id"), nested);
+            // One pinned root per polarity the body is translated in, each counted once unpinned.
+            assertEquals(3, fromClausesNamingTheResource(
+                    nested.replaceAll("re\\d+_0\\.id=re1_0\\.id", "")));
         }
 
         /** A subquery over the same association WITHOUT correlating it to the outer root. */
@@ -909,14 +917,21 @@ class SpringDataTranslatorTest {
             return count;
         }
 
-        /** Counts the FROM lists naming the resource table; an uncorrelated subquery adds one. */
+        /**
+         * Counts the FROM lists naming the resource table; an uncorrelated subquery adds one. A
+         * reference pinned to the outer row by identity ({@code re2_0.id=re1_0.id}) is the fresh
+         * range variable a macro nested over the same relation takes (#509), so it is not counted.
+         */
         private int fromClausesNamingTheResource(String statement) {
             int count = 0;
             Matcher m = Pattern.compile("from ([a-z_]+ [a-z]+\\d*_\\d+(?:,[a-z_]+ [a-z]+\\d*_\\d+)*)")
                     .matcher(statement);
             while (m.find()) {
                 for (String reference : m.group(1).split(",")) {
-                    if (reference.trim().startsWith("resources ")) {
+                    String trimmed = reference.trim();
+                    if (trimmed.startsWith("resources ")
+                            && !statement.contains(trimmed.substring("resources ".length())
+                                    + ".id=re1_0.id")) {
                         count++;
                     }
                 }

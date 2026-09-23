@@ -1,0 +1,80 @@
+{
+  "action": "nest-same-all",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "all",
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operator": "lambda",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "exists",
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operator": "lambda",
+                          "operands": [
+                            {
+                              "expression": {
+                                "operator": "and",
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operator": "ne",
+                                      "operands": [
+                                        {
+                                          "variable": "u.id"
+                                        },
+                                        {
+                                          "variable": "t.id"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operator": "eq",
+                                      "operands": [
+                                        {
+                                          "variable": "u.name"
+                                        },
+                                        {
+                                          "variable": "t.name"
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "variable": "u"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

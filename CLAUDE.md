@@ -432,7 +432,7 @@ Three kinds of material legitimately live only in a unit test, and they are not 
    bug this repository exists to stop was living in. One of the shapes currently parked this way is
    a suspected live over-grant. Each instance must say at the test that it is a corpus gap, name the
    issue tracking the port, and be deleted when the corpus action lands
-   ([#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the open port).
+   ([#509](https://github.com/cerbos/query-plan-adapters/issues/509) tracks the open ports).
    `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 3 — a policy can reach these,
    and the corpus does not carry them yet` banner over the block, and a `Corpus gap.` lead on every
    test under it; `SpringDataQueryPlanAdapterTest` follows the same layout, with all three kinds

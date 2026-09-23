@@ -264,7 +264,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 260, unconditional: 7, throwing: 63 });
+    }).toEqual({ conditional: 263, unconditional: 7, throwing: 63 });
   });
 
   /**

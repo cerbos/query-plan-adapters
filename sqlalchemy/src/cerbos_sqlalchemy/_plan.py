@@ -148,3 +148,64 @@ def declared_collection_name(
     if isinstance(collection, Variable) and collection.name in declared:
         return collection.name
     return None
+
+
+def _reads_variable(operand: Operand, variable_name: str) -> bool:
+    """Whether ``operand`` reads the lambda variable ``variable_name`` or a field of it."""
+    if isinstance(operand, Variable):
+        return operand.name == variable_name or operand.name.startswith(
+            f"{variable_name}."
+        )
+    if isinstance(operand, Expr):
+        return any(_reads_variable(child, variable_name) for child in operand.operands)
+    return False
+
+
+def assert_no_same_collection_correlation(
+    operand: Operand, enclosing: Tuple[Tuple[str, str], ...] = ()
+) -> None:
+    """Refuse a macro nested over the collection an enclosing macro iterates, when its body
+    reads the enclosing element.
+
+    ``attr_map`` binds a lambda variable's fields to columns by name, and an operator override
+    receives the collection's marker and a translated body — never the scope. Both macros'
+    subqueries therefore range over the one unaliased table, and a body comparing the inner
+    element with the outer one renders as a column compared with itself: SQL resolves both to
+    the innermost row, which denies what CEL allows and, under negation, allows what it denies
+    (cerbos/query-plan-adapters#509). There is no mapping a caller can supply that gives the
+    inner scope its own alias, so the shape is refused before any SQL is built.
+    """
+    if not isinstance(operand, Expr):
+        return
+    children = operand.operands
+    if operand.operator in LAMBDA_BINDING_OPERATORS and len(children) == 2:
+        collection, lambda_operand = children
+        if (
+            isinstance(collection, Variable)
+            and isinstance(lambda_operand, Expr)
+            and lambda_operand.operator == "lambda"
+            and len(lambda_operand.operands) == 2
+            and isinstance(lambda_operand.operands[1], Variable)
+        ):
+            body, variable = lambda_operand.operands
+            for outer_collection, outer_variable in enclosing:
+                if (
+                    outer_collection == collection.name
+                    and outer_variable != variable.name
+                    and _reads_variable(body, outer_variable)
+                ):
+                    raise ValueError(
+                        f"Cannot correlate a macro over {collection.name} nested inside "
+                        "another over the same collection: attr_map gives both lambda "
+                        "scopes the same table, so the inner subquery would compare each "
+                        f"element with itself rather than with {outer_variable}"
+                    )
+            assert_no_same_collection_correlation(collection, enclosing)
+            assert_no_same_collection_correlation(
+                body,
+                tuple(scope for scope in enclosing if scope[1] != variable.name)
+                + ((collection.name, variable.name),),
+            )
+            return
+    for child in children:
+        assert_no_same_collection_correlation(child, enclosing)

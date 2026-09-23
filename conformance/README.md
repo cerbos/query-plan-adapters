@@ -235,7 +235,7 @@ class are the source of truth.
   needing no nested path, `size()` over a declared flat collection versus an undeclared field,
   `Options` immutability and its convenience overloads, and the three typed refusals
   (`UnsupportedPlanShapeException`, `UnmappedAttributeException`, `MalformedPlanException`).
-- **Kind 3** (corpus gap; bridge tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414),
+- **Kind 3** (corpus gap; bridge tracked by [#509](https://github.com/cerbos/query-plan-adapters/issues/509),
   each test opens with *Corpus gap.*):
   - `anUnfoldableMacroOverAValueListIsRefusedByName` — direct boolean-root `filter`/`map` results;
   - `exceptIsRefusedByNameWhereverItAppears` — directly negated and nested-lambda positions;
@@ -258,7 +258,7 @@ regex surface tests remain mechanism tests against Lucene.
   `OffsetDateTime`/`LocalDateTime` columns, unmapped references, the bulk-delete guard, the
   null-predicate contract with Spring Data, defensive copies, and (in `RefusalTypesTest`/`OptionsTest`)
   the typed refusals and `Options` immutability.
-- **Kind 3.** Bridges tracked by [#414](https://github.com/cerbos/query-plan-adapters/issues/414):
+- **Kind 3.** Bridges tracked by [#509](https://github.com/cerbos/query-plan-adapters/issues/509):
   `size()` against arbitrary, fractional and out-of-int-range thresholds, and fractional `size()`
   equality over a collection, a chain and `size(filter(...))` (reachable via `dyn()`); empty-list
   intersection over a direct scalar, relation or map projection; value-first and relation structured
@@ -443,6 +443,18 @@ These actions pin places where CEL and a store's query language are known to dis
   the 14 `aBool` rows.
 - **`projection-exists-eq` / `-not-eq`** and **`rel-not-*-hop`** (#430) — explicit null versus missing
   inside a projection lambda, and negated scalar predicates through the to-one parent.
+
+### A macro nested over the same collection
+
+`nest-same-exists`, `nest-same-not-exists` and `nest-same-all`
+([#509](https://github.com/cerbos/query-plan-adapters/issues/509)) nest a macro over the collection
+the enclosing macro iterates, reading the outer element:
+`R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))`. One table name, alias or scope for
+both subqueries compares each tag with itself: `a6` (two names) is dropped by the positive form and
+returned by the negated one; `a3` (one name, two ids) is dropped by `nest-same-all`, which also pins
+that the id is correlated, not only the name. `b6` (a NULL-name tag) stays denied under every
+polarity. The family found drizzle (bare table name, every store) and spring-data (Hibernate 7
+gives a correlated root's joins the outer element's navigable path) comparing a tag with itself.
 
 ### Rule composition
 

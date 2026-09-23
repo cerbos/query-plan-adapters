@@ -318,7 +318,7 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 265 reference conformance actions |
+| Oracle-tested | 268 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()` (SQL regex dialects do not follow CEL/RE2), indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list), `string()` over a number or text column (no `CAST` target works on all three stores: MySQL rejects `TEXT`/`VARCHAR` and PostgreSQL's `CHAR` is `character(1)`), CEL's `+` over strings (`\|\|` is logical OR on MySQL, and numeric `+` coerces strings to 0), a hierarchy path built by `list()` rather than read from a column, `mod` (reached through the `int()` cast), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the prefix `LIKE` would match the path itself) (63 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `nullAttributeRepresentation: "explicit"` on its mapper entry renders definitely, so a NULL row is included where CEL's null *value* says so. Undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -385,6 +385,15 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
+  the relation an enclosing macro iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
+  now gives the inner subquery its own alias (`cerbos_<table>_<n>`), so the lambda compares its
+  element with the enclosing one. Both subqueries used to range over the bare table name, SQL
+  resolved `t.name` to the inner row, and the body compared each element with itself: an
+  under-grant, and an over-grant under negation. An inner element read that cannot be rebound to
+  the alias — a transform, a further relation hop, or a relation carrying a `subqueryFilter` —
+  now throws, as does testing an enclosing element's column for membership in a collection stored
+  in the same table.
 - An `in` list or `hasIntersection` list against a string, number or boolean column now drops the
   constants of another type before binding them, because CEL's `5 in ["5", 2]` never matches the
   `"5"`. The store used to convert it: SQLite and PostgreSQL read `'5'` as 5, and MySQL reads a

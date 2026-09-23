@@ -618,11 +618,11 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Each is tracked by cerbos/query-plan-adapters#414 and deleted when its corpus action lands.
+    // Each is tracked by cerbos/query-plan-adapters#509 and deleted when its corpus action lands.
     // ============================================================================================
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #414. Direct {@code filter}/{@code map} in boolean
+     * <strong>Corpus gap.</strong> Tracked by #509. Direct {@code filter}/{@code map} in boolean
      * position over a principal value list.
      */
     @ParameterizedTest
@@ -638,7 +638,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #414. {@code except} under negation and inside a
+     * <strong>Corpus gap.</strong> Tracked by #509. {@code except} under negation and inside a
      * nested lambda; the corpus carries the root, size and comparison forms.
      */
     @Test
@@ -662,7 +662,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #414. {@code size(c) != 0} and its negation over a
+     * <strong>Corpus gap.</strong> Tracked by #509. {@code size(c) != 0} and its negation over a
      * flat array; the negation is refused because an empty array and a missing field look the
      * same.
      */
@@ -677,7 +677,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #414. A null-bearing {@code hasIntersection} inside a
+     * <strong>Corpus gap.</strong> Tracked by #509. A null-bearing {@code hasIntersection} inside a
      * nested lambda.
      */
     @Test
@@ -696,7 +696,7 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #414. Ordering and string operators against a list,
+     * <strong>Corpus gap.</strong> Tracked by #509. Ordering and string operators against a list,
      * plus decoder refusals for raw protobuf map and list values. Real plans carry
      * {@code struct()}/{@code list()} expressions instead.
      */

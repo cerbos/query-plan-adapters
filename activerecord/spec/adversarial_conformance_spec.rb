@@ -97,10 +97,10 @@ RSpec.describe "adversarial conformance" do
   describe "corpus" do
     # Corpus additions must update both the classification and degeneracy tripwires.
     it "pins the corpus size" do
-      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(317)
+      expect(ConformanceCorpus::ACTIONS_FILE.fetch("conformance").size).to eq(320)
       expect(ConformanceCorpus::EXPECTED_UNSUPPORTED.size).to eq(11)
       expect(ConformanceCorpus::NULL_REPRESENTATION_OMITTED.size).to eq(1)
-      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(330)
+      expect(ConformanceCorpus::MANIFEST_ACTIONS.size).to eq(333)
       # Refusals must retain their pinned messages.
       expect(ConformanceCorpus::THROWING_ACTIONS.size).to eq(72)
       # An action joins the corpus allowlist of degenerate oracles only deliberately.

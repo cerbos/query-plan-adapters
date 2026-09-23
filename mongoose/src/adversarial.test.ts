@@ -521,6 +521,9 @@ const DEGENERACY_LIVENESS_PROBES = [
   "index-fractional",
   "index-negative",
   "regex-lookahead",
+  // #509: a macro nested over the same relation whose body reads the enclosing element. The
+  // negated form is the one a self-comparison would over-grant, so it carries the group's probe.
+  "nest-same-not-exists",
 ] as const;
 
 interface AdversarialLabel {
@@ -979,11 +982,11 @@ describe("adversarial conformance corpus", () => {
       return count !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(330);
-    expect(unsupportedCount).toBe(96);
+    expect(MANIFEST_ACTIONS.size).toBe(333);
+    expect(unsupportedCount).toBe(99);
     expect(supportedExpectedCount).toBe(4);
     expect(ORACLE_ACTIONS).toHaveLength(225);
-    expect(THROWING_ACTIONS).toHaveLength(103);
+    expect(THROWING_ACTIONS).toHaveLength(106);
     expect(misclassified).toEqual([]);
   });
 

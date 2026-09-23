@@ -1347,6 +1347,18 @@
         ]
       }
     },
+    "nest-same-all": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nest-same-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
+    "nest-same-not-exists": {
+      "kind": "KIND_CONDITIONAL",
+      "path": "post"
+    },
     "not-and": {
       "kind": "KIND_CONDITIONAL",
       "path": "db",
