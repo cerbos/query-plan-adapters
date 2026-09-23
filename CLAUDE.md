@@ -92,11 +92,15 @@ default costs.
 
 ### Python (SQLAlchemy)
 ```bash
-pdm install
+pdm install -G :all    # or ./pw install: pyprojectx fetches pdm, ruff and isort into .pyprojectx/
 pdm run test           # pytest: translator unit test, get_query contract, adversarial suite
 pdm run golden:update  # rewrite golden/expectations.json from what the translator emits
-pdm run format         # isort + black
+pdm run format         # isort + ruff format
+pdm run lint           # ruff check --fix; CI fails on any diff format or lint leaves
 ```
+
+Every `pdm` command also runs through the pyprojectx wrapper, `./pw` (`pw.bat` on Windows), as in
+cerbos-sdk-python: `./pw test`, `./pw format`, `./pw lint`, `./pw pdm build`.
 
 `pdm run test` collects three suites. `tests/test_translator.py` is the **translator unit test** and
 `tests/test_query.py` / `tests/test_relations.py` are `get_query`'s contract for plans the planner

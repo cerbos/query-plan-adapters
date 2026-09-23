@@ -495,11 +495,17 @@ demo/scripts/run-example.sh sqlalchemy
 | `tests/test_adversarial_conformance.py` | returned rows match `check()` | Docker: a pinned Cerbos PDP, in-memory SQLite, and PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) for declared collection storage |
 
 ```bash
-pdm install
+pdm install -G :all
 pdm run test            # all three
 pdm run golden:update   # rewrite golden/expectations.json, then review the diff
-pdm run format          # isort + black
+pdm run format          # isort + ruff format
+pdm run lint            # ruff check --fix
 ```
+
+Without PDM installed, run the same commands through the [pyprojectx](https://pyprojectx.github.io/)
+wrapper, `./pw` (`pw.bat` on Windows), which installs PDM, ruff and isort into `.pyprojectx/` on
+first use: `./pw install`, `./pw test`, `./pw format`, `./pw lint`, or `./pw pdm <command>`. CI runs
+`format` and `lint` on the SQLAlchemy 2.x leg and fails if they leave a diff.
 
 `golden/expectations.json` records, for every corpus action this adapter translates, the `WHERE`
 clause it emits on SQLite and on PostgreSQL plus the bound parameters. The whole `Select` is compiled
