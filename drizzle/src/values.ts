@@ -3,6 +3,7 @@ import { is, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { ARITHMETIC_OPERATORS } from "./arithmetic";
 import { buildFilteredCount } from "./collections";
 import { buildFilterFromExpression } from "./filter";
@@ -165,11 +166,11 @@ const buildArithmeticExpression = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error(`Arithmetic operator '${operator}' requires two operands`);
+    throw new UnsupportedQueryPlanError(`Arithmetic operator '${operator}' requires two operands`);
   }
   const [leftOperand, rightOperand] = operands;
   if (!leftOperand || !rightOperand) {
-    throw new Error(`Arithmetic operator '${operator}' is missing operands`);
+    throw new UnsupportedQueryPlanError(`Arithmetic operator '${operator}' is missing operands`);
   }
   if (
     operator === "div" &&
@@ -201,7 +202,7 @@ const buildArithmeticExpression = (
     // and the numeric `+` it would otherwise emit is silently wrong rather than a syntax
     // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches
     // nothing (cerbos/query-plan-adapters#376).
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Cannot translate string concatenation: CEL's + over strings has no dialect-independent " +
         "SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, " +
         "which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would " +
@@ -221,7 +222,7 @@ const buildSizeExpression = (
     return buildFilteredCount(operand, mapper, options);
   }
   if (!isNameOperand(operand)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "'size' operator requires a field reference or filter expression",
     );
   }
@@ -257,11 +258,11 @@ const buildTimestampExpression = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 1) {
-    throw new Error("'timestamp' operator requires exactly one operand");
+    throw new UnsupportedQueryPlanError("'timestamp' operator requires exactly one operand");
   }
   const inner = operands[0];
   if (!inner) {
-    throw new Error("'timestamp' operator is missing its operand");
+    throw new UnsupportedQueryPlanError("'timestamp' operator is missing its operand");
   }
   if (isNameOperand(inner)) {
     const resolved = resolveFieldReference(inner.name, mapper);
@@ -269,14 +270,14 @@ const buildTimestampExpression = (
       !isMappingConfig(resolved.mapping) ||
       resolved.mapping.valueType !== "timestamp"
     ) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `'timestamp' field '${inner.name}' requires a mapping with valueType: "timestamp"`,
       );
     }
     return buildValueExpression(inner, mapper, options);
   }
   if (!isValueOperand(inner) || typeof inner.value !== "string") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "'timestamp' requires an RFC-3339 string value or field reference",
     );
   }
@@ -302,14 +303,14 @@ export const buildValueExpression = (
       (relation) => !options.skipRelations?.has(relation),
     );
     if (unskipped.length > 0) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Cannot use relation '${operand.name}' as a scalar value expression`,
       );
     }
     return buildColumnExpression(resolved.mapping, operand.name);
   }
   if (!isExpressionOperand(operand)) {
-    throw new Error("Invalid value-expression operand");
+    throw new UnsupportedQueryPlanError("Invalid value-expression operand");
   }
 
   const { operator, operands } = operand;
@@ -330,13 +331,13 @@ export const buildValueExpression = (
 
   const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];
   if (unsupportedConversion !== undefined) {
-    throw new Error(`Cannot translate ${operator}(): ${unsupportedConversion}`);
+    throw new UnsupportedQueryPlanError(`Cannot translate ${operator}(): ${unsupportedConversion}`);
   }
 
   switch (operator) {
     case "if": {
       if (operands.length !== 3) {
-        throw new Error("'if' operator requires exactly three operands");
+        throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
       }
       const cond = buildFilterFromExpression(operands[0]!, mapper, options);
       const thenExpr = buildValueExpression(operands[1]!, mapper, options);
@@ -349,18 +350,18 @@ export const buildValueExpression = (
     }
     case "size":
       if (operands.length !== 1) {
-        throw new Error("'size' operator requires exactly one operand");
+        throw new UnsupportedQueryPlanError("'size' operator requires exactly one operand");
       }
       return buildSizeExpression(operands[0]!, mapper, options);
     case "timestamp":
       return buildTimestampExpression(operands, mapper, options);
     case "index":
       resolveIndexedColumn(operands, mapper, options);
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Indexed values support only direct eq/ne comparisons with scalar literals; nested value expressions cannot preserve element types and index errors",
       );
     default:
-      throw new Error(`Unsupported value-expression operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unsupported value-expression operator: ${operator}`);
   }
 };
 

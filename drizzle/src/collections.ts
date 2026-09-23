@@ -2,6 +2,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { buildFilterFromExpression } from "./filter";
 import { createCollectionScope } from "./mapper";
 import type { CollectionScope } from "./mapper";
@@ -64,7 +65,7 @@ const resolveMacroScope = (
   options: BuildFilterOptions,
 ): MacroScope => {
   if (!isNameOperand(collectionOperand)) {
-    throw new Error("Collection operand must be a field reference");
+    throw new UnsupportedQueryPlanError("Collection operand must be a field reference");
   }
   const { variable, expression } = extractLambdaComponents(
     lambdaOperand,
@@ -119,11 +120,11 @@ export const buildFilteredCount = (
   options: BuildFilterOptions,
 ): SQL => {
   if (filterOperand.operands.length !== 2) {
-    throw new Error("'filter' operator requires exactly two operands");
+    throw new UnsupportedQueryPlanError("'filter' operator requires exactly two operands");
   }
   const [collectionOperand, lambdaOperand] = filterOperand.operands;
   if (!collectionOperand || !lambdaOperand) {
-    throw new Error("'filter' operator requires collection and lambda operands");
+    throw new UnsupportedQueryPlanError("'filter' operator requires collection and lambda operands");
   }
   const scope = resolveMacroScope(
     collectionOperand,
@@ -197,13 +198,13 @@ const substituteLambdaVariable = (
           Array.isArray(current) ||
           !(segment in current)
         ) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
         const next = current[segment];
         if (next === undefined) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element field "${segment}" is undefined`,
           );
         }
@@ -264,13 +265,13 @@ const buildKnownValueCollectionFilter = (
   negated: boolean,
 ): SQL => {
   if (operator !== "exists" && operator !== "all") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection value is not supported. ` +
         "Only exists() and all() can be folded into a flat filter.",
     );
   }
   if (!Array.isArray(collectionValue)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection requires a list value`,
     );
   }
@@ -297,7 +298,7 @@ const buildKnownValueCollectionFilter = (
   );
   const combined = combinesWithOr ? or(...filters) : and(...filters);
   if (!combined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Unable to combine folded '${operator}' collection conditions`,
     );
   }
@@ -324,11 +325,11 @@ export const buildCollectionOperatorFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error(`'${operator}' operator requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
   const [collectionOperand, lambdaOperand] = operands;
   if (!collectionOperand || !lambdaOperand) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' operator requires collection and lambda operands`,
     );
   }
@@ -377,7 +378,7 @@ export const buildCollectionOperatorFilter = (
     // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
     // use — `size(filter(coll, lambda))` — is handled by buildFilteredCount before this.
     case "filter":
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. " +
           "Only size(filter(...)) has a boolean meaning",
       );

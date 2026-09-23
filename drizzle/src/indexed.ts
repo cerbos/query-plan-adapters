@@ -5,6 +5,7 @@ import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgArray, PgColumn } from "drizzle-orm/pg-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mapper";
 import { isNameOperand, isValueOperand } from "./operands";
 import type { BuildFilterOptions, Mapper } from "./types";
@@ -93,12 +94,12 @@ export function indexedMembership({
       value !== null && typeof value !== "string" &&
       typeof value !== "boolean" && typeof value !== "number"
     ) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Membership in declared indexed storage supports only scalar literals",
       );
     }
     if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new Error("Indexed numeric comparisons require a finite literal");
+      throw new UnsupportedQueryPlanError("Indexed numeric comparisons require a finite literal");
     }
     return value;
   });
@@ -189,7 +190,7 @@ export const resolveIndexedColumn = (
   if (
     operands.length !== 2 || !collection || !position || !isNameOperand(collection)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Index access requires a mapped collection and a constant position",
     );
   }
@@ -217,7 +218,7 @@ export const resolveIndexedColumn = (
     !Number.isSafeInteger(position.value) || position.value < 0 ||
     position.value > 2147483647
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Index access requires a constant non-negative 32-bit integer position",
     );
   }
@@ -246,12 +247,12 @@ export const buildIndexedComparison = (
     (other.value !== null && typeof other.value !== "string" &&
      typeof other.value !== "boolean" && typeof other.value !== "number")
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Indexed values support only direct eq/ne comparisons with scalar literals",
     );
   }
   if (typeof other.value === "number" && !Number.isFinite(other.value)) {
-    throw new Error("Indexed numeric comparisons require a finite literal");
+    throw new UnsupportedQueryPlanError("Indexed numeric comparisons require a finite literal");
   }
   const equality = indexedEquality({ ...resolved, value: other.value });
   return (operator === "ne") !== negated ? not(equality) : equality;

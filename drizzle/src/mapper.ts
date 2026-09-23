@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { aliasedTableColumn, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
 import { resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
@@ -119,7 +120,7 @@ const resolveRelationField = (
 
   const [segment, ...rest] = path;
   if (segment === undefined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Invalid relation path for reference '${reference}': missing segment`,
     );
   }
@@ -135,7 +136,7 @@ const resolveRelationField = (
       );
     }
     if (rest.length > 0) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Mapping for '${segment}' does not support further nesting in '${reference}'`,
       );
     }
@@ -278,7 +279,7 @@ const aliasElementMapping = (
   reference: string,
 ): ResolvedMapping => {
   const refuse = (): never => {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot correlate '${reference}' to a collection macro nested over the same table as an ` +
         "enclosing one: only a plain column of that table can be rebound to the inner " +
         "subquery's alias",
@@ -326,7 +327,7 @@ export const createCollectionScope = (
   const alias =
     occurrences > 0 ? `cerbos_${tableName}_${occurrences}` : undefined;
   if (alias !== undefined && primaryRelation.subqueryFilter !== undefined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot nest a collection macro over '${collectionReference}' inside another over the ` +
         "same table: its subqueryFilter is written against the unaliased table, so it would " +
         "narrow the enclosing subquery's rows instead of the inner one's",
@@ -419,18 +420,18 @@ export const buildColumnExpression = (
   reference: string,
 ): SQL => {
   if (isRelationValue(mapping)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot use relation '${reference}' as a scalar value expression`,
     );
   }
   if (typeof mapping === "function") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot use transform mapping for '${reference}' as a value expression`,
     );
   }
   if (isMappingConfig(mapping)) {
     if (mapping.relation) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Cannot use relation mapping for '${reference}' as a scalar value expression`,
       );
     }
