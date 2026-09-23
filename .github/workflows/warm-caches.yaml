@@ -1,0 +1,135 @@
+name: Warm Caches
+
+# Every adapter workflow runs on pull_request only, and a cache written from a pull request is
+# scoped to that pull request's merge ref: no other pull request can restore it. Only an entry
+# written on main is visible to all of them. So until this workflow existed every job started
+# cold — every npm install, every Go module and every Maven artifact fetched afresh on every push,
+# which is also what got Gradle jobs rate-limited by Maven Central (HTTP 429).
+#
+# This writes those entries on main, under the SAME keys the adapter workflows look up: the
+# setup-node, setup-go and setup-java keys are derived from the lockfile / go.sum / build-script
+# hashes named in `cache-dependency-path`, so each step below has to name exactly what its
+# adapter workflow names. It runs no tests. An entry is only written on a key miss, so a run whose
+# inputs have not changed restores and exits.
+#
+# Runs when a dependency manifest changes on main, and weekly so an entry nothing touched for
+# seven days (GitHub's eviction window) is restored and kept alive.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/package-lock.json"
+      - "**/go.sum"
+      - "**/*.gradle.kts"
+      - "**/gradle-wrapper.properties"
+      - ".github/workflows/warm-caches.yaml"
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: warm-caches-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [prisma, drizzle, mongoose, langchain-chromadb, convex]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            ${{ matrix.adapter }}/package-lock.json
+            ${{ matrix.adapter }}/example/package-lock.json
+
+      # Populates ~/.npm, which is what the cache holds. --ignore-scripts: nothing here needs a
+      # postinstall to have run, only the tarballs to have been fetched.
+      - name: Fetch dependencies
+        run: |
+          npm ci --ignore-scripts --prefix "${{ matrix.adapter }}"
+          npm ci --ignore-scripts --prefix "${{ matrix.adapter }}/example"
+
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [ent, ent/example, pgx, pgx/example]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      # setup-go caches the build cache as well as the module cache, so compile what the adapter
+      # workflows compile: the test binaries with and without -race (the unit suite runs with it,
+      # the adversarial suite without). `-run '^$'` builds them and runs nothing.
+      - name: Compile
+        run: |
+          if [[ "${{ matrix.module }}" == */example ]]; then
+            go build ./...
+          else
+            go test -race -count=1 -run '^$' ./...
+            go test -count=1 -run '^$' ./...
+          fi
+
+  gradle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - adapter: elasticsearch-java
+            translator-test: "*ElasticsearchTranslatorTest"
+            example-task: writeRuntimeClasspath
+          - adapter: spring-data
+            translator-test: "*SpringDataTranslatorTest"
+            example-task: assemble
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.adapter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            ${{ matrix.adapter }}/**/*.gradle*
+            ${{ matrix.adapter }}/**/gradle-wrapper.properties
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # The translator unit test is offline and resolves the full test runtime classpath, which a
+      # compile task alone would not. Spring-data resolves a second ORM set on its `next` leg, so
+      # both are fetched. The example resolves the adapter from mavenLocal, so it is published first.
+      - name: Resolve dependencies
+        run: |
+          ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
+          if [[ "${{ matrix.adapter }}" == spring-data ]]; then
+            ADAPTER_TEST_ORM=next ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
+          fi
+          ./gradlew publishToMavenLocal --no-daemon
+          ./gradlew -p example ${{ matrix.example-task }} --no-daemon

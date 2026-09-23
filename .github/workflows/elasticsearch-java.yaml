@@ -11,6 +11,12 @@ on:
     tags:
       - elasticsearch-java/v*
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: elasticsearch-java-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     shell: bash
@@ -51,6 +57,7 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
           cache-dependency-path: |
             elasticsearch-java/**/*.gradle*
@@ -102,6 +109,7 @@ jobs:
           distribution: temurin
           # The adapter's floor.
           java-version: "17"
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
           cache-dependency-path: |
             elasticsearch-java/**/*.gradle*

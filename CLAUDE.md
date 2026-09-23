@@ -337,6 +337,8 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Adding a new adversarial job — or dropping the Node gate so the corpus replays on every Node leg — multiplies runner minutes for no extra coverage. Adding a *store* leg does buy coverage; adding a Node leg does not. `conformance.yaml` additionally replans the golden wire fixtures against the pinned PDP and fails on drift.
 
+Every PR-triggered workflow declares a `concurrency` group that cancels a pull request's superseded run; give a new workflow the same block. Adapter workflows never run on `main`, and a cache written from a pull request is visible to that pull request alone, so `warm-caches.yaml` writes the npm, Go and Gradle caches on `main` for every pull request to restore. It can only do that under the keys the adapter jobs look up, so a job's `cache-dependency-path` (and, for Go, its `go-version-file`) must match the entry for that adapter in `warm-caches.yaml`. Gradle jobs cache through `setup-java`'s `cache: gradle` with `setup-gradle`'s own cache disabled, because `setup-gradle` keys its entries by job id and writes them only on `main`.
+
 Npm releases use `<package-name>@v<version>` tags (for example, `@cerbos/orm-prisma@v5.0.0`),
 as declared in each `*-publish.yaml` workflow. The publish workflow calls the adapter's test
 workflow at the tagged commit and publishes only after its full matrix, conformance suite and

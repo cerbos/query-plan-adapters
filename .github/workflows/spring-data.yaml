@@ -11,6 +11,12 @@ on:
     tags:
       - spring-data/v*
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: spring-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     shell: bash
@@ -48,6 +54,7 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
           cache-dependency-path: |
             spring-data/**/*.gradle*
@@ -103,6 +110,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
           cache-dependency-path: |
             spring-data/**/*.gradle*
@@ -111,9 +119,10 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - name: Build and test (${{ matrix.database }})
+      # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
+      - name: Adversarial suite (${{ matrix.database }})
         run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
           ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
         env:
           ADAPTER_TEST_DB: ${{ matrix.database }}
@@ -154,6 +163,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
           cache-dependency-path: |
             spring-data/**/*.gradle*
