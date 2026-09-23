@@ -511,6 +511,38 @@ row in CEL, whose equality is heterogeneous; an adapter comparing a JSON element
 Every harness declares and consumes both fields. An adapter with no positional list read refuses all
 six, as it refuses `index-scalar-list`.
 
+### Cross-type membership and comparison
+
+CEL's equality is heterogeneous: `"2" == 2`, `"true" == true` and `"0" == 0` are false, and `!=` is
+true. A store that converts one side to the other's type answers differently, and every direction
+was live when these actions landed: Elasticsearch coerces a term onto the field's mapped type,
+Mongoose casts a literal to the schema type, SQLite, H2 and MySQL compare `'2'` equal to 2, MySQL
+reads `'true'` and every non-numeric string as 0, and PostgreSQL rejects the comparison at execution.
+
+| action | condition | oracle |
+| --- | --- | --- |
+| `in-number-list` | `2 in aNumberList` | `a1 a3 a4 a6` — the matching-type baseline; position does not matter |
+| `in-number-list-vs-string` | `"2" in aNumberList \|\| aNumber == 5` | `a1` |
+| `in-bool-list-vs-string` | `"true" in aBoolList \|\| aNumber == 5` | `a1` |
+| `hasint-number-list-vs-string` | `hasIntersection(aNumberList, ["2", 3])` | `a3 a4` — only the typed member matches |
+| `hasint-bool-list-vs-string` | `hasIntersection(aBoolList, ["true"]) \|\| aNumber == 5` | `a1` |
+| `eq-number-vs-string` | `aNumber == "5" \|\| aNumber == 2` | `a3 a8`; coercion adds `a1` |
+| `ne-number-vs-string` | `aNumber != "5" && aNumber > 3` | every `aNumber > 3`, `a1` included; coercion drops it (an under-grant) |
+| `eq-bool-vs-string` | `aBool == "true" \|\| aNumber == 5` | `a1`; coercion adds every true row |
+| `eq-string-vs-number` | `aString == 0 \|\| aNumber == 5` | `a1`; `h4`'s `aString` is `"0"`, and MySQL matches most rows |
+| `in-scalar-number-vs-string` | `aNumber in ["5", 2]` | `a3 a8` |
+| `exists-tag-name-vs-number` | `tags.exists(t, t.name == 0) \|\| aNumber == 5` | `a1` |
+| `hasint-map-vs-number` | `hasIntersection(tags.map(t, t.name), ["public", 0])` | the rows holding a `public` tag |
+| `null-in-number-list` | `null in aNumberList` | `a6` — a null element is a value |
+| `not-null-in-number-list` | `!(null in aNumberList)` | every row but `a6`; `null in []` is a definite false |
+
+A correct translation answers a literal the attribute's type cannot equal as CEL does — drop the
+member, answer false, keep `!=` true where the field is present — or refuses it and pins the
+message. The `|| aNumber == 5` branch keeps an always-false probe's oracle live at `a1`. No seed
+tag name spells a number, so on a store that converts the *literal* to text (Mongoose over a string
+sub-field) the two tag-name actions cannot tell a cast from no cast; they still pin the emitted
+filter. None of these actions is in `degenerateOracles`.
+
 ### The real to-one relation
 
 The corpus carries exactly one **real** to-one join: `parent`, and `parent.inner` one hop further.
