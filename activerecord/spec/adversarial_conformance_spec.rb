@@ -73,6 +73,9 @@ RSpec.describe "adversarial conformance" do
   #
   # Every index-*-list shape is listed separately: indexed-list support could arrive for some
   # and not others.
+  #
+  # The rest are either families refused whole here (regex-*, except-*, index-*) or refused
+  # variants of a compared family (cast-not-int beside the compared cast-not-string-*).
   LIVENESS_ONLY_PROBES = %w[
     regex-final-newline regex-eq-true regex-lookahead
     index-negative index-fractional index-not-oob

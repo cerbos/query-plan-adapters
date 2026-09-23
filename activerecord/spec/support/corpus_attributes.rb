@@ -65,11 +65,11 @@ module CorpusAttributes
     }),
 
     # The same two hops as a chain from the root. Each seed has at most one category, so
-    # check() sees one object; 16 seeds have none and get no attribute.
+    # check() sees one object; a seed with none gets no attribute.
     #
     # Nested on purpose. A flat `has_many :through` cannot tell a missing parent from a parent
-    # with no children, so `all`, `!exists` and counts would return the 16 rows the PDP denies
-    # (w1-*-chain, #309).
+    # with no children, so `all`, `!exists` and counts would return the category-less rows the
+    # PDP denies (w1-*-chain, #309).
     "request.resource.attr.mainCategory" => relation(:categories, fields: {
       "subCategories" => relation(:sub_categories, fields: {"name" => field("name")}),
       "subNames" => relation(:sub_categories, member_field: "name")
