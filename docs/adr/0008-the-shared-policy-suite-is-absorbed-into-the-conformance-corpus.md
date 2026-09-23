@@ -4,6 +4,10 @@ Accepted. Implemented in
 [#385](https://github.com/cerbos/query-plan-adapters/issues/385), the contract half of
 [#372](https://github.com/cerbos/query-plan-adapters/issues/372).
 
+**Amended by [ADR 0010](0010-conformance-replays-recorded-pdp-decisions.md).** The decision stands:
+one policy source for semantics, now `conformance/cases/`. The wire fixtures, `actions.json` and
+`adversarial.yaml` it names are gone, and a new shape is a case rather than an action.
+
 ## Context
 
 This repository proved semantics with two policy suites, and only one of them was a suite.

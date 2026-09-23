@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Asserts CERBOS_IMAGE_DIGEST is what ghcr.io/cerbos/cerbos:$CERBOS_VERSION actually resolves to.
+# Asserts each PDP pinned in conformance/pdp-versions.json — `current` and `previous` — carries the
+# digest its tag actually resolves to.
 #
 # validate-corpus.sh proves every file agrees with the pin, but not that the tag/digest pair is
 # right. Docker pulls `repo:tag@digest` by digest, so a version bump that keeps the old digest
@@ -7,38 +8,37 @@
 # runs once, in conformance.yaml. Only the PDP is checked: Cerbos tags are immutable, service
 # image tags are not.
 #
-# Requires: docker (with buildx).
+# Requires: docker (with buildx), jq.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFORMANCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${CONFORMANCE_DIR}"
+PDP_VERSIONS="$(cd "${SCRIPT_DIR}/.." && pwd)/pdp-versions.json"
 
-pinned_version="$(tr -d '[:space:]' <CERBOS_VERSION)"
-pinned_digest="$(tr -d '[:space:]' <CERBOS_IMAGE_DIGEST)"
-reference="ghcr.io/cerbos/cerbos:${pinned_version}"
+status=0
+for slot in current previous; do
+  tag="$(jq -er ".${slot}.tag" "${PDP_VERSIONS}")"
+  pinned="$(jq -er ".${slot}.digest" "${PDP_VERSIONS}")"
+  reference="ghcr.io/cerbos/cerbos:${tag}"
 
-echo "==> Resolving ${reference}"
-resolved="$(docker buildx imagetools inspect "${reference}" --format '{{.Manifest.Digest}}' | tail -1)"
+  echo "==> Resolving ${reference} (${slot})"
+  resolved="$(docker buildx imagetools inspect "${reference}" --format '{{json .Manifest}}' \
+    | jq -r .digest)"
 
-if [[ "${resolved}" != "${pinned_digest}" ]]; then
-  cat >&2 <<EOF
-conformance/CERBOS_IMAGE_DIGEST does not match the tag it claims to pin.
+  if [[ "${resolved}" != "${pinned}" ]]; then
+    cat >&2 <<EOF
+conformance/pdp-versions.json .${slot} does not carry the digest of the tag it claims to pin.
 
   ${reference}
     resolves to ${resolved}
-    CERBOS_IMAGE_DIGEST says ${pinned_digest}
+    pdp-versions.json says ${pinned}
 
-Every harness pulls \`${reference}@${pinned_digest}\`, which Docker resolves by digest and not by
-tag — so the suites are testing whatever build that digest names, not ${pinned_version}. If the
-version bump is intentional, update the digest together with the tag:
-
-  docker buildx imagetools inspect ${reference} --format '{{.Manifest.Digest}}' \\
-    > conformance/CERBOS_IMAGE_DIGEST
-
-then re-run conformance/scripts/regenerate-wire-fixtures.sh and review the fixture diff.
+The generator pulls \`${reference}@${pinned}\`, which Docker resolves by digest and not by tag, so
+the goldens record whatever build that digest names, not ${tag}. Bump with
+conformance/scripts/bump-pdp.sh, which resolves the digest for you, rather than by hand.
 EOF
-  exit 1
-fi
-
-echo "Cerbos ${pinned_version} resolves to ${pinned_digest}"
+    status=1
+    continue
+  fi
+  echo "Cerbos ${tag} resolves to ${pinned}"
+done
+exit "${status}"

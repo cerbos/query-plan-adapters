@@ -46,13 +46,12 @@ Rules:
   A translation bug reported against one adapter has historically been the same bug in several —
   see "Changing how a condition is translated" in `CLAUDE.md`.
 - **Use `conformance` instead of tagging every adapter** when the issue is about the corpus itself: a new
-  hostile shape, a classification in `actions.json`, the wire fixtures, the degeneracy guard, or a
-  `CERBOS_VERSION` bump. It already means "affects every adapter", so don't also apply a label per adapter
-  — that's noise.
+  case, the dataset, the generator, a recorded golden, or a PDP bump (`conformance/pdp-versions.json`).
+  It already means "affects every adapter", so don't also apply a label per adapter — that's noise.
 - **Combine the two when a corpus change has a known adapter-specific consequence.** `conformance` +
-  `prisma` reads as "a corpus change whose open work is in the Prisma adapter". Adding a shape
-  requires classifying it for every adapter, so only tag the adapters with outstanding work, and say in
-  the body that the rest are already classified.
+  `prisma` reads as "a corpus change whose open work is in the Prisma adapter". A new case is run by
+  every adapter's harness, so only tag the adapters with outstanding work (a fix or a ledger entry), and
+  say in the body that the rest already pass it.
 - **A change to `demo/` is also repo-wide** — the demo domain feeds every example application — but
   it isn't corpus work, so it takes no scope label unless a specific adapter is implicated.
 - **No scope label** means the issue is repo-level: tooling, CI, docs, dependencies.

@@ -189,10 +189,11 @@ a vacuous pass.
 
 ## Bumping the PDP
 
-`scripts/bump-pdp.sh <new-tag>` resolves the new tag's digest, moves `current` to `previous` in
-`pdp-versions.json`, updates every restatement of the pin (the Compose files, the Go modules'
-`cerbos/api/genpb`), and runs the generator. The weekly `pdp-bump` workflow runs it when Cerbos has
-released a newer PDP and opens the PR. That PR:
+Run `scripts/bump-pdp.sh` locally, on a branch. With no argument it bumps to the latest Cerbos
+release; `scripts/bump-pdp.sh 0.56.0` picks one. It resolves the new tag's digest, moves `current`
+to `previous` in `pdp-versions.json`, updates every restatement of the pin (the Compose files, the Go
+modules' `cerbos/api/genpb`), drops ledger entries scoped to the old `previous`, runs the generator
+and `validate-corpus.sh`. The PR you open from it:
 
 1. Carries the regenerated golden directories and `CHANGES.md`, which is its body and the review
    surface: which plans, allowed sets and plan errors changed.

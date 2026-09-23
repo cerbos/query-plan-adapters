@@ -1,5 +1,8 @@
 # The demo domain is a second corpus with no per-adapter exceptions
 
+_Note, [ADR 0010](0010-conformance-replays-recorded-pdp-decisions.md): `actions.json` is gone; the
+conformance corpus's per-adapter exceptions now live in each `<adapter>/conformance-ledger.json`._
+
 Example applications need shared policies and seed data, and the obvious move is to reuse the
 conformance corpus. We are not doing that. The demo domain is a separate corpus of realistic
 shapes, and unlike the conformance corpus it carries no per-adapter classification: every shape in

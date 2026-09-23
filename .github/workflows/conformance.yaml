@@ -27,52 +27,44 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Capture both evaluation modes independently. Offline translator tests consume the
-  # default fixtures; live adapter harnesses plan against their own same-mode PDP.
-  # Replanning here detects planner drift before adapter expectations are refreshed.
-  fixtures:
-    name: Corpus validity and wire-fixture drift
+  corpus:
+    name: Corpus validity and golden drift
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate conformance corpus
         run: conformance/scripts/validate-corpus.sh
 
-      # validate-corpus.sh proves every restatement in the repository agrees with CERBOS_VERSION
-      # and CERBOS_IMAGE_DIGEST; it cannot prove the PAIR is right, because that needs a registry.
-      # This is the job that owns the pinned-PDP contract, and it already has network and Docker,
-      # so the tag/digest correspondence is asserted here — once, rather than in every adapter
-      # workflow, which runs validate-corpus.sh offline.
-      - name: Verify the pinned Cerbos digest matches its tag
+      # validate-corpus.sh proves every restatement in the repository agrees with
+      # conformance/pdp-versions.json; it cannot prove each tag/digest PAIR is right, because that
+      # needs a registry. This is the job that owns the pinned-PDP contract, and it already has
+      # network and Docker, so the correspondence is asserted here — once, rather than in every
+      # adapter workflow, which runs validate-corpus.sh offline.
+      - name: Verify the pinned Cerbos digests match their tags
         run: conformance/scripts/verify-cerbos-digest.sh
 
-      # Mutates conformance/wire-fixtures/ in place, replanning every action in actions.json
-      # against the PDP version pinned in conformance/CERBOS_VERSION.
-      - name: Verify evaluation modes and planner limitations
-        run: conformance/scripts/check-evaluation-modes.sh
+      # Must match the key warm-caches.yaml writes on main.
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: conformance/generator/go.mod
+          cache-dependency-path: conformance/generator/go.sum
 
-      - name: Regenerate golden wire fixtures (default and strict)
-        run: conformance/scripts/regenerate-wire-fixtures.sh
-
-      - name: Check golden wire fixtures are up to date
+      - name: Vet and format-check the generator
         run: |
-          # --intent-to-add stages any *new* fixture as an empty blob so `git diff` reports it;
-          # plain `git diff` ignores untracked files and would miss an added action. Deleted
-          # fixtures already show up in `git diff` because they are tracked.
-          git add --intent-to-add conformance/wire-fixtures conformance/wire-fixtures-strict
-          if git diff --exit-code -- conformance/wire-fixtures conformance/wire-fixtures-strict; then
-            exit 0
+          go -C conformance/generator vet ./...
+          unformatted="$(gofmt -l conformance/generator)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "::error::gofmt would reformat these files:"
+            echo "${unformatted}"
+            exit 1
           fi
-          echo
-          echo "::error::Golden wire fixtures are out of date with the pinned Cerbos PDP."
-          echo "The PDP at the version in conformance/CERBOS_VERSION returns different wire"
-          echo "output than conformance/wire-fixtures/ records. If this is an intentional PDP"
-          echo "upgrade, run:"
-          echo
-          echo "    ./conformance/scripts/regenerate-wire-fixtures.sh"
-          echo
-          echo "locally and commit the resulting diff alongside the CERBOS_VERSION bump, so"
-          echo "reviewers can see exactly what the planner's wire contract changed."
-          exit 1
+
+      # Starts both pinned PDPs, replans every case and replays check() for every seed, then fails
+      # if the policy, resources.json, any golden or golden/CHANGES.md differs from what is
+      # committed. A drift here means a case, the dataset or a pin changed without re-running
+      # `go -C conformance/generator run .` and committing the result.
+      - name: Check the recorded goldens are up to date
+        run: go -C conformance/generator run . -check
