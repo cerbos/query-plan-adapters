@@ -320,7 +320,7 @@ class ElasticsearchAdversarialConformanceTest {
                 "adapterUnsupported.elasticsearch-java contains non-conformance actions");
         assertTrue(expected.containsAll(supportedExpected),
                 "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(170, unsupported.size(),
+        assertEquals(172, unsupported.size(),
                 "Elasticsearch unsupported coverage changed without updating the ledger assertion");
         assertEquals(2, supportedExpected.size(),
                 "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
@@ -364,10 +364,10 @@ class ElasticsearchAdversarialConformanceTest {
         manifest.addAll(expected);
         manifest.addAll(nullRepresentationOmittedActions);
         manifest.addAll(divergences);
-        assertEquals(129, oracleActions.size());
-        assertEquals(179, throwingActions.size());
+        assertEquals(141, oracleActions.size());
+        assertEquals(181, throwingActions.size());
         assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(310, classified.size());
+        assertEquals(324, classified.size());
         assertEquals(manifest, classified, "every manifest action must be classified locally");
     }
 
@@ -939,7 +939,11 @@ class ElasticsearchAdversarialConformanceTest {
             // key, so there is no stored path for a prefix or terms query to run against. It sits
             // here rather than in the sweep, and the complement assertion below is what
             // makes that split a statement rather than an omission.
-            "hier-list-id");
+            "hier-list-id",
+            // A null element of a flat number list leaves no indexed term, so membership of null
+            // is refused in both polarities, the negation first as negated collection membership.
+            "null-in-number-list",
+            "not-null-in-number-list");
 
     /**
      * Guard the guard, over the WHOLE oracle set. The comparison in
