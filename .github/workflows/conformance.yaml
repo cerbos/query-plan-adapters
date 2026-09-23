@@ -14,6 +14,12 @@ on:
       - "conformance/**"
       - ".github/workflows/conformance.yaml"
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: conformance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Capture both evaluation modes independently. Offline translator tests consume the
   # default fixtures; live adapter harnesses plan against their own same-mode PDP.

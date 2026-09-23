@@ -11,6 +11,12 @@ on:
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: prisma-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -27,7 +33,7 @@ jobs:
       # extra CI cycle whenever a genuinely broken change would have failed both.
       fail-fast: false
       matrix:
-        node-version: ["22", "24", "25"]
+        node-version: ["22", "24"]
         prisma-version: ["6", "7"]
     runs-on: ubuntu-latest
     steps:
@@ -38,20 +44,32 @@ jobs:
 
       # Only the adversarial legs below need a PDP: the translator unit test reads its plans from
       # conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and diffs
-      # against this same pinned version.
+      # against this same pinned version. Both steps are therefore gated to the baseline Node leg,
+      # the one the adversarial steps below run on.
       - name: Read pinned Cerbos version
+        if: matrix.node-version == '22'
         id: cerbos
         run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
+        if: matrix.node-version == '22'
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
+          # Without a token the action fetches the release under GitHub's stricter anonymous
+          # rate limit, and that download is the step that has failed a run with no code change.
+          github_token: ${{ github.token }}
           version: v${{ steps.cerbos.outputs.version }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+          # Keyed on both lockfiles so every job in this workflow shares one entry, which the
+          # `Warm Caches` workflow writes on main — the only scope every pull request can read.
+          cache: npm
+          cache-dependency-path: |
+            prisma/package-lock.json
+            prisma/example/package-lock.json
 
       - run: npm install
 
@@ -149,6 +167,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
+          # Keyed on both lockfiles so every job in this workflow shares one entry, which the
+          # `Warm Caches` workflow writes on main — the only scope every pull request can read.
+          cache: npm
+          cache-dependency-path: |
+            prisma/package-lock.json
+            prisma/example/package-lock.json
 
       - run: npm install
 

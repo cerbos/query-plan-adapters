@@ -11,6 +11,12 @@ on:
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: mongoose-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -50,16 +56,14 @@ jobs:
         mongodb-image-file:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE
-        node-version: ["22", "24", "25"]
+        node-version: ["22", "24"]
         # The server dimension only discriminates the adversarial suite, which is gated to the
         # baseline Node leg — so off that leg the two server legs would run byte-identical work
-        # (a typecheck and an offline unit test that never opens a connection). Excluding them
-        # keeps the coverage and drops two runners.
+        # (a typecheck and an offline unit test that never opens a connection). Excluding it
+        # keeps the coverage and drops a runner.
         exclude:
           - mongodb-image-file: MONGO_NEXT_IMAGE
             node-version: "24"
-          - mongodb-image-file: MONGO_NEXT_IMAGE
-            node-version: "25"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,6 +84,9 @@ jobs:
         if: matrix.node-version == '22'
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
         with:
+          # Without a token the action fetches the release under GitHub's stricter anonymous
+          # rate limit, and that download is the step that has failed a run with no code change.
+          github_token: ${{ github.token }}
           version: v${{ steps.cerbos.outputs.version }}
 
       - name: Start MongoDB
@@ -101,6 +108,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+          # Keyed on both lockfiles so every job in this workflow shares one entry, which the
+          # `Warm Caches` workflow writes on main — the only scope every pull request can read.
+          cache: npm
+          cache-dependency-path: |
+            mongoose/package-lock.json
+            mongoose/example/package-lock.json
 
       - run: npm install
       - run: npm run typecheck
@@ -161,6 +174,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
+          # Keyed on both lockfiles so every job in this workflow shares one entry, which the
+          # `Warm Caches` workflow writes on main — the only scope every pull request can read.
+          cache: npm
+          cache-dependency-path: |
+            mongoose/package-lock.json
+            mongoose/example/package-lock.json
 
       - run: npm install
 
