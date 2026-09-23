@@ -68,65 +68,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Translator unit test: for every action in the shared {@code ../conformance/} corpus, the SQL
- * this adapter emits. Offline — no Cerbos sidecar, no container, and no database: the
- * {@code translator-pu} persistence unit carries no JDBC connection at all, and Hibernate
- * renders the Criteria tree against a dialect it is told about rather than one it discovers.
+ * Translator unit test: for every corpus action, the SQL this adapter emits on H2, PostgreSQL and
+ * MySQL, asserted against {@code golden/expectations.json}. Plans come from
+ * {@code conformance/wire-fixtures/}. Offline: no PDP, no Docker, no database connection.
  *
- * <p>This suite asserts ONE thing, and the three assertions its predecessors braided around it
- * belong elsewhere now:
- *
- * <table border="1">
- *   <caption>Who owns which assertion</caption>
- *   <tr><th>assertion</th><th>owner</th></tr>
- *   <tr><td>the plan the PDP produces for a policy</td>
- *       <td>{@code conformance/wire-fixtures/}, replanned and diffed by the
- *           {@code Conformance Corpus} workflow</td></tr>
- *   <tr><td>which shapes this adapter must refuse, and with what message</td>
- *       <td>{@code conformance/actions.json} — read below, never restated</td></tr>
- *   <tr><td>the rows a filter returns</td>
- *       <td>{@link AdversarialConformanceTest}, against real H2/PostgreSQL/MySQL with
- *           {@code check()} as the oracle</td></tr>
- *   <tr><td><strong>the SQL this adapter emits for a plan</strong></td>
- *       <td><strong>here</strong></td></tr>
- * </table>
- *
- * <p><strong>The plans are read, not written.</strong> A hand-built plan is a BELIEF about what
- * the planner emits, and this repository keeps golden fixtures because that belief has been
- * wrong before
- * ({@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}). The
- * hand-built plans that remain in {@link SpringDataQueryPlanAdapterTest} are there for shapes no
- * policy can produce — malformed operands, caller-supplied overrides, mapping validation — which
- * is the one thing a fixture cannot supply.
- *
- * <p><strong>The expectations are data, not literals.</strong> The SQL this adapter is pinned to
- * emit lives in {@code spring-data/golden/expectations.json}, a golden expectation file this
- * adapter owns — never under {@code conformance/}, where every adapter workflow triggers and one
- * adapter re-pinning one statement would re-run all the others. It is regenerated with
- * {@code gradle goldenUpdate} and reviewed as a diff, exactly like the wire fixtures it is
- * asserted against ({@code conformance/README.md}, "Golden expectations").
- *
- * <p><strong>What a pinned statement buys over the harness.</strong> The harness proves the query
- * returns the right rows AGAINST THE ROWS IT SEEDS. Two different queries can agree on all 22 of
- * them and disagree on the row a consumer has, so a rewrite that quietly changes the emitted SQL
- * passes there and shows up here as a diff a reviewer reads.
+ * <p>Regenerate the asset with {@code gradle goldenUpdate}; see {@code conformance/README.md},
+ * "Golden expectations".
  */
 class SpringDataTranslatorTest {
 
     /**
-     * The dialects the asset records, and the server version each one is rendered at.
-     *
-     * <p>All three are executed by CI: H2 is the default {@link AdversarialConformanceTest} leg,
-     * PostgreSQL and MySQL are the {@code test-database} legs. A dialect nothing executes would
-     * be a rendering nobody has ever proved returns the right rows.
-     *
-     * <p><strong>The version is load-bearing, not decoration.</strong> Told only a dialect class,
-     * Hibernate reports that dialect's MINIMUM supported version, and
-     * {@link MySqlDoubleCastFunctionContributor} then declines to register — so MySQL would
-     * render {@code cast(x as decimal(53,20))} here while the MySQL leg executes
-     * {@code cast(x as double)}, and the asset would pin SQL no database in this repository runs.
-     * Each version below is the one {@link DatabaseTestImages} pins for that leg (H2 is a driver
-     * on the classpath rather than a container, so its version comes from the build file).
+     * The dialects the asset records, each at the server version its CI leg runs. Without a
+     * version Hibernate assumes the dialect's minimum, and
+     * {@link MySqlDoubleCastFunctionContributor} would not register for MySQL.
      */
     private static final Map<String, Dialect> DIALECTS = new LinkedHashMap<>();
 
@@ -141,15 +95,8 @@ class SpringDataTranslatorTest {
     private static final ActionsFile ACTIONS = Corpus.actionsFile();
 
     /**
-     * The shapes {@code actions.json} says this adapter must refuse, each with the message it
-     * must refuse them with. Identical to the classification the harness asserts against a live
-     * PDP; asserting it here as well is what lets the completeness guard below be total, and it
-     * costs a millisecond rather than a container.
-     *
-     * <p>A throwing action needs no golden expectation of its own: the message is already corpus
-     * data, pinned once in {@code actions.json} and read by every adapter. Writing it into this
-     * adapter's asset too would create two places to change one string with nothing to say which
-     * is authoritative.
+     * Actions this adapter must refuse, mapped to the message actions.json pins. They get no
+     * golden entry.
      */
     private static final Map<String, String> THROWING =
             Corpus.throwingActions(ACTIONS, Corpus.ADAPTER);
@@ -160,12 +107,8 @@ class SpringDataTranslatorTest {
     private static List<String> recordedActions;
 
     /**
-     * Every emitted statement, rendered once per action per dialect and read by everything
-     * below — the comparison against the asset, the rules, and the regeneration that writes it.
-     *
-     * <p>One pass, deliberately: the rules are about what the translator emits RIGHT NOW rather
-     * than about the pinned bytes, and a second pass would let those two answers drift apart
-     * within a single run.
+     * Every statement, rendered once per action and dialect, and read by the golden comparison,
+     * the rules below and regeneration.
      */
     private static Map<String, Map<String, String>> emitted;
 
@@ -177,22 +120,14 @@ class SpringDataTranslatorTest {
 
         emitted = new LinkedHashMap<>();
         for (String action : Corpus.wireFixtureActions()) {
-            // A throwing action is never rendered: its message is corpus data, and asking the
-            // translator for SQL it must refuse would fail here rather than in the throw suite
-            // that owns the question.
+            // Refused actions are not rendered; the throw test covers them.
             if (!THROWING.containsKey(action)) {
                 emitted.put(action, statementsFor(action));
             }
         }
 
-        // `gradle goldenUpdate` rewrites the file from what the translator emits today and
-        // preserves every note. That is the same deliberate act as regenerating the wire
-        // fixtures, and the safety is identical: the diff is what a reviewer reads. CI never
-        // sets the property, so a translator change that moves the emitted SQL fails there
-        // whatever anyone ran locally. Skipping the throwing actions above is also what keeps
-        // regeneration from papering over a misclassification — an action moved into
-        // `adapterUnsupported` that this adapter still translates fails the throw suite, and one
-        // moved out of it that this adapter still refuses fails regeneration itself.
+        // `gradle goldenUpdate` sets golden.update and rewrites the asset from what the
+        // translator emits now. CI never sets it.
         if (Boolean.getBoolean("golden.update")) {
             Map<String, ObjectNode> expectations = new TreeMap<>();
             emitted.forEach((action, statements) ->
@@ -215,14 +150,9 @@ class SpringDataTranslatorTest {
     // -- translating one corpus action ----------------------------------------------------------
 
     /**
-     * The whole translator output for one action, in the shape the golden file records.
-     *
-     * <p>{@code joins} is present only for the shapes that emit one, which keeps the common entry
-     * to a single line per dialect and makes a join APPEARING a visible diff. It is not
-     * decoration: a dotted {@code jpaPath} through a to-one association is rendered as a root
-     * {@code LEFT JOIN}, and whether that join is LEFT or INNER decides whether a row with an
-     * absent parent survives a disjunction — a consumer-visible behaviour change once already
-     * (cerbos/query-plan-adapters#375).
+     * The golden entry for one action. {@code joins} appears only when a root join is emitted:
+     * whether that join is LEFT or INNER decides whether a row with an absent parent survives a
+     * disjunction (#375).
      */
     private static ObjectNode expectationOf(Map<String, String> statements) {
         Map<String, Rendered> rendered = new LinkedHashMap<>();
@@ -267,19 +197,10 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * Renders one Specification into the statement the repository would execute.
-     *
-     * <p>The query is the one {@link AdversarialConformanceTest} runs — {@code select distinct
-     * id}, so the preamble the asset strips is that harness's own — and the translation stops one
-     * step before JDBC: Hibernate's SQM is converted to a SQL AST and rendered by the dialect,
-     * which is everything a database would see except the connection.
-     *
-     * <p>Criteria literals are INLINED rather than bound ({@code hibernate.criteria.value_handling_mode}
-     * in {@code translator-pu}). A parameterised rendering would record {@code a_number>=?} and
-     * leave the operand — the half of a filter an authorization bug hides in — out of the asset
-     * entirely. What a consumer's database receives is the same statement with those literals
-     * bound; a rule below asserts no placeholder survives, so the asset cannot silently become
-     * the parameterised rendering.
+     * Renders a Specification into the SQL a repository would run, using the
+     * {@code select distinct id} query {@link AdversarialConformanceTest} runs. Literals are
+     * inlined ({@code hibernate.criteria.value_handling_mode} in {@code translator-pu}) so the
+     * asset records operands rather than {@code ?}.
      */
     private static String statementOf(String dialect, Specification<ResourceEntity> spec) {
         EntityManagerFactory factory = FACTORIES.get(dialect);
@@ -301,12 +222,9 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The {@code SqlAstCreationContext} the SQM translator renders under. On Hibernate 6.6 the
-     * {@code SessionFactoryImplementor} IS that context; Hibernate 7 moved the role to
-     * {@code SqlTranslationEngine}, reached through {@code getSqlTranslationEngine()}, a method 6.6
-     * does not have. Resolved reflectively so one source compiles against both majors — this
-     * suite runs under both ({@code ADAPTER_TEST_ORM}), and a second copy of the renderer per
-     * major would be the drift the divergence list exists to catch.
+     * On Hibernate 6.6 the SessionFactoryImplementor is the SqlAstCreationContext; Hibernate 7
+     * moved it to {@code getSqlTranslationEngine()}. Resolved reflectively so this compiles
+     * against both.
      */
     private static SqlAstCreationContext sqlAstCreationContext(SessionFactoryImplementor sf) {
         try {
@@ -346,10 +264,7 @@ class SpringDataTranslatorTest {
     /** One emitted statement, minus the preamble: the root joins and the filter. */
     private record Rendered(String joins, String where) {}
 
-    /**
-     * Splits a statement into what the asset records. Both halves are {@code null} when absent —
-     * no root join, or no filter at all.
-     */
+    /** Splits a statement into root joins and WHERE clause; either is null when absent. */
     private static Rendered split(String statement) {
         assertTrue(statement.startsWith(PREAMBLE),
                 () -> "statement does not start with the corpus preamble: " + statement);
@@ -402,10 +317,8 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
-     * {@code assertThrows} just as well as the limitation the corpus documents
-     * (cerbos/query-plan-adapters#326). The harness makes the same assertion against a live PDP;
-     * here it costs a millisecond, which is what lets the completeness guard below be total.
+     * Asserts the message too: a bare throw would also pass for a mapping typo or an unrelated
+     * validation (#326).
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("throwingActions")
@@ -417,10 +330,7 @@ class SpringDataTranslatorTest {
                         + ex.getMessage());
     }
 
-    /**
-     * Adding a throwing action without pinning its message must fail this suite rather than
-     * silently degrade the throw assertions to a bare "it threw" (#326).
-     */
+    /** A throwing action with no pinned message must fail classification (#326). */
     @Test
     void throwingActionWithNoPinnedMessageFailsClassification() {
         for (String absent : new String[] {null, ""}) {
@@ -436,19 +346,13 @@ class SpringDataTranslatorTest {
                 .sorted()
                 .toList();
 
-        // Total: a corpus action with no golden expectation and no pinned throw lands as a
-        // failure rather than as silence. This is the assertion that makes the asset
-        // self-maintaining — adding a hostile shape to the corpus forces someone to look at the
-        // SQL this adapter emits for it, and `goldenUpdate` refuses to invent one for a shape
-        // that throws.
+        // Total: every wire fixture has a golden entry or a pinned throw.
         assertEquals(Corpus.wireFixtureActions(), classified,
                 "every wire fixture must be accounted for exactly once");
-        // Disjoint: an action carrying a golden expectation AND declared unsupported would
-        // satisfy the union above while asserting two contradictory things.
+        // Disjoint: never both.
         assertEquals(classified.size(), Set.copyOf(classified).size(),
                 "an action is either recorded or thrown, never both");
-        // The asset is written sorted, so a translator change reads as the list of shapes it
-        // moved.
+        // Sorted, so a diff lists the shapes that moved.
         assertEquals(new ArrayList<>(new TreeSet<>(recordedActions)), recordedActions,
                 "golden/expectations.json must stay sorted by action");
 
@@ -475,43 +379,27 @@ class SpringDataTranslatorTest {
 
     @Test
     void theUnconditionalActionIsThePlannerFoldTheCorpusDeclares() {
-        // `p-has` is the corpus's one knownDivergences entry: the planner folds has() on a
-        // missing attribute to ALWAYS_ALLOWED while check() denies those rows. The adapter must
-        // translate that faithfully — an unfiltered SELECT — and this is the assertion that says
-        // the empty WHERE belongs to that shape rather than to a translation that quietly stopped
-        // emitting a filter.
+        // `p-has` is the planner's fold to ALWAYS_ALLOWED (knownDivergences), and the two
+        // pv-empty-* actions fold on an empty principal list. An empty WHERE on any other action
+        // means the translation stopped emitting a filter.
         assertEquals(List.of("p-has", "pv-empty-all", "pv-empty-not-exists"), unconditionalActions());
         assertTrue(ACTIONS.skippedDivergences(Corpus.ADAPTER).contains("p-has"));
     }
 
-    // -- the renderer, and the other one -------------------------------------------------------
+    // -- Hibernate 6.6 and 7 -------------------------------------------------------------------
 
     /**
-     * The Hibernate major the forward-compatibility leg runs: the one after the major the asset
-     * was rendered under, by definition, so it is derived from {@link Corpus#HIBERNATE_MINOR}
-     * rather than declared a second time. {@code build.gradle.kts} selects the leg
-     * ({@code ADAPTER_TEST_ORM=next}) and forwards the choice as {@code adapter.test.orm}.
+     * The Hibernate major of the {@code ADAPTER_TEST_ORM=next} leg: one after
+     * {@link Corpus#HIBERNATE_MINOR}.
      */
     private static final int NEXT_HIBERNATE_MAJOR =
             Integer.parseInt(Corpus.HIBERNATE_MINOR.substring(0, Corpus.HIBERNATE_MINOR.indexOf('.')))
                     + 1;
 
     /**
-     * Corpus actions Hibernate 7 renders differently from the 6.6 the asset is generated under,
-     * from the SAME Criteria tree — which is why they are pinned as a list rather than as a
-     * second asset.
-     *
-     * <p>ONE renderer change accounts for every one of them, and it is asserted below rather than
-     * left to this comment: Hibernate 7's {@code MySQLDialect} renders a boolean literal as
-     * {@code true}/{@code false} where 6.6 rendered {@code 1}/{@code 0}, so every action whose
-     * MySQL statement compares a boolean column diverges and nothing else does. H2 and PostgreSQL
-     * render every recorded shape byte-identically on both majors. It is not a translation
-     * decision: {@link AdversarialConformanceTest} runs the same corpus against a real PDP on both
-     * majors, and every one of these actions is an oracle comparison there.
-     *
-     * <p>The list is asserted in BOTH directions, so an action that stops diverging fails just as
-     * loudly as one that starts: a shrinking list is a renderer change worth knowing about, and a
-     * growing one lands here rather than silently widening an exemption.
+     * Actions Hibernate 7 renders differently from the 6.6 asset. The only cause is MySQL boolean
+     * literals ({@code true}/{@code false} instead of {@code 1}/{@code 0}). The list is asserted
+     * in both directions by {@link #divergesFromTheAssetOnExactlyTheShapesTheListNames}.
      */
     static final List<String> RENDERING_DIFFERS_ON_HIBERNATE_7 = List.of(
             "cast-string-bool",
@@ -563,14 +451,9 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The asset is one renderer's rendering of the adapter's Criteria trees, so it records which
-     * one — {@code conformance/README.md}, "When the generator is an input". CI runs this suite
-     * under two Hibernate majors ({@code build.gradle.kts}, {@code ADAPTER_TEST_ORM}): the one the
-     * asset was rendered under, where every recorded byte is asserted, and the next one, where
-     * {@link #RENDERING_DIFFERS_ON_HIBERNATE_7} is asserted instead. Which leg this is comes from
-     * the build, not the classpath: a resolution that quietly drifted to a third major would
-     * otherwise read as whichever leg it happened to match, and a dependency bump that makes the
-     * recorded bytes somebody else's fails here before it fails on the shapes.
+     * The asset's {@code hibernate} header matches the baseline leg, and {@code adapter.test.orm}
+     * resolves the expected major. The leg comes from the build rather than the classpath, so a
+     * drift to a third major fails here.
      */
     @Test
     void theAssetDeclaresTheRendererThatWroteIt() throws Exception {
@@ -594,25 +477,20 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The other half of the divergence list. On the leg the asset was NOT generated under, every
-     * action outside the list must still render byte-identically — otherwise the list is stale in
-     * the other direction and that leg is proving nothing about the emitted SQL — and every action
-     * inside it must differ, in the one way the list's javadoc claims.
+     * On the {@code next} leg, exactly the listed actions differ from the asset, and only in the
+     * MySQL WHERE clause.
      */
     @Test
     void divergesFromTheAssetOnExactlyTheShapesTheListNames() {
-        // A name in the list that is not a recorded action can never fire, on either leg. Checked
-        // before the leg split because the baseline is the leg that runs on every push.
+        // Checked on both legs: every listed name must be a recorded action.
         assertTrue(recordedActions.containsAll(RENDERING_DIFFERS_ON_HIBERNATE_7),
                 () -> "not recorded actions: " + RENDERING_DIFFERS_ON_HIBERNATE_7.stream()
                         .filter(action -> !recordedActions.contains(action)).toList());
         assertEquals(new ArrayList<>(new TreeSet<>(RENDERING_DIFFERS_ON_HIBERNATE_7)),
                 RENDERING_DIFFERS_ON_HIBERNATE_7,
                 "the divergence list must stay sorted and free of duplicates");
-        // The reason the list is allowed to be a list rather than a second pinned asset: an entry
-        // on it is a shape whose ROWS the harness proves against check() on both majors, so what
-        // the bytes do not cover, the oracle does. Runs on both legs, since the claim is about the
-        // list rather than about either renderer.
+        // Listed shapes must stay oracle-compared, so the harness covers their rows on both
+        // majors.
         Set<String> oracle = Corpus.oracleActions(ACTIONS, Corpus.ADAPTER)
                 .collect(java.util.stream.Collectors.toSet());
         assertEquals(List.of(), RENDERING_DIFFERS_ON_HIBERNATE_7.stream()
@@ -629,9 +507,7 @@ class SpringDataTranslatorTest {
                 "Hibernate " + org.hibernate.Version.getVersionString() + " diverges from the asset"
                         + " on a different set of shapes than the list pins");
 
-        // The characterisation, not just the membership: MySQL differs, H2 and PostgreSQL do not.
-        // A listed shape whose H2 or PostgreSQL rendering moved is a second renderer change, and
-        // it has to be triaged into the javadoc above rather than absorbed by the list.
+        // Only MySQL may differ; any other change is a second renderer change to triage.
         for (String action : RENDERING_DIFFERS_ON_HIBERNATE_7) {
             ObjectNode pinned = recorded.get(action);
             ObjectNode rendered = expectationOf(emitted.get(action));
@@ -649,11 +525,8 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * "Offline" is a property of the persistence unit, so it is asserted rather than described.
-     *
-     * <p>Adding a JDBC url to {@code translator-pu} would make this suite quietly start needing a
-     * database — it would still pass, because Hibernate would simply have a connection it never
-     * uses, and the claim in this file's javadoc would become false with nothing to say so.
+     * {@code translator-pu} declares no JDBC connection. With one, this suite would quietly start
+     * needing a database.
      */
     @Test
     void theTranslatorPersistenceUnitDeclaresNoDatabase() throws Exception {
@@ -667,16 +540,11 @@ class SpringDataTranslatorTest {
                 start, persistenceXml.indexOf("</persistence-unit>", start));
         assertFalse(unit.contains("jakarta.persistence.jdbc."), unit);
         assertFalse(unit.contains("hbm2ddl"), unit);
-        // ...and the sibling units DO declare one, so the assertion above is about this unit
-        // rather than about a spelling that appears nowhere in the file.
+        // The sibling units do declare one, so the check above is not vacuous.
         assertTrue(persistenceXml.contains("jakarta.persistence.jdbc.url"));
     }
 
-    /**
-     * The asset carries the command that rewrites it, so a reader who opens the file after a
-     * failing assertion is told how to look at the difference. That is only useful while the
-     * command exists.
-     */
+    /** The regeneration command the asset names must be a task this build defines. */
     @Test
     void theAssetNamesACommandThisBuildDefines() throws Exception {
         String[] parts = Corpus.GOLDEN_REGENERATE_COMMAND.split(" ");
@@ -688,32 +556,14 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * Where in the walk each rejection happens, and how many corpus shapes reach each site.
-     *
-     * <p>{@code actions.json} pins a substring of the message per action, so the throw suite above
-     * proves every refusal is the declared one. It cannot say anything about the SHAPE of the
-     * refusals taken together: whether the 21 shapes this reference refuses land on a dozen
-     * distinct mechanisms or on one catch-all, and whether a translator change moved a shape from
-     * one to another. That is a property no corpus action can state, because a corpus action asks
-     * which rows come back.
-     *
-     * <p>Three things are asserted. <strong>Total</strong> — every refusal matches a site this
-     * adapter actually has, so a shape rejected by an accident cannot pass as a declared
-     * limitation, which is the #326 trap at corpus scale. <strong>Pinned counts</strong> — a
-     * translator change that moves a shape from one site to another shows up as a diff even though
-     * both sites throw and {@code actions.json} is unchanged, so a restructuring of the
-     * translator has this table to prove it moved nothing. <strong>No unmapped field</strong> — {@code Scope}'s "Unknown attribute" and
-     * "Cannot resolve" family is not a limitation of the Criteria API at all, it is this suite's
-     * own mapping coming up short, and it is the exact accident #326 was filed for.
+     * Maps every refusal to the throw site that raised it and pins the count per site, so a
+     * change that moves a shape between sites shows up even when {@code actions.json} does not
+     * change. No refusal may come from a mapping gap (#326).
      */
     @Nested
     class WhereTheRefusalsHappen {
 
-        /**
-         * One entry per {@code throw} site the corpus reaches, named for the mechanism rather
-         * than for the message. The substrings are the ones {@code actions.json} pins, narrowed
-         * to the part that identifies the site rather than the action.
-         */
+        /** One entry per throw site, keyed by mechanism, valued by a message substring. */
         private final Map<String, String> sites = Map.ofEntries(
                 Map.entry("two-list difference", "except is not supported:"),
                 Map.entry("computed macro collection", "exists first operand must be a variable"),
@@ -724,48 +574,33 @@ class SpringDataTranslatorTest {
                 Map.entry("whole-list comparison", "comparison against a list"),
                 Map.entry("computed intersection", "Unsupported hasIntersection operand shape:"),
 
-                // leafOperandError: the operand slot of a comparison holds a computed
-                // sub-expression the resolver has no case for — a cast, a positional read, a
-                // struct member access, a lambda. A Criteria predicate compares a path against a
-                // literal, another path, or the arithmetic and ternary forms the resolver does
-                // lower; everything else is Opaque and refused here by the operator it sits in.
+                // ComparisonTranslator.leafOperandError: an operand the resolver cannot lower,
+                // such as a cast, a positional read, a struct access or a lambda.
                 Map.entry("computed leaf operand", " expression in leaf operand of "),
-                // The operator dispatch's default: an operator the reference never translates.
-                // The corpus reaches it through matches() alone — regular expressions have no
-                // dialect-independent SQL form.
+                // The operator dispatch's default; the corpus reaches it only through matches().
                 Map.entry("operator the reference never translates", "Unsupported operator: "),
-                // filter() at the root of the condition or one conjunct below it: a list where a
-                // boolean is required, refused by name before any predicate is built (#387).
+                // filter() used where a boolean is required (#387).
                 Map.entry("filter() in boolean position", "filter() returns a list, not a boolean"),
-                // resolveNumericOperand: CEL's `+` over strings arrives as the same `add` node as
-                // numeric addition, and the reference lowers `add` as arithmetic only, so a
-                // string operand — a constant, the primary key, or a second column — is refused
-                // rather than concatenated (#376, #391).
+                // CEL's string `+` arrives as `add`, which this adapter lowers as arithmetic only
+                // (#376, #391).
                 Map.entry("non-numeric arithmetic operand",
                         "Arithmetic comparison requires numeric operands"),
-                // Arithmetic composed on top of a division whose denominator may be zero: CEL
-                // carries the NaN or infinity through the outer operation and SQL has no value
-                // that does (#311).
+                // CEL carries NaN or infinity through the outer arithmetic; SQL cannot (#311).
                 Map.entry("division inside further arithmetic",
                         "arithmetic composed on a division whose denominator may be zero"),
-                // CEL `%` is integer-only while attribute values are doubles, and the int() cast
-                // that would make it satisfiable has no faithful lowering.
+                // CEL `%` is integer-only, and int() has no faithful lowering.
                 Map.entry("modulo", "mod is not supported in comparisons"),
-                // map() translates only as the collection operand of hasIntersection; compared
-                // directly to a value it is a whole-list equality no scalar column can answer.
+                // map() translates only as the collection operand of hasIntersection.
                 Map.entry("map projection compared directly",
                         "Direct comparison of map(...) to a value is not supported"),
-                // HierarchyTranslator: an empty delimiter splits the path per character, and the
-                // prefix LIKE this adapter emits would then match the path itself.
+                // An empty delimiter would make the prefix LIKE match the path itself.
                 Map.entry("empty hierarchy delimiter",
                         "hierarchy delimiter must be a non-empty string"),
-                // Two columns under different null conventions: the omitted side is UNKNOWN for
-                // a NULL column and the explicit side is definite, and no single predicate is
-                // both (#308).
+                // The omitted side is UNKNOWN for NULL and the explicit side is definite; no one
+                // predicate is both (#308).
                 Map.entry("mixed null conventions across two columns",
                         "between two columns under mixed null conventions"),
-                // timestamp() over a column whose Java type does not denote an absolute instant:
-                // the adapter would have to guess a zone to compare it.
+                // The adapter would have to guess a time zone.
                 Map.entry("ambiguous temporal column",
                         "timestamp() comparison requires a column mapped to java.time.Instant"));
 
@@ -821,21 +656,14 @@ class SpringDataTranslatorTest {
         }
 
         /**
-         * The substrings raised when the MAPPING or the DATA, not the plan shape, is what fell
-         * short: a reference the mapping does not name, a scalar reference to a Relation (both
-         * from {@code Scope}), and a struct element of a literal collection that lacks the field
-         * a lambda reads. None of them is a limitation of the Criteria API, so none may be the
-         * reason a corpus shape is refused.
+         * Messages raised when the mapping or the data falls short rather than the Criteria API:
+         * an unmapped attribute, a scalar reference to a Relation, and a literal struct element
+         * missing the field a lambda reads.
          */
         private static final List<String> MAPPING_SHORTFALLS =
                 List.of("Unknown attribute", "cannot resolve as a scalar path", "Cannot resolve");
 
-        /**
-         * The #326 assertion, stated over the whole corpus. An unmapped field makes an action throw
-         * from {@code Scope} — which is the mapping coming up short, not a limitation of the
-         * Criteria API — and on elasticsearch-java it once let six actions pass the throw suite
-         * while never reaching the mechanism their {@code actions.json} reasons claim.
-         */
+        /** No corpus refusal may come from a mapping gap (#326). */
         @Test
         void noRefusalIsTheMappingComingUpShort() {
             List<String> unmapped = new ArrayList<>();
@@ -851,12 +679,8 @@ class SpringDataTranslatorTest {
             }
             assertEquals(List.of(), unmapped);
 
-            // Anti-vacuity: the detector must recognise the messages it is looking for, built
-            // here rather than hoped for — the corpus mapping with one entry removed, and a bare
-            // boolean whose attribute is redirected at a Relation (an equality against one would
-            // translate as membership instead). The third substring needs a literal collection
-            // of struct elements, which no wire fixture carries, so it has no anti-vacuity
-            // probe here.
+            // Anti-vacuity: provoke the first two messages. The third needs a literal
+            // collection of structs, which no wire fixture carries.
             assertTrue(refusal("cs-eq", Map.of()).contains("Unknown attribute"));
             assertTrue(refusal("root-bare-bool", Map.of("request.resource.attr.aBool",
                             AttributeMapping.relation("tags")))
@@ -872,21 +696,15 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The properties a regenerated asset must not silently accept.
-     *
-     * <p>Pinned bytes do not survive {@code gradle goldenUpdate} being run and committed unread;
-     * rules do. So each of these is stated over every translated corpus action rather than over a
-     * chosen shape, and each carries an anti-vacuity assertion. They read what the translator
-     * emits RIGHT NOW rather than what the asset pins.
+     * Rules over what the translator emits now, for every translated action, each with an
+     * anti-vacuity check. They catch what a regenerated asset committed unread would not.
      */
     @Nested
     class WhatTheEmittedStatementContains {
 
         @Test
         void everyStatementIsTheCorpusSelectPlusItsJoinsAndFilter() {
-            // The asset records only what follows the preamble, which is lossless exactly while
-            // this holds — and the preamble is the query the harness executes, so a statement that
-            // stopped starting with it would mean the two suites had stopped describing one query.
+            // The asset records only what follows the preamble, which is the harness's query.
             for (String action : recordedActions) {
                 emitted.get(action).forEach((dialect, statement) -> assertTrue(
                         statement.startsWith(PREAMBLE),
@@ -898,15 +716,12 @@ class SpringDataTranslatorTest {
 
         @Test
         void aRecordedEntryReassemblesIntoTheStatementThatProducedIt() {
-            // The other half of "recording only the tail is lossless": every entry reassembles
-            // into exactly the statement the adapter emitted, preamble included. Without this the
-            // asset could be a faithful record of something the adapter never built.
+            // Every entry reassembles into the emitted statement, so recording the tail is
+            // lossless.
             for (String action : recordedActions) {
                 if (!onTheRendererThatWroteTheAsset()
                         && RENDERING_DIFFERS_ON_HIBERNATE_7.contains(action)) {
-                    // The asset holds the 6.6 rendering; on the other major a listed shape
-                    // reassembles into the statement 6.6 emitted, not this one. The invariant is
-                    // still asserted for every shape the two renderers agree on.
+                    // The asset holds the 6.6 rendering of listed shapes.
                     continue;
                 }
                 ObjectNode expectation = recorded.get(action);
@@ -925,10 +740,7 @@ class SpringDataTranslatorTest {
 
         @Test
         void noStatementCarriesABindPlaceholder() {
-            // The asset is only a complete record of the filter while the operands are IN it.
-            // A rendering that started binding them would still reassemble, still pass every
-            // other rule here, and quietly stop pinning the half of a filter that decides which
-            // rows come back.
+            // Operands must be inlined; a bound `?` would drop them from the asset.
             List<String> offenders = new ArrayList<>();
             for (String action : recordedActions) {
                 emitted.get(action).forEach((dialect, statement) -> {
@@ -938,25 +750,16 @@ class SpringDataTranslatorTest {
                 });
             }
             assertEquals(List.of(), offenders);
-            // Anti-vacuity: satisfied by a corpus whose statements carry no operands at all.
+            // Anti-vacuity: statements do carry operands.
             assertTrue(emitted.get("cs-eq").get("h2").contains("'one'"),
                     emitted.get("cs-eq").get("h2"));
         }
 
         @Test
         void everyLikeCarriesANonEmptyEscapeClause() {
-            // LIKE metacharacters in a needle are the corpus's founding bug class (#258/#259): an
-            // unescaped `%` in a value turns an equality into a wildcard match and returns rows
-            // the PDP denies. The adapter escapes them and declares the escape character, and a
-            // LIKE that reached the database without one would read those backslashes as literal
-            // text.
-            //
-            // NON-EMPTY is the load-bearing half, and it is not obvious. Hibernate renders the
-            // two-argument `cb.like(path, pattern)` as `... escape ''` — a clause that is present
-            // and declares nothing — so a rule counting ESCAPE clauses passes while every escaped
-            // metacharacter has quietly become literal text. Verified by mutation: dropping the
-            // escape argument from the `startsWith` lowering and regenerating the asset produces
-            // `like '100\%%' escape ''`, which the count-only version of this rule accepted.
+            // An unescaped `%` or `_` turns equality into a wildcard match (#258, #259). Every
+            // LIKE needs a non-empty ESCAPE: Hibernate renders two-argument cb.like(...) as
+            // `escape ''`, which declares nothing.
             List<String> unescaped = new ArrayList<>();
             int withLike = 0;
             for (String action : recordedActions) {
@@ -974,8 +777,7 @@ class SpringDataTranslatorTest {
                 }
             }
             assertEquals(List.of(), unescaped);
-            // Anti-vacuity, in two parts: satisfied by a corpus that emits no LIKE at all, and by
-            // one whose escape character never has to do anything.
+            // Anti-vacuity: a LIKE is emitted, and its escape character is exercised.
             assertTrue(withLike > 0);
             assertTrue(emitted.get("like-percent").get("h2").contains("'100\\%%' escape '\\'"),
                     emitted.get("like-percent").get("h2"));
@@ -983,9 +785,8 @@ class SpringDataTranslatorTest {
 
         @Test
         void theResourceTableIsNamedInExactlyOneFromClause() {
-            // A correlated subquery that lost its correlation lists the outer table in its OWN
-            // FROM and then compares against every row of it — silent wrongness, and the class of
-            // bug no row-level oracle catches while the seeded data happens to agree.
+            // A subquery that lost its correlation names the outer table in its own FROM and
+            // compares against every row of it.
             List<String> offenders = new ArrayList<>();
             for (String action : recordedActions) {
                 emitted.get(action).forEach((dialect, statement) -> {
@@ -996,15 +797,12 @@ class SpringDataTranslatorTest {
             }
             assertEquals(List.of(), offenders);
 
-            // Anti-vacuity, in two parts because the rule needs both to say anything. The corpus
-            // must still emit subqueries at all: these are the shapes that do — a chained
-            // collection macro, a direct EXISTS, and a counted filter().
+            // Anti-vacuity: these actions emit subqueries...
             for (String action : List.of("w1-all-chain", "exists-on-empty", "size-filter-count")) {
                 assertTrue(emitted.get(action).get("h2").contains("(select "),
                         () -> action + ": " + emitted.get(action).get("h2"));
             }
-            // And the detector must recognise the thing it is looking for. This is the broken
-            // rendering, built here rather than hoped for.
+            // ...and the detector catches the broken rendering.
             assertEquals(2, fromClausesNamingTheResource(uncorrelatedRendering()));
         }
 
@@ -1029,9 +827,7 @@ class SpringDataTranslatorTest {
 
         @Test
         void everyQualifiedIdentifierNamesAColumnTheModelDeclares() {
-            // An identifier the model does not carry is a mapping that would fail at execution
-            // time — or worse, resolve against a column that happens to exist. The harness cannot
-            // catch the second: it seeds the same schema this maps against.
+            // Every qualified column must be one the JPA model declares.
             Set<String> declared = declaredColumns();
             Set<String> stray = new TreeSet<>();
             Pattern qualified = Pattern.compile("\\b[a-z]+\\d*_\\d+\\.([a-z_]+)\\b");
@@ -1046,12 +842,9 @@ class SpringDataTranslatorTest {
                 });
             }
             assertEquals(Set.of(), stray);
-            // Anti-vacuity, in two parts. The column set must be populated at all...
+            // Anti-vacuity: the column set is populated...
             assertTrue(declared.contains("a_optional_string"), declared.toString());
-            // ...and the detector must reject something, which a rule reading its column set from
-            // the same metamodel that rendered the SQL would otherwise be too close to tautology
-            // to prove. This is a statement the model does NOT declare, matched here rather than
-            // hoped for.
+            // ...and the detector rejects an undeclared column.
             Matcher stranger = qualified.matcher("re1_0.no_such_column='x'");
             assertTrue(stranger.find(), "the detector matches no qualified identifier at all");
             assertFalse(declared.contains(stranger.group(1)), stranger.group(1));
@@ -1059,12 +852,9 @@ class SpringDataTranslatorTest {
 
         @Test
         void everyRootJoinIsALeftJoin() {
-            // #375, in the SQL. A dotted jpaPath through a to-one association is joined at the
-            // ROOT of the query, and the Criteria API's default there is an INNER join — which
-            // removes the row from the WHOLE query when the association is absent. That is right
-            // for a standalone predicate and wrong under a disjunction: a row whose parent is
-            // missing but whose OTHER branch holds is one the PDP allows. The harness proves the
-            // rows for the shapes the corpus carries; this is the property, over every shape.
+            // #375. A dotted jpaPath through a to-one association is joined at the root. An
+            // INNER join would drop a row with an absent parent even when another OR branch
+            // allows it.
             List<String> offenders = new ArrayList<>();
             int withJoins = 0;
             for (String action : recordedActions) {
@@ -1074,8 +864,7 @@ class SpringDataTranslatorTest {
                         continue;
                     }
                     withJoins++;
-                    // Every `join` in the clause must be spelled `left join`: an INNER one renders
-                    // as a bare `join`, and a cross join as `cross join`.
+                    // An INNER join renders as a bare `join`, a cross join as `cross join`.
                     for (int at = joins.indexOf("join "); at >= 0;
                             at = joins.indexOf("join ", at + 1)) {
                         if (at < "left ".length()
@@ -1092,13 +881,9 @@ class SpringDataTranslatorTest {
 
         @Test
         void mysqlRendersTheIeeeDoubleCastTheOtherDialectsGetForFree() {
-            // The README's "MySQL: keeping arithmetic IEEE-faithful" gotcha, pinned in the SQL
-            // for the first time. MySQLDialect renders a to-double cast as decimal(53,20), which
-            // evaluates CEL's double arithmetic in EXACT decimal and returns rows check() denies;
-            // MySqlDoubleCastFunctionContributor replaces it with cast(x as double) on 8.0.17+.
-            // This is also the anti-vacuity assertion for the dialect VERSIONS above — told only
-            // a dialect class, Hibernate reports its minimum version and the contributor declines
-            // to register, so this fails rather than the asset silently pinning decimal.
+            // MySQLDialect casts to decimal(53,20), which makes double arithmetic exact;
+            // MySqlDoubleCastFunctionContributor renders cast(x as double) instead. This also
+            // fails if the dialect versions in DIALECTS are dropped.
             assertTrue(emitted.get("p-double-frac").get("mysql").contains("as double)"),
                     emitted.get("p-double-frac").get("mysql"));
             assertTrue(emitted.get("p-double-frac").get("h2").contains("as float(53))"),
@@ -1107,15 +892,11 @@ class SpringDataTranslatorTest {
 
         @Test
         void theFoldedNowLiteralKeepsThePrecisionThePdpEmits() {
-            // The one operand a wire fixture cannot pin: `now() - duration("24h")` differs on
-            // every capture, so the fixture carries a placeholder and this adapter's reader
-            // chooses a value (Corpus.PLANNED_AT). The choice is load-bearing — the PDP emits
-            // NANOSECONDS, and a tidy millisecond substitution would pin a comparison the PDP
-            // never produces against a column that carries them.
+            // `now() - duration("24h")` changes on every capture, so the fixture holds a
+            // placeholder and Corpus.PLANNED_AT fills it at nanosecond precision, as the PDP does.
             assertTrue(emitted.get("ts-window").get("h2").contains(".123456789"),
                     emitted.get("ts-window").get("h2"));
-            // ...and the dialects that cannot carry nanoseconds truncate rather than round,
-            // which is a rendering difference worth seeing in the asset.
+            // PostgreSQL truncates to microseconds.
             assertTrue(emitted.get("ts-window").get("postgresql").contains(".123456"),
                     emitted.get("ts-window").get("postgresql"));
         }
@@ -1128,11 +909,7 @@ class SpringDataTranslatorTest {
             return count;
         }
 
-        /**
-         * How many of a statement's FROM lists name the resource table. A FROM list is one or
-         * more table references — which is exactly how an uncorrelated subquery pulls the outer
-         * table in.
-         */
+        /** Counts the FROM lists naming the resource table; an uncorrelated subquery adds one. */
         private int fromClausesNamingTheResource(String statement) {
             int count = 0;
             Matcher m = Pattern.compile("from ([a-z_]+ [a-z]+\\d*_\\d+(?:,[a-z_]+ [a-z]+\\d*_\\d+)*)")
@@ -1155,16 +932,14 @@ class SpringDataTranslatorTest {
             sf.getMappingMetamodel().forEachEntityDescriptor(descriptor -> {
                 descriptor.forEachSelectable((index, selectable) ->
                         columns.add(selectable.getSelectionExpression()));
-                // The identifier is not part of forEachSelectable's attribute walk, and it is the
-                // column every one of these statements selects.
+                // The identifier is not part of the attribute walk.
                 descriptor.getIdentifierMapping().forEachSelectable((index, selectable) ->
                         columns.add(selectable.getSelectionExpression()));
             });
             sf.getMappingMetamodel().forEachCollectionDescriptor(descriptor -> {
                 descriptor.getAttributeMapping().forEachSelectable((index, selectable) ->
                         columns.add(selectable.getSelectionExpression()));
-                // A collection's key and index columns are named in the correlated subqueries but
-                // belong to neither entity's attribute walk.
+                // Collection key columns belong to no entity's attribute walk.
                 descriptor.getAttributeMapping().getKeyDescriptor()
                         .forEachSelectable((index, selectable) ->
                                 columns.add(selectable.getSelectionExpression()));
@@ -1174,13 +949,8 @@ class SpringDataTranslatorTest {
     }
 
     /**
-     * The corpus's {@code nullRepresentationOmitted} probe, which has no store in it at all.
-     *
-     * <p>{@code null-eq-missing} compares {@code aOptionalString == null}, and the planner emits
-     * the same {@code eq(attr, null)} node whichever convention the caller uses — so the adapter
-     * has to be TOLD, and what it does when it is told is a pure translator property. The harness
-     * asserts the same pair against a live PDP and proves the over-grant with real rows; here it
-     * costs a millisecond and pins the SQL each option produces.
+     * The {@code nullRepresentationOmitted} probe, offline. The planner emits the same
+     * {@code eq(attr, null)} under either convention, so the caller's option decides the SQL.
      */
     @Nested
     class NullAttributeRepresentationOption {
@@ -1198,8 +968,7 @@ class SpringDataTranslatorTest {
 
         @Test
         void omittedRefusesTheSamePlan() {
-            // A NULL column then sends no attribute, so check() denies on a missing-attribute
-            // error while the filter above returns exactly those rows (#302).
+            // check() denies every row on a missing attribute, while IS NULL returns rows (#302).
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                     () -> specificationFor(probe.action(), Corpus.MAPPING,
                             NullAttributeRepresentation.OMITTED, Corpus.PLANNED_AT));
@@ -1209,14 +978,13 @@ class SpringDataTranslatorTest {
 
         @Test
         void aPerAttributeDeclarationOverridesTheCallLevelOption() {
-            // #308. `owner` declares EXPLICIT in the corpus mapping, so `null-eq` — which probes
-            // it — must still translate under a call-level OMITTED...
+            // #308. `owner` declares EXPLICIT, so `null-eq` still translates under a call-level
+            // OMITTED...
             assertEquals(statementOf("h2", specificationFor("null-eq")),
                     statementOf("h2", specificationFor("null-eq", Corpus.MAPPING,
                             NullAttributeRepresentation.OMITTED, Corpus.PLANNED_AT)));
 
-            // ...and stripping the declaration must reject the same action under the same option,
-            // so the override above is doing work rather than being quietly equivalent.
+            // ...and without the declaration the same call is refused.
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                     () -> specificationFor("null-eq", Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS,
                             NullAttributeRepresentation.OMITTED, Corpus.PLANNED_AT));

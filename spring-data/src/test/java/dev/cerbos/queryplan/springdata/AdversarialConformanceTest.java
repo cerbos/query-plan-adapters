@@ -80,49 +80,31 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Adversarial differential suite: every action from the repo-level {@code ../conformance/}
- * corpus is planned against a real Cerbos PDP, translated by the adapter, and executed against
- * seeded rows. The filtered id set is compared with an oracle computed by calling the check API
- * for each row with matching attributes.
+ * Differential suite: plans every {@code conformance/} action against a real Cerbos PDP, runs the
+ * translated Specification against seeded rows, and compares the ids with per-row
+ * {@code check()} decisions. Needs Docker.
  *
- * <p>No hand-computed expectations: if the adapter's SQL semantics diverge from Cerbos's own
- * evaluation for any row, the mismatch surfaces mechanically. See {@code conformance/README.md}
- * for the shared seed, NULL, and degeneracy conventions.
- *
- * <p><strong>Database selection.</strong> By default the suite runs on in-memory H2. Set the
- * {@code adapter.test.db} system property (forwarded from {@code ADAPTER_TEST_DB}) to
- * {@code postgres} or {@code mysql} to run the same oracle against a real Testcontainers
- * database. The MySQL leg defaults to the byte-exact {@code utf8mb4_0900_bin} collation;
- * using {@code -Dadapter.test.mysql.collation=utf8mb4_0900_ai_ci} reproduces the documented
- * case-insensitive authorization over-grant, and {@code utf8mb4_0900_as_cs} the soft-hyphen one
- * (seed h6, cerbos/query-plan-adapters#474).
+ * <p>Runs on H2 by default. Set {@code adapter.test.db} to {@code postgres} or {@code mysql} to
+ * use a Testcontainers database; {@code adapter.test.mysql.collation} overrides the MySQL
+ * collation (default {@code utf8mb4_0900_bin}).
  */
 class AdversarialConformanceTest {
 
     /**
-     * The corpus mapped onto the JPA model, and the same mapping with the per-attribute null
-     * conventions stripped. Both live in {@link Corpus} because {@link SpringDataTranslatorTest}
-     * pins the SQL these produce and this suite proves the rows that SQL returns — two statements
-     * about one query, which they only are while both are built from the same mapping.
+     * The corpus mapping, with and without its per-attribute null conventions. Shared with
+     * {@link SpringDataTranslatorTest} so both suites describe the same query.
      */
     private static final Map<String, AttributeMapping> MAPPING = Corpus.MAPPING;
 
     private static final Map<String, AttributeMapping> MAPPING_WITHOUT_NULL_CONVENTIONS =
             Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS;
 
-    // -- shared corpus (../conformance/): policy, seed data, and action list are read from disk
-    // rather than duplicated here. See conformance/README.md for the recipe these implement.
-
     private record Tag(String id, String name) {}
 
     /**
-     * One seeded row; the single source of truth for BOTH the DB entity and the oracle attributes.
-     * {@code note} is corpus documentation this harness never reads; it is named so that strict
-     * decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
-     *
-     * <p>{@code aNumberList} and {@code aBoolList} elements are boxed because the corpus carries
-     * null elements, and a null element is a value CEL compares; each is persisted as a related
-     * row whose column is NULL (see {@link #seed}).
+     * One seeded row, feeding both the persisted entity and the check() oracle. {@code note} is
+     * corpus prose and never read. List elements are boxed because the corpus carries null
+     * elements.
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
@@ -130,19 +112,15 @@ class AdversarialConformanceTest {
                         String note) {}
 
     /**
-     * {@code attr} is typed as raw JSON rather than {@code Map<String, List<String>>}: the corpus
-     * carries scalar principal attributes as well as lists, and a narrower type would reject the
-     * file rather than silently drop one — but it would still be this harness deciding what the
-     * corpus may contain. {@link #principal()} converts each value by its actual JSON type.
+     * {@code attr} is raw JSON because the corpus carries scalar, list and struct attributes;
+     * {@link #principal()} converts each by its JSON type.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record PrincipalSpec(String id, List<String> roles, Map<String, Object> attr) {}
 
     /**
-     * conformance/seeds.json. Every key the file carries is named, including the prose ones,
-     * because unknown properties are rejected rather than ignored: a seed field this harness does
-     * not consume would be dropped from the entity AND the check() oracle at once, and the
-     * differential would agree for the wrong reason.
+     * conformance/seeds.json. Unknown properties are rejected, so a new seed field fails decoding
+     * instead of being dropped from both sides of the differential.
      */
     private record SeedsFile(@JsonProperty("$schema") String schema, String description,
                              PrincipalSpec principal, String resourceKind, String principalNote,
@@ -155,51 +133,33 @@ class AdversarialConformanceTest {
     private record DerivedFile(@JsonProperty("$schema") String schema, String description,
                                List<String> fields, Map<String, DerivedEntry> derived) {}
 
-    // The actions.json records, the classification helpers and the wire-fixture reader live in
-    // Corpus: SpringDataTranslatorTest asserts the same classification offline, and one parse of
-    // one file is what keeps the two suites from disagreeing about which shapes must throw.
+    // The actions.json records and helpers live in Corpus, shared with SpringDataTranslatorTest.
 
-    /** The corpus key for this adapter — its directory name, as every other harness uses. */
+    /** This adapter's key in the corpus. */
     private static final String ADAPTER = Corpus.ADAPTER;
 
     // -- corpus coverage guards -----------------------------------------------------------------
     //
-    // The same parsed seed feeds the persisted entity AND the check() oracle, so a corpus field
-    // this harness does not consume is dropped from both sides at once and the differential agrees
-    // for the wrong reason — the projection trap conformance/README.md describes for actions.json,
-    // applied to the seeds. Asserting set equality catches both directions: a corpus key nothing
-    // here reads, and a key this harness reads that the corpus no longer carries.
+    // One parsed seed feeds both the entity and the check() oracle, so a corpus key this harness
+    // ignored would drop from both sides and the differential would still agree. These key lists
+    // are asserted equal to the corpus.
 
     private static final List<String> SEED_KEYS = List.of(
             "id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList",
             "tags", "subCategoryNames", "parentSeedId");
 
-    /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
+    /** Corpus prose, never read. */
     private static final String SEED_NOTE_KEY = "note";
 
-    /**
-     * The one nested object array a seed carries. A key added inside an element is dropped from
-     * both sides of the differential just as silently as a top-level one, so it is guarded the
-     * same way.
-     */
+    /** Keys of each {@code tags[]} element, guarded like the top-level seed keys. */
     private static final List<String> TAG_KEYS = List.of("id", "name");
 
     private static final List<String> DERIVED_KEYS =
             List.of("createdBy", "aDouble", "createdAt", "updatedAt", "scope", "labels");
 
-    // The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
-    // test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides
-    // at once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal,
-    // agrees. That is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass
-    // while testing nothing (conformance/README.md, "Adding a new hostile shape", step 7).
-    // principal() iterates the whole attr map, which is correct; the guard is what proves it does.
-    //
-    // `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
-    // attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
-    // elements. A role dropped on the way in changes every policy decision at once; that it is less
-    // likely to be projected away than an attribute is a reason to expect the assertion to stay
-    // quiet, not a reason to omit it. PrincipalSpec ignores unknown properties so that this
-    // assertion, not a Jackson decode error, is what names an added key.
+    // The principal feeds both the plan and the oracle, so a dropped role or attribute would
+    // vanish from both sides too. PrincipalSpec ignores unknown properties so that the coverage
+    // assertion, not a decode error, names an added key.
 
     private static final List<String> PRINCIPAL_KEYS = List.of("id", "roles", "attr");
 
@@ -214,20 +174,12 @@ class AdversarialConformanceTest {
     private static DerivedFile derivedFile;
     private static List<Seed> SEEDS;
 
-    /**
-     * Conformance actions this adapter cannot express and must reject loudly instead.
-     *
-     * <p>Spring Data is the reference implementation, so this list is normally empty — a shape it
-     * translates is what puts an action in {@code conformance} in the first place. An entry here
-     * means the reference itself proved unable to express the shape faithfully and now fails
-     * closed, which is still the required outcome: a wrong filter is an authorization bug, a
-     * throw is a bug report.
-     */
+    /** Actions this adapter cannot express and must refuse ({@code adapterUnsupported}). */
     private static List<AdapterUnsupported> adapterUnsupported() {
         return actionsFile.adapterUnsupportedFor(ADAPTER);
     }
 
-    /** Reference-unsupported shapes this adapter deliberately translates anyway (normally empty). */
+    /** {@code expectedUnsupported} actions this adapter translates anyway. */
     private static List<AdapterUnsupported> adapterSupportedExpected() {
         return actionsFile.adapterSupportedExpectedFor(ADAPTER);
     }
@@ -258,47 +210,34 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Actions whose {@code == null} probe targets an attribute the oracle OMITS for NULL
-     * columns. They carry no oracle comparison: under the omitted representation check() denies
-     * every row, so the adapter must reject the shape rather than emit a filter (#302).
+     * Actions whose {@code == null} probe reads an attribute the corpus omits when NULL. check()
+     * denies every row, so under {@code OMITTED} the adapter must refuse the shape (#302).
      */
     static Stream<Arguments> nullRepresentationOmitted() {
         return actionsFile.nullRepresentationOmitted().stream()
                 .map(n -> Arguments.of(n.action(), n.reason(), nullOmittedMessage(n)));
     }
 
-    /** The substring this adapter's rejection under the omitted representation must contain. */
     private static String nullOmittedMessage(NullRepresentationOmitted entry) {
         return Corpus.nullOmittedMessage(entry, ADAPTER);
     }
 
     /**
-     * Deterministic label names per seed for the {@code macro-depth3-*} actions — the third
-     * macro level (categories → subCategories → labels). A {@code null} entry seeds a label
-     * whose {@code name} column is NULL: a missing element attribute on the check side, so the
-     * innermost lambda body touching it is a CEL evaluation error that must propagate up
-     * through BOTH enclosing macro levels (deny) — and SQL UNKNOWN through the nested scoring
-     * subqueries on the adapter side. a1 is the true witness ("gold"), a6 the error witness
-     * (no true sibling to absorb the NULL-name error), a8 the determined-false witness, and
-     * c1 the collation witness ("Gold" vs "gold"). Only consulted for seeds that hold a
-     * category/subCategory chain.
+     * Label names for the {@code macro-depth3-*} actions. A {@code null} seeds a NULL
+     * {@code name}, which check() sees as a missing attribute.
      */
     private static List<String> labelsFor(Seed s) {
         return derivedFor(s).labels();
     }
 
-    /** Deterministic ISO instant per seed for the timestamp probe: split around 2025-01-01. */
+    /** {@code createdBy}: a timestamp string per seed, split around 2025-01-01. */
     private static String isoFor(Seed s) {
         return derivedFor(s).createdBy();
     }
 
     /**
-     * The deterministic derived fields for one seed, read from conformance/derived-fields.json
-     * rather than restated here. The same value feeds the persisted entity and the check() oracle,
-     * so a transcription error would be self-consistent and invisible to the differential; one
-     * machine-readable definition is what makes that impossible. The JavaDoc on the accessors below
-     * explains what each value witnesses; conformance/README.md states the rules the file
-     * materialises, and validate-corpus.sh re-derives them.
+     * One seed's derived fields from conformance/derived-fields.json, so the entity and the
+     * oracle share one definition.
      */
     private static DerivedEntry derivedFor(Seed s) {
         DerivedEntry entry = derivedFile.derived().get(s.id());
@@ -307,16 +246,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Deterministic {@link Instant} per seed for the {@code ts-*} timestamp() comparison
-     * actions. The split matters: a1/a5 and the {@code aNumber < 2} seeds are firmly in the
-     * past (the {@code ts-window} retention cutoff, {@code now() - 24h}, must include them),
-     * a2 and the {@code aNumber >= 2} seeds are far enough in the future to stay AFTER any
-     * plan-time {@code now()} yet inside MySQL's {@code TIMESTAMP} range (which ends
-     * 2038-01-19 — the CI MySQL leg stores Instant as {@code timestamp}), a3 is NULL
-     * (missing attribute → CEL error → {@code check()} denies; SQL NULL comparison →
-     * UNKNOWN → excluded — both sides must agree), a4 is the {@code ts-eq} witness, and a5
-     * carries sub-second (microsecond) precision — exactly representable on H2, PostgreSQL,
-     * and MySQL {@code timestamp(6)} columns.
+     * {@code createdAt} for the {@code ts-*} actions. Future values stay before 2038-01-19, where
+     * MySQL's {@code TIMESTAMP} range ends.
      */
     private static java.time.Instant tsFor(Seed s) {
         String value = derivedFor(s).createdAt();
@@ -324,41 +255,25 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Deterministic fractional double per seed for the IEEE add-solve probes
-     * ({@code arith-add-*-frac*}). a1 carries the algebraic-solve trap: {@code -0.6} is
-     * EXACTLY what solving {@code aDouble + 0.7 == 0.1} yields in Java double space, yet
-     * {@code check()} denies it ({@code -0.6 + 0.7 == 0.09999999999999998 != 0.1}) — so a
-     * pre-solved filter diverges from the oracle on this row. a2 is the exact-arithmetic
-     * agreement witness ({@code 0.25 + 0.5 == 0.75} holds bit-for-bit: both filter and
-     * oracle INCLUDE it). a3 has NO aDouble (missing attribute → CEL error → deny; SQL NULL
-     * arithmetic → UNKNOWN → excluded). The rest get an unremarkable fractional value both
-     * sides agree to exclude.
+     * {@code aDouble} for the {@code arith-add-*-frac*} actions. a1 holds {@code -0.6}, which is
+     * what solving {@code aDouble + 0.7 == 0.1} gives, yet CEL computes
+     * {@code -0.6 + 0.7 == 0.09999999999999998}, so a pre-solved filter diverges on that row.
      */
     private static Double doubleFor(Seed s) {
         return derivedFor(s).aDouble();
     }
 
     /**
-     * Deterministic hierarchy path per seed for the {@code hier-*} actions. The paths
-     * triangulate the translator's branches: strict-prefix IN lists (ancestor-side fields),
-     * prefix LIKE (descendant-side fields), the EQUAL path (ancestorOf/descendentOf are
-     * strict — verified against a live PDP — while overlaps is inclusive), sibling STRING
-     * prefixes that are not PATH prefixes ({@code "dept.engineering"},
-     * {@code "dept.eng.platform2"}), LIKE metacharacters in segments (b2 is the
-     * unescaped-{@code %} trap, b3 the unescaped-{@code _} trap, b4 the equal-path
-     * strictness trap for the colon-delimited metachar actions), a trailing-delimiter empty
-     * segment (c2), a case variant for the collation legs (c1), and a NULL (a7: missing
-     * attribute → CEL error → deny on the check side vs SQL NULL → excluded on the SQL side).
+     * Hierarchy path for the {@code hier-*} actions. The values include LIKE metacharacters,
+     * string prefixes that are not path prefixes, a case variant and a NULL.
      */
     private static String scopeFor(Seed s) {
         return derivedFor(s).scope();
     }
 
     /**
-     * Proves this harness consumes every seed key, every principal key and every derived field the
-     * corpus defines, and nothing it does not. Rejecting unknown properties on decode cannot do
-     * this alone: it catches an added key but says nothing about one that disappears, and a
-     * disappeared key decodes to its default on both sides of the differential.
+     * Asserts this harness consumes exactly the seed, principal and derived keys the corpus
+     * defines. Rejecting unknown properties on decode catches added keys but not removed ones.
      */
     private static void assertCorpusCoverage(ObjectMapper mapper, Path conformance)
             throws IOException {
@@ -390,13 +305,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Guards the corpus principal the way {@link #assertCorpusCoverage} guards a seed row: the
-     * top-level keys, then the keys one level in.
-     *
-     * <p>Asserted against the RAW JSON because {@link #principal()} rebuilds the principal from
-     * {@link PrincipalSpec} — a rebuilt object could only ever report the keys this harness already
-     * names. Attribute values are guarded as well: scalar types, collection element types and
-     * struct keys must match the corpus declaration before recursive conversion feeds both APIs.
+     * Guards the principal's keys and attribute value types. Reads the raw JSON, because
+     * {@link PrincipalSpec} could only report keys this harness already names.
      */
     private static void assertPrincipalCoverage(JsonNode principal) {
         assertKeys("seeds.json principal", keysOf(principal), PRINCIPAL_KEYS, List.of());
@@ -465,7 +375,7 @@ class AdversarialConformanceTest {
         SEEDS = seedsFile.seeds();
         assertCorpusCoverage(mapper, conformance);
 
-        // Pinned PDP image — see CerbosTestImage for the pin rationale and bump policy.
+        // Pinned PDP image; see CerbosTestImage.
         cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
                 .withExposedPorts(3593)
                 .withCommand("server", "--set=storage.disk.directory=/policies",
@@ -473,10 +383,7 @@ class AdversarialConformanceTest {
                 .withEnv("CERBOS_NO_TELEMETRY", "1")
                 .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("cerbos-adversarial-pdp")))
                 .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
-        // The WHOLE policy directory, not the one file the corpus carries today. A second policy
-        // file — a derived-roles or exported-variables file a future action depends on — would
-        // otherwise be silently absent from the PDP, and every action reaching it would plan
-        // against a policy that never loaded.
+        // Copy the whole policy directory, so a policy file added later is loaded too.
         List<Path> policies = policyFiles(conformance.resolve("policies"));
         assertFalse(policies.isEmpty(), "conformance/policies/ holds no policy file");
         for (Path policy : policies) {
@@ -504,10 +411,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Builds the EntityManagerFactory for the database selected by {@code adapter.test.db}:
-     * the H2-backed persistence unit as-is (default), or the same unit with its JDBC
-     * connection properties overridden to point at a Testcontainers-managed PostgreSQL or
-     * MySQL instance.
+     * The H2 persistence unit by default, or the same unit pointed at a PostgreSQL or MySQL
+     * container, chosen by {@code adapter.test.db}.
      */
     private static EntityManagerFactory createEntityManagerFactory() {
         String db = System.getProperty("adapter.test.db", "h2");
@@ -522,30 +427,19 @@ class AdversarialConformanceTest {
                         "adversarial-pu", jdbcOverrides(pg, "org.hibernate.dialect.PostgreSQLDialect"));
             }
             case "mysql": {
-                // Byte-exact server collation by default, per the README's
-                // "Database collation requirements" section. Overriding this with MySQL's
-                // default utf8mb4_0900_ai_ci reproduces the collation over-grant: the
-                // mixed-case seeds (c1/c2) then diverge from the check() oracle. The
-                // case-sensitive utf8mb4_0900_as_cs is not enough either: it ignores the soft
-                // hyphen in seed h6, which then diverges.
+                // Byte-exact collation by default. MySQL's default utf8mb4_0900_ai_ci makes `=`
+                // case-insensitive (seeds c1/c2 diverge), and utf8mb4_0900_as_cs ignores the soft
+                // hyphen in seed h6 (#474).
                 String collation = System.getProperty(
                         "adapter.test.mysql.collation", "utf8mb4_0900_bin");
                 MySQLContainer my = new MySQLContainer(DatabaseTestImages.MYSQL)
                         .withCommand("--character-set-server=utf8mb4",
                                 "--collation-server=" + collation);
-                // The leg runs with Connector/J's DEFAULT client-side prepared statements,
-                // which interpolate double bind parameters as DECIMAL literals. Hibernate's
-                // MySQLDialect renders to-double casts as decimal(53,20), so without the
-                // adapter's own `cast(... as double)` rendering (registered by
-                // MySqlDoubleCastFunctionContributor) the double-space arithmetic would
-                // evaluate in exact decimal — 3 * 0.1 == 0.3 becomes TRUE, diverging from
-                // CEL IEEE semantics; p-double-frac is the witness. Running client-side by
-                // default makes the oracle pin the DOUBLE-cast fix; set
-                // -Dadapter.test.mysql.serverPrepStmts=true (env var
-                // ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS) to verify the server-side prepared
-                // statement mode too — both
-                // modes must agree with the check() oracle. Verified empirically on
-                // MySQL 8.4.
+                // Connector/J defaults to client-side prepared statements, which send double
+                // parameters as DECIMAL literals, and MySQLDialect casts to decimal(53,20). Double
+                // arithmetic would then be exact (3 * 0.1 == 0.3), unlike CEL, so the adapter
+                // casts with MySqlDoubleCastFunctionContributor; p-double-frac witnesses it. Set
+                // adapter.test.mysql.serverPrepStmts=true to test server-side statements too.
                 if (Boolean.getBoolean("adapter.test.mysql.serverPrepStmts")) {
                     my.withUrlParam("useServerPrepStmts", "true");
                 }
@@ -598,8 +492,7 @@ class AdversarialConformanceTest {
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
-            // One related row per element, a null element as a NULL column — the value the
-            // check() side sends as an explicit null element (see asCheckResource).
+            // One related row per element; a null element becomes a NULL column.
             s.aNumberList().forEach(r::addNumberListElement);
             s.aBoolList().forEach(r::addBoolListElement);
             List<CategoryEntity> cats = new ArrayList<>();
@@ -624,9 +517,8 @@ class AdversarialConformanceTest {
             r.setCategories(cats);
             em.persist(r);
 
-            // The to-one chain, one owned row per level. A seed with no parent gets no row at
-            // all, which is what makes the absent-parent hazard reachable through a SCALAR
-            // rather than only through mainCategory's collection.
+            // A seed with no parent gets no parent row, so an absent parent is reachable
+            // through a scalar path.
             Seed parentSeed = parentSeedOf(s);
             if (parentSeed != null) {
                 AdversarialParentEntity parent = new AdversarialParentEntity();
@@ -667,8 +559,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * One principal attribute, converted by the JSON type the corpus actually carries. JSON scalars, lists and structs are preserved recursively so the plan and oracle receive
-     * the same unmodified principal.
+     * Converts a principal attribute by its JSON type, recursively, so the plan and the oracle
+     * get the same principal.
      */
     private static AttributeValue asPrincipalAttribute(String key, Object value) {
         if (value == null) return nullAttributeValue();
@@ -692,15 +584,13 @@ class AdversarialConformanceTest {
         throw new IllegalStateException("Unsupported principal attribute: " + key);
     }
 
-    // -- the real to-one relation (conformance/README.md, "The real to-one relation") -----------
+    // -- the to-one relation (conformance/README.md, "The real to-one relation") ----------------
     //
-    // `parentSeedId` names the seed whose four scalars a row's `parent` carries, and that seed's
-    // own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
-    // Every resource owns a FRESH parent (and inner) row rather than pointing at the named seed's
-    // own row, so no two resources share one and a filter that returned the parent instead of the
-    // child cannot agree with the oracle by accident.
+    // `parentSeedId` names the seed whose scalars a row's `parent` carries; that seed's own
+    // `parentSeedId` fills `parent.inner`. Each resource owns fresh parent rows, so a filter that
+    // returned the parent instead of the child cannot match the oracle by accident.
 
-    /** The seed one hop out, or null when this level has no parent. A null argument returns null. */
+    /** The seed one hop out, or null when there is none or {@code s} is null. */
     private static Seed parentSeedOf(Seed s) {
         if (s == null || s.parentSeedId() == null) {
             return null;
@@ -713,10 +603,7 @@ class AdversarialConformanceTest {
                                 + "\", which is not a seed id"));
     }
 
-    /**
-     * One level of the chain as check() attributes. A NULL column is a MISSING attribute one hop
-     * out, exactly as it is on the resource row itself.
-     */
+    /** One level of the chain as check() attributes; a NULL column is a missing attribute. */
     private static Map<String, AttributeValue> relationAttr(Seed s) {
         Map<String, AttributeValue> attrs = new LinkedHashMap<>();
         attrs.put("aBool", AttributeValue.boolValue(s.aBool()));
@@ -750,43 +637,30 @@ class AdversarialConformanceTest {
                                                         .map(AdversarialConformanceTest::asLabelAttribute)
                                                         .toList())))))))
                         .toList()));
-        // A DB NULL is a missing attribute on the check side — conditions touching it must
-        // deny (CEL error), matching SQL three-valued logic excluding the row.
+        // A NULL column is a missing attribute: conditions on it deny, as SQL excludes the row.
         if (s.aOptionalString() != null) {
             r = r.withAttribute("aOptionalString", AttributeValue.stringValue(s.aOptionalString()));
         }
-        // `owner` reads the SAME column under the OTHER null convention: a DB NULL is the
-        // EXPLICITLY-null attribute. This is the convention the adapter's null translations
-        // implement (eq-null → IS NULL; a null in-list element → OR IS NULL), and the two
-        // check() verdicts genuinely differ: `null in ["x", null]` is TRUE (allow) while a
-        // MISSING owner is a CEL error (deny). SQL cannot distinguish the two — the adapter
-        // follows the planner, which itself folds `x in [null]` to eq(x, null).
+        // `owner` is the same column with a NULL sent as an explicit null, the convention the
+        // adapter's null translations assume (eq-null becomes IS NULL). The verdicts differ:
+        // `null in ["x", null]` allows, while a missing attribute denies.
         r = r.withAttribute("owner", s.aOptionalString() != null
                 ? AttributeValue.stringValue(s.aOptionalString())
                 : nullAttributeValue());
-        // `coOwner` is the explicit-null alias of the `scope` column, the second half of
-        // `null-value-f2f`: `scope` itself is omitted when NULL (below), so the corpus carries
-        // the same column under both conventions and the field-to-field probe has two explicit
-        // nulls to compare.
+        // `coOwner` is the `scope` column as an explicit null, so `null-value-f2f` compares two
+        // explicit nulls. `scope` itself is omitted when NULL.
         r = r.withAttribute("coOwner", scopeFor(s) != null
                 ? AttributeValue.stringValue(scopeFor(s))
                 : nullAttributeValue());
-        // tagNames: the scalar name projection of tags, with NULL name columns as explicit
-        // null elements — the representation under which `null in R.attr.tagNames` is TRUE
-        // exactly when a related row's member column IS NULL.
+        // NULL tag names as null elements, so `null in tagNames` is true exactly when a tag
+        // row's name IS NULL.
         r = r.withAttribute("tagNames", AttributeValue.listValue(s.tags().stream()
                 .map(t -> t.name() != null
                         ? AttributeValue.stringValue(t.name())
                         : nullAttributeValue())
                 .toList()));
-        // aNumberList / aBoolList: sent verbatim, every element in place and a null element as an
-        // EXPLICIT null — `[null, 2][0] == 2` is a definite false in CEL, not an error, and a6
-        // exists to witness exactly that. The persisted side is one related row per element
-        // with a NULL column for the null element (seed()), mapped in Corpus.MAPPING as the
-        // scalar projection of that relation — the same convention tagNames uses. The
-        // positional reads (`[0]`) never reach it: this adapter refuses index() in the leaf
-        // operand before the list attribute is resolved. The membership actions (`in`,
-        // hasIntersection) do.
+        // Sent verbatim, a null element as an explicit null: `[null, 2][0] == 2` is false in
+        // CEL, not an error (seed a6). Persisted as one related row per element.
         r = r.withAttribute("aNumberList", AttributeValue.listValue(s.aNumberList().stream()
                 .map(n -> n != null ? AttributeValue.doubleValue(n) : nullAttributeValue())
                 .toList()));
@@ -799,18 +673,15 @@ class AdversarialConformanceTest {
         if (scopeFor(s) != null) {
             r = r.withAttribute("scope", AttributeValue.stringValue(scopeFor(s)));
         }
-        // A NULL created_at column is a missing attribute on the check side: timestamp()
-        // over it is a CEL evaluation error → deny, matching SQL NULL exclusion.
+        // A NULL created_at is a missing attribute: timestamp() over it errors and check() denies.
         if (tsFor(s) != null) {
             r = r.withAttribute("createdAt", AttributeValue.stringValue(derivedFor(s).createdAt()));
         }
         if (derivedFor(s).updatedAt() != null) {
             r = r.withAttribute("updatedAt", AttributeValue.stringValue(derivedFor(s).updatedAt()));
         }
-        // mainCategory mirrors the row's single category as ONE nested object (the seeder
-        // creates at most one category per seed), so direct dotted-chain CEL expressions
-        // evaluate cleanly; rows without a category get NO attribute — a CEL missing-attr
-        // error (deny), matching the adapter's empty join chain excluding the row.
+        // The row's single category as one object. Rows without one get no attribute (deny),
+        // matching the empty join.
         if (!s.subCategoryNames().isEmpty()) {
             r = r.withAttribute("mainCategory", AttributeValue.mapValue(Map.of(
                     "name", AttributeValue.stringValue("business"),
@@ -822,9 +693,8 @@ class AdversarialConformanceTest {
                             .map(AttributeValue::stringValue)
                             .toList()))));
         }
-        // The real to-one chain, mirroring the seeded rows exactly. A row with no parent sends NO
-        // `parent` attribute — a CEL missing-path error (deny) — matching a join that finds
-        // nothing; the same holds one level down for `parent.inner`.
+        // A row with no parent sends no `parent` attribute (deny), matching a join that finds
+        // nothing; likewise for `parent.inner`.
         Seed parentSeed = parentSeedOf(s);
         if (parentSeed != null) {
             Map<String, AttributeValue> parent = relationAttr(parentSeed);
@@ -838,10 +708,9 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * An explicit protobuf NULL attribute value. The SDK's {@link AttributeValue} exposes no
-     * null factory (string/double/bool/list/map only), so the private constructor is reached
-     * reflectively — the null attribute is exactly what the in-null-elem-* actions exist to
-     * exercise, and check() verdicts differ between an explicit null and a missing attribute.
+     * An explicit null attribute. {@link AttributeValue} has no null factory, so its private
+     * constructor is called reflectively. check() treats an explicit null differently from a
+     * missing attribute.
      */
     private static AttributeValue nullAttributeValue() {
         try {
@@ -882,11 +751,7 @@ class AdversarialConformanceTest {
                 .toList();
     }
 
-    /**
-     * The plan the PDP produces for one action. The SDK's single-action {@code plan} overload is
-     * deprecated in favour of the multi-action one; one action in the list is the same request,
-     * and the result's filter is that action's.
-     */
+    /** The plan for one action, through the non-deprecated multi-action overload. */
     private static PlanResourcesResult plan(String action) {
         return client.plan(
                 principal(), Resource.newInstance(seedsFile.resourceKind()), List.of(action));
@@ -913,9 +778,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * The ids the repository's query returns under {@code spec} — or, when {@code spec} is
-     * null, with no authorization clause at all, which is the query a caller runs for an
-     * always-allowed plan.
+     * The ids the query returns under {@code spec}, or with no filter when {@code spec} is null,
+     * as for an always-allowed plan.
      */
     private static List<String> executeIds(Specification<ResourceEntity> spec) {
         EntityManager em = emf.createEntityManager();
@@ -945,15 +809,7 @@ class AdversarialConformanceTest {
                 "adapter result diverges from check-API oracle for action '" + action + "'");
     }
 
-    /**
-     * Probe shapes the adapter does not support: the translation must fail loudly (never a
-     * silently-wrong filter). Messages pinned so a regression to silent acceptance is caught.
-     *
-     * <p>{@code p-timestamp} runs here like every other shape. It used to be routed around this
-     * case because {@code actions.json} still carried the pre-support operand error; the corpus
-     * now pins the column-type error the adapter actually raises, which is the one that must keep
-     * firing.
-     */
+    /** {@code expectedUnsupported} shapes must throw with the message actions.json pins. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("unsupportedShapes")
     void unsupportedShapesThrow(String action, String expectedMessage) {
@@ -964,11 +820,7 @@ class AdversarialConformanceTest {
                         + ex.getMessage());
     }
 
-    /**
-     * Conformance actions the reference itself cannot express (see {@link #adapterUnsupported()}).
-     * They are excluded from the oracle comparison and must fail loudly instead — the invariant is
-     * absolute either way: an inexpressible shape throws before its filter can be used.
-     */
+    /** Shapes this adapter cannot express must throw with the message actions.json pins. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("adapterUnsupportedActions")
     void adapterUnsupportedActionsThrow(String action, String reason, String expectedMessage) {
@@ -980,18 +832,15 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * #302. {@code null-eq-missing} probes {@code aOptionalString == null}, and
-     * {@code aOptionalString} follows the corpus default: a NULL column sends NO attribute. Both
-     * halves are asserted because the rejection alone would pass vacuously if the adapter threw
-     * for an unrelated reason — the over-grant under the default representation is what makes the
-     * rejection necessary.
+     * #302. Asserts the over-grant under {@code EXPLICIT} as well as the refusal under
+     * {@code OMITTED}, so the refusal cannot pass because of an unrelated error.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("nullRepresentationOmitted")
     void nullRepresentationOmittedIsRejected(String action, String reason, String message) {
         assertEquals(List.of(), oracleAllowedIds(action), reason);
 
-        // The default translation emits IS NULL and returns exactly the rows the PDP denies.
+        // EXPLICIT emits IS NULL and returns rows the PDP denies.
         assertFalse(adapterFilteredIds(action).isEmpty(), reason);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
@@ -1000,21 +849,17 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * #308. The per-attribute declaration overrides the call-level option, which is the
-     * property that makes a suite mixing both conventions expressible at all. Asserted in both
-     * directions against the SAME action and the SAME call-level option, varying only whether
-     * the mapping declares the convention — so a declaration that did nothing would show up here
-     * as the two runs agreeing. It also proves the completeness guard below is not quietly
-     * running against the same mapping.
+     * #308. A per-attribute null convention overrides the call-level option. Without the
+     * declaration the same call throws, which also shows the stripped mapping differs from
+     * {@code MAPPING}.
      */
     @Test
     void perAttributeDeclarationOverridesTheCallLevelRepresentation() {
-        // `owner` declares EXPLICIT, so the call-level OMITTED does not reach it.
+        // `owner` declares EXPLICIT, so the call-level OMITTED does not apply.
         assertEquals(oracleAllowedIds("null-eq"),
                 adapterFilteredIds("null-eq", NullAttributeRepresentation.OMITTED));
 
-        // Strip the declaration and the same action under the same option is rejected — so the
-        // stripped mapping the completeness guard uses is not quietly equivalent to MAPPING.
+        // Without the declaration the same call is refused.
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> adapterFilteredIds("null-eq", NullAttributeRepresentation.OMITTED,
                         MAPPING_WITHOUT_NULL_CONVENTIONS));
@@ -1022,10 +867,9 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * #302 completeness guard. The rejection must key off the null OPERAND, not off a list of
-     * operators: {@code hasIntersection(tagNames, ["public", null])} carries one in its value
-     * list, and an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than
-     * naming shapes means a newly added action carrying a null constant is covered automatically.
+     * #302. Under {@code OMITTED}, every action whose plan carries a null literal, including one
+     * inside a list such as {@code hasIntersection(tagNames, ["public", null])}, must be refused.
+     * The corpus is enumerated so new actions are covered.
      */
     @Test
     void everyNullCarryingActionIsRejectedUnderOmitted() {
@@ -1040,7 +884,7 @@ class AdversarialConformanceTest {
                     .ifPresent(c -> nullCarrying.add(action));
         }
 
-        // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
+        // Guard against a walk that finds nothing.
         assertTrue(nullCarrying.contains("null-eq-missing"), nullCarrying.toString());
         assertTrue(nullCarrying.contains("in-null-elem-hasint"), nullCarrying.toString());
 
@@ -1051,9 +895,7 @@ class AdversarialConformanceTest {
                         MAPPING_WITHOUT_NULL_CONVENTIONS);
                 notRejected.add(action);
             } catch (IllegalArgumentException expected) {
-                // The rejection must be the null-operand check talking, not an incidental
-                // failure: a mapper typo counting as the required rejection is the silent pass
-                // the corpus README warns about.
+                // The refusal must come from the null-operand check, not an unrelated error.
                 if (!expected.getMessage().contains(nullOmittedMessage(
                         actionsFile.nullRepresentationOmitted().get(0)))) {
                     notRejected.add(action + " (rejected for the wrong reason: "
@@ -1083,14 +925,9 @@ class AdversarialConformanceTest {
 
 
     /**
-     * Pins the MySQL IEEE double-cast wiring. On the MySQL leg the ServiceLoader-discovered
-     * {@link MySqlDoubleCastFunctionContributor} must have registered the
-     * {@code cerbos_ieee_double} function — without it the adapter's arithmetic silently
-     * evaluates in exact decimal under Connector/J's default client-side prepared statements
-     * ({@code p-double-frac} catches the semantics; this test names the mechanism when it
-     * breaks, e.g. the META-INF/services entry going missing). On H2/PostgreSQL the function
-     * must NOT be registered: those dialects render IEEE-correct casts already, and the
-     * adapter must keep their SQL on the untouched {@code cb.toDouble} path.
+     * On MySQL the {@code cerbos_ieee_double} function must be registered (through
+     * META-INF/services). Elsewhere it must not be, and the adapter keeps the plain
+     * {@code cb.toDouble} cast.
      */
     @Test
     void ieeeDoubleCastRegistrationMatchesDatabase() {
@@ -1107,28 +944,12 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Tripwire pinning the known UPSTREAM planner over-grant on the {@code has(...)} macro.
+     * Pins the upstream planner fold behind the {@code p-has} known divergence: the planner plans
+     * {@code has(R.attr.aOptionalString)} as always-allowed while check() denies rows without the
+     * attribute. Fails when a PDP image bump stops reproducing it.
      *
-     * <p>The Cerbos query planner constant-folds {@code has(R.attr.aOptionalString)} (action
-     * {@code p-has}) to {@code KIND_ALWAYS_ALLOWED} — "return every row" — even though the
-     * {@code check()} API denies resources that lack the attribute. The fold happens at the
-     * PLANNER, so every query-plan adapter is affected equally; this adapter translates the
-     * always-allowed plan faithfully. That is why {@code p-has} is excluded from the
-     * shared conformance action list: the differential comparison
-     * cannot pass while the planner itself over-grants. (Tracked in the Cerbos team's
-     * internal issue tracker as of 2026-07; no public cerbos/cerbos issue exists.)
-     *
-     * <p>This test asserts BOTH halves of the divergence — the plan kind AND the check()
-     * denials — so that the moment an upstream image stops folding, the test fails with
-     * explicit re-inclusion instructions instead of the coverage hole silently becoming
-     * permanent. NOTE: the suite runs against the pinned image in {@link CerbosTestImage},
-     * so this "fires when upstream fixes the fold" property is dormant between image bumps —
-     * the tripwire is re-evaluated on every deliberate bump of that pin (see the bump policy
-     * in {@code CerbosTestImage}), which is when an upstream fix would surface here.
-     *
-     * <p>README "Gotchas" documents the policy-author workaround:
-     * {@code R.attr.aOptionalString != null} plans as a conditional {@code ne(variable, null)}
-     * that this adapter translates to {@code IS NOT NULL} (PDP-verified).
+     * <p>Policy authors can use {@code R.attr.aOptionalString != null} instead, which plans as
+     * {@code IS NOT NULL} (README, "Gotchas").
      */
     @Test
     void upstreamHasFoldOverGrantTripwire() {
@@ -1170,18 +991,14 @@ class AdversarialConformanceTest {
 
         // Pinned fact 1: the planner still folds has(...) to an unconditional allow-all plan.
         assertTrue(plan.isAlwaysAllowed(), upstreamChanged);
-        // Pinned fact 2: the check() oracle diverges from that plan — at least one seeded row
-        // (a2/a4/a8/c2 hold NULL aOptionalString) is denied while the plan admits everything.
+        // check() denies the rows with a NULL aOptionalString.
         assertTrue(oracle.size() < allIds.size(), upstreamChanged);
         assertTrue(oracle.contains("a1"),
                 "sanity: check() must still allow rows whose aOptionalString is set; oracle="
                         + oracle);
 
-        // The over-grant itself, measured. `allIds == adapterFilteredIds("p-has")` on its own is
-        // a tautology — an always-allowed Specification adds no WHERE clause, so the query
-        // returns every row by construction whatever the PDP or the table held. What makes it
-        // an over-grant is the set the PDP DENIES being non-empty and every one of those ids
-        // coming back from the unfiltered query a caller runs for this plan.
+        // An unfiltered query returns every row by construction. The over-grant is that the set
+        // the PDP denies is non-empty and all of it comes back.
         Set<String> denied = new TreeSet<>(allIds);
         denied.removeAll(oracle);
         assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
@@ -1191,20 +1008,16 @@ class AdversarialConformanceTest {
                 + " row the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
         assertEquals(allIds, unfiltered);
 
-        // And the adapter translates the always-allowed plan faithfully into that same
-        // unfiltered query rather than second-guessing the plan kind.
+        // The adapter translates the always-allowed plan as no filter.
         assertEquals(unfiltered, adapterFilteredIds("p-has"),
                 "the adapter is expected to translate KIND_ALWAYS_ALLOWED faithfully into all "
                         + "rows — if this fails the adapter started second-guessing plan kinds");
     }
 
     /**
-     * The corpus pins two count spellings over the chain — {@code size(...) == 0} and
-     * {@code !(size(...) > 0)} — but the guard has to be a property of the COUNT rather than
-     * of the two spellings that happen to be pinned. These synthesise the remaining
-     * threshold/polarity combinations onto the same seeded store and assert the parentless
-     * rows stay out of every one, including an arbitrary-N threshold that neither corpus
-     * action reaches (cerbos/query-plan-adapters#316).
+     * The corpus pins two count spellings over the chain. These add the other thresholds and
+     * polarities, including one no corpus action reaches, and assert rows without a
+     * {@code mainCategory} stay out of every one (#316).
      */
     @Test
     void everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
@@ -1212,8 +1025,8 @@ class AdversarialConformanceTest {
                 .setVariable("request.resource.attr.mainCategory.subCategories").build();
         Operand size = expression("size", chain);
 
-        // Every seed that HAS a mainCategory holds exactly one subCategory, and the 16 without
-        // it are CEL missing-path errors — so each of these is empty unless the guard leaks.
+        // Seeds with a mainCategory have exactly one subCategory and the rest are CEL
+        // missing-path errors, so each of these must be empty.
         Map<String, Operand> emptyByConstruction = new LinkedHashMap<>();
         emptyByConstruction.put("size(chain) == 0", compare("eq", size, 0));
         emptyByConstruction.put("size(chain) <= 0", compare("le", size, 0));
@@ -1226,8 +1039,7 @@ class AdversarialConformanceTest {
                 assertEquals(List.of(), filteredIdsFor(condition),
                         "absent-parent guard leaked for " + shape));
 
-        // The mirror image, so the loop above cannot pass by denying everything: `>= 0` and
-        // `< 2` are TRUE for exactly the rows that HAVE the parent.
+        // The mirror image, so the loop above cannot pass by denying everything.
         List<String> withParent = oracleAllowedIds("w1-size-nonneg-chain");
         assertFalse(withParent.isEmpty(), "sanity: some seed must carry a mainCategory");
         assertTrue(withParent.size() < SEEDS.size(), "sanity: not every seed carries one");
@@ -1262,16 +1074,9 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * #387. {@code filter-as-conjunct} puts a filter() one level below the root, where the guard
-     * that refuses {@code filter-as-condition} does not look. Its oracle is empty BY CONSTRUCTION
-     * — check() cannot evaluate a non-boolean conjunction — so it is a {@code degenerateOracles}
-     * entry that this adapter never oracle-compares, and the throw suite on its own would say nothing about whether
-     * refusing it is REQUIRED.
-     *
-     * <p>This is that argument. The other conjunct is {@code R.attr.aBool}, which this adapter
-     * certainly can express and which {@code root-bare-bool} spells on its own; an adapter that
-     * dropped the conjunct it could not translate would emit exactly that Specification and
-     * return every row it selects, all of which the PDP denies for this action.
+     * #387. {@code filter-as-conjunct} has an empty oracle by construction, so it is never
+     * oracle-compared. This shows why refusing it is required: dropping the filter() conjunct
+     * leaves {@code root-bare-bool}, which returns rows the PDP denies.
      */
     @Test
     void filterAsConjunctMustBeRefusedBecauseDroppingItsUntranslatableHalfOverGrants() {
@@ -1293,10 +1098,7 @@ class AdversarialConformanceTest {
         assertTrue(ex.getMessage().contains(message), ex.getMessage());
     }
 
-    /**
-     * Adding a throwing action without pinning its message must fail this harness rather than
-     * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-     */
+    /** A throwing action with no pinned message must fail classification (#326). */
     @Test
     void throwingActionWithNoPinnedMessageFailsClassification() {
         for (String absent : new String[] {null, ""}) {
@@ -1306,12 +1108,7 @@ class AdversarialConformanceTest {
         }
     }
 
-    /**
-     * Corpus-size tripwire and exactly-once partition. A corpus edit must bump the pinned
-     * counts in the same change — without this, a new hostile action silently joins the
-     * oracle run, and a group dropped by the {@code ActionsFile} parser above would make its
-     * actions vanish from every parameterised case with nothing failing.
-     */
+    /** Corpus-size tripwires, and every action gets exactly one outcome. */
     @Test
     void manifestAssignsEveryActionExactlyOneOutcome() {
         Set<String> supportedExpected = adapterSupportedExpectedActions();
@@ -1331,8 +1128,7 @@ class AdversarialConformanceTest {
                 .map(KnownDivergence::action)
                 .collect(java.util.stream.Collectors.toSet());
 
-        // Every group, from the one place that knows them all — so a group added to actions.json
-        // and not to `ActionsFile` fails here rather than vanishing from the count.
+        // Every group, so a group missing from ActionsFile fails here.
         Set<String> manifest = actionsFile.manifestActions();
 
         List<String> misclassified = manifest.stream()
@@ -1347,10 +1143,7 @@ class AdversarialConformanceTest {
         assertEquals(324, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(29, SEEDS.size(), "seed count changed");
-        // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
-        // lost has to be re-triaged here rather than joining the throw suite unnoticed. The two
-        // @MethodSource streams that feed the throw cases are what resolve those messages, and
-        // both fail loudly on a missing one.
+        // Each throwing action carries a pinned message; re-triage when this count changes.
         assertEquals(66, throwing.size(), "throwing action count changed");
         assertEquals(throwing.size(),
                 adapterUnsupportedActions().count() + unsupportedShapes().count(),
@@ -1365,9 +1158,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
-     * here as PDP/policy liveness probes for a group the sweep in
-     * {@link #adapterMatchesCheckOracle} cannot cover.
+     * Refused actions whose group has no oracle-compared member. Their oracles are still checked
+     * for discrimination, so the policy stays live for that group.
      */
     private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
             "regex-final-newline", "regex-eq-true", "regex-lookahead",
@@ -1375,48 +1167,30 @@ class AdversarialConformanceTest {
             "cast-not-int", "cast-not-string-missing", "cast-not-string-null",
             "cast-not-timestamp", "cast-not-double",
             "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-grouped", "regex-brace", "regex-repetition", "regex-optional-operators", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "pv-except", "temporal-raw-eq", "eq-list", "ne-list",
-            // A division nested inside further arithmetic fails closed: SQL has no value that
-            // carries CEL's NaN or signed infinity through the sum.
+            // Division inside further arithmetic: SQL cannot carry CEL's NaN or infinity.
             "cr-div-then-add", "cr-div-then-add-ne",
-            // int() over a numeric column: truncation-versus-rounding, unsupported for every
-            // adapter but convex, which promotes it in adapterSupportedExpected.
+            // int() over a number: CAST rounds where CEL truncates.
             "cast-int-double",
-            // string() over a double: the Criteria API has no cast, and the only string() form
-            // the reference has is over a BOOLEAN column, whose two words it compares in Java —
-            // which is why the other half of the pair, cast-string-bool, is compared by the
-            // sweep in adapterMatchesCheckOracle.
+            // string() over a double has no Criteria form; cast-string-bool is compared.
             "cast-string-double",
-            // Concatenation against the key where the reference lowers `+` as arithmetic.
+            // String `+` against the key; `+` is lowered as arithmetic only.
             "id-concat",
-            // The same arithmetic-only lowering of `+` with both operands columns (#391).
+            // The same, with both operands columns (#391).
             "concat-f2f",
-            // #387, one probe per group this adapter cannot compare: modulo (CEL `%` is
-            // integer-only, and the int() cast that would make it satisfiable has no faithful
-            // lowering), the positional read of a scalar list, and list equality over a map()
-            // projection.
+            // #387: modulo, a positional read of a scalar list, and list equality over map().
             "arith-mod", "index-scalar-list", "map-eq-list",
-            // Index errors and explicit-null elements must stay distinguishable under negation.
+            // Index errors and explicit-null elements under negation.
             "index-scalar-list-not-eq", "index-scalar-list-null",
-            // The same positional read over a list of numbers and a list of booleans, both
-            // polarities, and the two cross-type probes CEL answers false for every element.
+            // Positional reads over number and bool lists, and two cross-type probes.
             "index-number-list", "index-number-list-not-eq", "index-bool-list",
             "index-bool-list-not-eq", "index-bool-list-vs-number", "index-number-list-vs-bool",
-            // An empty hierarchy delimiter is refused before the prefix LIKE is built (the LIKE
-            // would match the path itself), and a regex with a top-level alternation is a
-            // matches(), which the reference never translates.
+            // An empty hierarchy delimiter, and matches() with a top-level alternation.
             "hier-empty-delim", "matches-alt");
 
     /**
-     * Guard the guard, over the WHOLE oracle set. The comparison in
-     * {@link #adapterMatchesCheckOracle} passes vacuously when the oracle is trivial — the PDP
-     * denying every seed, or allowing every seed, whatever the adapter emitted — so that
-     * comparison asserts this shape on the oracle it has already computed, before comparing, for
-     * EVERY oracle-compared action. The only way out is the corpus allowlist,
-     * {@code degenerateOracles} in {@code conformance/actions.json}, which every harness shares:
-     * a listed action must have exactly the declared oracle, and any other must have a non-empty,
-     * non-total one. A representative sample used to stand here
-     * (cerbos/query-plan-adapters#324, #490); a sample leaves the actions it does not name free
-     * to go degenerate unnoticed.
+     * Fails when an oracle-compared action's oracle is empty or total, since the comparison would
+     * then pass whatever the adapter emits. {@code degenerateOracles} in actions.json is the only
+     * exemption, and a listed action must be exactly as declared.
      */
     private static void assertOracleShape(String action, List<String> oracle) {
         String declared = DEGENERATE_ORACLES.get(action);
@@ -1442,10 +1216,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * Every {@code degenerateOracles} entry — whether this adapter oracle-compares it, refuses
-     * it, or rejects it under the omitted null representation — has exactly the oracle the corpus
-     * declares, so the allowlist cannot rot into a blanket exemption: an entry whose oracle became
-     * discriminating is a guard entry wearing an exemption.
+     * Every {@code degenerateOracles} entry has exactly its declared oracle, so the list cannot
+     * become a blanket exemption.
      */
     @Test
     void everyDegenerateOracleIsExactlyAsDeclared() {
@@ -1461,12 +1233,7 @@ class AdversarialConformanceTest {
                 + " conformance/actions.json do not have the oracle they declare");
     }
 
-    /**
-     * The liveness probes are this adapter's refused shapes, so the sweep in
-     * {@link #adapterMatchesCheckOracle} never reaches them. Asserting the complement keeps the
-     * split honest — an action this adapter gains support for must move out of the liveness
-     * probes and into the sweep.
-     */
+    /** Liveness probes must not be oracle-compared, and their oracles must discriminate. */
     @Test
     void livenessProbesAreRefusedAndNonDegenerate() {
         Set<String> compared = conformanceActions().collect(java.util.stream.Collectors.toSet());
@@ -1480,13 +1247,8 @@ class AdversarialConformanceTest {
     }
 
     /**
-     * The to-one relation carries no corpus action yet — this is the expand half of
-     * cerbos/query-plan-adapters#372's expand–contract — so nothing else in this class would
-     * notice a seeder that stored no chain at all, or one that attached every parent to the wrong
-     * resource. Read the two hops back through a real join rather than counting rows: a count
-     * cannot tell an inner row carrying the corpus's values from one carrying the root's own
-     * columns, which is exactly the flat-column-alias failure this relation exists to make
-     * visible.
+     * Reads the seeded to-one chain back through a join and compares it with the corpus. A row
+     * count could not tell a correct parent row from one attached to the wrong resource.
      */
     @Test
     void seededToOneChainMatchesTheCorpusRelation() {
