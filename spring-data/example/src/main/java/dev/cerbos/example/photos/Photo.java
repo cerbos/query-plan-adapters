@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example.photos;
 
 import jakarta.persistence.CascadeType;
@@ -47,28 +52,19 @@ public class Photo {
     @Column(name = "rating", nullable = false)
     private int rating;
 
-    /**
-     * Nullable IEEE-double attribute used only by the {@code edge-ieee-*} regression
-     * scenarios (see scripts/smoke-edge-cases.sh). Kept nullable so the regular fixtures
-     * are unaffected: a NULL score is UNKNOWN under SQL three-valued logic and a missing
-     * attribute is a CEL evaluation error at check() time — both sides exclude the row.
-     */
+    // Used only by the edge-ieee-* scenarios. Nullable so other rows never match a score rule.
     @Column(name = "score")
     private Double score;
 
-    /**
-     * Photo creation instant for the {@code edge-retention} time-window scenario. Mapped as
-     * {@link Instant} because the adapter's {@code timestamp()} support compares folded
-     * RFC-3339 plan constants against {@code Instant}/{@code OffsetDateTime} columns.
-     */
+    // Used by edge-retention. The adapter compares timestamp() constants against Instant or
+    // OffsetDateTime fields.
     @Column(name = "created_at")
     private Instant createdAt;
 
     @Embedded
     private PhotoDetails details;
 
-    // EAGER so the controller can build DTOs after the repository transaction has closed —
-    // the example uses spring.jpa.open-in-view=false to avoid hidden persistence work in the web layer.
+    // EAGER because open-in-view is off, so the controller reads these after the session closes.
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "photo_tags", joinColumns = @JoinColumn(name = "photo_id"))
     @Column(name = "tag")
@@ -108,13 +104,13 @@ public class Photo {
         return this;
     }
 
-    /** Fluent setter used only by the edge-case regression fixtures. */
+    /** Sets the score. Used only by the edge-case rows. */
     public Photo withScore(Double score) {
         this.score = score;
         return this;
     }
 
-    /** Fluent setter used only by the edge-case regression fixtures. */
+    /** Sets the creation time. Used only by the edge-case rows. */
     public Photo withCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
         return this;

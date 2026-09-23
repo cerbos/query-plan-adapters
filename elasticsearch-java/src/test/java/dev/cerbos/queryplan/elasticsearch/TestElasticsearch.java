@@ -16,18 +16,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The HTTP transport the two container-backed suites share:
- * {@link ElasticsearchAdversarialConformanceTest} and {@link ElasticsearchSurfaceTest}.
- *
- * <p>Only the transport. What each suite indexes, what it asks for and what it asserts are
- * different questions with different answers — the harness executes one query per corpus action
- * over the shared seeds and compares ids with {@code check()}, the surface suite executes hand-made
- * documents to measure Elasticsearch's own behaviour — so neither the mappings nor the search
- * semantics live here.
- *
- * <p>This is a duplication ADR 0007 does NOT license: that rule is about the per-adapter corpus
- * loader, where the copies belong to different adapters and are allowed to differ. Two suites in
- * one adapter sending byte-identical HTTP requests are not that.
+ * Minimal HTTP client for Elasticsearch, shared by {@link ElasticsearchAdversarialConformanceTest}
+ * and {@link ElasticsearchSurfaceTest}. Mappings and queries stay in each suite.
  */
 final class TestElasticsearch {
 
@@ -40,7 +30,7 @@ final class TestElasticsearch {
         this.baseUrl = "http://" + httpHostAddress;
     }
 
-    /** One request, with a non-2xx response raised rather than returned. */
+    /** Sends one request and throws on a 4xx or 5xx response. */
     String request(String method, String path, String body) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + path))
@@ -71,17 +61,11 @@ final class TestElasticsearch {
     }
 
     /**
-     * The raw hits for a search body, so a caller can read {@code _score} as well as {@code _id}.
+     * Returns the raw hits, so callers can read {@code _score} as well as {@code _id}.
+     * {@code searchPath} is a full path so a caller can add parameters such as {@code size}.
      *
-     * <p>{@code searchPath} is the whole path rather than an index name, because the harness has to
-     * raise {@code size} past Elasticsearch's default page of 10 to see all its seeds.
-     *
-     * <p>A partial response is raised, not returned. Elasticsearch answers HTTP 200 with whatever
-     * hits it has when a search times out ({@code timed_out: true}) or a shard fails
-     * ({@code _shards.failed > 0}), and a truncated hit list is indistinguishable from a filter
-     * that matched fewer documents — on the harness side that reads as an adapter under-grant,
-     * and on the oracle side of a {@code must_not} as an over-grant. Neither is a fact about the
-     * adapter, so neither is allowed to reach an assertion.
+     * <p>Throws on a timed-out search or a failed shard. Elasticsearch returns HTTP 200 with
+     * partial hits in both cases, which would look like a filter that matched fewer documents.
      */
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> hits(String searchPath, Map<String, Object> body) throws Exception {
@@ -101,7 +85,7 @@ final class TestElasticsearch {
         return (List<Map<String, Object>>) ((Map<String, Object>) response.get("hits")).get("hits");
     }
 
-    /** The document ids a search body selects, sorted. */
+    /** Returns the matching document ids, sorted. */
     List<String> ids(String searchPath, Map<String, Object> body) throws Exception {
         return hits(searchPath, body).stream().map(hit -> (String) hit.get("_id")).sorted().toList();
     }

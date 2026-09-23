@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata.testmodel;
 
 import jakarta.persistence.CascadeType;
@@ -41,8 +46,7 @@ public class ResourceEntity {
     @Column(name = "a_number")
     private Integer aNumber;
 
-    // Fractional-value column for the IEEE add-solve probes: the -0.6 reproduction needs a
-    // stored double, which the Integer aNumber column cannot hold.
+    // Fractional values (the corpus has -0.6), which the Integer aNumber column cannot hold.
     @Column(name = "a_double")
     private Double aDouble;
 
@@ -52,9 +56,8 @@ public class ResourceEntity {
     @Column(name = "created_by")
     private String createdBy;
 
-    // Temporal columns for the timestamp() comparison support: Instant and OffsetDateTime are
-    // the two column types the adapter translates (both unambiguously denote an absolute
-    // instant); localCreatedAt exists to pin the named error for ambiguous temporal types.
+    // The adapter compares timestamp() only against Instant and OffsetDateTime. localCreatedAt
+    // is here to test the error for a LocalDateTime column, which has no time zone.
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -80,9 +83,7 @@ public class ResourceEntity {
     @OneToMany(mappedBy = "resource", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<TagEntity> tags = new ArrayList<>();
 
-    // The corpus's homogeneous number and boolean lists, one related row per element (see
-    // NumberListElementEntity for why not an @ElementCollection). Seeded only by the
-    // adversarial suite, for the position-blind membership actions.
+    // One related row per element; see NumberListElementEntity. Seeded by the adversarial suite.
     @OneToMany(mappedBy = "resource", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<NumberListElementEntity> aNumberList = new ArrayList<>();
 
@@ -102,10 +103,8 @@ public class ResourceEntity {
     @Embedded
     private NestedEmbeddable nested;
 
-    // The conformance corpus's one REAL to-one relation, seeded only by the adversarial suite.
-    // `nested` above is an @Embedded value in this row; this is a separate table reached through
-    // a join. The two are kept side by side on purpose — see conformance/README.md, "The real
-    // to-one relation".
+    // The corpus's to-one relation, a separate table reached through a join (unlike `nested`).
+    // Seeded by the adversarial suite.
     @OneToOne(mappedBy = "resource")
     private AdversarialParentEntity parent;
 

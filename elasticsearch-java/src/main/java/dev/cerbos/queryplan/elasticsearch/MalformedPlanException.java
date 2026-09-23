@@ -6,12 +6,8 @@
 package dev.cerbos.queryplan.elasticsearch;
 
 /**
- * The plan violates the planner's wire contract — an operator with the wrong arity, a lambda whose
- * second operand is not a variable, a literal CEL's own {@code timestamp()} would reject, a
- * constant comparison the planner should have folded away.
- *
- * <p>No Cerbos planner output should produce one of these, so a caller seeing it has either a
- * hand-built plan or an upstream bug to report, not a policy shape to rewrite.
+ * The plan breaks the planner's wire contract, for example an operator with the wrong number of
+ * operands or an invalid {@code timestamp()} literal. The Cerbos planner should never produce one.
  */
 public final class MalformedPlanException extends IllegalArgumentException {
 

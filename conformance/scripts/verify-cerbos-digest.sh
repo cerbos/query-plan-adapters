@@ -1,21 +1,11 @@
 #!/usr/bin/env bash
-# Asserts that CERBOS_IMAGE_DIGEST is the digest ghcr.io/cerbos/cerbos:$CERBOS_VERSION actually
-# resolves to.
+# Asserts CERBOS_IMAGE_DIGEST is what ghcr.io/cerbos/cerbos:$CERBOS_VERSION actually resolves to.
 #
-# Why this is separate from validate-corpus.sh: that script is offline and runs in every adapter
-# workflow and on developer machines with no Docker. This one talks to a registry, so it runs once,
-# from .github/workflows/conformance.yaml — the workflow that already owns the pinned-PDP contract.
-#
-# Why it exists at all: validate-corpus.sh proves every restatement in the repository agrees with
-# the two corpus files. It cannot prove the PAIR is right. A CERBOS_VERSION bump that leaves the old
-# digest behind is internally consistent and repo-wide green, and because Docker resolves
-# `repo:tag@digest` BY DIGEST and ignores the tag, every harness would go on testing the old build
-# while every file claims the new version (cerbos/query-plan-adapters#322).
-#
-# Only the PDP is checked. The service images are pinned to the build a suite was proved against on
-# purpose, and their tags — the Postgres, MySQL and MongoDB majors — are expected to move underneath
-# that pin, so asserting those still resolve to our digest would fail the corpus on somebody else's
-# release. A Cerbos release tag is immutable, so for the PDP the two must agree.
+# validate-corpus.sh proves every file agrees with the pin, but not that the tag/digest pair is
+# right. Docker pulls `repo:tag@digest` by digest, so a version bump that keeps the old digest
+# would keep testing the old build (cerbos/query-plan-adapters#322). This needs a registry, so it
+# runs once, in conformance.yaml. Only the PDP is checked: Cerbos tags are immutable, service
+# image tags are not.
 #
 # Requires: docker (with buildx).
 set -euo pipefail

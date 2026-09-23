@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -11,22 +16,12 @@ import jakarta.persistence.criteria.Subquery;
 import java.util.stream.Collectors;
 
 /**
- * The correlated-subquery shapes every collection operator composes over.
+ * The correlated subqueries every collection operator is built on: EXISTS, COUNT, the
+ * tri-state macro score and the strict match count. Callers choose the shape; every shape
+ * ranges over the same flattened elements of the relation chain.
  *
- * <p>Owns the {@link ChainSubquery} skeleton ({@link #chainSubquery}) and the shapes built on
- * it: the two-valued {@code EXISTS}, the {@code COUNT} seed, the tri-state macro score
- * ({@code exists}/{@code all}/{@code filter}), the strict match counter
- * ({@code exists_one}/{@code size(filter(...))}) with its undetermined-poison term, and the
- * leading-hop guards that keep an absent to-one parent UNKNOWN under both polarities. It is
- * also the one place the SELECT-only guard fires: a Specification evaluated outside its own
- * SELECT cannot correlate, so every relation subquery throws from here before anything is
- * built (see {@link SpringDataQueryPlanAdapter the class documentation}).
- *
- * <p>Nothing here reads a plan. A caller resolves its variable to a
- * {@link Scope.ResolvedRelation}, translates the lambda body into a
- * {@link SubqueryBodyBuilder} and hands both in; which SQL shape answers which CEL operator
- * is the caller's decision, and this class only guarantees that every shape ranges over the
- * same flattened element set.
+ * <p>Relation subqueries throw when the Specification is evaluated outside its own SELECT,
+ * because they cannot correlate there (see {@link SpringDataQueryPlanAdapter}).
  */
 final class ChainSubqueries {
 
@@ -41,28 +36,18 @@ final class ChainSubqueries {
     }
 
     /**
-     * The single-subquery scoring translation shared by {@code exists}/{@code filter}
-     * (score 2/0) and {@code all} (score 0/2). Each element of the relation
-     * chain is scored with a searched CASE:
+     * Scores each element for {@code exists} (true 2, false 0) and {@code all} (true 0,
+     * false 2):
      *
      * <pre>{@code CASE WHEN body THEN trueScore WHEN NOT body THEN falseScore ELSE 1 END}</pre>
      *
-     * An UNKNOWN body matches neither WHEN (SQL treats an UNKNOWN condition as not taken),
-     * so undetermined elements land in the ELSE — that is what makes the polarity pair
-     * sufficient to distinguish all three states with a single scan. The subquery selects
+     * An UNKNOWN body takes neither branch and scores 1. The subquery selects
+     * {@code NULLIF(COALESCE(MAX(score), 0), 1)}: an empty collection gives 0, and an UNKNOWN
+     * element that dominates gives NULL. Comparing the result with 2 or 0 then gives TRUE,
+     * FALSE or UNKNOWN as the CEL macro does.
      *
-     * <pre>{@code NULLIF(COALESCE(MAX(score), 0), 1)}</pre>
-     *
-     * i.e. the dominant score with the empty collection folded to 0 and the
-     * "only undetermined elements dominate" state (max score 1) mapped to SQL NULL. A
-     * two-valued equality against 2 (exists) or 0 (all) then yields TRUE / FALSE /
-     * UNKNOWN exactly per the CEL macro truth tables, and {@code NOT} keeps UNKNOWN rows
-     * excluded ({@code NOT(UNKNOWN) = UNKNOWN}).
-     *
-     * <p>The body is translated exactly twice — once per polarity, the minimum Hibernate 6's
-     * stateful negation permits (see {@link TriPredicate}) — so nested macros grow at
-     * {@code 2^depth}, not the {@code 3^depth} of the previous
-     * EXISTS-plus-two-COUNT-probes translation.
+     * <p>The body is translated twice, once per polarity (see {@link TriPredicate}), so nested
+     * macros grow as {@code 2^depth}.
      */
     Subquery<Integer> macroScoreSubquery(Scope scope, Scope.ResolvedRelation ref,
                                          SubqueryBodyBuilder bodyBuilder,
@@ -77,21 +62,13 @@ final class ChainSubqueries {
     }
 
     /**
-     * The strict counting subquery behind {@code exists_one} and {@code size(filter(...))}:
-     * selects the number of elements whose body is determined-true, poisoned to SQL NULL
-     * when ANY element body is UNKNOWN (CEL's strict macros error if any element errors —
-     * no absorption). Shape:
+     * Counts elements whose body is true, for {@code exists_one} and
+     * {@code size(filter(...))}:
      *
      * <pre>{@code COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + poisonTerm}</pre>
      *
-     * where {@code poisonTerm} ({@link #undeterminedPoisonTerm}) is 0 when every element is
-     * determined and NULL otherwise — NULL is absorbing under addition, so any undetermined
-     * element nulls the whole count and every comparison against it goes UNKNOWN (row
-     * excluded under both polarities). The empty collection yields 0 + 0 = 0, matching CEL
-     * ({@code exists_one} over an empty list is false, a zero count compares normally).
-     *
-     * <p>Costs three body translations (one positive in the match counter, one per polarity
-     * in the poison term); see {@link #macroScoreSubquery} for why two is the floor.
+     * These CEL macros error if any element errors, so {@link #undeterminedPoisonTerm} makes
+     * the count NULL when any body is UNKNOWN. An empty collection counts 0.
      */
     Subquery<Long> strictMatchCountSubquery(Scope scope, Scope.ResolvedRelation ref,
                                             SubqueryBodyBuilder bodyBuilder) {
@@ -106,10 +83,8 @@ final class ChainSubqueries {
     }
 
     /**
-     * A subquery selecting ONLY the poison term: 0 when every element body is determined
-     * (or the collection is empty), SQL NULL when any element body is UNKNOWN. Used by the
-     * statically-collapsed {@code size(filter(...))} comparisons, whose count comparison is
-     * pre-decided but whose error semantics still depend on the lambda body.
+     * Selects only the poison term, for a {@code size(filter(...))} comparison that is decided
+     * statically but must still deny when a body is UNKNOWN.
      */
     Subquery<Long> undeterminedPoisonSubquery(Scope scope, Scope.ResolvedRelation ref,
                                               SubqueryBodyBuilder bodyBuilder) {
@@ -119,11 +94,8 @@ final class ChainSubqueries {
     }
 
     /**
-     * {@code NULLIF(COALESCE(MAX(CASE WHEN body THEN 0 WHEN NOT body THEN 0 ELSE 1 END), 0), 1)}
-     * — 0 when every element body is determined (either WHEN taken; also the empty
-     * collection via COALESCE), SQL NULL when at least one element body is UNKNOWN (both
-     * WHENs skipped → ELSE 1 dominates the MAX → NULLIF). The body is translated once per
-     * polarity (stateful negation — see {@link TriPredicate#not}).
+     * {@code NULLIF(COALESCE(MAX(CASE WHEN body THEN 0 WHEN NOT body THEN 0 ELSE 1 END), 0), 1)}:
+     * 0 when every body is determined or the collection is empty, NULL when any is UNKNOWN.
      */
     private Expression<Long> undeterminedPoisonTerm(
             ChainSubquery<?> cs, SubqueryBodyBuilder bodyBuilder) {
@@ -134,7 +106,6 @@ final class ChainSubqueries {
         return cb.nullif(cb.coalesce(cb.max(determined), 0L), 1L);
     }
 
-    /** Correlate {@code outerFrom} (the relation owner's {@code From}) into {@code sub}. */
     @SuppressWarnings("unchecked")
     private static From<?, ?> correlate(Subquery<?> sub, From<?, ?> outerFrom) {
         if (outerFrom instanceof Root<?> r) {
@@ -148,23 +119,10 @@ final class ChainSubqueries {
     }
 
     /**
-     * Build the shared skeleton of every relation subquery. Two invariants fix the two
-     * join-anchoring failure modes:
-     * <ul>
-     *   <li>the correlation anchor is {@code ref.owner().from()} — the {@code From} that
-     *       OWNS the first relation attribute — never the evaluation scope's own
-     *       {@code from()}, which inside a lambda is the lambda element join and does not
-     *       hold outer relations like {@code request.resource.attr.tags};</li>
-     *   <li>a multi-hop chain ({@code categories.subCategories}) joins THROUGH every hop
-     *       off that anchor, so the subquery ranges over the flattened tail elements —
-     *       joining only the tail attribute off the anchor would either fail at query-build
-     *       time or silently query a same-named collection on the wrong entity.</li>
-     * </ul>
-     * EXISTS over the join chain, aggregate scoring over {@code tailJoin}
-     * ({@link #macroScoreSubquery}/{@link #strictMatchCountSubquery}) and COUNT over
-     * {@code tailJoin} therefore express exists/in/hasIntersection membership and
-     * {@code size()} of the flattened union with the same element set, so the tri-state
-     * unknown-element machinery composes with chains unchanged.
+     * Builds the skeleton of every relation subquery. It correlates on
+     * {@code ref.owner().from()}, not the current scope's {@code from()}, which inside a lambda
+     * is the element join and does not hold outer relations. A multi-hop chain joins through
+     * every hop, so the subquery ranges over the flattened tail elements.
      */
     <T> ChainSubquery<T> chainSubquery(Class<T> resultType, Scope scope,
                                        Scope.ResolvedRelation ref) {
@@ -238,7 +196,7 @@ final class ChainSubqueries {
         cs.sub().where(cs.anchor() == null ? predicate : cb.and(cs.anchor(), predicate));
     }
 
-    /** A chain subquery seeded to {@code SELECT COUNT(tailJoin)} — the shared seed of every counting shape. */
+    /** A chain subquery selecting {@code COUNT(tailJoin)}. */
     ChainSubquery<Long> countSubquery(Scope scope, Scope.ResolvedRelation ref) {
         ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
         cs.sub().select(cb.count(cs.tailJoin()));
@@ -246,14 +204,12 @@ final class ChainSubqueries {
     }
 
     /**
-     * "Every intermediate hop of a dotted path exists", or {@code null} for a direct relation.
+     * Whether every intermediate hop of a dotted path exists, or {@code null} for a direct
+     * relation.
      *
-     * <p>CEL cannot dot through a list, so each intermediate segment of {@code a.b.c} is a
-     * to-ONE parent: absent, the caller sends no attribute at all and CEL raises a
-     * missing-path error, which denies. A subquery rooted at the entity cannot see that — an
-     * absent parent and a childless parent both return nothing — so {@code all} reads TRUE,
-     * {@code !exists} reads TRUE and the count reads 0, each admitting rows the PDP denies
-     * (cerbos/query-plan-adapters#309).
+     * <p>Each intermediate segment of {@code a.b.c} is a to-one parent. When it is absent, CEL
+     * raises a missing-path error and denies, but a subquery sees the same empty result as a
+     * parent with no children.
      */
     Predicate leadingHopsExist(Scope scope, Scope.ResolvedRelation ref) {
         if (!ref.isChained()) {
@@ -265,9 +221,8 @@ final class ChainSubqueries {
     }
 
     /**
-     * Make {@code value} SQL NULL unless every intermediate to-one hop exists, so an absent
-     * parent leaves the enclosing comparison UNKNOWN and the row excluded under BOTH
-     * polarities. A CASE with no ELSE yields NULL for the missing case.
+     * Returns {@code value}, or SQL NULL when an intermediate hop is absent, so the enclosing
+     * comparison is UNKNOWN under both polarities.
      */
     <N> Expression<N> requireLeadingHops(
             Scope scope, Scope.ResolvedRelation ref,
@@ -288,19 +243,10 @@ final class ChainSubqueries {
     }
 
     /**
-     * "Some element of the chain satisfies the body", as a THREE-valued predicate: UNKNOWN
-     * rather than FALSE when an intermediate to-one hop is absent.
-     *
-     * <p>Every operator whose whole answer is an existence test over a chain must build it
-     * here rather than calling {@link #existsSubquery} directly. {@code EXISTS} is
-     * two-valued, so {@code NOT EXISTS} over an absent to-one parent is TRUE and readmits
-     * every parentless row — which is how {@code !("x" in R.attr.parent.names)} and its
-     * {@code hasIntersection} sibling kept over-granting after the collection macros were
-     * fixed (cerbos/query-plan-adapters#315). Counting instead of testing existence lets the
-     * guard live on the count EXPRESSION, so both polarities inherit it.
-     *
-     * <p>A direct relation keeps the plain {@code EXISTS}: it has no hop to require, and its
-     * empty-collection semantics are already correct under both polarities.
+     * Whether some element satisfies the body, UNKNOWN when an intermediate hop is absent.
+     * Use this rather than {@link #existsSubquery} for any existence test over a chain:
+     * {@code NOT EXISTS} is TRUE for an absent parent and would readmit the row. A direct
+     * relation keeps the plain {@code EXISTS}.
      */
     Predicate chainContains(Scope scope, Scope.ResolvedRelation ref,
                             SubqueryBodyBuilder bodyBuilder) {

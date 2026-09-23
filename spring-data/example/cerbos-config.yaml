@@ -14,9 +14,7 @@ telemetry:
 schema:
   enforcement: reject
 
-# Stream decision/audit logs to stdout — `docker compose logs cerbos` then shows every
-# PlanResources call the Spring Boot app made, so you can see what filter the adapter
-# turned each plan into.
+# Audit logs on stdout, so `docker compose logs cerbos` shows each PlanResources call.
 audit:
   enabled: true
   accessLogsEnabled: true

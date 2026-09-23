@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for the cerbos-spring-data multi-resource example.
+# End-to-end smoke test for the photo-sharing example: starts the PDP and the Spring Boot app, then
+# checks the row sets of three resource endpoints and that each request made one PlanResources call
+# (from the PDP audit log).
 #
-# Brings up the Cerbos PDP via docker compose, starts the Spring Boot app, and
-# hits three resource endpoints with a matrix of principal, tenant, role, and action tuples. Each
-# request triggers a real PlanResources call to the PDP container — the audit
-# log in `docker compose logs cerbos` then proves what plan the adapter saw.
-#
-# Pre-reqs: docker, curl, jq, gradle (8.x), JDK 17+.
+# Pre-reqs: docker, curl, jq, JDK 17+. Gradle comes from the adapter's wrapper.
 
 set -euo pipefail
 
@@ -23,8 +20,7 @@ cleanup() {
         kill "$APP_PID" 2>/dev/null || true
         wait "$APP_PID" 2>/dev/null || true
     fi
-    # On failure, dump diagnostics BEFORE `compose down` discards the container —
-    # this is what CI (and anyone running headless) gets to debug with.
+    # Dump logs before `compose down` removes the container.
     if (( status != 0 )); then
         echo "==> smoke test failed (exit $status): Cerbos container logs" >&2
         docker compose logs --no-color cerbos >&2 || true
@@ -37,13 +33,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The example resolves dev.cerbos:cerbos-spring-data from mavenLocal as a real Maven coordinate
-# rather than through a composite build (docs/adr/0002-examples-install-the-packed-artifact.md),
-# so the adapter under review has to be installed before anything here compiles. Doing it in the
-# script rather than in a prerequisite line keeps `./scripts/smoke.sh` one command, and keeps it
-# from silently proving a stale artifact.
-echo "==> gradle -p .. publishToMavenLocal"
-gradle -p .. publishToMavenLocal --no-daemon
+# The example resolves the adapter from mavenLocal, so publish the current source first.
+echo "==> gradlew -p .. publishToMavenLocal"
+../gradlew -p .. publishToMavenLocal --no-daemon
 
 echo "==> docker compose up -d"
 docker compose up -d
@@ -54,19 +46,15 @@ for i in {1..30}; do
     sleep 1
 done
 
-# The PDP address for the app, asked of Compose rather than restated here. docker-compose.yml
-# publishes the PDP well away from Cerbos's default 3593 — the port any other local PDP may be
-# holding — and application.yaml reads CERBOS_HOST with no fallback, so this is not a
-# convenience: see the comment on `cerbos.address` there for why a default would be worse than a
-# failure to start. Reading the published port back keeps the number in one place.
+# application.yaml requires CERBOS_HOST; read the published port from Compose.
 PUBLISHED_PDP=$(docker compose port cerbos 3593) ||
     fail "docker compose port cerbos 3593 — did the PDP publish its gRPC port?"
 export CERBOS_HOST="localhost:${PUBLISHED_PDP##*:}"
 echo "==> PDP at $CERBOS_HOST"
 
-echo "==> gradle bootRun (background)"
+echo "==> gradlew bootRun (background)"
 mkdir -p build/smoke
-gradle bootRun --no-daemon >build/smoke/app.log 2>&1 &
+../gradlew bootRun --no-daemon >build/smoke/app.log 2>&1 &
 APP_PID=$!
 
 echo "==> waiting for Spring Boot on :8080"
@@ -249,7 +237,7 @@ assert_status() {
 #   p8 erin    public  !arch location=Tokyo  tags=unicode,... title contains literal "_"
 #   p9 globex-user private arch tenant=globex (cross-tenant control row)
 #
-# Grants deliberately include null subjects, duplicate matches, wrong permissions, and one
+# Grants include null subjects, duplicate matches, wrong permissions, and one
 # grant whose tenant disagrees with its photo. Group IDs are tenant-qualified in the database.
 #
 # view (user)  : (public AND !archived) OR ownerId == self

@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.ListValue;
@@ -43,42 +48,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * What is left when the corpus owns the policy shapes: the adapter's CALL contract, the shapes no
- * plan can carry, and the shapes a policy can express that the corpus does not carry yet.
- *
- * <p>These tests hand-build protobuf operands and execute the resulting Specification against an
- * H2 schema. A hand-built plan is a BELIEF about what the planner emits, which is exactly why
- * {@link SpringDataTranslatorTest} reads its plans from {@code conformance/wire-fixtures/}
- * instead ({@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}),
- * and why 134 tests whose shapes the corpus now carries were deleted rather than converted:
- * their belief is a fixture's job to hold, their emitted filter is the golden asset's, and the
- * rows they returned are {@link AdversarialConformanceTest}'s {@code check()} oracle's.
- *
- * <p>What remains is of the three kinds {@code CLAUDE.md} ("What a translator unit test may pin")
- * admits, and every test below sits under the banner of exactly one:
- *
- * <ol>
- *   <li><strong>A branch CEL itself cannot reach.</strong> No policy compiles to it, or no plan
- *       carries it: an operator CEL does not have ({@code isSet}), a comparison CEL's type checker
- *       rejects (a fractional {@code size()} equality, a timestamp against a number), an operand
- *       shape the planner never emits (a wrong arity, a bare string where {@code timestamp()}
- *       always wraps one), or a constant-only sub-expression the planner folds away before the
- *       wire — the corpus's own fixtures are the proof of that last one: {@code p-startswith-concat}
- *       arrives with {@code "100" + "%"} already folded and {@code in-empty} arrives as
- *       {@code ALWAYS_DENIED}. Each test says which. Permanent.
- *   <li><strong>A caller-supplied argument the corpus structurally cannot vary.</strong>
- *       {@code actions.json} classifies each action against ONE mapping per adapter, so an
- *       {@link OperatorFunction} override, the {@code maxMacroDepth} system property, the
- *       call-level and per-attribute {@link NullAttributeRepresentation}, a mapping the corpus
- *       does not use (an {@code OffsetDateTime} or {@code LocalDateTime} column, an unmapped
- *       reference), the bulk-delete guard, the null-predicate contract with Spring Data, and the
- *       defensive copies have no corpus spelling. Permanent.
- *   <li><strong>A corpus gap wearing a unit test.</strong> Policy-reachable, and the corpus does
- *       not carry it yet. A bridge, not a home: each is pinned in this adapter alone and asked of
- *       none of the others, which is the condition every bug this repository exists to stop was
- *       living in. Every test under that banner opens with <em>Corpus gap.</em>, is tracked by
- *       cerbos/query-plan-adapters#414, and is deleted when the corpus action lands.
- * </ol>
+ * Unit tests that hand-build plans and run the resulting Specification against in-memory H2. No
+ * Docker. Each test sits under one of the three banners from CLAUDE.md, "What a translator unit
+ * test may pin": a branch CEL cannot reach, a caller-supplied argument the corpus cannot vary, or
+ * a corpus gap (tracked by #414, deleted when the corpus action lands).
  */
 class SpringDataQueryPlanAdapterTest {
 
@@ -97,8 +70,7 @@ class SpringDataQueryPlanAdapterTest {
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")
             ))),
-            // Scalar projection of the tags relation (defaultMemberField) for the
-            // null-element membership tests: `null in R.attr.tagNames`.
+            // Scalar projection of the tags relation.
             Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name"))
     );
 
@@ -169,12 +141,7 @@ class SpringDataQueryPlanAdapterTest {
         return exprOp("lambda", body, var(varName));
     }
 
-    /**
-     * Assert that {@link #runCount} for {@code condition} throws {@link IllegalArgumentException}
-     * whose message contains every {@code messageFragments} entry. Pins error contracts so a
-     * future refactor can't silently regress to a less-helpful message or different exception
-     * type.
-     */
+    /** Asserts that translating {@code condition} throws with every fragment in the message. */
     private static void assertConditionThrows(Operand condition, String... messageFragments) {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> runCount(condition));
@@ -184,10 +151,7 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    /**
-     * Build a Specification, translate to a predicate, and run the query — returns the row count.
-     * Exercises the full path so any IllegalArgumentException during predicate building surfaces.
-     */
+    /** Translates {@code condition}, runs it, and returns the row count. */
     private static int runCount(Operand condition) {
         return runCount(condition, Map.of());
     }
@@ -240,21 +204,18 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    /** Thrown by {@link #THROWING_OVERRIDE} to prove an override hook was actually invoked. */
+    /** Thrown by {@link #THROWING_OVERRIDE}, so a test can assert the override was called. */
     private static final class OverrideInvoked extends RuntimeException {
         OverrideInvoked() {
             super("override invoked");
         }
     }
 
-    /** An override that fails loudly when reached, so a test can assert the override path is taken. */
     private static final OperatorFunction THROWING_OVERRIDE = (cb, field, value) -> {
         throw new OverrideInvoked();
     };
 
-    // -- helpers shared by tests that sit under different banners ------------------------------
-
-    /** Distinctive element values so the no-leak assertions cannot false-negative. */
+    // Distinctive values, so a leak into an error message is easy to detect.
     private static final String ELEM_A = "leak-canary-alpha";
     private static final String ELEM_B = "leak-canary-beta";
 
@@ -273,32 +234,13 @@ class SpringDataQueryPlanAdapterTest {
         return ex;
     }
 
-    /**
-     * The standard scope fixture, chosen so a correct translation and every plausible
-     * regression return DIFFERENT row sets:
-     * <ul>
-     *   <li>{@code "a:b"} — equal to the ancestor constant (strict-vs-inclusive
-     *       discriminator: strict operators must NOT match the equal path),</li>
-     *   <li>{@code "a:b:c"} — equal to the descendant constant (off-by-one strict-prefix
-     *       discriminator: an IN list wrongly including the full path would match it),</li>
-     *   <li>{@code "a:bb:c"} — shares the STRING prefix {@code "a:b"} but not the PATH
-     *       prefix (separator-mishandling discriminator: {@code LIKE 'a:b%'} without the
-     *       trailing delimiter would match it),</li>
-     *   <li>{@code "a:b:c:d"} — multi-level descendant,</li>
-     *   <li>{@code "x:y"} — unrelated control.</li>
-     * </ul>
-     * Verified against a live PDP (Cerbos 0.54.0): {@code check()} treats
-     * ancestorOf/descendentOf as STRICT (the equal path is denied) and overlaps as
-     * inclusive; sibling string prefixes are denied.
-     */
+    // Scope paths that tell a correct hierarchy translation from the likely bugs: "a:bb:c"
+    // shares the string prefix "a:b" but not the path prefix. In check(), ancestorOf and
+    // descendentOf are strict (a path is not its own ancestor); overlaps is inclusive.
     private static final List<String> SCOPES =
             List.of("a", "a:b", "a:b:c", "a:b:c:d", "a:bb:c", "x:y");
 
-    /**
-     * Seed one row per path — the row's ID doubles as its {@code aString} scope path —
-     * run {@code body}, then delete the rows. Row-identity assertions then read
-     * naturally: the expected set IS the set of matching paths.
-     */
+    /** Seeds one row per path, using the path as id and {@code aString}; cleans up after. */
     private static void withScopeRows(List<String> paths, Runnable body) {
         EntityManager em = emf.createEntityManager();
         em.getTransaction().begin();
@@ -325,7 +267,7 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    /** Translate {@code condition}, run it, and return the matched row IDs (= scope paths). */
+    /** Translates {@code condition}, runs it, and returns the matched ids (the scope paths). */
     private static Set<String> scopeIds(Operand condition) {
         PlanResourcesResponse resp =
                 buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
@@ -373,11 +315,7 @@ class SpringDataQueryPlanAdapterTest {
         return runCount(condition, CHAIN_MAPPER, Map.of());
     }
 
-    /**
-     * Persist a resource plus its (non-cascaded) category/sub-category graph, run
-     * {@code body}, then delete everything again — the shared in-memory schema must stay
-     * empty for the other tests.
-     */
+    /** Persists a resource and its category graph (not cascaded), runs {@code body}, cleans up. */
     private static void withCategoryGraph(ResourceEntity resource,
                                    List<CategoryEntity> categories,
                                    List<SubCategoryEntity> subCategories,
@@ -457,8 +395,11 @@ class SpringDataQueryPlanAdapterTest {
 
     // ============================================================================================
     // KIND 1 — a branch CEL itself cannot reach
+    //
+    // No policy compiles to these, or the planner never emits them. Permanent.
     // ============================================================================================
 
+    // CEL rejects an undeclared function, so no plan carries one.
     @Test
     void unknownOperatorThrows() {
         Operand cond = exprOp("unsupported_op",
@@ -468,19 +409,10 @@ class SpringDataQueryPlanAdapterTest {
         assertTrue(ex.getMessage().contains("Unsupported operator"));
     }
 
-    /**
-     * The planner has no existence operator: {@code isSet} is not a registered CEL function,
-     * so a policy naming it fails to compile and it can never reach the wire. The adapter
-     * carried a dedicated branch for it regardless; it must now fail closed like any unknown
-     * operator rather than guess at IS NULL / IS NOT NULL. See
-     * cerbos/query-plan-adapters#261 — the eq/ne-null override tests below are the live path.
-     */
+    // isSet is not a CEL function, so a policy using it does not compile. Every operand shape
+    // must fail as an unsupported operator. Existence arrives as eq/ne against null.
     @Test
     void isSetReportsUnsupportedOperator() {
-        // isSet had bespoke operand-shape diagnostics; it is not a wire operator at all
-        // (#261), so every shape of it must now surface as a plain unsupported-operator
-        // error naming it, rather than a message implying the adapter was close to
-        // translating it.
         assertConditionThrows(
                 exprOp("isSet", var("request.resource.attr.aOptionalString"), bval(true)),
                 "Unsupported operator", "isSet");
@@ -495,11 +427,9 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * The equality half of the fractional {@code size()} thresholds. CEL rejects {@code ==} and
-     * {@code !=} between an int and a double ("found no matching overload for '_==_' applied to
-     * '(int, double)'"), so no policy can make the planner emit these; the ordering half is
-     * reachable — cross-type numeric ORDERING compiles — and sits under the corpus-gap banner
-     * as {@link FractionalSizeThresholds}.
+     * CEL rejects {@code ==}/{@code !=} between an int and a double ("found no matching overload
+     * for '_==_' applied to '(int, double)'"), so no policy reaches these. The reachable ordering
+     * cases are in {@link FractionalSizeThresholds}.
      */
     @Nested
     class FractionalSizeEquality {
@@ -518,20 +448,20 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void eqFractionalIsAlwaysFalse() {
-            // size == 2.5 can never hold for an integral count; truncation made it eq 2.
+            // A count is never 2.5; truncating the threshold to 2 would match.
             withResource(seeded(), () -> assertEquals(0, runCount(sizeCmp("eq", 2.5))));
         }
 
         @Test
         void neFractionalIsAlwaysTrue() {
-            // size != 2.5 always holds; truncation made it ne 2 (false for the seeded row).
+            // Always true; truncating to ne 2 would exclude the seeded row.
             withResource(seeded(), () -> assertEquals(1, runCount(sizeCmp("ne", 2.5))));
         }
 
         @Test
         void stringSizeFractionalNeExcludesNullColumn() {
-            // size(string) != 1.5 is vacuously true for any PRESENT string, but a NULL
-            // column is a missing attribute → CEL error → deny. Always-true would leak it.
+            // True for any present string, but a NULL column is a missing attribute, which
+            // CEL denies. A plain always-true would return it.
             Operand cond = exprOp("ne",
                     exprOp("size", var("request.resource.attr.aOptionalString")),
                     nval(1.5));
@@ -541,7 +471,7 @@ class SpringDataQueryPlanAdapterTest {
             withNull.setaOptionalString(null);
             withResource(withValue, () -> withResource(withNull, () ->
                     assertEquals(1, runCount(cond))));
-            // eq fractional over a string length is always false, NULL or not.
+            // eq is always false, NULL or not.
             Operand eqCond = exprOp("eq",
                     exprOp("size", var("request.resource.attr.aOptionalString")),
                     nval(1.5));
@@ -553,17 +483,10 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * The FRACTIONAL threshold over a chain. CEL rejects {@code ==}/{@code !=} between an
-     * int and a double ("found no matching overload for '_==_' applied to '(int, double)'"),
-     * so no policy can make the planner emit these and no corpus action reaches them — the
-     * collapse branch is defensive code a consumer can still drive with a hand-built plan,
-     * and this is its only proving ground (cerbos/query-plan-adapters#333).
-     *
-     * <p>A COUNT is never fractional, so the comparison is statically decided — but not
-     * UNCONDITIONALLY. An absent to-one parent is a CEL missing-path error, which denies
-     * under both polarities, so the collapse has to be tri-state like every other chained
-     * comparison. Spelling it {@code hops AND constant} is two-valued: the negations below
-     * were TRUE for the parentless row and returned it.
+     * Fractional equality over a chain: CEL rejects int-vs-double {@code ==}/{@code !=}, so no
+     * policy reaches it. A count is never fractional, but a row with no parent is still a CEL
+     * error that denies under both polarities, so the collapsed result must stay UNKNOWN for it,
+     * including under {@code not}.
      */
     @Test
     void fractionalCollapseOverTwoHopChainStaysUnknownForAnAbsentParent() {
@@ -572,8 +495,7 @@ class SpringDataQueryPlanAdapterTest {
         biz.setSubCategories(List.of(fin));
         ResourceEntity parented = new ResourceEntity("chain-r-f1");
         parented.setCategories(List.of(biz));
-        // No categories at all: the chain's leading hop is absent, so CEL denies this row
-        // whatever the collapse decides.
+        // No categories: CEL denies this row whatever the comparison.
         ResourceEntity orphan = new ResourceEntity("chain-r-f2");
 
         Operand size = exprOp("size", var(CHAIN));
@@ -583,15 +505,14 @@ class SpringDataQueryPlanAdapterTest {
 
         withCategoryGraph(parented, List.of(biz), List.of(fin), () ->
                 withResource(orphan, () -> {
-                    // ne f collapses to always-TRUE: the parented row only, never the orphan.
+                    // ne is true for the parented row only, never the orphan.
                     assertEquals(1, runChainCount(exprOp("ne", size, nval(1.5))));
                     assertEquals(1, runChainCount(exprOp("ne", matching, nval(1.5))));
-                    // eq f collapses to always-FALSE: neither row.
+                    // eq is false for both.
                     assertEquals(0, runChainCount(exprOp("eq", size, nval(1.5))));
                     assertEquals(0, runChainCount(exprOp("eq", matching, nval(1.5))));
 
-                    // The discriminating arms. A two-valued `hops AND constant` makes both
-                    // negations TRUE for the orphan; the tri-state form leaves them UNKNOWN.
+                    // Under not, the orphan must stay excluded.
                     assertEquals(0, runChainCount(
                             exprOp("not", exprOp("ne", size, nval(1.5)))));
                     assertEquals(0, runChainCount(
@@ -603,11 +524,9 @@ class SpringDataQueryPlanAdapterTest {
                 }));
     }
 
+    // The planner sends map literals as struct() expressions, never as a STRUCT_VALUE constant.
     @Test
     void eqFieldAgainstStructConstantThrowsNamedError() {
-        // Defensive: the planner emits map literals as struct() expressions (which throw a
-        // named error via leafOperandError), but protoValueToJava can produce a Map from a
-        // STRUCT_VALUE — pin the same contract for that shape.
         Operand structConstant = Operand.newBuilder()
                 .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
                         .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
@@ -618,17 +537,13 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * Hierarchy shapes no plan carries. Four compare two CONSTANT hierarchies, which the planner
-     * evaluates itself — a condition with no attribute reference folds to ALWAYS_ALLOWED or
-     * ALWAYS_DENIED before the wire, exactly as {@code in-empty} does — and one calls
-     * {@code overlaps} on a string, which CEL's type checker rejects: {@code overlaps} is declared
-     * on the hierarchy type alone. The adapter still has to answer them, because a caller can
-     * hand it any operand, and this is the only place that answer is pinned.
+     * Hierarchy shapes no plan carries. The planner folds a comparison of two constant
+     * hierarchies to ALWAYS_ALLOWED or ALWAYS_DENIED, and CEL's checker rejects {@code overlaps}
+     * on a plain string.
      */
     @Nested
     class HierarchyShapesNoPlanCarries {
 
-        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
         private Operand hierarchy(Operand inner, String delimiter) {
             return exprOp("hierarchy", inner, sval(delimiter));
         }
@@ -639,8 +554,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void overlapsConstantsMatchingPrefixIsAlwaysTrue() {
-            // overlaps("a", "a:b") — "a" is a prefix of "a:b", all constant → unconditionally
-            // true: EVERY seeded row must come back (a regression to always-false returns none).
+            // "a" is a prefix of "a:b", so every row comes back.
             Operand cond = exprOp("overlaps",
                     hierarchy(sval("a"), ":"),
                     hierarchy(sval("a:b"), ":"));
@@ -650,17 +564,15 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void ancestorOfConstantsSatisfied() {
-            // ancestorOf("a", "a:b") — satisfied by constants alone → unconditionally true:
-            // every seeded row comes back regardless of its own scope value.
+            // Satisfied by the constants alone, so every row comes back.
             Operand cond = exprOp("ancestorOf",
                     hierarchy(sval("a"), ":"),
                     hierarchy(sval("a:b"), ":"));
             withScopeRows(SCOPES, () ->
                     assertEquals(Set.copyOf(SCOPES), scopeIds(cond)));
 
-            // A trailing delimiter is a real (empty) segment: "a:b:" splits to ["a","b",""],
-            // so "a:b" is still a strict prefix. If splitLiteral dropped trailing empties this
-            // would throw "do not satisfy" instead of translating to always-true.
+            // A trailing delimiter is an empty segment: "a:b:" is ["a", "b", ""], so "a:b" is
+            // still a strict ancestor.
             Operand trailing = exprOp("ancestorOf",
                     hierarchy(sval("a:b"), ":"),
                     hierarchy(sval("a:b:"), ":"));
@@ -670,7 +582,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void overlapsIncompatibleConstantsWithoutFieldThrows() {
-            // overlaps("a:b", "x:y") — no prefix relationship and no field to constrain → planner bug.
+            // No prefix relation and no column to constrain.
             assertConditionThrows(
                     exprOp("overlaps",
                             hierarchy(sval("a:b"), ":"),
@@ -699,21 +611,16 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * {@code timestamp()} shapes no plan carries. The planner folds {@code now() - duration(...)}
-     * and every other constant to an instant and RE-WRAPS it in {@code timestamp()}, so a bare
-     * string, a malformed literal, a number, or a concatenation never arrives inside one; and
-     * {@code timestamp(x) > 5} and {@code timestamp(x) + 1} are no-overload errors CEL's checker
-     * rejects. The reachable operator cells sit under the corpus-gap banner as
-     * {@link TimestampComparisons}.
+     * {@code timestamp()} shapes no plan carries. The planner folds constants to an instant and
+     * wraps it in {@code timestamp()}, so a bare string, number or concatenation never arrives;
+     * {@code timestamp(x) > 5} and {@code timestamp(x) + 1} fail CEL's type checker. The
+     * reachable cases are in {@link TimestampComparisons}.
      */
     @Nested
     class TimestampShapesNoPlanCarries {
 
         @Test
         void bareStringConstantStillThrows() {
-            // The PDP never emits timestamp(variable) vs a bare string (verified against a
-            // live PDP: even folded now()-duration constants are re-wrapped in timestamp()).
-            // Unverifiable shape → keep failing closed.
             assertConditionThrows(
                     exprOp("lt", tsVar("createdAt"), sval(TS_CONST)),
                     "Unexpected timestamp() expression in leaf operand of lt");
@@ -728,7 +635,6 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void timestampOverNestedExpressionThrows() {
-            // timestamp(<expression>) has no verified wire shape → Opaque → named error.
             assertConditionThrows(
                     exprOp("lt",
                             exprOp("timestamp", exprOp("add", sval("a"), sval("b"))),
@@ -738,8 +644,6 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void timestampInsideArithmeticStillThrows() {
-            // Nested shapes the numeric machinery routes through resolveNumericOperand keep
-            // their named error — no partial support for shapes the oracle cannot verify.
             assertConditionThrows(
                     exprOp("lt",
                             exprOp("add", tsVar("createdAt"), nval(1)),
@@ -757,12 +661,11 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- constant-only sub-expressions the planner folds before the wire: p-startswith-concat and
-    // cr-startswith-concat arrive with their concatenation already a literal --
+    // Constant-only sub-expressions: the planner folds these before sending the plan (see the
+    // p-startswith-concat wire fixture).
 
     @Test
     void addFoldedTwoConstants() {
-        // eq(R.attr.aString, add("hello", "-world"))  →  field == "hello-world"
         Operand cond = exprOp("eq",
                 var("request.resource.attr.aString"),
                 exprOp("add", sval("hello"), sval("-world")));
@@ -772,7 +675,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void addFoldedConstantValueFirstIsMirrored() {
-        // (1 + 2) < aNumber → aNumber > 3, with aNumber = 5 → match.
+        // (1 + 2) < aNumber, with aNumber = 5.
         withResource(orderSeed(), () ->
                 assertEquals(1, runCount(exprOp("lt",
                         exprOp("add", nval(1), nval(2)),
@@ -781,9 +684,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void addFoldedConstantReceiver() {
-        // ("role1," + "role2").contains(aString) — if the planner ever ships the concat
-        // unfolded, the receiver arrives as add(value, value) and must fold into the same
-        // constant-haystack translation, not the inverted column-haystack one.
+        // ("role1," + "role2").contains(aString): the folded constant stays the haystack.
         Operand cond = exprOp("contains",
                 exprOp("add", sval("role1,"), sval("role2")),
                 var("request.resource.attr.aString"));
@@ -793,8 +694,6 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void bothOperandsAddExpressionsReportsShapeNotArity() {
-        // contains(add(...), add(...)): there ARE two operands — the old message
-        // ("add comparison requires a second operand") misstated the problem as arity.
         assertConditionThrows(
                 exprOp("contains",
                         exprOp("add", sval("a"), sval("b")),
@@ -802,12 +701,11 @@ class SpringDataQueryPlanAdapterTest {
                 "contains", "two add() expressions");
     }
 
-    // -- Malformed / hostile operand shapes the planner never emits --
+    // Malformed operand shapes the planner never emits. Each must fail with a named
+    // IllegalArgumentException, not a raw runtime error or a silently dropped operand.
 
     @Test
     void mapLambdaWithWrongArityThrowsCleanly() {
-        // A malformed lambda inside map() must produce IllegalArgumentException, not
-        // IndexOutOfBoundsException.
         Operand mapExpr = exprOp("map",
                 var("request.resource.attr.tags"),
                 exprOp("lambda", var("t")));
@@ -818,7 +716,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void structValueWithNullEntryDoesNotThrow() {
-        // Struct fields may hold nulls; Collectors.toMap would NPE on them.
+        // Collectors.toMap throws on null values.
         Struct struct = Struct.newBuilder()
                 .putFields("a", Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build())
                 .putFields("b", Value.newBuilder().setStringValue("x").build())
@@ -834,24 +732,19 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void ternaryWithWrongOperandCountThrows() {
-        // if() with 2 operands inside a comparison — malformed plan, not a silent drop.
         assertConditionThrows(
                 exprOp("gt",
                         exprOp("if", var("request.resource.attr.aBool"), nval(1)),
                         nval(0)),
                 "if (ternary) requires exactly 3 operands", "got 2");
-        // Same contract for a bare-boolean-position ternary.
+        // Same for a ternary in boolean position.
         assertConditionThrows(
                 exprOp("if", var("request.resource.attr.aBool"), bval(true)),
                 "if (ternary) requires exactly 3 operands", "got 2");
     }
 
-    // -- Leaf operand-count guard: extra operands must fail loudly, not drop silently --
-
     @Test
     void leafWithExtraOperandThrows() {
-        // A 3-operand eq previously kept the field-to-field comparison and silently DROPPED
-        // the value operand. Malformed plans must throw instead.
         assertConditionThrows(
                 exprOp("eq",
                         var("request.resource.attr.aString"),
@@ -862,10 +755,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void sizeComparisonWithExtraOperandThrows() {
-        // The size() probe used to run BEFORE the arity guard and scan operands
-        // last-match-wins: a malformed eq(size(tags), variable, value) translated to
-        // COUNT(tags) = value, silently discarding the variable constraint. The guard now
-        // fires first, so the size() path shares the loud-failure contract of plain leaves.
+        // The arity check must run before the size() path, or the extra operand is dropped.
         assertConditionThrows(
                 exprOp("eq",
                         exprOp("size", var("request.resource.attr.tags")),
@@ -887,13 +777,14 @@ class SpringDataQueryPlanAdapterTest {
 
     // ============================================================================================
     // KIND 2 — a caller-supplied argument the corpus structurally cannot vary
+    //
+    // actions.json classifies each action against one mapping per adapter, so overrides, null
+    // conventions, other column types and the Spring Data call contract have no corpus spelling.
     // ============================================================================================
 
     @Test
     void alwaysAllowedSpecificationReturnsNullPredicate() {
-        // Contract: an always-allowed plan must produce a Specification whose toPredicate
-        // returns null — Spring Data's SimpleJpaRepository skips the WHERE clause entirely
-        // in that case. Pins B2 against regression to cb.conjunction().
+        // A null predicate makes Spring Data omit the WHERE clause.
         PlanResourcesResponse resp = buildResponse(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED, null);
         Specification<ResourceEntity> spec =
                 SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER);
@@ -908,7 +799,7 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- override hook is consulted on every scalar-leaf path, not just the direct comparison --
+    // An OperatorFunction override must be used on every scalar comparison path.
 
     @Test
     void overrideAppliesToDirectComparison() {
@@ -919,7 +810,6 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void overrideAppliesToAddFoldedComparison() {
-        // field == "prefix:" + "123" folds to a constant then compares — must hit the same override.
         Operand cond = exprOp("eq",
                 var("request.resource.attr.aString"),
                 exprOp("add", sval("prefix:"), sval("123")));
@@ -929,7 +819,6 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void overrideAppliesToNullRhs() {
-        // eq(field, null) must route through a registered override rather than forcing IS NULL.
         Operand cond = exprOp("eq", var("request.resource.attr.aOptionalString"), nullVal());
         assertThrows(OverrideInvoked.class,
                 () -> runCount(cond, Map.of("eq", THROWING_OVERRIDE)));
@@ -950,7 +839,6 @@ class SpringDataQueryPlanAdapterTest {
                 () -> runCount(cond, Map.of("in", THROWING_OVERRIDE)));
     }
 
-    /** Null existence reaches overrides as ne/eq against a null value, not as isSet (#261). */
     @Test
     void overrideAppliesToNeNull() {
         Operand cond = exprOp("ne", var("request.resource.attr.aOptionalString"), nullVal());
@@ -960,9 +848,8 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void operatorOverrideIsUsed() {
-        // The override's PREDICATE is what the query executes, not merely a hook that runs:
-        // the default translation of `aString == "foo"` excludes this row, the override's
-        // `aString IS NOT NULL` includes it.
+        // The query must run the override's predicate: the default excludes this row, the
+        // override's IS NOT NULL includes it.
         Operand cond = exprOp("eq", var("request.resource.attr.aString"), sval("foo"));
         Map<String, OperatorFunction> overrides = Map.of(
                 "eq", (cb, field, value) -> cb.isNotNull(field));
@@ -974,7 +861,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void overrideStillOwnsInWithNullElement() {
-        // A registered override must keep receiving the RAW list (nulls included).
+        // The override receives the list as sent, nulls included.
         Operand cond = exprOp("in",
                 var("request.resource.attr.aOptionalString"), listOpNullable("a", null));
         assertThrows(OverrideInvoked.class,
@@ -983,7 +870,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void overrideIsConsultedUnderMirroredOperator() {
-        // 3 < aNumber builds a gt predicate — the override must be looked up as "gt".
+        // 3 < aNumber becomes aNumber > 3, so the override is looked up as "gt".
         Operand cond = exprOp("lt", nval(3), var("request.resource.attr.aNumber"));
         assertThrows(OverrideInvoked.class,
                 () -> runCount(cond, Map.of("gt", THROWING_OVERRIDE)));
@@ -991,8 +878,7 @@ class SpringDataQueryPlanAdapterTest {
 
     @Test
     void overrideAppliesToArithmeticComparison() {
-        // OperatorFunction contract: overrides win on EVERY scalar path. The arithmetic
-        // expression is passed as the field argument; the plan constant as the value.
+        // The arithmetic expression is passed as the field argument.
         Operand cond = exprOp("gt",
                 exprOp("add", var("request.resource.attr.aNumber"), nval(1.0)),
                 nval(2.0));
@@ -1009,13 +895,10 @@ class SpringDataQueryPlanAdapterTest {
                 "Unknown attribute");
     }
 
-    // -- NULL attribute representation (issue #302) --
-
     /**
-     * Both NULL-column conventions produce the identical {@code eq(attr, null)} wire node, so
-     * the adapter cannot infer which one the caller uses. Under {@code OMITTED} a NULL column
-     * carries no attribute at all, CEL raises a missing-attribute error, and {@code check()}
-     * denies every row — {@code IS NULL} would return precisely the rows the PDP refuses.
+     * Both null conventions send the same {@code eq(attr, null)}, so the caller must say which one
+     * it uses. Under {@code OMITTED}, {@code check()} denies a NULL column, so {@code IS NULL}
+     * would return denied rows.
      */
     @Nested
     class NullAttributeRepresentationTest {
@@ -1034,8 +917,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void explicitIsTheDefaultAndKeepsIsNull() {
-            // The three-arg overload keeps IS NULL, and an EXPLICIT fourth argument still
-            // translates rather than throw.
+            // The three-argument overload gives IS NULL; an explicit EXPLICIT also translates.
             ResourceEntity nullColumn = new ResourceEntity("explicit-default-1");
             nullColumn.setaOptionalString(null);
             withResource(nullColumn, () -> assertEquals(1, runCount(nullEq())));
@@ -1050,16 +932,9 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- the per-attribute NULL convention (issue #308) --
-
     /**
-     * A call-level {@link NullAttributeRepresentation} cannot describe a policy suite that mixes
-     * both conventions — the same column mapped twice, sent as an explicit null under one
-     * attribute name and omitted under another — so the declaration lives on the mapping and the
-     * call-level option is only its default.
-     *
-     * <p>Every case here runs the query, so an assertion is about the rows the filter actually
-     * returns rather than about the Criteria tree that produced them.
+     * The null convention declared per attribute mapping, which overrides the call-level default.
+     * This lets one call mix both conventions.
      */
     @Nested
     class PerAttributeNullRepresentationTest {
@@ -1098,21 +973,14 @@ class SpringDataQueryPlanAdapterTest {
             });
         }
 
-        /**
-         * The equality family only. An ordering comparison against a null receiver is a
-         * no-overload error in CEL, which denies under both polarities — exactly what UNKNOWN
-         * already does — so it keeps propagating it.
-         */
+        // An EXPLICIT declaration only changes eq/ne. Ordering a null is a CEL error that
+        // denies under both polarities, which SQL UNKNOWN already gives.
         @Test
         void orderingComparisonsStayUnknown() {
             withResource(nullOwner(), () -> assertEquals(0, count(
                     exprOp("gt", var("request.resource.attr.owner"), sval("x")))));
         }
 
-        /**
-         * The declaration overrides the call-level default in both directions, which is the
-         * whole point: one call, two conventions.
-         */
         @Test
         void declaringOmittedRejectsANullOperandUnderTheExplicitDefault() {
             PlanResourcesResponse resp = buildResponse(
@@ -1128,20 +996,14 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- collection-macro nesting depth guard --
-    // Each nesting level multiplies the correlated-subquery count of the translated filter, so
-    // plans nested beyond the configured limit must fail loudly at translation time instead of
-    // silently emitting a filter that times out on production-sized tables. The property name is
-    // spelled out literally here (not via the adapter constant) so this suite compiles — and
-    // demonstrably FAILS — against the pre-guard adapter.
-
+    // Each nested collection macro adds a correlated subquery, so nesting beyond the limit must
+    // throw at translation time rather than emit a filter that may not finish.
     @Nested
     class MacroDepthGuard {
 
         private static final String DEPTH_PROPERTY = "dev.cerbos.queryplan.springdata.maxMacroDepth";
 
-        // categories → subCategories → labels → subCategories → labels → subCategories: the
-        // bidirectional many-to-many pair gives arbitrarily deep legal join chains.
+        // The subCategories/labels many-to-many pair allows join chains of any depth.
         private static final Map<String, AttributeMapping> DEEP_MAPPER = Map.of(
                 "request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
                         "name", AttributeMapping.field("name"),
@@ -1239,8 +1101,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void sizeFilterCountsAsAMacroLevel() {
-            // size(categories.filter(v1, v1.subCategories.exists(v2, ...))) — the filter level
-            // plus the exists level is depth 2, over a limit of 1.
+            // filter plus the nested exists is depth 2, over a limit of 1.
             Operand filtered = exprOp("filter",
                     var("request.resource.attr.categories"),
                     lambda("v1", existsLevel(2, 2, "v1.subCategories")));
@@ -1277,9 +1138,8 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * Column types the corpus does not map. The corpus maps {@code createdAt} to an
-     * {@link java.time.Instant}; an {@code OffsetDateTime} column, a {@code LocalDateTime} column
-     * and the override that reaches past the column-type check are caller-supplied arguments.
+     * Timestamp column types the corpus does not map (it uses {@link java.time.Instant}), and
+     * overrides on timestamp comparisons.
      */
     @Nested
     class TimestampColumnMappings {
@@ -1293,15 +1153,15 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(2, runCount(exprOp("ge", tsVar("updatedAt"), tsVal(TS_CONST))));
                 assertEquals(1, runCount(exprOp("eq", tsVar("updatedAt"), tsVal(TS_CONST))));
                 assertEquals(3, runCount(exprOp("ne", tsVar("updatedAt"), tsVal(TS_CONST))));
-                // Value-first mirror on the OffsetDateTime column too.
+                // Value-first is mirrored.
                 assertEquals(1, runCount(exprOp("lt", tsVal(TS_CONST), tsVar("updatedAt"))));
             });
         }
 
         @Test
         void localDateTimeColumnThrowsNamedError() {
-            // LocalDateTime has no zone: the stored wall-clock could denote any instant, and
-            // guessing UTC could silently include rows check() denies. Fail closed, by name.
+            // LocalDateTime has no zone, so it cannot be compared to an instant. Guessing UTC
+            // could return rows check() denies.
             assertConditionThrows(
                     exprOp("lt", tsVar("localCreatedAt"), tsVal(TS_CONST)),
                     "timestamp() comparison", "LocalDateTime", "localCreatedAt");
@@ -1309,8 +1169,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void overrideIsConsultedBeforeColumnTypeCheck() {
-            // The README's OperatorFunction escape hatch must be REACHABLE for timestamp
-            // comparisons — including on column types the default translation rejects.
+            // An override still works on a column type the default translation rejects.
             assertThrows(OverrideInvoked.class, () -> runCount(
                     exprOp("lt", tsVar("localCreatedAt"), tsVal(TS_CONST)),
                     Map.of("lt", THROWING_OVERRIDE)));
@@ -1318,7 +1177,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void valueFirstOverrideIsConsultedUnderTheMirroredOperator() {
-            // Same contract as NormalizedBinary: a value-first lt is looked up as gt.
+            // A value-first lt is looked up as gt.
             assertThrows(OverrideInvoked.class, () -> runCount(
                     exprOp("lt", tsVal(TS_CONST), tsVar("createdAt")),
                     Map.of("gt", THROWING_OVERRIDE)));
@@ -1327,10 +1186,8 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * Defensive copies (API hardening): {@code AttributeMapping} records validate and copy at
-     * construction, and {@code toSpecification} captures copies of the caller's maps — so
-     * post-construction mutation cannot silently change which columns the authorization filter
-     * resolves.
+     * {@code AttributeMapping} and {@code toSpecification} copy the caller's maps, so changing a
+     * map afterwards cannot change which columns the filter uses.
      */
     @Nested
     class DefensiveCopies {
@@ -1365,8 +1222,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void mutatingCallerMapperAfterToSpecificationDoesNotAffectSpecification() {
-            // aString and aOptionalString hold different values, so a re-resolved column
-            // is observable as a changed row set.
+            // Different values, so reading the wrong column changes the count.
             ResourceEntity r = new ResourceEntity("copy-1");
             r.setaString("match");
             r.setaOptionalString("other");
@@ -1380,8 +1236,7 @@ class SpringDataQueryPlanAdapterTest {
                         SpringDataQueryPlanAdapter.toSpecification(resp, mapper);
 
                 assertEquals(1, countWithSpec(spec));
-                // Redirect the attribute at a different column AFTER construction: the
-                // Specification (re-invoked fresh per execution) must keep the original mapping.
+                // Remap after construction; the Specification must keep the original column.
                 mapper.put("request.resource.attr.aString", AttributeMapping.field("aOptionalString"));
                 assertEquals(1, countWithSpec(spec),
                         "post-construction mapper mutation changed the captured Specification");
@@ -1405,24 +1260,16 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * {@code repository.delete(Specification)} guard. Relation-mapped operators translate to
-     * correlated subqueries over collection tables; Hibernate's multi-table bulk delete first
-     * clears {@code @ElementCollection}/join tables with the same predicate, which
-     * self-invalidates the correlated subquery — empirically (Hibernate 6.6.18/H2, plan
-     * {@code in(value "user1", variable ownedBy)}): SELECT returns the row, {@code delete()}
-     * returns 0, the entity survives, and ALL its {@code resource_owned_by} collection rows are
-     * destroyed. The adapter now detects the bulk-delete invocation context (the {@code Root}
-     * comes from a {@code CriteriaDelete} and is not a member of the throwaway
-     * {@code CriteriaQuery}'s root set) and throws {@link UnsupportedOperationException} from
-     * {@code toPredicate} — i.e. BEFORE any statement executes.
+     * {@code repository.delete(Specification)} guard. Hibernate's bulk delete first clears the
+     * collection tables using the same predicate, which breaks a correlated subquery over them:
+     * the entity survives and its collection rows are deleted. So a relation-mapped
+     * Specification throws {@link UnsupportedOperationException} from {@code toPredicate} when
+     * called for a delete, before any statement runs.
      */
     @Nested
     class BulkDeleteGuard {
 
-        /**
-         * Exact wire shape the PDP emits for policy {@code P.id in request.resource.attr.ownedBy}
-         * (operand order is source order, so the constant-folded principal id comes first).
-         */
+        // The plan for `P.id in R.attr.ownedBy`: the folded principal id comes first.
         private final Operand ownedByUser1 =
                 exprOp("in", sval("user1"), var("request.resource.attr.ownedBy"));
 
@@ -1433,13 +1280,9 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * {@code JpaSpecificationExecutor.delete(Specification)} is a Spring Data JPA 3.x method:
-         * 4.0 replaced it with {@code delete(PredicateSpecification)} and
-         * {@code delete(DeleteSpecification)}, so a direct call does not compile on the
-         * forward-compatibility leg ({@code ADAPTER_TEST_ORM=next}). Resolved reflectively so one
-         * source compiles against both majors, and the two tests that need the 3.x method are
-         * SKIPPED where it is absent rather than reported as passing — the guard they pin is
-         * about an invocation shape that major no longer has.
+         * {@code delete(Specification)} exists in Spring Data JPA 3.x only; 4.0 removed it. It is
+         * looked up by reflection so this source compiles on both, and tests that need it are
+         * skipped on 4.x.
          */
         private static java.lang.reflect.Method specificationDelete() {
             try {
@@ -1449,7 +1292,7 @@ class SpringDataQueryPlanAdapterTest {
             }
         }
 
-        /** Skips the calling test where the 3.x method is absent; call it before any assertThrows. */
+        /** Skips the test on Spring Data JPA 4.x. Call it before any assertThrows. */
         private static void assumeSpecificationDeleteIsOnTheClasspath() {
             org.junit.jupiter.api.Assumptions.assumeTrue(specificationDelete() != null,
                     "JpaSpecificationExecutor.delete(Specification) is a Spring Data JPA 3.x "
@@ -1478,8 +1321,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void deleteWithRelationSpecThrowsBeforeAnyDeletion() {
-            // Before the assertThrows below, which would otherwise report the skip as a wrong
-            // exception type.
+            // Must run before assertThrows, which would report the skip as a wrong exception.
             assumeSpecificationDeleteIsOnTheClasspath();
             ResourceEntity r = new ResourceEntity("bulk-del-1");
             r.setOwnedBy(new ArrayList<>(List.of("user1", "user2")));
@@ -1490,7 +1332,7 @@ class SpringDataQueryPlanAdapterTest {
                     SimpleJpaRepository<ResourceEntity, String> repository =
                             new SimpleJpaRepository<>(ResourceEntity.class, em);
 
-                    // SELECT paths through the real Spring Data repository are unaffected.
+                    // SELECTs are unaffected.
                     assertEquals(1, repository.findAll(spec).size());
                     assertEquals(1, repository.count(spec));
 
@@ -1512,9 +1354,7 @@ class SpringDataQueryPlanAdapterTest {
                     em.close();
                 }
 
-                // The guard fired inside toPredicate, before Hibernate built or ran any DELETE:
-                // the entity row AND every one of its collection rows survive. (Without the
-                // guard: entity survives but resource_owned_by is emptied — data corruption.)
+                // Nothing was deleted: the entity and its collection rows survive.
                 EntityManager check = emf.createEntityManager();
                 try {
                     ResourceEntity reloaded = check.find(ResourceEntity.class, "bulk-del-1");
@@ -1529,8 +1369,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void deleteWithFieldOnlySpecStillDeletes() {
-            // Field-only predicates involve no correlated subquery and no collection-table
-            // pre-clear hazard — the guard must not block them.
+            // A field-only predicate has no subquery, so the guard must allow it.
             ResourceEntity r = new ResourceEntity("bulk-del-2");
             r.setCreatedBy("alice");
             withResource(r, () -> {
@@ -1559,12 +1398,9 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void criteriaDeleteInvocationContextIsDetected() {
-            // Pins the detection mechanism itself, independent of the Spring Data version:
-            // SimpleJpaRepository.delete(Specification) calls
-            // spec.toPredicate(delete.from(cls), builder.createQuery(cls), builder) — a Root
-            // created on a CriteriaDelete plus a throwaway CriteriaQuery whose root set does
-            // not contain it. Every Spring Data SELECT path creates the Root via
-            // query.from(...), so membership in query.getRoots() distinguishes the two.
+            // Spring Data's delete passes a Root from a CriteriaDelete with an unrelated
+            // CriteriaQuery; SELECT paths pass a Root from query.from(...). The guard tells them
+            // apart by whether the Root is in query.getRoots(). Runs on any Spring Data version.
             Specification<ResourceEntity> spec = spec(ownedByUser1);
             EntityManager em = emf.createEntityManager();
             try {
@@ -1580,8 +1416,7 @@ class SpringDataQueryPlanAdapterTest {
 
         @Test
         void hasIntersectionAndSizeAreGuardedToo() {
-            // All correlated-subquery construction funnels through the same choke point
-            // (chainSubquery) — spot-check two more Relation-mapped operator families.
+            // Spot-check two more relation operators; all subqueries go through chainSubquery.
             Operand hasIntersection = exprOp("hasIntersection",
                     var("request.resource.attr.ownedBy"), listOp("user1", "user2"));
             Operand sizeGt = exprOp("gt",
@@ -1605,13 +1440,10 @@ class SpringDataQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#509, and is deleted
-    // when its corpus action lands.
+    // Each test is a corpus gap tracked by #509. Delete it when its corpus action lands.
     // ============================================================================================
 
-    // -- size(collection) compared with arbitrary N → correlated (SELECT COUNT(...)) <op> N.
-    // Seeds a real row because an empty table cannot distinguish count thresholds.
-
+    // size(collection) <op> N translates to a correlated COUNT subquery.
     @Nested
     class SizeCountComparisons {
 
@@ -1623,13 +1455,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The corpus counts a collection against 1 alone ({@code
-         * size-threshold}, {@code size-filter-count}); an arbitrary threshold under every operator,
-         * over an element collection and an entity relation, is not carried.
+         * <strong>Corpus gap.</strong> #414: The corpus counts a collection against 1 alone
+         * ({@code size-threshold}, {@code size-filter-count}); an arbitrary threshold under every
+         * operator, over an element collection and an entity relation, is not carried.
          */
         @Test
         void sizeComparedWithArbitraryN() {
-            // Seeded row has 2 owners (@ElementCollection) and 1 tag (@OneToMany).
+            // 2 owners (@ElementCollection) and 1 tag (@OneToMany).
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(exprOp("eq",
                         exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
@@ -1647,20 +1479,18 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("size", var("request.resource.attr.ownedBy")), nval(3))));
                 assertEquals(0, runCount(exprOp("ne",
                         exprOp("size", var("request.resource.attr.ownedBy")), nval(2))));
-                // Entity relation (@OneToMany), not just element collections.
                 assertEquals(1, runCount(exprOp("eq",
                         exprOp("size", var("request.resource.attr.tags")), nval(1))));
             });
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code vf-size} mirrors the emptiness check alone; a
+         * <strong>Corpus gap.</strong> #414: {@code vf-size} mirrors the emptiness check alone; a
          * value-first arbitrary threshold is not carried.
          */
         @Test
         void sizeValueFirstWithArbitraryNIsMirrored() {
-            // 3 > size(ownedBy) → size < 3, with 2 owners → match. The naive (unmirrored)
-            // translation `size > 3` would return 0.
+            // 3 > size(ownedBy) means size < 3; not mirroring it would give size > 3.
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(exprOp("gt",
                         nval(3),
@@ -1672,11 +1502,8 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- Fractional size() thresholds: COUNT/LENGTH are integral, so a fractional constant f
-    // can never be hit exactly. Correct semantics: eq → always-false; ne → always-true (but a
-    // NULL string column is a missing attribute → CEL error → deny); ge/gt f → ge ceil(f);
-    // le/lt f → le floor(f). Truncation (`>= 1.5` becoming `>= 1`) over-included.
-
+    // A count is an integer, so against a fractional f: ge/gt f means ge ceil(f), and le/lt f
+    // means le floor(f). Truncating f would return extra rows.
     @Nested
     class FractionalSizeThresholds {
 
@@ -1693,12 +1520,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code cr-size-frac-ge} and {@code w1-size-frac-chain} carry
-         * the inclusive {@code >=}; the strict {@code >} rounding is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code cr-size-frac-ge} and {@code w1-size-frac-chain}
+         * carry the inclusive {@code >=}; the strict {@code >} rounding is not carried.
          */
         @Test
         void gtFractionalRoundsUp() {
-            // gt f ⇔ ge ceil(f) for integral counts.
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(sizeCmp("gt", 1.5)));
                 assertEquals(0, runCount(sizeCmp("gt", 2.5)));
@@ -1706,12 +1532,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code w1-size-frac-le-chain} carries the inclusive {@code
-         * <=}; the strict {@code <} rounding is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code w1-size-frac-le-chain} carries the inclusive
+         * {@code <=}; the strict {@code <} rounding is not carried.
          */
         @Test
         void ltFractionalRoundsDown() {
-            // size < 2.5 ⇔ size <= 2; truncation made it lt 2 (under-inclusive).
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(sizeCmp("lt", 2.5)));
                 assertEquals(0, runCount(sizeCmp("lt", 1.5)));
@@ -1719,12 +1544,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A fractional threshold below 1 folds into the emptiness
-         * shortcuts, which no corpus action reaches.
+         * <strong>Corpus gap.</strong> #414: A fractional threshold below 1 folds into the
+         * emptiness shortcuts, which no corpus action reaches.
          */
         @Test
         void fractionalEmptinessShortcutsStillRoute() {
-            // ge 0.5 ⇔ ge 1 → EXISTS; lt 0.5 ⇔ le 0 → NOT EXISTS.
+            // ge 0.5 becomes EXISTS; lt 0.5 becomes NOT EXISTS.
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(sizeCmp("ge", 0.5)));
                 assertEquals(0, runCount(sizeCmp("lt", 0.5)));
@@ -1733,13 +1558,10 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- size(string) thresholds outside int range: cb.length is Expression<Integer>, so an
-    // unguarded (int) narrowing cast wrapped them (2147483648 → −2147483648, 4294967296 → 0),
-    // silently flipping the filter: `size(s) > 4294967296` became `LENGTH(s) > 0` — always-true
-    // over-inclusion while check() denies every row. No string's length leaves int range, so
-    // these comparisons must fold statically: gt/ge/eq huge → always-false; lt/le/ne huge →
-    // true for a PRESENT string only (NULL column = missing attribute → CEL error → deny).
-
+    // size(string) against a threshold outside int range. cb.length is an Integer expression, so
+    // casting the threshold to int would wrap it (2^32 becomes 0). No string is that long, so the
+    // comparison is decided without SQL: gt/ge/eq are false, and lt/le/ne are true for a present
+    // string. A NULL column is a missing attribute, which CEL denies.
     @Nested
     class HugeStringSizeThresholds {
 
@@ -1771,35 +1593,29 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code size-huge-gt} carries {@code >} at 2^32 alone; {@code
-         * ge}, {@code eq} and the 2^31 boundary are not carried.
+         * <strong>Corpus gap.</strong> #414: {@code size-huge-gt} carries {@code >} at 2^32 alone;
+         * {@code ge}, {@code eq} and the 2^31 boundary are not carried.
          */
         @Test
         void gtGeEqAboveIntMaxAreAlwaysFalse() {
-            // No string has >= 2^31 chars, so gt/ge/eq can never hold. The wrap made
-            // gt 2^32 into LENGTH > 0 (matched every non-empty row) and gt 2^31 into
-            // LENGTH > −2^31 (matched every present row).
             withResource(present(), () -> {
                 assertEquals(0, runCount(strSize("gt", TWO_POW_32)));
                 assertEquals(0, runCount(strSize("gt", TWO_POW_31)));
                 assertEquals(0, runCount(strSize("ge", TWO_POW_32)));
                 assertEquals(0, runCount(strSize("ge", TWO_POW_31)));
             });
-            // eq 2^32 wrapped to LENGTH = 0, wrongly matching the empty string.
+            // A wrapped eq 2^32 would be LENGTH = 0 and match the empty string.
             withResource(emptyString(), () ->
                     assertEquals(0, runCount(strSize("eq", TWO_POW_32))));
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code size-huge-lt} carries {@code <} at 2^32 over a corpus
-         * whose aString is never NULL, so the NULL exclusion this pins has no discriminating seed
-         * there.
+         * <strong>Corpus gap.</strong> #414: {@code size-huge-lt} carries {@code <} at 2^32 over a
+         * corpus whose aString is never NULL, so the NULL exclusion this pins has no discriminating
+         * seed there.
          */
         @Test
         void ltLeAboveIntMaxIncludePresentAndExcludeNull() {
-            // Every present string satisfies lt/le a huge threshold — but a NULL column is
-            // a missing attribute → CEL error → deny. The wrap made lt 2^32 into
-            // LENGTH < 0 (excluded everything).
             withResource(present(), () -> withResource(nullString(), () -> {
                 assertEquals(1, runCount(strSize("lt", TWO_POW_32)));
                 assertEquals(1, runCount(strSize("le", TWO_POW_32)));
@@ -1808,24 +1624,22 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code ne} above int range is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code ne} above int range is not carried.
          */
         @Test
         void neAboveIntMaxIncludesEmptyStringAndExcludesNull() {
-            // size("") != 2^32 is TRUE in CEL. The wrap made it LENGTH <> 0, wrongly
-            // excluding the empty string; NULL must stay excluded either way.
+            // size("") != 2^32 is true in CEL; the NULL row stays excluded.
             withResource(emptyString(), () -> withResource(nullString(), () ->
                     assertEquals(1, runCount(strSize("ne", TWO_POW_32)))));
         }
 
         /**
-         * <strong>Corpus gap.</strong> Thresholds below int range are not carried.
+         * <strong>Corpus gap.</strong> #414: Thresholds below int range are not carried.
          */
         @Test
         void belowIntMinThresholdsFoldMirrored() {
-            // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
-            // present string (incl. the empty string — the wrap made gt −2^32 into
-            // LENGTH > 0, wrongly excluding it); eq/lt/le can never hold.
+            // A length is never negative: gt/ge/ne hold for any present string, including the
+            // empty one; eq/lt/le never hold.
             withResource(emptyString(), () -> withResource(nullString(), () -> {
                 assertEquals(1, runCount(strSize("gt", -TWO_POW_32)));
                 assertEquals(1, runCount(strSize("ge", -TWO_POW_32)));
@@ -1837,12 +1651,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A fractional threshold outside int range is not carried.
+         * <strong>Corpus gap.</strong> #414: A fractional threshold outside int range is not
+         * carried.
          */
         @Test
         void fractionalHugeThresholdRoundsThenFolds() {
-            // ge 2^32 + 0.5 → ceil → 4294967297 → still above int range → always-false;
-            // le → floor → 4294967296 → present strings satisfy it.
+            // Rounded first (ceil for ge, floor for le), then still out of int range.
             withResource(present(), () -> {
                 assertEquals(0, runCount(strSize("ge", TWO_POW_32 + 0.5)));
                 assertEquals(1, runCount(strSize("le", TWO_POW_32 + 0.5)));
@@ -1850,12 +1664,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The exact {@code Integer.MAX_VALUE} boundary is not carried.
+         * <strong>Corpus gap.</strong> #414: The exact {@code Integer.MAX_VALUE} boundary is not
+         * carried.
          */
         @Test
         void boundaryIntegerMaxStillComparesExactly() {
-            // Integer.MAX_VALUE itself is in range and must keep producing a real LENGTH
-            // comparison, not a fold.
+            // Integer.MAX_VALUE is in range, so this is a real LENGTH comparison.
             withResource(present(), () -> {
                 assertEquals(0, runCount(strSize("gt", 2147483647.0)));
                 assertEquals(1, runCount(strSize("lt", 2147483647.0)));
@@ -1865,16 +1679,8 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- except: a two-list function with no JPA translation — every arrival shape throws --
-    //
-    // PDP-verified wire shapes (Cerbos latest, 2026-07): `size(R.attr.tags.except(["archived"]))
-    // > 0` arrives as gt(size(except(variable, value-list)), 0), and `R.attr.tags.except(
-    // ["archived"]) == []` as eq(except(variable, value-list), value-list). except NEVER
-    // arrives with a lambda operand — a previous lambda-except translation here was
-    // unreachable from any real plan and has been removed.
-
     /**
-     * <strong>Corpus gap.</strong> {@code exists-one-multi} carries a single-equality body; a
+     * <strong>Corpus gap.</strong> #414: {@code exists-one-multi} carries a single-equality body; a
      * disjunctive body is not carried.
      */
     @Test
@@ -1887,21 +1693,21 @@ class SpringDataQueryPlanAdapterTest {
                                 exprOp("eq", var("t.name"), sval("public")))))));
     }
 
-    // -- empty-list intersection short-circuits (no dialect-dependent `IN ()`) --
+    // hasIntersection with an empty list is always false and must not emit `IN ()`, which some
+    // databases reject.
 
     /**
-     * <strong>Corpus gap.</strong> {@code hasIntersection(x, [])} against a scalar column is not
-     * carried; whether the planner folds it as it folds {@code in-empty} is unrecorded.
+     * <strong>Corpus gap.</strong> #414: {@code hasIntersection(x, [])} against a scalar column is
+     * not carried. It is not known whether the planner folds it as it folds {@code in-empty}.
      */
     @Test
     void hasIntersectionScalarEmptyListCompiles() {
-        // hasIntersection(field, []) is always false and must not emit an empty `IN ()`.
         assertEquals(0, runCount(exprOp("hasIntersection",
                 var("request.resource.attr.aString"), listOp())));
     }
 
     /**
-     * <strong>Corpus gap.</strong> The same empty constant list, over a relation.
+     * <strong>Corpus gap.</strong> #414: The same empty constant list, over a relation.
      */
     @Test
     void hasIntersectionRelationEmptyListCompiles() {
@@ -1910,7 +1716,8 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> The same empty constant list, over a {@code map()} projection.
+     * <strong>Corpus gap.</strong> #414: The same empty constant list, over a {@code map()}
+     * projection.
      */
     @Test
     void hasIntersectionMapEmptyListCompiles() {
@@ -1920,23 +1727,17 @@ class SpringDataQueryPlanAdapterTest {
         assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp())));
     }
 
-    // -- eq/ne against a structured (list/map) constant: named error, not a raw Hibernate one --
-
     /**
-     * PDP-verified wire shapes (Cerbos {@code :latest}, 2026-07-23): {@code R.attr.tags ==
-     * ["a", "b"]} arrives as {@code eq(variable, value-list)} verbatim — in BOTH operand
-     * orders — and {@code ne} likewise. Without the guard, {@code cb.equal(stringPath, List)}
-     * dies inside Hibernate with a raw coercion error ("Could not convert
-     * java.util.ImmutableCollections$ListN to java.lang.String"), violating the README's
-     * contract that unsupported constructs throw {@link IllegalArgumentException} naming the
-     * operator. These tests pin the named error AND that no element values leak into it.
+     * {@code eq}/{@code ne} against a list constant, in either operand order, must throw a named
+     * {@link IllegalArgumentException} rather than a raw Hibernate conversion error. The message
+     * must not contain the element values.
      */
     @Nested
     class StructuredConstantComparison {
 
         /**
-         * The corpus's {@code literal-list-eq} covers the refusal. This assertion additionally
-         * pins attribute context, list cardinality, and absence of element values in the error.
+         * <strong>Corpus gap.</strong> #414: {@code eq-list} carries a relation-mapped attribute; a
+         * scalar column against a list constant is not carried.
          */
         @Test
         void eqFieldAgainstListConstantThrowsNamedError() {
@@ -1946,7 +1747,8 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * The {@code literal-list-ne} refusal's diagnostic context and value-redaction contract.
+         * <strong>Corpus gap.</strong> #414: {@code ne-list} carries a relation-mapped attribute; a
+         * scalar column against a list constant is not carried.
          */
         @Test
         void neFieldAgainstListConstantThrowsNamedError() {
@@ -1956,19 +1758,17 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The value-first spelling of the same gap.
+         * <strong>Corpus gap.</strong> #414: The value-first spelling of the same gap.
          */
         @Test
         void eqValueFirstListConstantThrowsNamedError() {
-            // ["a", "b"] == R.attr.x — source order is preserved on the wire; NormalizedBinary
-            // mirrors it back to field-first, so the same named error must surface.
             assertNamedError(
                     exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
                     "eq", "request.resource.attr.aString", "list of 1 element");
         }
 
         /**
-         * <strong>Corpus gap.</strong> The value-first {@code ne} spelling of the same gap.
+         * <strong>Corpus gap.</strong> #414: The value-first {@code ne} spelling of the same gap.
          */
         @Test
         void neValueFirstListConstantThrowsNamedError() {
@@ -1978,13 +1778,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The same gap over a relation-mapped attribute.
+         * <strong>Corpus gap.</strong> #414: {@code eq-list} carries this shape with a one-element
+         * list; a multi-element list is not carried.
          */
         @Test
         void eqRelationAgainstListConstantThrowsNamedError() {
-            // Relation-mapped attribute: previously surfaced the generic "is a Relation;
-            // cannot resolve as a scalar path" — the structured-constant guard runs before
-            // path resolution so this shape gets the same actionable message.
             assertNamedError(
                     exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
                     "eq", "request.resource.attr.tags", "list of 2 elements");
@@ -1992,17 +1790,13 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- add operator --
-
     /**
-     * <strong>Corpus gap.</strong> {@code id-concat-vf} solves a PREFIX concatenation back to a key
-     * equality; the suffix form is not carried.
+     * <strong>Corpus gap.</strong> #414: {@code id-concat-vf} solves a PREFIX concatenation back to
+     * a key equality; the suffix form is not carried.
      */
     @Test
     void addSolveStringSuffixStrip() {
-        // eq("foo.bar", add(R.attr.aString, ".bar"))
-        //   → "foo.bar".stripSuffix(".bar") == "foo"
-        //   → aString == "foo"
+        // "foo.bar" == aString + ".bar" solves to aString == "foo".
         Operand cond = exprOp("eq",
                 sval("foo.bar"),
                 exprOp("add", var("request.resource.attr.aString"), sval(".bar")));
@@ -2010,17 +1804,13 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> {@code arith-add-eq-frac} and its siblings solve fractional
-     * constants through SQL arithmetic; the exact integer solve in Java is not carried. Note that a
-     * policy spelling this with int literals is a CEL no-overload error at check time (attribute
-     * values are doubles), which a row-level test against the adapter alone cannot see — the corpus
-     * action is what would settle it.
+     * <strong>Corpus gap.</strong> #414: {@code arith-add-eq-frac} and its siblings go through SQL
+     * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
+     * is a CEL no-overload error at check time, since attribute values are doubles.
      */
     @Test
     void addSolveNumeric() {
-        // eq(10, add(3, R.attr.aNumber))  →  aNumber == 7. Long/long solves within ±2^53 are
-        // algebraically exact and must keep solving in Java: seeded rows prove the filter
-        // keeps the aNumber=7 row and drops the aNumber=8 row.
+        // 10 == 3 + aNumber solves to aNumber == 7; exact within ±2^53.
         Operand cond = exprOp("eq",
                 nval(10),
                 exprOp("add", nval(3), var("request.resource.attr.aNumber")));
@@ -2034,13 +1824,12 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> A constant beyond 2^53 is not carried.
+     * <strong>Corpus gap.</strong> #414: A constant beyond 2^53 is not carried.
      */
     @Test
     void addSolveOversizedLongRoutesToSqlArithmetic() {
-        // 2^54 is outside the ±2^53 exactly-representable range: the check-time double
-        // arithmetic has gaps there, so the long-space solve must NOT fire — the shape
-        // routes through SQL double arithmetic instead (and must not throw).
+        // Beyond ±2^53 a double is not exact, so this must use SQL double arithmetic instead
+        // of the Java solve.
         Operand cond = exprOp("eq",
                 exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
                 nval(0x1p54));
@@ -2050,22 +1839,16 @@ class SpringDataQueryPlanAdapterTest {
         withResource(row, () -> assertEquals(0, runCount(cond)));
     }
 
-    // -- CEL primitives (PR #223): only empty-collection is natively supported; the rest throw --
-
     @Nested
     class CelPrimitives {
 
-        // add/sub/mult/div appearing as a comparison operand are supported (double-space SQL
-        // arithmetic) — see ArithmeticComparisons. Only mod remains rejected.
-
         /**
-         * <strong>Corpus gap.</strong> {@code string-size} and {@code string-size-gt0} carry {@code
-         * >}; equality and the value-first mirror over a string length are not carried.
+         * <strong>Corpus gap.</strong> #414: {@code string-size} and {@code string-size-gt0} carry
+         * {@code >}; equality and the value-first mirror over a string length are not carried.
          */
         @Test
         void stringSizeComparesLength() {
-            // size(aString) on a Field mapping → LENGTH(a_string) <op> N.
-            // Seeded aString = "seededString" (12 chars).
+            // size() of a string column is LENGTH; "seededString" has 12 characters.
             ResourceEntity r = new ResourceEntity("string-size-seed-1");
             r.setaString("seededString");
             withResource(r, () -> {
@@ -2077,7 +1860,7 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("size", var("request.resource.attr.aString")), nval(0))));
                 assertEquals(0, runCount(exprOp("gt",
                         exprOp("size", var("request.resource.attr.aString")), nval(20))));
-                // Value-first is mirrored: 5 < size(aString) → length > 5 → match.
+                // Value-first is mirrored.
                 assertEquals(1, runCount(exprOp("lt",
                         nval(5),
                         exprOp("size", var("request.resource.attr.aString")))));
@@ -2085,20 +1868,17 @@ class SpringDataQueryPlanAdapterTest {
         }
     }
 
-    // -- Minor operator/comparison shapes (PR #234) --
-
     @Nested
     class MinorOperators {
 
         /**
-         * <strong>Corpus gap.</strong> The corpus orders a column against a constant ({@code
-         * rel-lt-hop} and siblings) and compares two columns for equality ({@code field-to-field});
-         * a two-column ORDERING is not carried.
+         * <strong>Corpus gap.</strong> #414: The corpus orders a column against a constant
+         * ({@code rel-lt-hop} and siblings) and compares two columns for equality
+         * ({@code field-to-field}); a two-column ORDERING is not carried.
          */
         @Test
         void fieldToFieldOrderingKeepsOperandDirection() {
-            // lt/gt over two variables must honor source order: createdBy < aString
-            // with createdBy = "abc", aString = "xyz" → match; the swapped form must not.
+            // Two-column ordering keeps the source operand order.
             ResourceEntity r = new ResourceEntity("f2f-seed-2");
             r.setaString("xyz");
             r.setCreatedBy("abc");
@@ -2120,13 +1900,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code matches()} between two columns is not carried; {@code
-         * p-matches} refuses the constant form.
+         * <strong>Corpus gap.</strong> #414: {@code matches()} between two columns is not carried;
+         * {@code p-matches} refuses the constant form.
          */
         @Test
         void fieldToFieldUnsupportedOperatorStillThrows() {
-            // contains/startsWith/endsWith(var, var) are supported (see FieldToFieldStringMatch);
-            // anything else without a column-to-column translation keeps the specific message.
+            // contains/startsWith/endsWith between two columns translate to LIKE; matches has
+            // no column-to-column translation.
             assertConditionThrows(
                     exprOp("matches",
                             var("request.resource.attr.aString"),
@@ -2135,8 +1915,8 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code R.attr.aBool == false} is not carried; the corpus
-         * reaches the boolean column bare ({@code root-bare-bool}).
+         * <strong>Corpus gap.</strong> #414: {@code R.attr.aBool == false} is not carried; the
+         * corpus reaches the boolean column bare ({@code root-bare-bool}).
          */
         @Test
         void equalBoolFalse() {
@@ -2146,17 +1926,14 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Collection macro composition (PR #235) --
-
     @Nested
     class CollectionMacroComposition {
 
         /**
-         * <strong>Corpus gap.</strong> {@code all} with a conjunctive body is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code all} with a conjunctive body is not carried.
          */
         @Test
         void allWithNestedAnd() {
-            // tags.all(t, t.name == "public" && t.id != "tag1")
             Operand cond = exprOp("all",
                     var("request.resource.attr.tags"),
                     lambda("t", exprOp("and",
@@ -2166,13 +1943,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code size-filter-count} carries {@code == 1}; the other
-         * operators and the value-first mirror are not carried.
+         * <strong>Corpus gap.</strong> #414: {@code size-filter-count} carries {@code == 1}; the
+         * other operators and the value-first mirror are not carried.
          */
         @Test
         void sizeOfFilterCountsMatchingElements() {
-            // size(tags.filter(t, t.name == "public")) <op> N → correlated
-            // (SELECT COUNT(...) WHERE lambda) <op> N. Seeded row: tags [public, public, x].
+            // Translates to a correlated COUNT with the lambda as its WHERE clause.
             ResourceEntity r = new ResourceEntity("size-filter-seed-1");
             r.addTag("tagA", "public");
             r.addTag("tagB", "public");
@@ -2185,34 +1961,23 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(3))));
                 assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(1))));
                 assertEquals(0, runCount(exprOp("gt", exprOp("size", filterExpr), nval(2))));
-                // Emptiness checks work through the same path.
                 assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(0))));
                 assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
-                // Value-first is mirrored: 3 > size(filter) → count < 3 → match.
+                // Value-first is mirrored.
                 assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
             });
         }
     }
 
     /**
-     * {@code in}-lists containing {@code null} — PDP-verified wire facts (Cerbos latest,
-     * 2026-07): {@code R.attr.owner in ["a", null]} compiles and the planner emits
-     * {@code in(variable, value ["a", null])} VERBATIM, and {@code check()} ALLOWS an
-     * explicitly-null attribute (CEL {@code null in ["a", null]} is true). The planner itself
-     * folds the degenerate {@code x in [null]} to {@code eq(x, null)} — which this adapter
-     * already translates as IS NULL — so a null list element must become an IS NULL disjunct:
-     * {@code path IN (nonNulls) OR path IS NULL}. Passing the raw null-bearing list to
-     * {@code path.in} instead produces SQL {@code IN ('a', NULL)}, whose three-valued
-     * semantics silently EXCLUDE null rows check() allows (under-return), and whose negation
-     * is UNKNOWN for every non-matching row (the negated filter returns nothing at all).
-     * The Relation side mirrors this: a null element of a mapped collection is a related row
-     * whose member column IS NULL, so the null needle/element becomes an IS NULL disjunct
-     * inside the membership EXISTS.
+     * Null in membership tests. CEL's {@code null in ["a", null]} is true, but SQL's
+     * {@code IN ('a', NULL)} never matches a NULL, so a null is translated as an extra
+     * {@code IS NULL} condition.
      */
     @Nested
     class InListNullElements {
 
-        /** Seed three rows keyed by aOptionalString content: "a", "b", and NULL. */
+        /** Seeds rows whose aOptionalString is "a", "b" and NULL. */
         private void withOwnerRows(Runnable body) {
             ResourceEntity a = new ResourceEntity("in-null-a");
             a.setaOptionalString("a");
@@ -2223,7 +1988,7 @@ class SpringDataQueryPlanAdapterTest {
             withResource(a, () -> withResource(b, () -> withResource(nul, body)));
         }
 
-        /** Seed rows with tag collections: a null-name member, an "x" member, and no tags. */
+        /** Seeds rows with a tag named "x", a tag with a NULL name, and no tags. */
         private void withTagRows(Runnable body) {
             ResourceEntity withX = new ResourceEntity("in-null-tag-x");
             withX.addTag("int1", "x");
@@ -2233,7 +1998,7 @@ class SpringDataQueryPlanAdapterTest {
             withResource(withX, () -> withResource(withNullName, () -> withResource(noTags, body)));
         }
 
-        /** Translate {@code condition}, run it, and return the matched row IDs. */
+        /** Translates {@code condition}, runs it, and returns the matched ids. */
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
@@ -2256,13 +2021,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code null in R.attr.x} over a scalar column is not
+         * <strong>Corpus gap.</strong> #414: {@code null in R.attr.x} over a scalar column is not
          * carried; the corpus's null needles are over relations ({@code in-null-elem-rel}).
          */
         @Test
         void nullNeedleAgainstScalarFieldIsIsNull() {
-            // `null in R.attr.x` over a Field mapping: scalar membership is equality, and
-            // equality against the null constant is IS NULL (mirrors the eq-null leaf).
+            // Membership in a scalar is equality, so this is IS NULL.
             Operand cond = exprOp("in",
                     nullVal(), var("request.resource.attr.aOptionalString"));
             withOwnerRows(() ->
@@ -2274,7 +2038,6 @@ class SpringDataQueryPlanAdapterTest {
     @Nested
     class HierarchyOperators {
 
-        // Helpers: a hierarchy(...) wrapper and a list(...) of segments.
         private Operand hierarchy(Operand inner, String delimiter) {
             return exprOp("hierarchy", inner, sval(delimiter));
         }
@@ -2284,14 +2047,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The corpus's hierarchy constants are two segments or more; a
-         * single-segment ancestor, which has no strict ancestors at all, is not carried.
+         * <strong>Corpus gap.</strong> #414: The corpus's hierarchy constants are two segments or
+         * more; a single-segment ancestor, which has no strict ancestors at all, is not carried.
          */
         @Test
         void ancestorOfSingleSegmentConstantMatchesNothing() {
-            // ancestorOf(field, "a") — a single-segment path has NO strict ancestors, so the
-            // translation is always-false: even the row whose scope is exactly "a" must not
-            // match (a path is not its own ancestor).
+            // "a" has no strict ancestors, and a path is not its own ancestor: no rows.
             Operand cond = exprOp("ancestorOf",
                     hierarchy(var("request.resource.attr.aString"), ":"),
                     hierarchy(sval("a"), ":"));
@@ -2300,14 +2061,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A single-segment descendant prefix, under which the sibling
-         * branch is a genuine descendant, is not carried.
+         * <strong>Corpus gap.</strong> #414: A single-segment descendant prefix, under which the
+         * sibling branch is a genuine descendant, is not carried.
          */
         @Test
         void descendentOfSingleSegmentConstant() {
-            // descendentOf(field, "a") → field LIKE 'a:%': every path under the root —
-            // including the sibling branch "a:bb:c" (a genuine descendant of "a") — but not
-            // the root itself and not "x:y".
+            // LIKE 'a:%': everything under "a", including "a:bb:c", but not "a" itself.
             Operand cond = exprOp("descendentOf",
                     hierarchy(var("request.resource.attr.aString"), ":"),
                     hierarchy(sval("a"), ":"));
@@ -2316,7 +2075,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code overlaps} between two column hierarchies is not
+         * <strong>Corpus gap.</strong> #414: {@code overlaps} between two column hierarchies is not
          * carried.
          */
         @Test
@@ -2330,32 +2089,29 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Operand order: the planner preserves policy source order, so a value (or folded
-    // constant) can appear BEFORE the field. Directional operators must mirror or results are
-    // silently inverted. These tests seed a real row because an empty table cannot distinguish
-    // `x < 3` from `x > 3`.
-
+    // The planner keeps policy source order, so a constant can come before the column.
+    // Ordering operators must be mirrored.
     @Nested
     class OperandOrderSemantics {
 
         /**
-         * <strong>Corpus gap.</strong> The corpus carries {@code vf-le}, {@code vf-ge}, {@code
-         * vf-lt} and {@code vf-ne}; value-first {@code gt} is not carried.
+         * <strong>Corpus gap.</strong> #414: The corpus carries {@code vf-le}, {@code vf-ge},
+         * {@code vf-lt} and {@code vf-ne}; value-first {@code gt} is not carried.
          */
         @Test
         void gtValueFirstMeansFieldLessThan() {
-            // 10 > aNumber, with aNumber = 5 → match.
+            // 10 > aNumber, with aNumber = 5.
             withResource(orderSeed(), () ->
                     assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code vf-size} spells {@code 0 < size(...)}; the {@code 1 >
-         * size(...)} mirror, which lowers to NOT EXISTS, is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code vf-size} spells {@code 0 < size(...)}; the
+         * {@code 1 > size(...)} mirror, which lowers to NOT EXISTS, is not carried.
          */
         @Test
         void sizeValueFirstEmptinessCheck() {
-            // 1 > size(ownedBy) → size < 1 → NOT EXISTS; seeded row is non-empty → 0.
+            // 1 > size(ownedBy) is NOT EXISTS; the seeded row has owners.
             withResource(orderSeed(), () ->
                     assertEquals(0, runCount(exprOp("gt",
                             nval(1),
@@ -2363,12 +2119,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The deprecated {@code has_intersection} spelling the PDP
-         * still accepts is not carried.
+         * <strong>Corpus gap.</strong> #414: The deprecated {@code has_intersection} spelling the
+         * PDP still accepts is not carried.
          */
         @Test
         void hasIntersectionSnakeCaseAliasIsAccepted() {
-            // The PDP still accepts the deprecated has_intersection spelling in policies.
             withResource(orderSeed(), () ->
                     assertEquals(1, runCount(exprOp("has_intersection",
                             var("request.resource.attr.ownedBy"),
@@ -2377,20 +2132,18 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- CEL ternary: `if(cond, then, else)` is rewritten into pure
-    // predicates — cmp(if(c,a,b), other) → (c AND cmp(a, other)) OR (NOT c AND cmp(b, other)).
-    // Seeds real rows because an empty table cannot distinguish the branch predicates.
-
+    // A comparison against if(c, a, b) is rewritten into the two branch comparisons, each
+    // guarded by c or not c.
     @Nested
     class TernaryIfExpressions {
 
         /**
-         * <strong>Corpus gap.</strong> {@code ternary-bare} has two comparison branches; a constant
-         * boolean branch is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code ternary-bare} has two comparison branches; a
+         * constant boolean branch is not carried.
          */
         @Test
         void bareBooleanTernaryWithConstantBranch() {
-            // aBool ? true : aNumber > 5 — a boolean VALUE branch folds to 1=1 / 1=0.
+            // aBool ? true : aNumber > 5
             Operand plan = exprOp("if",
                     var("request.resource.attr.aBool"),
                     bval(true),
@@ -2406,7 +2159,7 @@ class SpringDataQueryPlanAdapterTest {
             elseMiss.setaNumber(1);
             withResource(elseMiss, () -> assertEquals(0, runCount(plan)));
 
-            // aBool ? false : aNumber > 5 — a false then-branch excludes matching-condition rows.
+            // aBool ? false : aNumber > 5
             Operand planFalse = exprOp("if",
                     var("request.resource.attr.aBool"),
                     bval(false),
@@ -2418,13 +2171,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code ternary-negated} carries the negation; the ternary
-         * comparison under {@code and}, {@code or} and a double negation is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code ternary-negated} carries the negation; the
+         * ternary comparison under {@code and}, {@code or} and a double negation is not carried.
          */
         @Test
         void ternaryUnderLogicalOperators() {
-            // The rewrite produces an OR-of-ANDs; it must compose under not/and/or like any
-            // other predicate (negation goes through the junction-barrier helper).
             Operand comparison = exprOp("gt",
                     exprOp("if",
                             var("request.resource.attr.aBool"),
@@ -2438,7 +2189,7 @@ class SpringDataQueryPlanAdapterTest {
             truthy.setaNumber(10);
             withResource(truthy, () -> {
                 assertEquals(0, runCount(exprOp("not", comparison)));
-                // Double negation must toggle back (junction barrier, not raw cb.not).
+                // Hibernate collapses cb.not(cb.not(p)); double negation must still toggle back.
                 assertEquals(1, runCount(exprOp("not", exprOp("not", comparison))));
                 assertEquals(1, runCount(exprOp("and", comparison,
                         exprOp("eq", var("request.resource.attr.aString"), sval("x")))));
@@ -2448,8 +2199,7 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("eq", var("request.resource.attr.aString"), sval("z")))));
             });
 
-            // Row where the ternary comparison is false: NOT must select it, OR must rescue it
-            // only through the other arm.
+            // Here the ternary comparison is false.
             ResourceEntity falsy = new ResourceEntity("ternary-logic-2");
             falsy.setaBool(false);
             falsy.setaString("x");
@@ -2465,8 +2215,8 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code eq}/{@code ne} against a ternary with a string branch
-         * is not carried; the corpus compares its ternaries by ordering.
+         * <strong>Corpus gap.</strong> #414: {@code eq}/{@code ne} against a ternary with a string
+         * branch is not carried; the corpus compares its ternaries by ordering.
          */
         @Test
         void eqNeWithTernary() {
@@ -2494,7 +2244,7 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(1, runCount(nePlan));
             });
 
-            // else branch folds: eq("none", "x") → always false; ne("none", "x") → always true.
+            // The else branch compares two constants: "none" vs "x".
             ResourceEntity elseRow = new ResourceEntity("ternary-eqne-3");
             elseRow.setaBool(false);
             elseRow.setaString("x");
@@ -2505,16 +2255,14 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code nan-ord-inf} reaches the constant fold through a
-         * ternary with two constant branches; the fold's other cells — mixed types, whole-number
-         * constants beyond the long range, an incomparable ordering — are reached here through
-         * direct constant comparisons the planner would itself fold away, so only the ternary
-         * spelling is a shape the corpus could carry.
+         * <strong>Corpus gap.</strong> #414: {@code nan-ord-inf} reaches the constant-vs-constant
+         * fold through a ternary; the other fold cases are not carried. They are spelled here as
+         * direct constant comparisons, which the planner itself would fold; only the ternary form
+         * could reach the adapter.
          */
         @Test
         void constantVersusConstantComparisonsFold() {
-            // (aBool ? 1 : 0) > 0 — BOTH branches collapse to constant comparisons, leaving
-            // only the condition predicate. Seeded row: matches iff aBool is true.
+            // Both branches are constant comparisons, so only the condition remains.
             Operand allConstBranches = exprOp("gt",
                     exprOp("if", var("request.resource.attr.aBool"), nval(1), nval(0)),
                     nval(0));
@@ -2524,9 +2272,7 @@ class SpringDataQueryPlanAdapterTest {
             withResource(boolTrue, () -> {
                 assertEquals(1, runCount(allConstBranches));
 
-                // Direct value-vs-value plans exercise the fold through the public seam:
-                // numbers compare in double space (1.0 == 1, 0.5 < 1), strings via compareTo,
-                // mixed incomparable types are eq → false / ne → true.
+                // Numbers compare as doubles; mixed types are unequal.
                 assertEquals(1, runCount(exprOp("eq", nval(1.0), nval(1))));
                 assertEquals(1, runCount(exprOp("lt", nval(0.5), nval(1))));
                 assertEquals(0, runCount(exprOp("gt", nval(0), nval(0))));
@@ -2535,13 +2281,12 @@ class SpringDataQueryPlanAdapterTest {
                 assertEquals(0, runCount(exprOp("eq", sval("a"), nval(1))));
                 assertEquals(1, runCount(exprOp("ne", sval("a"), nval(1))));
                 assertEquals(1, runCount(exprOp("eq", bval(true), bval(true))));
-                // Whole-number constants beyond the long range must stay doubles: a
-                // saturating (long) cast collapses 1.0e19 and 9.3e18 both to
-                // Long.MAX_VALUE, inverting these comparisons.
+                // Beyond the long range these must stay doubles; a (long) cast makes both
+                // Long.MAX_VALUE.
                 assertEquals(1, runCount(exprOp("gt", nval(1.0e19), nval(9.3e18))));
                 assertEquals(1, runCount(exprOp("ne", nval(1.0e19), nval(9.3e18))));
                 assertEquals(0, runCount(exprOp("eq", nval(-1.0e19), nval(-9.3e18))));
-                // Ordering incomparable constant types is a planner bug and must throw.
+                // Ordering a string against a number cannot be answered, so it throws.
                 assertConditionThrows(exprOp("lt", sval("a"), nval(1)),
                         "Cannot order", "lt");
             });
@@ -2552,13 +2297,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code p-not-ternary-null} negates a ternary COMPARISON; the
-         * negated bare ternary with a NULL condition column is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code p-not-ternary-null} negates a ternary
+         * COMPARISON; the negated bare ternary with a NULL condition column is not carried.
          */
         @Test
         void negatedBareTernaryWithNullConditionExcludesRow() {
-            // aOptionalString != "x" ? aNumber > 1 : aBool — bare boolean-position ternary
-            // with a NULL condition column: same UNKNOWN-not-FALSE contract as above.
+            // A NULL condition column is a CEL error, so the row is excluded both with and
+            // without not.
             Operand plan = exprOp("if",
                     exprOp("ne", var("request.resource.attr.aOptionalString"), sval("x")),
                     exprOp("gt", var("request.resource.attr.aNumber"), nval(1)),
@@ -2575,12 +2320,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A ternary as the receiver of a string match is not carried.
+         * <strong>Corpus gap.</strong> #414: A ternary as the receiver of a string match is not
+         * carried.
          */
         @Test
         void ternaryUnderUnsupportedWrapperNamesOperator() {
-            // contains(if(...), "x") — only eq/ne/lt/gt/le/ge accept a ternary operand; the
-            // error must name the offending wrapper operator.
+            // Only eq/ne/lt/gt/le/ge accept a ternary operand.
             assertConditionThrows(
                     exprOp("contains",
                             exprOp("if",
@@ -2594,34 +2339,19 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * Structural join-anchoring defects:
-     *
-     * <p>W1 — a dotted relation CHAIN ({@code categories.subCategories}) must join through
-     * every intermediate hop. Resolving only the tail Relation and joining its attribute off
-     * the root either fails at query-build time (the root has no such attribute) or — worse —
-     * silently joins a same-named collection on the wrong entity. Chain semantics are the
-     * FLATTENED union of tail elements across all intermediate hops, which is exactly what a
-     * correlated join chain expresses for exists/in/hasIntersection and a JOIN-through COUNT
-     * expresses for size().
-     *
-     * <p>W2 — a subquery for a relation referenced inside a lambda body must correlate the
-     * From that OWNS the relation attribute. {@code R.attr.tags} inside a
-     * {@code categories.exists(c, ...)} lambda resolves through the outer scope against the
-     * ROOT entity; anchoring the tags join to the lambda's category join instead is a wrong
-     * From — build-time failure or a silent wrong join if the element entity had a same-named
-     * collection.
+     * A relation chain such as {@code categories.subCategories} must join through every hop. Its
+     * value is the flattened list of tail elements across all intermediate rows.
      */
     @Nested
     class MultiHopRelationChains {
 
         /**
-         * <strong>Corpus gap.</strong> {@code w1-size-chain} carries the emptiness shortcut over
-         * the chain; an arbitrary count of flattened elements is not carried.
+         * <strong>Corpus gap.</strong> #414: {@code w1-size-chain} carries the emptiness shortcut
+         * over the chain; an arbitrary count of flattened elements is not carried.
          */
         @Test
         void sizeOverTwoHopChainCountsFlattenedElements() {
-            // Two categories with one sub-category each: the FLATTENED chain count is 2 — a
-            // tail join anchored to the wrong parent could never produce it.
+            // Two categories with one sub-category each: the flattened count is 2.
             var s1 = new SubCategoryEntity("chain-sub-s1", "finance");
             var s2 = new SubCategoryEntity("chain-sub-s2", "tech");
             var c1 = new CategoryEntity("chain-cat-s1", "business");
@@ -2632,10 +2362,10 @@ class SpringDataQueryPlanAdapterTest {
             r.setCategories(List.of(c1, c2));
 
             withCategoryGraph(r, List.of(c1, c2), List.of(s1, s2), () -> {
-                // Non-empty shortcut (EXISTS through the chain).
+                // Emptiness check (EXISTS).
                 assertEquals(1, runChainCount(
                         exprOp("gt", exprOp("size", var(CHAIN)), nval(0))));
-                // Arbitrary-N JOIN-through COUNT: 2 flattened elements.
+                // Arbitrary threshold (COUNT through the joins).
                 assertEquals(1, runChainCount(
                         exprOp("ge", exprOp("size", var(CHAIN)), nval(2))));
                 assertEquals(0, runChainCount(
@@ -2645,18 +2375,14 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Error-message context and the no-value-leak discipline --
-
     /**
-     * <strong>Corpus gap.</strong> A concatenation of a null principal attribute is a policy any
-     * application can write; the corpus principal has no null attribute.
+     * <strong>Corpus gap.</strong> #414: Concatenating a null principal attribute is not carried;
+     * the corpus principal has no null attribute.
      */
     @Test
     void foldAddNullOperandErrorDoesNotLeakConstantValues() {
-        // eq(field, add(null, "<folded principal attr>")) — PDP-reachable when a policy
-        // concatenates principal attributes and one is null: the folded value can carry PII
-        // and consuming apps log translation errors at ERROR. The message must report operand
-        // TYPES only, never the values.
+        // The folded principal value may be personal data and error messages get logged, so
+        // the message names operand types only.
         Operand cond = exprOp("eq",
                 var("request.resource.attr.aString"),
                 exprOp("add", nullVal(), sval("canary-secret-value")));
@@ -2669,7 +2395,7 @@ class SpringDataQueryPlanAdapterTest {
         assertFalse(ex.getMessage().contains("canary-secret-value"),
                 "constant value leaked into the error message: " + ex.getMessage());
 
-        // Mirrored shape: the null on the right.
+        // The null on the right.
         IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
                 () -> runCount(exprOp("eq",
                         var("request.resource.attr.aString"),
@@ -2679,13 +2405,12 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> {@code hasIntersection} between two attributes is not carried.
+     * <strong>Corpus gap.</strong> #414: {@code hasIntersection} between two attributes is not
+     * carried.
      */
     @Test
     void hasIntersectionVariableVariableReportsBothOperands() {
-        // The PDP can emit hasIntersection(variable, variable); the error must name BOTH
-        // operands (the old message printed only the first node case — "VARIABLE" — which is
-        // individually a supported shape) and point at the supported shapes.
+        // The message names both operands and lists the supported shapes.
         assertConditionThrows(
                 exprOp("hasIntersection",
                         var("request.resource.attr.tagNames"),
@@ -2696,9 +2421,9 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> {@code size()} over a {@code map()} projection is not carried.
-     * The string-literal half is a shape the planner folds away, kept beside it because both name
-     * the same refusal.
+     * <strong>Corpus gap.</strong> #414: {@code size()} over a {@code map()} projection is not
+     * carried. The string-literal case is folded by the planner; it is here because it hits the
+     * same error.
      */
     @Test
     void sizeBadArgumentErrorNamesTheOffendingShape() {
@@ -2715,58 +2440,42 @@ class SpringDataQueryPlanAdapterTest {
                 "EXPRESSION map()");
     }
 
-    // -- SQL Server '[' LIKE escaping --
-    // T-SQL LIKE treats '[...]' as a character class EVEN WITH an ESCAPE clause declared, so
-    // every '[' in a generated pattern must arrive as '\['. On H2, PostgreSQL and MySQL '['
-    // is inert and '\[' under ESCAPE '\' is still a literal '[', so the escape is a semantic
-    // no-op there — which is why it is pinned at pattern level: no row behaviour on a dialect
-    // CI executes can tell whether the '[' rewrite happened.
-
     @Nested
     class BracketLikeEscaping {
 
         /**
-         * <strong>Corpus gap.</strong> {@code like-bracket} and {@code hier-bracket} carry the
-         * shape, but no CI leg executes SQL Server, the one dialect where {@code [} opens a
-         * character class even under an ESCAPE clause, so the rewrite is pinned at pattern level
-         * here.
+         * <strong>Corpus gap.</strong> #414: {@code like-bracket} and {@code hier-bracket} carry
+         * the shape, but no CI leg runs SQL Server, where {@code [} starts a character class even
+         * with an ESCAPE clause. On the other databases the escape changes nothing, so it is
+         * checked on the pattern.
          */
         @Test
         void escapeLikeEscapesOpeningBracket() {
-            // The pattern-level contract for the constant contains/startsWith/endsWith forms
-            // AND the hierarchy prefix LIKE (both build their patterns via escapeLike).
             assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
             assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
-            // Backslash is escaped FIRST, so a literal '\[' becomes '\\' + '\['.
+            // Backslash is escaped first.
             assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
-            // ']' is intentionally unescaped: it is only special on SQL Server as the closer
-            // of a character class, and no class can open once every '[' is escaped.
+            // ']' only closes a class, and none can open once '[' is escaped.
             assertEquals("]", PlanValues.escapeLike("]"));
         }
     }
 
-    // -- Constant-receiver string matches: `"a,b".contains(R.attr.x)` --
-    // CEL string-match methods are receiver-sensitive and the planner preserves policy source
-    // order, so the constant RECEIVER arrives FIRST: contains(value, variable). The constant is
-    // the haystack and the COLUMN is the needle — operand-order normalization must not swap
-    // them (that silently inverts the match), and the column needle's LIKE metacharacters must
-    // be escaped dynamically.
-
+    // `"a,b".contains(R.attr.x)` arrives as contains(value, variable): the constant is the
+    // haystack and the column is the needle, so the operands must not be swapped.
     @Nested
     class ConstantReceiverStringMatch {
 
         private Operand plan(String op, String constant) {
-            // Receiver (constant) first — exactly as the planner emits it.
             return exprOp(op, sval(constant), var("request.resource.attr.aString"));
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code cr-contains} and its siblings run over a corpus whose
-         * aString is never NULL, so the NULL-needle denial has no discriminating seed there.
+         * <strong>Corpus gap.</strong> #414: {@code cr-contains} and its siblings run over a corpus
+         * whose aString is never NULL, so the NULL-needle denial has no discriminating seed there.
          */
         @Test
         void nullColumnNeedleExcludesRow() {
-            // A NULL column is a missing attribute → CEL error → deny for all three ops.
+            // A NULL column is a missing attribute, which CEL denies.
             withResource(row("cr-9", null), () -> {
                 assertEquals(0, runCount(plan("contains", "anything")));
                 assertEquals(0, runCount(plan("startsWith", "anything")));
@@ -2776,19 +2485,12 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    /**
-     * {@code in(variable, variable)} — attribute-in-attribute membership. PDP-verified wire
-     * shape (Cerbos latest, 2026-07): {@code R.attr.createdBy in R.attr.ownedBy} arrives as
-     * {@code in(variable, variable)} verbatim, member first. Translated as a correlated EXISTS
-     * comparing the collection's member column to the outer scalar column, with a NULL scalar
-     * matching a NULL member element (CEL {@code null in [..., null]} is TRUE — check()
-     * verified for every branch below; see the translator Javadoc for the truth table).
-     */
+    // in(variable, variable): the second attribute must be a relation.
     @Nested
     class InVariableVariable {
 
         /**
-         * <strong>Corpus gap.</strong> {@code in} whose second attribute is a scalar is not
+         * <strong>Corpus gap.</strong> #414: {@code in} whose second attribute is a scalar is not
          * carried; {@code in-var-var} maps a relation.
          */
         @Test
@@ -2802,14 +2504,9 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Arithmetic (add/sub/mult/div) as a comparison operand --
-    // Cerbos attribute values are ALWAYS CEL doubles (protobuf Value numbers), so the only
-    // arithmetic that can evaluate at check time is double-typed — verified against a live
-    // PDP: `R.attr.n + 1 > 2` (int literal) is a no-overload error → deny, `+ 1.0` works,
-    // and `/ 2.0` is true double division (5/2.0 == 2.5). The adapter therefore computes
-    // the whole comparison in double space; integer truncation is never observable.
-    // `mod` stays unsupported: CEL `%` is int-only, so it always errors on attributes.
-
+    // Arithmetic as a comparison operand. Attribute values are CEL doubles, so the adapter
+    // computes in double arithmetic. mod is refused: CEL's % is int-only, so it always fails
+    // on an attribute.
     @Nested
     class ArithmeticComparisons {
 
@@ -2824,7 +2521,7 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code arith-sub} carries one subtraction;
+         * <strong>Corpus gap.</strong> #414: {@code arith-sub} carries one subtraction;
          * constant-minus-column under an ordering is not carried.
          */
         @Test
@@ -2834,19 +2531,19 @@ class SpringDataQueryPlanAdapterTest {
                         exprOp("sub", numVar(), nval(1)), nval(10))));
                 assertEquals(0, runCount(exprOp("lt",
                         exprOp("sub", numVar(), nval(1)), nval(2))));
-                // Constant-minus-field keeps direction: 10 - 5 = 5 <= 5.
+                // Constant minus column: 10 - 5 <= 5.
                 assertEquals(1, runCount(exprOp("le",
                         exprOp("sub", nval(10), numVar()), nval(5))));
             });
         }
 
         /**
-         * <strong>Corpus gap.</strong> Arithmetic nested inside arithmetic is not carried; {@code
-         * arith-both} puts one operation on each side.
+         * <strong>Corpus gap.</strong> #414: Arithmetic nested inside arithmetic is not carried;
+         * {@code arith-both} puts one operation on each side.
          */
         @Test
         void nestedArithmetic() {
-            // (aNumber + 1) * 2 > 11 → 12 > 11.
+            // (aNumber + 1) * 2 with aNumber = 5 is 12.
             withResource(seeded(), () -> {
                 assertEquals(1, runCount(exprOp("gt",
                         exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
@@ -2859,18 +2556,13 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- Constant NaN / ±Infinity ordering --
-    // CEL/IEEE define EVERY ordering comparison involving NaN as false. The planner does
-    // NOT fold div(0,0) (verified vs live PDP: `(R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5`
-    // arrives as gt(if(aBool, 1, div(0,0)), 0.5)), so resolveNumericOperand folds it to
-    // NaN in Java and constantComparison must order with primitive IEEE operators.
-    // Double.compare's total order ranks NaN above every number (and -0.0 below 0.0),
-    // which would collapse gt/ge against a NaN constant to always-true — over-inclusion.
-
+    // Every ordering comparison with NaN is false. The planner sends div(0, 0) unfolded, and the
+    // adapter must compare with IEEE operators: Double.compare ranks NaN above every number and
+    // -0.0 below 0.0, which would return extra rows.
     @Nested
     class ConstantNanInfinityOrdering {
 
-        /** {@code div(0, 0)} — folds to NaN in Java, exactly as delivered on the wire. */
+        /** {@code div(0, 0)}, which the adapter folds to NaN. */
         private Operand nan() {
             return exprOp("div", nval(0), nval(0));
         }
@@ -2883,20 +2575,18 @@ class SpringDataQueryPlanAdapterTest {
             return exprOp("div", nval(-1), nval(0));
         }
 
-        /** An arithmetic subtree folding to 0.5, so both sides rank as expressions. */
+        /** 0.5 as an expression, so the operands are not reordered. */
         private Operand half() {
             return exprOp("div", nval(1), nval(2));
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code nan-ord-ternary} reaches {@code gt} with NaN on the
-         * left through a ternary; {@code ge}, {@code lt} and {@code le} are not carried. Spelled
-         * here as a direct constant comparison the planner would fold away, which only the ternary
-         * form could put on the wire.
+         * <strong>Corpus gap.</strong> #414: {@code nan-ord-ternary} reaches {@code gt} with NaN on
+         * the left through a ternary; {@code ge}, {@code lt} and {@code le} are not carried. The
+         * direct constant form here would be folded by the planner; only a ternary could send it.
          */
         @Test
         void nanOnLeftExcludesForAllOrderingOperators() {
-            // Expression-vs-value keeps source order: constantComparison sees (NaN, 0.5).
             ResourceEntity r = new ResourceEntity("nan-ord-1");
             withResource(r, () -> {
                 for (String op : List.of("gt", "ge", "lt", "le")) {
@@ -2907,13 +2597,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code nan-ord-le} carries {@code le} with NaN on the right;
-         * the other three operators are not carried.
+         * <strong>Corpus gap.</strong> #414: {@code nan-ord-le} carries {@code le} with NaN on the
+         * right; the other three operators are not carried.
          */
         @Test
         void nanOnRightExcludesForAllOrderingOperators() {
-            // Arithmetic on BOTH sides so normalization cannot mirror the NaN to the left:
-            // constantComparison sees (0.5, NaN).
+            // Expressions on both sides, so NaN stays on the right.
             ResourceEntity r = new ResourceEntity("nan-ord-2");
             withResource(r, () -> {
                 for (String op : List.of("gt", "ge", "lt", "le")) {
@@ -2924,13 +2613,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code nan-ord-inf} carries {@code gt} against an infinity;
-         * the remaining operators and the infinity-versus-infinity ordering are not carried.
+         * <strong>Corpus gap.</strong> #414: {@code nan-ord-inf} carries {@code gt} against an
+         * infinity; the remaining operators and the infinity-versus-infinity ordering are not
+         * carried.
          */
         @Test
         void infinityOrderingFollowsIeee() {
-            // ±Infinity is ORDERED normally in IEEE space — it must NOT be excluded the
-            // way NaN is.
+            // Unlike NaN, infinities order normally.
             ResourceEntity r = new ResourceEntity("nan-ord-3");
             withResource(r, () -> {
                 assertEquals(1, runCount(exprOp("gt", posInf(), nval(0.5))));
@@ -2945,13 +2634,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A negative zero constant is not carried.
+         * <strong>Corpus gap.</strong> #414: A negative zero constant is not carried.
          */
         @Test
         void negativeZeroOrderingFollowsIeee() {
-            // mult(-1, 0) folds to -0.0 in Java. IEEE: -0.0 == 0.0, so lt is false and
-            // ge is true — Double.compare(-0.0, 0.0) = -1 would invert both (the same
-            // total-order defect as NaN, on the same line).
+            // mult(-1, 0) is -0.0, which IEEE treats as equal to 0.0.
             Operand negZero = exprOp("mult", nval(-1), nval(0));
             Operand zero = exprOp("mult", nval(1), nval(0));
             ResourceEntity r = new ResourceEntity("nan-ord-4");
@@ -2965,26 +2652,20 @@ class SpringDataQueryPlanAdapterTest {
 
     }
 
-    // -- timestamp(field) vs timestamp(constant) comparisons --
-    // Wire shape (PDP-verified): `timestamp(R.attr.createdAt) < now() - duration("24h")`
-    // arrives as lt(timestamp(variable), timestamp(value "<RFC-3339>")) — the planner folds
-    // now()-duration to a constant instant and RE-WRAPS it in timestamp(); a bare string
-    // constant never appears. Value-first policies keep source order (both operands are
-    // EXPRESSION nodes, so NormalizedBinary cannot reorder them) and must be MIRRORED.
-
+    // timestamp(column) against timestamp(constant). Both operands are expressions, so a
+    // value-first comparison keeps its order and must be mirrored.
     @Nested
     class TimestampComparisons {
 
         /**
-         * <strong>Corpus gap.</strong> {@code ts-window}, {@code ts-eq}, {@code ts-eq-offset} and
-         * {@code ts-ne} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
+         * <strong>Corpus gap.</strong> #414: {@code ts-window}, {@code ts-eq}, {@code ts-eq-offset}
+         * and {@code ts-ne} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
          * {@code ge} are not carried.
          */
         @Test
         void allSixOperatorsFieldFirstOnInstantColumn() {
             withTimestampRows(() -> {
-                // Row set: old1, old2 < TS_CONST; exact == TS_CONST; new > TS_CONST; null excluded
-                // everywhere (SQL three-valued logic == CEL missing-attribute deny).
+                // The NULL row is excluded by every operator, as CEL denies a missing attribute.
                 assertEquals(2, runCount(exprOp("lt", tsVar("createdAt"), tsVal(TS_CONST))));
                 assertEquals(3, runCount(exprOp("le", tsVar("createdAt"), tsVal(TS_CONST))));
                 assertEquals(1, runCount(exprOp("gt", tsVar("createdAt"), tsVal(TS_CONST))));
@@ -2995,13 +2676,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> {@code ts-vf} carries value-first {@code gt} alone.
+         * <strong>Corpus gap.</strong> #414: {@code ts-vf} carries value-first {@code gt} alone.
          */
         @Test
         void allSixOperatorsValueFirstAreMirroredNotInverted() {
             withTimestampRows(() -> {
-                // `TS_CONST < field` selects rows AFTER the instant (1 row) — an inversion bug
-                // (treating it as `field < TS_CONST`) would return the 2 older rows instead.
+                // TS_CONST < column selects the 1 later row, not the 2 earlier ones.
                 assertEquals(1, runCount(exprOp("lt", tsVal(TS_CONST), tsVar("createdAt"))));
                 assertEquals(2, runCount(exprOp("le", tsVal(TS_CONST), tsVar("createdAt"))));
                 assertEquals(2, runCount(exprOp("gt", tsVal(TS_CONST), tsVar("createdAt"))));
@@ -3012,13 +2692,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> The corpus's timestamp constants are whole seconds; a
-         * sub-second threshold splitting a5's microseconds is not carried.
+         * <strong>Corpus gap.</strong> #414: The corpus's timestamp constants are whole seconds; a
+         * sub-second threshold inside seed a5's microseconds is not carried.
          */
         @Test
         void subSecondPrecisionConstantDiscriminates() {
-            // The folded now()-duration constant carries nanosecond precision on the wire.
-            // A threshold BETWEEN old2 (…00.123456Z) and its whole second must split them.
+            // A folded now() - duration constant has sub-second precision. These thresholds
+            // fall inside old2's second.
             withTimestampRows(() -> {
                 assertEquals(1, runCount(exprOp("le",
                         tsVar("createdAt"), tsVal("2024-06-01T00:00:00.000001Z"))));
@@ -3028,13 +2708,11 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> A ternary over two timestamp constants is not carried.
+         * <strong>Corpus gap.</strong> #414: A ternary over two timestamp constants is not carried.
          */
         @Test
         void constantVsConstantFoldsViaTernarySubstitution() {
-            // (aBool ? timestamp(A) : timestamp(B)) == timestamp(A) — substitution yields
-            // timestamp-constant vs timestamp-constant comparisons; the fold must select
-            // exactly the aBool=true row (old1).
+            // Each branch compares two constants, so only the aBool = true row (old1) matches.
             withTimestampRows(() -> assertEquals(1, runCount(exprOp("eq",
                     exprOp("if",
                             var("request.resource.attr.aBool"),

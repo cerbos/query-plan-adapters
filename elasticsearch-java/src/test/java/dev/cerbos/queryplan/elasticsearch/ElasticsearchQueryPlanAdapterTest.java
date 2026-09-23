@@ -31,36 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The plans this suite hands the adapter are HAND-BUILT, and that is the exception rather than
- * the rule. {@link ElasticsearchTranslatorTest} reads its plans from
- * {@code conformance/wire-fixtures/} and accounts for every corpus action exactly once; a
- * hand-built plan is a BELIEF about what the planner emits, and this repository keeps golden
- * fixtures because that belief has been wrong before
- * ({@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}).
- *
- * <p>What remains is of the three kinds {@code CLAUDE.md} ("What a translator unit test may pin")
- * admits, and every test below sits under the banner of exactly one:
- *
- * <ol>
- *   <li><strong>A branch CEL itself cannot reach.</strong> No policy compiles to it, so there is
- *       no corpus action to substitute for and never can be. Each test quotes the type error CEL
- *       raises for the shape, rather than inferring unreachability from the adapter's own code.
- *       Permanent.
- *   <li><strong>A caller-supplied argument the corpus structurally cannot vary.</strong>
- *       {@code actions.json} classifies each action against ONE {@link Options} per adapter, so
- *       the field map, {@code nestedPaths}, {@code collectionFields}, an {@link OperatorFunction}
- *       override, and the caller-facing contracts around them — the {@link Options} record, the
- *       typed exceptions — have no corpus spelling. Permanent.
- *   <li><strong>A corpus gap wearing a unit test.</strong> Policy-reachable, and the corpus does
- *       not carry it yet. A bridge, not a home: each is pinned in this adapter alone and asked of
- *       none of the others, which is the condition every bug this repository exists to stop was
- *       living in. Every test under that banner opens with <em>Corpus gap.</em>, is tracked by
- *       cerbos/query-plan-adapters#414, and is deleted when the corpus action lands.
- * </ol>
- *
- * <p>Everything else this file used to hold — the operator table, the negation forms, the null
- * polarities, the collection macros, the value-list fold, the fail-closed families — is a corpus
- * action now, asserted against a real planner's output and against {@code check()}.
+ * Tests on hand-built plans, grouped under the three kinds of material CLAUDE.md allows only in a
+ * unit test ("What a translator unit test may pin"). Corpus actions are covered by
+ * {@link ElasticsearchTranslatorTest}, which reads real planner output. Needs no Docker.
  */
 class ElasticsearchQueryPlanAdapterTest {
 
@@ -81,10 +54,7 @@ class ElasticsearchQueryPlanAdapterTest {
     /** {@code tags} and {@code ownedBy} are flat keyword arrays; {@code aString} is a string. */
     private static final Set<String> COLLECTION_FIELDS = Set.of("tags", "ownedBy");
 
-    /**
-     * The CEL type of every scalar field above, keyed by Elasticsearch field name. A flat array
-     * declares its element type, and a nested document's sub-field is declared by its full path.
-     */
+    /** A flat array declares its element type; a nested sub-field is declared by its full path. */
     private static final Map<String, ScalarType> SCALAR_TYPES = Map.ofEntries(
             Map.entry("department", ScalarType.STRING),
             Map.entry("aBool", ScalarType.BOOLEAN),
@@ -242,12 +212,9 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
 
     /**
-     * CEL has no such function, so no policy compiles to either operator: the checker raises
-     * {@code undeclared reference to 'unsupported_op' (in container '')} and the planner never
-     * runs. {@code isSet} is the one worth naming: it is not a registered CEL function either
-     * ({@code undeclared reference to 'isSet'}), so it can never reach the wire
-     * (cerbos/query-plan-adapters#261), and existence is spelled {@code R.attr.x != null}, which
-     * the corpus carries as {@code null-ne} and this adapter lowers to {@code exists}.
+     * CEL has neither function, so the checker fails with {@code undeclared reference} and no
+     * plan can carry them. Existence is spelled {@code R.attr.x != null} instead (corpus action
+     * {@code null-ne}).
      */
     @ParameterizedTest
     @ValueSource(strings = {"unsupported_op", "isSet"})
@@ -259,9 +226,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * A lambda body referencing a variable the lambda does not bind: CEL's checker refuses the
-     * comprehension with {@code undeclared reference to 'x'}, so no plan carries one. Here it is
-     * a malformed plan, not a policy shape.
+     * CEL's checker rejects an unbound lambda variable ({@code undeclared reference to 'x'}), so no
+     * plan carries one.
      */
     @Test
     void aLambdaBodyReferencingAnUnboundVariableIsRefused() {
@@ -274,9 +240,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * A macro whose collection operand is a scalar literal rather than a list. CEL refuses it at
-     * check time — {@code expression of type 'string' cannot be range of a comprehension (must be
-     * list, map, or dynamic)} — so the planner never folds one.
+     * CEL rejects a scalar as a comprehension range ({@code expression of type 'string' cannot be
+     * range of a comprehension}), so the planner never emits one.
      */
     @Test
     void aValueListMacroOverANonListLiteralIsRefused() {
@@ -290,11 +255,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * CEL's own {@code timestamp()} rejects each of these, so the planner cannot emit one — a
-     * calendar-invalid date ({@code parsing time "2024-02-30T00:00:00Z": day out of range}), a
-     * non-RFC-3339 spelling, and the two ends of CEL's representable range. The adapter validates
-     * the literal anyway, because it is what decides whether a {@code term} or {@code range}
-     * query is even well-formed, and reports it as a malformed plan.
+     * CEL's {@code timestamp()} rejects each of these literals (for example {@code day out of
+     * range}), so the planner cannot emit them. The adapter still validates them and reports a
+     * malformed plan.
      */
     @Test
     void aTimestampLiteralOutsideStrictRfc3339IsRefused() {
@@ -317,11 +280,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // KIND 2 — a caller-supplied argument the corpus structurally cannot vary
     // ============================================================================================
 
-    /**
-     * The field map is a CALLER argument, so a reference it does not name is not a policy shape.
-     * The corpus maps every level of every path precisely so that no corpus action lands here
-     * (cerbos/query-plan-adapters#326) — this is the other side of that rule.
-     */
+    /** The field map is a caller argument; the corpus maps every path so it never lands here. */
     @Test
     void anUnmappedReferenceIsRefusedRatherThanUsedVerbatim() {
         IllegalArgumentException ex = refusal(expressionOperand("eq",
@@ -348,13 +307,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * Which operators and polarities an override reaches, pinned as the README states them.
-     *
-     * <p>{@code in} reaches its override in every polarity — positive, negated inside the
-     * {@code exists} guard, and the null-aware negated form — where it used to be built from the
-     * default {@code terms} regardless. The negation of an ordering operator is its MIRROR, so a
-     * negated {@code lt} applies the {@code ge} override. A positive {@code ne} with no {@code ne}
-     * override is {@code exists AND NOT eq}, and the {@code eq} inside it is the caller's.
+     * {@code in} reaches its override in every polarity. A negated ordering operator uses its
+     * mirror's override ({@code not lt} uses {@code ge}), and a positive {@code ne} with no
+     * {@code ne} override is {@code exists AND NOT eq}, using the {@code eq} override.
      */
     @Test
     void anOverrideReachesEveryPolarityOfItsOperator() {
@@ -386,10 +341,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * The two lowerings that borrow a shape without being that operator: a hierarchy relation is
-     * not {@code startsWith} or {@code in} even though it emits {@code prefix} and {@code terms},
-     * and the {@code ^literal} form of {@code matches} is not {@code startsWith} even though it
-     * emits {@code prefix}. Neither consults the borrowed operator's override.
+     * Hierarchy relations and a {@code ^literal} {@code matches} emit {@code prefix} or
+     * {@code terms}, but do not use the {@code startsWith} or {@code in} overrides.
      */
     @Test
     void hierarchyAndTheLiteralPrefixOfMatchesDoNotBorrowAnotherOperatorsOverride() {
@@ -412,9 +365,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * {@code nestedPaths} is a caller argument too, and the adapter cannot read an index mapping to
-     * check it. A collection macro over a field the caller did not declare has no {@code nested}
-     * query to emit, so it fails closed rather than emitting one that would match nothing.
+     * The adapter cannot read the index mapping, so a macro over a path not declared in
+     * {@code nestedPaths} fails closed instead of emitting a {@code nested} query that matches
+     * nothing.
      */
     @Test
     void aCollectionMacroOverAnUndeclaredNestedPathIsRefused() {
@@ -430,11 +383,7 @@ class ElasticsearchQueryPlanAdapterTest {
         assertInstanceOf(UnmappedAttributeException.class, ex);
     }
 
-    /**
-     * The complement of the rule above, and the reason it is scoped to DOCUMENT collections: a
-     * macro over a literal value list has no document to reach, so it must translate with an empty
-     * {@code nestedPaths}.
-     */
+    /** A macro over a literal value list has no document to reach, so needs no nested path. */
     @Test
     void aValueListMacroNeedsNoNestedPathDeclaration() {
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
@@ -451,11 +400,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * {@code collectionFields} is the declaration that lets a {@code size()} emptiness check over
-     * a FLAT array lower to {@code exists}. The adapter is handed a plan, never a mapping, so it
-     * cannot tell {@code size(tagNames)} from {@code size(aString)}; declaring the field is how the
-     * caller says which it is. Undeclared, the same plan is refused by name — and a nested path
-     * needs no second declaration.
+     * The adapter cannot tell {@code size(tags)} from {@code size(aString)} without a mapping, so
+     * a {@code size()} check over a flat array needs a {@code collectionFields} declaration. A
+     * nested path needs no second declaration.
      */
     @Test
     void sizeOverADeclaredFlatCollectionIsAnExistsCheckAndUndeclaredItIsRefused() {
@@ -476,9 +423,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * The {@link Options} record is the caller's whole contract, so its immutability is pinned:
-     * every collection is copied on the way in, each {@code with…} returns a new instance, and the
-     * positional convenience overloads are exactly the {@link Options} form with the rest empty.
+     * {@link Options} copies every collection on the way in, each {@code with…} returns a new
+     * instance, and the positional overloads equal the {@link Options} form with the rest empty.
      */
     @Test
     void optionsAreImmutableAndTheConvenienceOverloadsDelegateToThem() {
@@ -504,8 +450,8 @@ class ElasticsearchQueryPlanAdapterTest {
         assertThrows(NullPointerException.class, () -> Options.of(null));
         assertThrows(NullPointerException.class, () -> options.withCollectionFields(null));
 
-        // The positional overloads carry no scalar types, so the comparison goes through an
-        // `eq` override, which owns the operator and needs no declaration.
+        // The positional overloads carry no scalar types, so compare through an `eq` override,
+        // which needs no declaration.
         Map<String, OperatorFunction> overrides = Map.of(
                 "eq", (field, value) -> Map.of("custom_eq", Map.of(field, value)));
         Operand condition = expressionOperand("exists",
@@ -520,14 +466,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * {@code scalarTypes} is a caller argument: the corpus translates through one declaration that
-     * covers its whole mapping, so no corpus action can leave a field undeclared. Undeclared, a
-     * comparison is refused rather than lowered untyped, because Elasticsearch coerces a query
-     * term onto the field's mapped type — {@code "5"} matches the integer {@code 5} — where CEL's
-     * cross-type equality is false and {@code check()} denies the row
-     * (cerbos/query-plan-adapters#496). Every operator whose default lowering is a term, terms,
-     * range, prefix, wildcard or regexp query needs the declaration, at the top level and inside
-     * a lambda; an override owns its operator, so it needs none.
+     * A comparison against a field with no declared scalar type is refused: Elasticsearch coerces
+     * a query term to the mapped type ({@code "5"} matches {@code 5}), but CEL's cross-type
+     * equality is false. An override owns its operator, so it needs no declaration.
      */
     @Test
     void aComparisonAgainstAnUndeclaredFieldIsRefusedRatherThanCoerced() {
@@ -563,11 +504,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * What a declaration buys: a literal the declared type cannot inhabit is answered by CEL's
-     * semantics rather than by Elasticsearch's coercion. Cross-type equality is false, so
-     * {@code ==} matches nothing and {@code !=} holds wherever the field is present; membership is
-     * equality against each element, so an element of the wrong type is dropped from the
-     * {@code terms} list, and a list with none of the right type is false.
+     * With a declared type, a cross-type literal follows CEL: {@code ==} matches nothing,
+     * {@code !=} holds wherever the field exists, and wrong-type elements are dropped from
+     * {@code terms}.
      */
     @Test
     void aDeclaredTypeAnswersACrossTypeComparisonAsCelDoes() {
@@ -593,14 +532,10 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * The {@code map()} projection of a {@code hasIntersection} lowers to a {@code terms} query on
-     * the projected sub-field of the nested path, built from the default lowering rather than an
-     * override — so the sub-field's declared type always decides which literal elements can match,
-     * and an undeclared sub-field is refused like any other compared field
-     * (cerbos/query-plan-adapters#496). The flat-collection forms are corpus actions
-     * ({@code hasint-number-list-vs-string}, {@code in-number-list-vs-string}); the corpus has no
-     * nested sub-field whose values a cross-type literal could be coerced onto, and the
-     * declaration is a caller argument it cannot vary.
+     * A {@code map()}-projected {@code hasIntersection} lowers to {@code terms} on the nested
+     * sub-field, so that sub-field's declared type decides which literals can match, and an
+     * undeclared one is refused. The corpus has no nested sub-field a cross-type literal could be
+     * coerced onto.
      */
     @Test
     void aMapProjectedIntersectionNeedsTheSubFieldsTypeAndDropsTheWrongOnes() {
@@ -627,10 +562,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * Every refusal is one of three types, so a caller can route without matching on the message:
-     * a shape the Query DSL cannot express, a variable the caller did not declare, or a plan that
-     * violates the wire contract. All three are {@link IllegalArgumentException}, which stays the
-     * documented base type.
+     * Every refusal is one of three {@link IllegalArgumentException} subtypes, so a caller can
+     * route on type instead of message.
      */
     @Test
     void refusalsAreTypedByTheirMechanism() {
@@ -647,12 +580,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * The numeric wire-value decoder has a range. A double outside
-     * {@code [-2^63, 2^63)} is integral too, but a {@code long} cannot hold it: the cast saturates
-     * to {@code Long.MAX_VALUE} and silently changes the operand. Such a literal stays a double;
-     * the two ends of the range are pinned, {@code -2^63} narrowing and {@code 2^63} not. The
-     * corpus covers a negative out-of-range literal in {@code double-huge-lt}/{@code double-huge-gt},
-     * but not positive equality or the exact narrowing boundaries.
+     * A double outside {@code [-2^63, 2^63)} stays a double, because casting it to {@code long}
+     * would saturate and change the value. The corpus covers negative out-of-range literals
+     * ({@code double-huge-lt}, {@code double-huge-gt}) but not these boundaries.
      */
     @Test
     void anIntegralLiteralOutsideTheLongRangeStaysADouble() {
@@ -667,13 +597,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * A caller-supplied protobuf value can hold a non-finite number. The pinned
-     * PDP cannot serialize such a literal (the div-by-nan planning probe returns HTTP 500),
-     * so this is a wire-value validation contract rather than a policy corpus gap. JSON has no representation for
-     * it — Jackson would write the STRING {@code "Infinity"}, which parses back cleanly and has
-     * silently stopped being a number — so it is refused at the leaf, as {@code size()} already
-     * refuses a non-finite threshold. The corpus's non-finite actions ({@code nan-ord-*}) keep the
-     * division unfolded, so none reaches this branch.
+     * A protobuf value can hold a non-finite number, but JSON cannot, so it is refused. The PDP
+     * cannot serialize such a literal and the corpus's {@code nan-ord-*} actions keep the division
+     * unfolded, so no corpus action reaches this.
      */
     @Test
     void aNonFiniteNumericLiteralIsRefusedAtTheLeaf() {
@@ -692,15 +618,12 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Every test here is a corpus gap, tracked by cerbos/query-plan-adapters#509, and is deleted
-    // when its corpus action lands. They are NOT covered by #387 or #388, whose actions are
-    // enumerated and landed.
+    // Each is tracked by cerbos/query-plan-adapters#509 and deleted when its corpus action lands.
     // ============================================================================================
 
     /**
-     * <strong>Corpus gap.</strong> The corpus covers literal exists_one and filter/map as
-     * computed operands. Direct filter/map in boolean position over a principal value list
-     * remains a separate arrival position, which must name the list-valued result.
+     * <strong>Corpus gap.</strong> Tracked by #414. Direct {@code filter}/{@code map} in boolean
+     * position over a principal value list.
      */
     @ParameterizedTest
     @ValueSource(strings = {"filter", "map"})
@@ -715,13 +638,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Cerbos {@code except(list, list)} is a two-list function
-     * returning a list difference; no lambda form of it exists on the wire, and the nested
-     * {@code must_not} this adapter once emitted for one was unreachable from any real plan. The
-     * list difference has no Query DSL translation, so {@code except} is refused by name at every
-     * position it can arrive in: as a condition, as the argument of {@code size()}, as a leaf
-     * operand, and inside a nested lambda scope. The corpus carries the root, size and comparison forms; the remaining
-     * bridge pins the negated root and the nested lambda arrival positions.
+     * <strong>Corpus gap.</strong> Tracked by #414. {@code except} under negation and inside a
+     * nested lambda; the corpus carries the root, size and comparison forms.
      */
     @Test
     void exceptIsRefusedByNameWhereverItAppears() {
@@ -744,9 +662,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> size-ge-one covers {@code >= 1}; this bridge retains
-     * the direct {@code size(c) != 0} spelling and its negation over a flat collection.
-     * Negation requires distinguishing an empty indexed array from a missing field.
+     * <strong>Corpus gap.</strong> Tracked by #414. {@code size(c) != 0} and its negation over a
+     * flat array; the negation is refused because an empty array and a missing field look the
+     * same.
      */
     @Test
     void everySpellingOfNonEmptinessIsTheSameCheck() {
@@ -759,9 +677,8 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> The corpus covers both flat and map-projection operand
-     * orders. A null-bearing intersection inside a nested lambda still exercises a separate
-     * scoped arrival position.
+     * <strong>Corpus gap.</strong> Tracked by #414. A null-bearing {@code hasIntersection} inside a
+     * nested lambda.
      */
     @Test
     void hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt() {
@@ -779,10 +696,9 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> The corpus now covers eq/ne list comparisons and real
-     * struct()/list() operands. Ordering and string operations against a list remain bridges.
-     * The raw protobuf map/list value encodings below additionally pin decoder refusals: the
-     * corresponding real planner fixtures instead carry struct()/list() expressions.
+     * <strong>Corpus gap.</strong> Tracked by #414. Ordering and string operators against a list,
+     * plus decoder refusals for raw protobuf map and list values. Real plans carry
+     * {@code struct()}/{@code list()} expressions instead.
      */
     @Test
     void aNonScalarLiteralWhereAScalarIsExpectedIsRefused() {
@@ -798,7 +714,6 @@ class ElasticsearchQueryPlanAdapterTest {
         }
         assertTrue(refusal(expressionOperand("eq", aString, aMap)).getMessage()
                 .contains("eq against a map literal"));
-        // The struct-with-null case is the one that used to surface a NullPointerException.
         assertTrue(refusal(expressionOperand("eq", aString, valueOperand(struct("a", NULL))))
                 .getMessage().contains("eq against a map literal"));
 

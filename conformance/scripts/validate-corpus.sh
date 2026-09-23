@@ -12,7 +12,7 @@ trap cleanup EXIT INT TERM
 
 cd "${CONFORMANCE_DIR}"
 
-# Keep entry schemas closed so misspelled metadata cannot be silently ignored by loaders.
+# Closed entry schemas, so a misspelled key cannot be silently ignored.
 if ! jq -e '
   def text: type == "string" and length > 0;
   def entry($required; $optional):
@@ -57,9 +57,8 @@ jq -r '
   .knownDivergences[].action
 ' actions.json | sort >"${VALIDATION_TMP}/classified-actions"
 
-# One rule per action, except the rule-composition probes (#487): a `compose-*` action exists to
-# make the planner combine several rules, so it is the one family allowed to repeat. Anywhere else a
-# repeat is a copy-paste that silently ORs a second condition into an existing shape.
+# One rule per action. Only `compose-*` actions (#487) repeat, since they exist to combine rules;
+# elsewhere a repeat silently ORs a second condition into a shape.
 if duplicates="$(uniq -d "${VALIDATION_TMP}/policy-rule-actions" | grep -v '^compose-' || true)" \
   && [[ -n "${duplicates}" ]]; then
   echo "Duplicate policy actions:"
@@ -78,9 +77,8 @@ if ! diff -u "${VALIDATION_TMP}/policy-actions" "${VALIDATION_TMP}/classified-ac
   exit 1
 fi
 
-# `degenerateOracles` is the one way out of every harness's non-degeneracy sweep, so an entry has to
-# name a real, oracle-able action exactly once. A `knownDivergences` action is never oracle-compared,
-# so exempting it would exempt nothing; each harness asserts the declared oracle itself.
+# `degenerateOracles` exempts an action from the non-degeneracy sweep, so each entry must name a
+# real, oracle-compared action exactly once (never a knownDivergences one).
 jq -r '.degenerateOracles[].action' actions.json | sort >"${VALIDATION_TMP}/degenerate-actions"
 if duplicates="$(uniq -d "${VALIDATION_TMP}/degenerate-actions")" && [[ -n "${duplicates}" ]]; then
   echo "Actions listed more than once in degenerateOracles:"
@@ -114,9 +112,7 @@ if ! jq -e '
   exit 1
 fi
 
-# `adapters` is the canonical roster every other per-adapter key is checked against. Without it
-# each check would have to restate the roster size in prose, and an adapter added to one list but not
-# another would look consistent.
+# `adapters` is the roster every per-adapter key is checked against.
 if ! jq -e '
   (.adapters | type) == "array"
   and (.adapters | length) > 0
@@ -136,10 +132,8 @@ if ! jq -e '
   exit 1
 fi
 
-# Every throwing classification pins the substring that adapter's error must contain, so a
-# harness proves the throw is the DECLARED mechanism rather than a mapper typo or an unrelated
-# validation (cerbos/query-plan-adapters#326). A classification whose message is missing or empty
-# would degrade the harness assertion back to a bare "it threw".
+# Each refusal pins the message its adapter must raise, so a harness proves the declared mechanism
+# threw rather than an unrelated error (cerbos/query-plan-adapters#326).
 if ! jq -e '
   all((.adapterUnsupported // {})[][];
     (.message | type) == "string" and (.message | length) > 0
@@ -149,9 +143,8 @@ if ! jq -e '
   exit 1
 fi
 
-# An expectedUnsupported shape is rejected by every adapter that has not promoted it, so its
-# `messages` key set is exactly that complement — not a subset. A missing key is an adapter whose
-# harness would have nothing to assert; a stray one is a message no harness reads.
+# expectedUnsupported `messages` must name exactly the adapters that reject the shape: every
+# adapter that has not promoted it.
 messages_drift="$(jq -r '
   .adapters as $adapters
   | (.adapterSupportedExpected // {}) as $promoted
@@ -176,10 +169,7 @@ if ! jq -e '
   exit 1
 fi
 
-# A `nullRepresentationOmitted` action is rejected by EVERY adapter — the two conventions are
-# indistinguishable on the wire, so no adapter can translate it — hence the full roster with no
-# promotions to subtract. It is as fail-closed as anything in the two groups above, so it pins its
-# message the same way rather than leaving each harness with a hardcoded literal.
+# A nullRepresentationOmitted action is rejected by every adapter, so it pins a message for each.
 null_messages_drift="$(jq -r '
   .adapters as $adapters
   | .nullRepresentationOmitted[]
@@ -287,15 +277,10 @@ for fixture_dir in wire-fixtures wire-fixtures-strict; do
   done
 done
 
-# CERBOS_VERSION and CERBOS_IMAGE_DIGEST are the single source of truth for the pinned PDP: every
-# workflow and test harness reads them. Some files cannot read another file (Compose files, echo
-# strings, go.mod requirements), so every hardcoded restatement anywhere in the repository is
-# asserted to agree instead of de-duplicated. A repo-wide scan rather than a fixed path list: the
-# fixed list once missed spring-data/example/docker-compose.yml running `latest` in CI.
-#
-# The tag and the digest are checked TOGETHER. Checking the tag alone accepts a reference whose
-# digest belongs to some other build entirely — which is what a digest is for, so a half-validated
-# reference is worse than none: it reads as pinned and is not (cerbos/query-plan-adapters#322).
+# CERBOS_VERSION and CERBOS_IMAGE_DIGEST are the single source of truth for the PDP pin. Files that
+# cannot read them (Compose files, go.mod, echo strings) restate them, so the whole repository is
+# scanned for restatements. Tag and digest are checked together: a right tag with another build's
+# digest reads as pinned and is not (cerbos/query-plan-adapters#322).
 pinned_version="$(tr -d '[:space:]' <CERBOS_VERSION)"
 pinned_digest="$(tr -d '[:space:]' <CERBOS_IMAGE_DIGEST)"
 REPO_ROOT="$(cd "${CONFORMANCE_DIR}/.." && pwd)"
@@ -305,15 +290,9 @@ if [[ ! "${pinned_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   exit 1
 fi
 
-# Markdown is excluded on purpose: a README telling a *consumer* how to start a PDP of their own
-# is prose, not something a harness runs, and holding it to the corpus pin would be a claim about
-# the reader's environment rather than about this repository's tests.
-#
-# `*_IMAGE` is a convention, not one file's name: a harness whose image cannot live in source
-# (an npm script and a workflow both need it) puts the reference in a `<SERVICE>_IMAGE` file and
-# both read it. Matching the pattern rather than the filename means the next one is scanned
-# without editing this list — a bespoke `--include` for each is how the second such file ends up
-# silently unchecked.
+# Markdown is excluded: a README telling consumers how to run their own PDP is not a test input.
+# `*_IMAGE` files hold image references shared by an npm script and a workflow; matching the
+# pattern means new ones are scanned automatically.
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
@@ -326,17 +305,8 @@ SOURCE_EXCLUDES=(
   --exclude-dir=dist --exclude-dir=.gems --exclude-dir=.bundle-path
 )
 
-# `lib/` means two different things in this repository, and one --exclude-dir cannot serve both.
-# On the TypeScript adapters it is BUILD OUTPUT — committed, generated by `tsc --build`, and
-# worth skipping so a stale compiled copy of a source line cannot report a drift that no longer
-# exists in any source file. On the Ruby gem it is SOURCE: `activerecord/lib/` holds the whole
-# translator. Excluding it by name hid twelve implementation files from both scans below — the
-# PDP-pin check and the service-image check — which is exactly the class of bug those scans
-# exist to catch.
-#
-# So Ruby is scanned in a pass of its own, with the `lib` exclusion dropped. Two passes rather
-# than one un-excluded pass, because Ruby has no build output at all: there is nothing generated
-# to skip here, and nothing else needs the exclusion relaxed.
+# `lib/` is committed build output on the TypeScript adapters but source on the Ruby gem, so Ruby
+# gets its own pass without the `lib` exclusion.
 RUBY_INCLUDES=(
   --include='*.rb' --include='*.gemspec' --include='Gemfile' --include='Rakefile'
 )
@@ -346,18 +316,13 @@ for exclusion in "${SOURCE_EXCLUDES[@]}"; do
   RUBY_EXCLUDES+=("${exclusion}")
 done
 
-# Every scan of repository source goes through here, so a file type reaching one check and not
-# another is not expressible. Arguments are the grep flags, the pattern and the roots, exactly as
-# a caller would write them for a single grep.
+# Every source scan goes through here, so all checks see the same file types.
 source_grep() {
   grep "$@" "${SOURCE_INCLUDES[@]}" "${SOURCE_EXCLUDES[@]}" || true
   grep "$@" "${RUBY_INCLUDES[@]}" "${RUBY_EXCLUDES[@]}" || true
 }
 
-# The scan proves it reaches Ruby source under a `lib/` directory. Without this, restoring
-# `--exclude-dir=lib` to the Ruby pass — or dropping the pass entirely — silently returns the
-# scans to reading none of the ActiveRecord adapter, and every check below still reports green.
-# Stated over any adapter rather than one by name, so it keeps holding for the next Ruby gem.
+# Prove the scan reaches Ruby source under `lib/`; otherwise re-excluding it would pass silently.
 if ! source_grep -rl '' "${REPO_ROOT}" 2>/dev/null | grep -q '/lib/.*\.rb$'; then
   echo "The source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's"
   echo "implementation is invisible to every check below. Restore the Ruby scan pass."
@@ -369,8 +334,7 @@ while IFS=: read -r file _ match; do
   # Extract the tag: everything after the last `cerbos:` up to a digest/quote/space/paren.
   tag="$(printf '%s' "${match}" | sed -n 's|.*ghcr\.io/cerbos/cerbos:\([^@)"'\''[:space:]]*\).*|\1|p')"
   [[ -z "${tag}" ]] && continue
-  # Workflow/script interpolations (`cerbos:${CERBOS_VERSION}` and language equivalents)
-  # read the pinned files at runtime and cannot drift.
+  # Interpolations such as `cerbos:${CERBOS_VERSION}` read the pin at runtime and cannot drift.
   case "${tag}" in
     '$'*|'%'*|'{'*) continue ;;
   esac
@@ -393,22 +357,13 @@ if [[ "${version_drift}" -ne 0 ]]; then
   exit 1
 fi
 
-# Every other service image a test or workflow starts is pinned per harness rather than centrally:
-# a shared file would live under conformance/, and conformance/** re-runs every adapter
-# workflow, so bumping mongoose's server would cost nine irrelevant CI runs. What is shared is the
-# RULE, enforced here: a repository named below must appear everywhere as `repo:tag@sha256:<64 hex>`
-# — the tag says which release a reader is looking at, the digest says which build a green run
-# actually proved, and a `repo:tag` may resolve to only one digest across the whole repository, so
-# two harnesses cannot silently test different builds of the same nominal version.
+# Service images are pinned per harness, not centrally: a shared file under conformance/ would
+# re-run every adapter's CI on each bump. The rule is shared instead: every repository listed here
+# must appear as `repo:tag@sha256:<digest>`, with one digest per tag across the repository.
 #
-# Adding a service means adding its repository here. That is the point of the list, not an obstacle
-# to route around: a repository nothing scans is a repository nothing keeps pinned. ghcr.io/cerbos/
-# cerbos is deliberately absent — the scan above already holds it to a stricter rule (the exact
-# version and digest the corpus declares), and listing it twice would report each drift twice.
-# `gradle` is absent too, since spring-data's Dockerfile — the one file that pinned it — went the
-# way of elasticsearch-java's (cerbos/query-plan-adapters#454): nothing built either, both Java
-# adapters run their suites in the Gradle image directly, and an entry nothing references trips
-# the vacuity guard below. The workflows pin Gradle by version, not by image.
+# Add a repository here when you add a service. The Cerbos image is absent because the scan above
+# checks it more strictly. `gradle` is absent because nothing references a Gradle image; both
+# Java adapters pin Gradle through their wrapper.
 IMAGE_REPOSITORIES=(
   "postgres"
   "mysql"
@@ -423,9 +378,7 @@ image_drift=0
 for repository in "${IMAGE_REPOSITORIES[@]}"; do
   escaped="${repository//./\\.}"
   matched=0
-  # A leading character class rather than \b: it keeps `jdbc:mysql://…` and `postgres://…` out
-  # (both are URLs, not image references) while still matching a reference opened by a quote,
-  # a space or the start of a line.
+  # A leading character class rather than \b keeps URLs such as `jdbc:mysql://…` out.
   while IFS=: read -r file _ match; do
     matched=$((matched + 1))
     reference="${match}"
@@ -440,10 +393,8 @@ for repository in "${IMAGE_REPOSITORIES[@]}"; do
       >>"${VALIDATION_TMP}/image-refs"
   done < <(source_grep -rnoIE "(^|[^A-Za-z0-9._/:-])${escaped}:[A-Za-z0-9._-]+(@sha256:[0-9a-fA-F]*)?" \
     "${REPO_ROOT}")
-  # A repository nobody references is a guard watching nothing — the same vacuity the corpus's
-  # degeneracy guard exists to catch, applied here. It fires when a harness moves its constant
-  # into a file type SOURCE_INCLUDES does not reach, or when a service is dropped and its entry
-  # left behind, both of which otherwise read as green.
+  # A repository nothing references is a guard watching nothing: a moved constant or a stale
+  # entry would otherwise read as green.
   if [[ "${matched}" -eq 0 ]]; then
     echo "No reference to image repository '${repository}' was found: either the scan no longer"
     echo "reaches the file that pins it, or the service is gone and the entry should be removed."
@@ -451,9 +402,7 @@ for repository in "${IMAGE_REPOSITORIES[@]}"; do
   fi
 done
 
-# One `repo:tag`, one digest. Without this, two harnesses sharing a nominal version — the Postgres
-# leg of drizzle, prisma, ent and pgx all name the same tag — could pin it to different builds and
-# still report themselves as testing the same server.
+# One `repo:tag`, one digest: harnesses sharing a tag must test the same build.
 tag_conflicts="$(sort -u "${VALIDATION_TMP}/image-refs" | awk -F'\t' '
   { if (!($1 in seen)) { seen[$1] = $2; where[$1] = $3 }
     else if (seen[$1] != $2) { print "  " $1 ": " seen[$1] " (" where[$1] ") vs " $2 " (" $3 ")" } }
@@ -468,22 +417,12 @@ if [[ "${image_drift}" -ne 0 ]]; then
   exit 1
 fi
 
-# The two Go modules are standalone — each vendors the translator under its own
-# internal/queryplan so a consumer pulls in only the one — which means the same source exists
-# twice and a semantic fix can land in one copy alone. Nothing else notices: the corpus catches it
-# only if some action happens to exercise the fixed shape, and the hostile-plan invariants pinned
-# by the unit suites never come off a real planner wire at all
-# (cerbos/query-plan-adapters#319). So the trees are held byte-identical and diffed here, in the
-# script both adapter workflows already run — including on a change under the other adapter's
-# directory, since each workflow triggers on `conformance/**` as well as its own.
-#
-# Byte-identical rather than identical-modulo-an-allowlist on purpose: an allowlist is a place for
-# a real divergence to hide as a comment tweak. Anything genuinely per-module belongs in that
-# module's render.go, which is outside this tree.
+# ent and pgx each vendor the translator so a consumer pulls in one module. The two copies must stay
+# byte-identical, or a fix can land in one alone (cerbos/query-plan-adapters#319). Anything
+# per-module belongs in that module's render.go, outside this tree.
 VENDORED_TRANSLATOR="internal/queryplan"
 
-# A tree that is not there would make the diff below pass by comparing nothing, so assert both
-# exist first — the same vacuity guard the image scan applies to a repository nothing references.
+# A missing tree would make the diff below pass vacuously.
 for module in ent pgx; do
   if [[ ! -d "${REPO_ROOT}/${module}/${VENDORED_TRANSLATOR}" ]]; then
     echo "${module}/${VENDORED_TRANSLATOR} is missing: the sync check below would guard nothing."
@@ -500,9 +439,7 @@ if ! diff -ru \
   exit 1
 fi
 
-# The Go modules pin the Cerbos wire gencode (cerbos/api/genpb) separately from the PDP
-# image; a CERBOS_VERSION bump that leaves a stale genpb would silently test new planner
-# output against old generated types.
+# The Go modules pin cerbos/api/genpb separately; it must match CERBOS_VERSION.
 for gomod in "${REPO_ROOT}"/ent/go.mod "${REPO_ROOT}"/pgx/go.mod; do
   genpb_version="$(sed -n 's|.*github\.com/cerbos/cerbos/api/genpb v\([^[:space:]]*\).*|\1|p' "${gomod}")"
   if [[ -n "${genpb_version}" && "${genpb_version}" != "${pinned_version}" ]]; then
@@ -518,11 +455,8 @@ if [[ "${seed_count}" != "${unique_seed_count}" ]]; then
   exit 1
 fi
 
-# `parentSeedId` is the corpus's one real to-one relation and the only seed key that resolves
-# against another row, so it is the only one a typo can break without a harness noticing: an id
-# that names nothing materialises as "no parent" on both sides of every differential at once, and
-# the oracle agrees with the adapter for the wrong reason. Every reference is checked here, in the
-# one place that is a checker rather than an input.
+# `parentSeedId` must name a real seed. A dangling id reads as "no parent" on both sides of every
+# differential, so harnesses would agree for the wrong reason.
 relation_drift="$(jq -r '
   (.seeds | map(.id)) as $ids
   | .seeds[]
@@ -539,9 +473,8 @@ if [[ -n "${relation_drift}" ]]; then
   exit 1
 fi
 
-# The relation has to discriminate all three depths it can reach. A corpus where every row has a
-# parent never exercises the absent-parent hazard; one where no parent has a parent of its own
-# leaves `parent.inner` unreachable, which is the whole point of seeding two levels.
+# The relation must reach all three depths: no parent, a parent, and a grandparent
+# (`parent.inner`).
 relation_depths="$(jq -r '
   (.seeds | map({(.id): .parentSeedId}) | add) as $parent
   | (.seeds | map(select(.parentSeedId == null)) | length) as $none
@@ -558,10 +491,8 @@ if [[ -n "${relation_depths}" ]]; then
   exit 1
 fi
 
-# derived-fields.json materialises README.md's "Deterministic derived fields" rules once for every
-# harness. Nothing downstream can catch a wrong value there: each harness feeds the same entry to
-# both the stored row and the check() oracle, so a bad value makes both sides agree for the wrong
-# reason. These assertions are the only independent restatement of the rules.
+# derived-fields.json encodes README.md's "Deterministic derived fields" rules. Harnesses feed the
+# same value to the stored row and the oracle, so only this check can catch a wrong one.
 if ! jq -e '
   (.fields | type) == "array"
   and (.fields | length) > 0
@@ -641,12 +572,8 @@ if [[ -n "${derived_drift}" ]]; then
   exit 1
 fi
 
-# `scope` and `labels` are per-seed tables with no rule to re-derive from, so they are restated
-# here instead. A restatement inside a checker is not a second source of truth: unlike the ten
-# harness copies it replaced, it never feeds a stored row or an oracle, so it cannot make both
-# sides of a differential agree for the wrong reason — it can only fail loudly. Without it these
-# forty values, which drive the hier-* and label oracles on every adapter at once, are checked by
-# nothing.
+# `scope` and `labels` have no rule to re-derive, so their per-seed tables are restated here. A
+# checker's copy can only fail loudly; it never feeds a row or an oracle.
 cat >"${VALIDATION_TMP}/expected-tables" <<'JSON'
 {
   "a1": { "scope": "dept",                  "labels": ["gold", "silver"] },

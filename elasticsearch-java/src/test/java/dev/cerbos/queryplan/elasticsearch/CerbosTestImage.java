@@ -17,19 +17,13 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Pinned Cerbos image used by {@link ElasticsearchAdversarialConformanceTest}, the one suite here
- * that starts a PDP.
- *
- * <p>The PDP is the oracle for BOTH sides of the differential — it produces the plan under test
- * and the per-row {@code check()} decisions it is compared against — so which build answered is
- * the one fact a green run cannot be read without. {@link #assertPinned} is where that fact is
- * asserted rather than printed: the container's resolved digest must be the one
- * {@code conformance/CERBOS_IMAGE_DIGEST} names, unless the {@code cerbos.test.image} override is
- * set, in which case the run says so in a way nobody can miss.
+ * The pinned Cerbos PDP image for {@link ElasticsearchAdversarialConformanceTest}. The PDP produces
+ * both the plan and the {@code check()} oracle, so {@link #assertPinned} checks the started
+ * container runs the build {@code conformance/CERBOS_IMAGE_DIGEST} names.
  */
 final class CerbosTestImage {
 
-    /** The system property that swaps the oracle. Never set by any workflow. */
+    /** System property that replaces the pinned image. No workflow sets it. */
     static final String OVERRIDE_PROPERTY = "cerbos.test.image";
 
     static final String IMAGE = System.getProperty(OVERRIDE_PROPERTY, defaultImage());
@@ -37,8 +31,7 @@ final class CerbosTestImage {
     /** True when a caller replaced the pinned oracle for this run. */
     static final boolean OVERRIDDEN = System.getProperty(OVERRIDE_PROPERTY) != null;
 
-    // A stalled HTTP/2 stream must fail the differential instead of hanging the CI job.
-    // Healthy local calls complete in milliseconds; 30 seconds leaves ample startup/load margin.
+    // A stalled HTTP/2 stream fails the run instead of hanging the CI job.
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(30);
 
     static CerbosBlockingClient client(GenericContainer<?> container)
@@ -61,7 +54,7 @@ final class CerbosTestImage {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
-    /** The digest half of the pin, exactly as {@code conformance/CERBOS_IMAGE_DIGEST} spells it. */
+    /** The digest from {@code conformance/CERBOS_IMAGE_DIGEST}. */
     static String pinnedDigest() {
         try {
             return Files.readString(conformanceDir().resolve("CERBOS_IMAGE_DIGEST")).strip();
@@ -75,9 +68,7 @@ final class CerbosTestImage {
         Path conformance = conformanceDir();
         Path versionFile = conformance.resolve("CERBOS_VERSION");
         try {
-            // Tag AND digest: the tag records which release this is, the digest makes the pin
-            // immune to the tag being re-pointed. validate-corpus.sh asserts the two agree
-            // everywhere they are restated.
+            // The tag names the release; the digest guards against the tag being re-pointed.
             return "ghcr.io/cerbos/cerbos:" + Files.readString(versionFile).strip()
                     + "@" + pinnedDigest();
         } catch (IOException e) {
@@ -86,7 +77,7 @@ final class CerbosTestImage {
         }
     }
 
-    /** Every repo digest Docker records for the image a started container runs. */
+    /** The repo digests Docker records for a started container's image. */
     static List<String> resolvedDigests(GenericContainer<?> container) {
         List<String> digests = container.getDockerClient()
                 .inspectImageCmd(container.getDockerImageName()).exec().getRepoDigests();
@@ -94,12 +85,8 @@ final class CerbosTestImage {
     }
 
     /**
-     * The started container runs the pinned build, or the run is loudly NOT the pinned run.
-     *
-     * <p>Without this the override property changed the oracle silently: the resolved digest was
-     * printed, and a log line is not an assertion. A wrong digest here is a Docker cache holding
-     * a different build under the pinned reference, or a pin whose two halves disagree — either
-     * way the differential would be against a PDP nobody chose, so it fails rather than runs.
+     * Fails unless the started container runs the pinned digest. With the override set, prints a
+     * banner saying the run is not against the pinned PDP instead.
      */
     static void assertPinned(GenericContainer<?> container) {
         List<String> digests = resolvedDigests(container);
