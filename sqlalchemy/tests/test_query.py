@@ -1,12 +1,10 @@
 # Copyright 2021-2026 Zenauth Ltd.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Caller-option and malformed-plan contracts for ``get_query``.
+"""``get_query`` contracts for caller options and plans the planner cannot produce.
 
-Hand-built plans here isolate inputs a policy cannot vary, such as operator overrides
-and model declarations. Policy-reachable translation shapes belong in the shared
-corpus; ``test_translator.py`` pins their emitted SQL and the adversarial suite
-compares executed queries with the PDP. These tests need no PDP or container.
+The corpus cannot vary caller arguments such as operator overrides or model styles,
+so they are tested here. Policy-reachable shapes belong in the corpus. No PDP needed.
 """
 
 import math
@@ -45,13 +43,10 @@ def _conditional_plan(expression):
 
 
 class TestNullAttributeRepresentation:
-    """cerbos/query-plan-adapters#302.
+    """The call-level NULL convention (#302). The plan cannot tell the two apart.
 
-    Both NULL-column conventions produce the identical ``eq(attr, null)`` wire
-    node, so the adapter cannot infer which one the caller uses. Under
-    ``"omitted"`` a NULL column carries no attribute at all, CEL raises a
-    missing-attribute error, and ``check()`` denies every row -- an ``IS NULL``
-    filter would return precisely the rows the PDP refuses.
+    Under "omitted", CEL errors on the missing attribute and denies the row, so
+    ``IS NULL`` would return exactly the rows the PDP refuses.
     """
 
     @staticmethod
@@ -90,9 +85,8 @@ class TestNullAttributeRepresentation:
             )
 
     def test_omitted_rejects_ne_against_null(self, resource_table):
-        # Conservatively rejected too: `ne` alone is aligned under "omitted",
-        # but negation wraps the built predicate, so a leaf cannot see whether
-        # an enclosing `not` will flip IS NOT NULL back into IS NULL.
+        # `ne` alone would be safe, but a leaf cannot see whether an enclosing
+        # `not` will flip IS NOT NULL back into IS NULL.
         plan = _conditional_plan(
             {
                 "operator": "ne",
@@ -198,13 +192,9 @@ class TestNullAttributeRepresentation:
 
 
 class TestAttributeNullRepresentation:
-    """cerbos/query-plan-adapters#308.
+    """The per-attribute NULL convention (#308), for callers that mix both.
 
-    The per-attribute half of the same option. A call-level flag cannot express
-    a policy suite that mixes the two conventions -- the same column mapped
-    twice, sent explicitly under one attribute name and omitted under another --
-    so the declaration is keyed by attribute and the call-level option is only
-    its default.
+    The call-level option is only the default for undeclared attributes.
     """
 
     @staticmethod
@@ -238,9 +228,7 @@ class TestAttributeNullRepresentation:
             "operands": [{"variable": variable}, {"value": value}],
         }
 
-    # A null VALUE is not equal to "x", so CEL returns a definite FALSE and its
-    # negation a definite TRUE. `name != 'x'` is UNKNOWN instead, which excludes
-    # the row under BOTH polarities -- the row the PDP allows never comes back.
+    # In CEL, null != "x" is TRUE. In SQL it is UNKNOWN, which would drop the row.
     def test_ne_against_a_constant_includes_a_null_row(self, resource_table):
         compiled = self._compiled(
             resource_table,
@@ -256,9 +244,7 @@ class TestAttributeNullRepresentation:
         )
         assert "IS NOT NULL" in compiled
 
-    # The equality family only. An ordering comparison against a null receiver
-    # is a no-overload error in CEL, which denies under both polarities --
-    # exactly what UNKNOWN already does -- so it keeps propagating it.
+    # Ordering against null is a CEL error, which denies like UNKNOWN does.
     def test_ordering_comparisons_are_left_alone(self, resource_table):
         compiled = self._compiled(
             resource_table,
@@ -309,9 +295,7 @@ class TestAttributeNullRepresentation:
         assert compiled.count("IS NULL") == 2
         assert compiled.count("IS NOT NULL") == 2
 
-    # An attribute the declaration does not name keeps the historical
-    # rendering, so declaring the convention for one cannot change the SQL
-    # emitted for any other mapping.
+    # Declaring one attribute must not change the SQL for any other.
     def test_an_undeclared_attribute_is_untouched(self, resource_table):
         compiled = self._compiled(
             resource_table,
@@ -319,8 +303,7 @@ class TestAttributeNullRepresentation:
         )
         assert "IS NOT NULL" not in compiled
 
-    # The declaration overrides the call-level default in both directions,
-    # which is the whole point: one call, two conventions.
+    # The declaration overrides the call-level default in both directions.
     def test_declaring_omitted_rejects_a_null_operand_under_the_explicit_default(
         self, resource_table
     ):
@@ -465,19 +448,13 @@ class TestSemanticEdgeTranslations:
             "resource3",
         }
 
-        # #312: the infinity plan divides a NON-zero numerator by a constant zero, and
-        # the sign of that zero decides which infinity CEL produced. Over the HTTP
-        # transport the operand arrives as the INTEGER 0 — Cerbos renders the double
-        # -0.0 as `-0` and json.loads("-0") is 0 — so the sign bit is already gone and
-        # the adapter cannot tell +Infinity from -Infinity. It fails closed rather than
-        # assume the positive zero. The NaN plan above is unaffected: 0/0 is NaN under
-        # either sign.
+        # #312: x/0 is +Inf or -Inf depending on the zero's sign, which JSON loses
+        # (-0.0 arrives as 0). So the adapter fails closed. 0/0 is NaN either way.
         with pytest.raises(ValueError, match="sign is indeterminate"):
             get_query(infinity_plan, resource_table, attr)
 
-        # PostgreSQL gives NaN a total ordering above finite numbers. Letting a
-        # raw NaN bind reach that dialect turns the false CEL comparison into
-        # true; the adapter must fold it before SQL compilation.
+        # PostgreSQL orders NaN above every number, which would turn CEL's FALSE
+        # into TRUE. No NaN may reach the bound parameters.
         nan_query = get_query(nan_plan, resource_table, attr)
         compiled = nan_query.compile(dialect=postgresql.dialect())
         assert not any(
@@ -763,8 +740,7 @@ class TestGetQueryOverrides:
             resource_table,
             {"request.resource.attr.externalOwner": user_table.id},
             operator_override_fns={
-                # The override deliberately consumes the foreign marker and
-                # rewrites it to a predicate on the root table.
+                # Rewrites the foreign column to a predicate on the root table.
                 "eq": lambda _column, value: resource_table.ownedBy == str(value)
             },
         )
@@ -922,23 +898,11 @@ class TestGetQueryOverrides:
 
 
 class TestKnownValueCollections:
-    """The planner unroll cliff (cerbos/cerbos#2570, #2817), on the side no policy reaches.
+    """Edge cases of folding `exists`/`all` over a literal value list.
 
-    `exists`/`all` over a known collection — typically a folded principal attribute —
-    is unrolled by the planner into an or/and chain at 10 elements or fewer, and
-    shipped as a lambda over a literal value list above that (`maxItems = 10` in the
-    planner's struct matcher). The adapter must translate both shapes identically, or
-    support becomes a data-dependent cliff that small-seed tests never cross.
-
-    **Both sides of the cliff are corpus actions**: `pv-exists`/`pv-all` ship the
-    value-list lambda and `pv-exists-unrolled`/`pv-all-unrolled` the or/and chain, each
-    with a wire fixture, a golden expectation and an oracle comparison. Two tests here
-    used to plan a principal with 9, 10 and 11 teams against a live PDP to cross it by
-    hand; the corpus crosses it with a real principal instead.
-
-    What remains is the fold's own edge cases — an empty collection, a lambda rebinding
-    its own variable, a `t.path` no element carries, a collection value that is not a
-    list — which are malformed or degenerate plans rather than policy shapes.
+    The planner unrolls up to 10 elements and sends a value-list lambda above that
+    (cerbos/cerbos#2570). The corpus covers both sides with `pv-exists`, `pv-all` and
+    their `-unrolled` twins. These cover degenerate or malformed plans it cannot.
     """
 
     @staticmethod
@@ -1045,8 +1009,8 @@ class TestKnownValueCollections:
     def test_nested_lambda_rebinding_the_variable_shadows_substitution(
         self, resource_table
     ):
-        # The inner lambda rebinds `t`, so its body must keep referencing the
-        # inner binding; only the inner collection operand is substituted.
+        # The inner lambda rebinds `t`, so only the inner collection operand is
+        # substituted, not the inner body.
         plan = self._value_list_plan(
             "exists",
             [["a"], ["b"]],
@@ -1140,9 +1104,8 @@ class TestKnownValueCollections:
         )
 
     def test_value_list_fold_precedes_operator_overrides(self, resource_table, conn):
-        # An override exists to translate relation/column collections; a
-        # literal value list can never be one, so the fold must win rather
-        # than handing the override an unresolvable lambda.
+        # A literal list is never a relation, so the fold runs before any
+        # override could receive an unresolvable lambda.
         plan = self._value_list_plan("exists", ["string"], self._eq_body())
         query = get_query(
             plan,
@@ -1154,12 +1117,10 @@ class TestKnownValueCollections:
 
 
 class TestDeclarativeStyles:
-    """`get_query` accepts a model declared either declarative way, plus a Core `Table`.
+    """`get_query` accepts both declarative styles and a Core `Table`.
 
-    SQLAlchemy 2.0's `DeclarativeBase` is not a `declarative_base()` model in
-    disguise: its metaclass sits outside the `DeclarativeMeta` hierarchy, so a
-    2.0-style model is a distinct arm of `GenericTable` rather than a relabelled
-    one (cerbos/query-plan-adapters#181).
+    A 2.0 `DeclarativeBase` model is not a `DeclarativeMeta` instance, so it takes
+    its own arm of `GenericTable` (#181).
     """
 
     @staticmethod
@@ -1185,8 +1146,7 @@ class TestDeclarativeStyles:
     def test_declarative_base_cross_table_mapping(
         self, modern_resource_table, modern_user_table, conn
     ):
-        # Exercises the table-name lookup on both sides of the mapping: the root
-        # model and the joined one are both 2.0-style.
+        # Both the root and the joined model are 2.0-style.
         plan = _conditional_plan(
             {
                 "operator": "eq",
@@ -1253,8 +1213,8 @@ class TestPlanOperandBoundary:
         ],
     )
     def test_malformed_nodes_are_rejected_before_semantic_traversal(self, operand):
-        # Malformed oneof/discriminator values cannot come from the planner. Reject
-        # them at the decode boundary instead of choosing a branch by key order.
+        # The planner never sends these. Reject them rather than pick a branch
+        # by key order.
         from cerbos_sqlalchemy._plan import parse_operand
 
         with pytest.raises(ValueError, match="Unrecognised operand shape"):
