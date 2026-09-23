@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example.demo;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -10,13 +15,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * {@code demo/seeds.json}, parsed. The rows every example application indexes and the principals
- * every one of them plans for, read from the shared corpus rather than restated here — a copy per
- * example would be one more thing to update when the domain gains a row, and
- * {@code demo/scripts/validate-demo.sh} fails the build on a principal written out inline.
- *
- * <p>Corpus files are repository-controlled and structurally checked by
- * {@code demo/scripts/validate-demo.sh} before this program ever runs; this is not untrusted input.
+ * {@code demo/seeds.json}, parsed. The file is repository-controlled and checked by
+ * {@code demo/scripts/validate-demo.sh}.
  *
  * @param principals the demo principals
  * @param applicationFilter the predicate the APPLICATION owns, never expressed in policy
@@ -27,20 +27,18 @@ public record DemoSeeds(List<Principal> principals,
                         ApplicationFilter applicationFilter,
                         List<Document> documents) {
 
-    /** A demo principal: an id and the roles the policy's rules are keyed on. */
+    /** A demo principal. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Principal(String id, List<String> roles) {}
 
     /**
-     * {@code archived == false AND region == 'emea'} — the application's own predicate. It lives in
-     * the corpus so {@code demo/scripts/validate-demo.sh} can recompute usage shape 5 from it and
-     * prove that shape discriminates: applying this predicate alone, or the adapter's query alone,
-     * must both give the wrong answer.
+     * The application's own predicate, {@code archived == false AND region == 'emea'}. Kept in the
+     * corpus so {@code validate-demo.sh} can check that usage shape 5 needs both halves.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ApplicationFilter(boolean archived, String region) {}
 
-    /** One seed row. {@code public} is a Java keyword, hence the rename. */
+    /** One seed row. {@code public} is a Java keyword, so it is renamed. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Document(String id, String ownerId, @JsonProperty("public") boolean isPublic,
                            String region, boolean archived) {}
@@ -53,7 +51,6 @@ public record DemoSeeds(List<Principal> principals,
         }
     }
 
-    /** The named principal, or a failure naming the corpus — never a silently anonymous plan. */
     Principal principal(String id) {
         return principals.stream()
                 .filter(p -> id.equals(p.id()))

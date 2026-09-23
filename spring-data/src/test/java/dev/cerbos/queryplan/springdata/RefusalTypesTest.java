@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.ListValue;
@@ -32,20 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Which of the three refusal types each refusal is raised as — a property of WHERE in the walk
- * the plan was refused, which neither {@code conformance/actions.json} (a message substring per
- * action) nor {@link SpringDataTranslatorTest} (the SQL of the shapes that translate) can state.
- *
- * <p>Offline like the translator unit test: the {@code translator-pu} persistence unit carries
- * no JDBC connection, and a refusal is raised while the Specification builds its predicate,
- * one step before any SQL exists.
- *
- * <p>Two sources of plans, deliberately. The corpus's throwing actions are read from
- * {@code conformance/wire-fixtures/} — planner output, never hand-built — and each is pinned to
- * its type, so a translator change that moves a refusal from one site to another shows up as a
- * diff even though both sites throw and {@code actions.json} is unchanged. The malformed plans
- * are hand-built because that is the one thing a fixture cannot supply: a planner never emits a
- * wire-contract violation, which is also why {@link #noCorpusActionIsRefusedAsMalformed} holds.
+ * Checks which exception type each refusal uses: {@link UnsupportedPlanShapeException},
+ * {@link UnmappedAttributeException} or {@link MalformedPlanException}. Corpus refusals come from
+ * the wire fixtures; malformed plans are hand-built because the planner never emits them. Runs
+ * offline.
  */
 class RefusalTypesTest {
 
@@ -69,16 +64,10 @@ class RefusalTypesTest {
     // -- the corpus ------------------------------------------------------------------------------
 
     /**
-     * Every throwing corpus action, classified. The key set is asserted equal to what
-     * {@code actions.json} declares for this adapter, so a new throwing action fails here until
-     * someone decides which kind of refusal it is.
-     *
-     * <p>The three {@link UnmappedAttributeException} entries are the judgement calls:
-     * {@code p-timestamp} and {@code cast-not-timestamp} are refused because the MAPPING binds
-     * {@code createdBy} to a String column that does not pin the instant it stores, and
-     * {@code null-value-f2f-mixed} because the two mappings it compares declare different NULL
-     * conventions. Both mechanisms are resolved by
-     * changing a declaration rather than the policy, which is the line the type draws.
+     * The expected type for every corpus action this adapter refuses. The
+     * {@link UnmappedAttributeException} entries are fixed by changing the mapping:
+     * {@code createdBy} is a String column, and {@code null-value-f2f-mixed} compares two
+     * different null conventions.
      */
     private static final Map<String, Class<? extends IllegalArgumentException>> CLASSIFIED =
             Map.ofEntries(
@@ -162,19 +151,14 @@ class RefusalTypesTest {
             IllegalArgumentException ex = refusal(Corpus.planFromWireFixture(action), OPTIONS);
             assertInstanceOf(CLASSIFIED.get(action), ex,
                     () -> action + " was refused with \"" + ex.getMessage() + "\"");
-            // The type and the pinned message travel together: a refusal of the right type for
-            // an undeclared reason would be the #326 accident wearing a new label.
+            // The right type is not enough; the message must match too.
             assertTrue(ex.getMessage().contains(entry.getValue()),
                     () -> action + " was refused with \"" + ex.getMessage()
                             + "\", not the message actions.json pins");
         }
     }
 
-    /**
-     * The distribution over the corpus. A count, not only a per-action type, so the SHAPE of
-     * this adapter's refusals is pinned: three declaration-dependent actions, the rest shapes
-     * the Criteria API has no faithful form for.
-     */
+    /** How many corpus refusals use each type. */
     @Test
     void theRefusalTypesAreDistributedInTheseNumbers() {
         Map<String, Integer> counts = new TreeMap<>();
@@ -190,10 +174,8 @@ class RefusalTypesTest {
     }
 
     /**
-     * The corpus is planner output, and the planner honours its own wire contract — so no corpus
-     * action may land on a malformed-plan site. One doing so would mean either the planner shipped
-     * a shape this adapter reads as malformed (an upstream bug to report) or a well-formed shape
-     * is refused at a site that mislabels it.
+     * Planner output is never malformed. A failure here is either an upstream planner bug or a
+     * refusal raised with the wrong type.
      */
     @Test
     void noCorpusActionIsRefusedAsMalformed() {
@@ -206,9 +188,8 @@ class RefusalTypesTest {
     }
 
     /**
-     * The OMITTED-convention probe is refused from {@code toSpecification} itself, before any
-     * predicate is built, and it is an unsupported SHAPE: the plan is fine, the convention makes
-     * every NULL-selecting rendering of it an over-grant.
+     * Under OMITTED, a null comparison is refused by {@code toSpecification} itself, before any
+     * predicate is built, because any NULL-matching filter would over-grant.
      */
     @Test
     void theOmittedConventionRefusalIsAnUnsupportedShapeRaisedEagerly() {
@@ -227,10 +208,7 @@ class RefusalTypesTest {
 
     // -- hand-built plans: the shapes a fixture cannot supply ------------------------------------
 
-    /**
-     * Wire-contract violations. No planner emits these, so they are built by hand; each is
-     * pinned to the message it already carried and to the type that message now travels under.
-     */
+    /** Plans that break the wire contract. */
     @Nested
     class MalformedPlans {
 
@@ -278,9 +256,8 @@ class RefusalTypesTest {
         }
 
         /**
-         * A {@code map()} projection must project ITS lambda's variable; a projection of some
-         * other name is a plan whose lambda never bound it. (Inside an {@code exists} body the
-         * same unbound name delegates outward and is an unknown attribute instead.)
+         * A {@code map()} projection must use its own lambda variable. Inside an {@code exists}
+         * body the same name would resolve outward and fail as an unknown attribute instead.
          */
         @Test
         void aProjectionOfAnUnboundNameIsMalformed() {
@@ -291,7 +268,7 @@ class RefusalTypesTest {
                     MalformedPlanException.class, "does not start with lambda variable");
         }
 
-        /** Two constants under an operator the constant fold does not cover. */
+        /** The planner would have folded two constants. */
         @Test
         void aConstantComparisonThePlannerWouldHaveFoldedIsMalformed() {
             assertRefusal(refusal(expr("contains", string("a"), string("b")), OPTIONS),
@@ -323,10 +300,7 @@ class RefusalTypesTest {
         }
     }
 
-    /**
-     * Declaration gaps: the plan is well-formed and the Criteria API could express it, but the
-     * caller's mapping does not say how.
-     */
+    /** Well-formed plans the caller's mapping does not cover. */
     @Nested
     class UnmappedAttributes {
 
@@ -354,8 +328,7 @@ class RefusalTypesTest {
                             var("request.resource.attr.aNumber")), OPTIONS),
                     UnmappedAttributeException.class,
                     "requires the second attribute to be mapped as a Relation");
-            // The bare lambda element is the relation's scalar projection, not a Field, so
-            // size() of it is not a string length either.
+            // The bare lambda element is not a Field, so size() is not a string length here.
             Operand sizeOfElement = expr("lambda",
                     expr("gt", expr("size", var("t")), number(0)), var("t"));
             assertRefusal(refusal(expr("exists", var("request.resource.attr.tagNames"),
@@ -387,10 +360,7 @@ class RefusalTypesTest {
         return refusal(response(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition), options);
     }
 
-    /**
-     * Translates {@code plan} the way a repository would — by asking the Specification for its
-     * predicate — and returns the refusal that raises.
-     */
+    /** Builds the Specification's predicate and returns the refusal it throws. */
     private static IllegalArgumentException refusal(PlanResourcesResponse plan, Options options) {
         Specification<ResourceEntity> spec = SpringDataQueryPlanAdapter.toSpecification(plan, options);
         EntityManager em = emf.createEntityManager();

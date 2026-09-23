@@ -1,6 +1,9 @@
-.gradle/
-build/
 bin/
+build/
+.classpath
+.gradle/
 .idea/
 *.iml
+.project
+.settings/
 REVIEW-TASKS.md

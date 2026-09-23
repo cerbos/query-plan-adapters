@@ -1,7 +1,7 @@
 {
   "adapter": "spring-data",
   "hibernate": "6.6",
-  "regenerate": "gradle goldenUpdate",
+  "regenerate": "./gradlew goldenUpdate",
   "expectations": {
     "all-on-empty": {
       "note": "Three-valued logic, and the shape every collection macro follows here. The scoring subquery folds each element to 2 (true), 0 (false) or 1 (UNKNOWN — a NULL member column, which is a missing attribute on the check side, so CEL raises and the PDP denies); `nullif(..., 1)` turns UNKNOWN into SQL NULL so the row is excluded under BOTH polarities. Collapsing it to FALSE would return rows the PDP denies under a negation.",

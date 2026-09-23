@@ -18,19 +18,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The one walk over a plan's expression tree.
+ * Walks a plan's expression tree. Lowers {@code and}/{@code or}/{@code not} here and hands every
+ * other operator to its translator. Collection, hierarchy and {@code size()} operators are only
+ * handled at the top level; inside a lambda body the leaf translator refuses them.
  *
- * <p>It used to exist four times — unscoped and lambda-scoped, each in a true and a false
- * polarity — and the four differed in exactly two ways: how a variable resolves to a field, which
- * {@link Scope} now answers, and which truth value is being proved, which {@link Polarity} now
- * carries. Everything else is dispatch: the boolean connectives are lowered here, and every other
- * operator is handed to the collaborator that owns it. Only the top-level scope reaches the
- * collection, hierarchy and {@code size()} shapes; inside a lambda body those operators fall
- * through to the leaf translator, which refuses them as computed operands, exactly as the scoped
- * traversal always did.
- *
- * <p>One instance per translation, built from the caller's {@link Options}; it holds no state
- * beyond its collaborators, so the public facade stays thread-safe.
+ * <p>One instance per translation.
  */
 final class PlanWalker {
 
@@ -69,8 +61,7 @@ final class PlanWalker {
         List<Operand> operands = expression.getOperandsList();
 
         return switch (operator) {
-            // De Morgan: under FALSE, `and` becomes a `should` of the negated children and `or`
-            // a `must` of them.
+            // De Morgan: under FALSE, `and` becomes `should` and `or` becomes `must`.
             case "and", "or" -> {
                 List<Map<String, Object>> clauses = operands.stream()
                         .map(o -> operand(o, scope, polarity))

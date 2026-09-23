@@ -63,7 +63,7 @@ and the other CI leg asserts a pinned list of exactly which shapes diverge. Spri
 case in another language: it emits a JPA `Specification`, so its entry records that Specification
 rendered — the root joins and the `WHERE` clause on H2, PostgreSQL and MySQL, all three of which its
 CI executes — with criteria literals inlined so the operands are in the asset rather than behind a
-`?`. The file declares `"hibernate": "6.6"`, `gradle goldenUpdate` refuses to run under another
+`?`. The file declares `"hibernate": "6.6"`, `./gradlew goldenUpdate` refuses to run under another
 major, and a second leg (`ADAPTER_TEST_ORM=next`, Hibernate 7 / Spring Data JPA 4) asserts a pinned
 divergence list in both directions, exactly as the sqlalchemy and activerecord legs do; the header
 is load-bearing because `hibernate-core` is a `compileOnly` dependency and a consumer brings their
@@ -167,19 +167,14 @@ and stay green.
 
 ### Java (Elasticsearch, Spring Data)
 ```bash
-# Run from the REPOSITORY ROOT, not the adapter directory: the Java harnesses read the
-# shared corpus at ../conformance/ (seeds.json, actions.json, CERBOS_VERSION,
-# CERBOS_IMAGE_DIGEST), so the whole
-# repo must be mounted or they fail with FileNotFoundException.
-# The docker socket mount is for the testcontainers-backed tests (cerbos PDP + DBs).
-docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TESTCONTAINERS_RYUK_DISABLED=true --network host \
-  -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle build --no-daemon
+# Run from the adapter directory, in a checkout of the whole repository: the harnesses read the
+# shared corpus at ../conformance/. Each adapter commits its own Gradle wrapper; JDK 17+.
+# The testcontainers-backed tests (cerbos PDP + DBs) need Docker.
+./gradlew build
 
 # Both: rewrite golden/expectations.json from what the translator emits today.
-# `gradle test` never regenerates, so a translator change fails CI whatever anyone ran locally.
-#   … -w /repo/spring-data        gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
-#   … -w /repo/elasticsearch-java gradle:8.12-jdk17 gradle goldenUpdate --no-daemon
+# `./gradlew test` never regenerates, so a translator change fails CI whatever anyone ran locally.
+./gradlew goldenUpdate
 ```
 
 Both Java adapters have a **translator unit test** that reads its plans from
@@ -245,7 +240,7 @@ npm run test:adversarial              # TypeScript adapters
 npm run test:adversarial:postgres     # drizzle and prisma: the same corpus on real PostgreSQL
 npm run test:adversarial:mysql        # drizzle and prisma: the same corpus on real MySQL
 pdm run test                          # SQLAlchemy (includes the adversarial suite)
-gradle test                           # Java adapters (mount the repo root, see above)
+./gradlew test                        # Java adapters (whole-repo checkout, see above)
 conformance/scripts/validate-corpus.sh          # corpus integrity; runs in every adapter's CI
 conformance/scripts/regenerate-wire-fixtures.sh # after bumping conformance/CERBOS_VERSION
 ```
@@ -335,7 +330,7 @@ For pull requests: give a concise summary, note the affected adapters, link rela
 
 ## CI
 
-Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/conformance/` — plus `/demo/` where that adapter has an example. Each workflow declares its runtime and service-version matrix. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. Convex is the one exception, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen rather than putting Docker on every Node leg. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
+Each adapter has its own GitHub Actions workflow triggered by changes in its directory or `/conformance/` — plus `/demo/` where that adapter has an example. Every one of those workflows, `conformance.yaml` included, ends its `paths` with `!**/*.md`: no script, harness or build reads Markdown, so a prose-only change runs no CI. Keep that negation last in any new workflow, since a later positive pattern re-includes what it excluded, and drop it for good if a script ever starts reading a Markdown file. Each workflow declares its runtime and service-version matrix. Every adapter workflow validates the corpus and runs its adversarial suite **inside the same job as the regular tests** — there is no separate `adversarial` job. Convex is the one exception, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen rather than putting Docker on every Node leg. On the TypeScript adapters the adversarial step is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime; the other matrix dimensions still get their own adversarial run, and those divide into two kinds:
 
 - **The datastore is one.** Drizzle and Prisma each run the corpus once per `ADAPTER_TEST_DB` store on the baseline Node leg (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and there the store dimension exists **only** on the baseline Node leg: once `npm test` became an offline translator unit test, a second server crossed with a non-baseline Node version ran byte-identical work, so the workflow `exclude`s those legs rather than paying for them.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension is an engine matrix; it crosses with the store dimension, giving six adversarial runs per Prisma workflow (2 majors × 3 stores), all on Node 22.
@@ -438,7 +433,7 @@ Three kinds of material legitimately live only in a unit test, and they are not 
    a suspected live over-grant. Each instance must say at the test that it is a corpus gap, name the
    issue tracking the port, and be deleted when the corpus action lands
    ([#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the open port).
-   `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 2 — a policy can reach these,
+   `ElasticsearchQueryPlanAdapterTest` is the worked example: a `KIND 3 — a policy can reach these,
    and the corpus does not carry them yet` banner over the block, and a `Corpus gap.` lead on every
    test under it; `SpringDataQueryPlanAdapterTest` follows the same layout, with all three kinds
    under their own banner. `conformance/README.md`, "Shapes that live only in a unit test", is the

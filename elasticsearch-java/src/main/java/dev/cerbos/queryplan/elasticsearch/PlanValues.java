@@ -22,13 +22,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * How a plan literal becomes a JDK value the Query DSL can carry: the protobuf-to-Java
- * conversion with its long-narrowing rule, the refusal of a number JSON has no spelling for, and
- * the {@code timestamp()} literal validation.
- *
- * <p>Kept apart from the leaf translator because these rules are about the VALUE alone — what a
- * planner double means, what a request body can hold — and every translator that reads a literal
- * (leaf, hierarchy, {@code size()}, the value-list fold) needs the same answer.
+ * Converts plan literals to JDK values and validates them.
  */
 final class PlanValues {
 
@@ -39,21 +33,18 @@ final class PlanValues {
     private static final Instant CEL_TIMESTAMP_MAX =
             Instant.parse("9999-12-31T23:59:59.999999999Z");
 
-    /** The half-open range of doubles a {@code long} represents exactly: [-2^63, 2^63). */
+    /** Doubles in [-2^63, 2^63) convert to {@code long} without saturating. */
     private static final double LONG_MIN_AS_DOUBLE = -0x1p63;
     private static final double LONG_LIMIT_AS_DOUBLE = 0x1p63;
 
     private PlanValues() {}
 
     /**
-     * The plain JDK value a protobuf {@link Value} carries.
+     * The JDK value a protobuf {@link Value} carries.
      *
-     * <p>The planner sends every number as a double. An integral one inside the range a
-     * {@code long} represents exactly is narrowed, so a query does not read {@code 1.0} against an
-     * {@code integer} field; one outside it — {@code 1e300}, say — stays a double, because the
-     * cast would saturate to {@code Long.MAX_VALUE} and silently change the operand. A struct is
-     * read into a map that ACCEPTS null values, since a struct field holding a JSON null is a
-     * value the planner can ship.
+     * <p>The planner sends every number as a double. An integral double within {@code long} range
+     * becomes a {@code long}; outside it, the cast would saturate, so it stays a double. Struct
+     * values may be null, so a {@link LinkedHashMap} is used rather than {@code Map.of}.
      */
     static Object protoValueToJava(Value value) {
         return switch (value.getKindCase()) {
@@ -84,9 +75,7 @@ final class PlanValues {
     }
 
     /**
-     * JSON has no NaN and no infinity, so no Query DSL request body can carry one; a literal that
-     * folded to one (CEL's {@code 1.0 / 0.0} is {@code +Inf}) is refused here rather than
-     * serialised as a quoted string that has silently stopped being a number.
+     * Refuses NaN and infinity (e.g. CEL's {@code 1.0 / 0.0}), which JSON cannot represent.
      */
     static void rejectNonFinite(Object value) {
         if (value instanceof Double number && !Double.isFinite(number)) {

@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Regenerates conformance/wire-fixtures{,-strict}/*.json: for every action in actions.json, captures the
-# exact PlanResources response the pinned Cerbos PDP (see CERBOS_VERSION) returns for
-# policies/adversarial.yaml. These are golden wire fixtures -- they pin planner *shape*
-# (operand order, operator choice, filter kind) independent of any adapter, so a PDP upgrade
-# that silently changes wire output for a hostile shape is caught by diffing this directory
-# instead of by an adapter test failing for the wrong reason. Both evaluation modes
-# are captured independently; the default-mode directory remains the offline unit-test input.
+# Regenerates conformance/wire-fixtures{,-strict}/: the PlanResources response the pinned PDP
+# returns for every action in actions.json, in both evaluation modes. The fixtures pin planner
+# shape independent of any adapter, so a PDP bump that changes wire output shows up as a diff.
 #
 # Requires: docker, curl, jq.
 #
-# Two callers, one behaviour. Locally, run it deliberately after confirming a PDP version bump is
-# intentional, and commit the resulting diff in its own commit so reviewers can see exactly what
-# the planner's wire contract changed. In CI, .github/workflows/conformance.yaml runs this same
-# script and then fails on any resulting `git diff` -- that is the drift check, so the script must
-# stay deterministic for a fixed CERBOS_VERSION: never write a timestamp, container id or other
-# run-varying value into a fixture.
+# Run it locally after a deliberate PDP bump and commit the diff on its own. conformance.yaml runs
+# it too and fails on any `git diff`, so output must be deterministic: no timestamps or ids.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,8 +86,7 @@ for strict in false true; do
       exit 1
     fi
 
-    # Strip fields that vary per-invocation (call id, request id echo) so the fixture only pins
-    # planner-meaningful content: filter shape, resource kind, policy version, validation errors.
+    # Drop per-call fields (call id, request id) so the fixture pins only planner output.
     echo "${RESPONSE}" | jq -e \
       --arg action "${action}" \
       --arg resourceKind "${RESOURCE_KIND}" '

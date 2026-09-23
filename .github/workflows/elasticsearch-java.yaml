@@ -7,6 +7,9 @@ on:
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/elasticsearch-java.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   push:
     tags:
       - elasticsearch-java/v*
@@ -19,132 +22,84 @@ concurrency:
 
 defaults:
   run:
+    shell: bash
     working-directory: elasticsearch-java
 
+permissions: {}
+
 jobs:
-  # Every suite runs in this one job — the translator unit test, which needs nothing, and the two
-  # container-backed suites, which start a pinned PDP and a pinned Elasticsearch through
-  # Testcontainers. There is no separate adversarial job (CLAUDE.md, "CI").
+  # All suites run here, including the adversarial suite (CLAUDE.md, "CI").
   test:
+    permissions:
+      contents: read
     strategy:
-      # The Elasticsearch dimension only discriminates the two container-backed suites, and a
-      # failed forward-compatibility leg is a finding of its own; the default fail-fast would
-      # cancel the baseline leg mid-corpus and report it as neither a pass nor a failure.
+      # A failed next-major leg should not cancel the baseline leg.
       fail-fast: false
       matrix:
         java-version: ["17", "21"]
-        # Pinned by tag AND digest, and the references themselves live in
-        # elasticsearch-java/ELASTICSEARCH_IMAGE and elasticsearch-java/ELASTICSEARCH_NEXT_IMAGE,
-        # so this dimension is a list of FILENAMES and no image is restated here.
-        # ElasticsearchTestImage and example/run.sh read ELASTICSEARCH_IMAGE too, and a matrix
-        # entry that drifted from it would prove the adapter against a different server than
-        # anyone reproducing a failure locally. conformance/scripts/validate-corpus.sh holds every
-        # reference to one digest per tag, but nothing holds two tags equal — the same argument as
-        # mongoose/MONGO_IMAGE and MONGO_NEXT_IMAGE, which is the precedent this follows.
-        #
-        # ELASTICSEARCH_IMAGE is the baseline: the server the adapter is developed against, the
-        # major the example's client matches, and the only one the example runs.
-        # ELASTICSEARCH_NEXT_IMAGE is the forward-compatibility leg, deliberately the next major
-        # and read by nothing else — test-only until example/ moves its client to that major, which
-        # example/run.sh's client/server major check would otherwise refuse. Both names end in
-        # `_IMAGE` because that suffix is what validate-corpus.sh's `--include='*_IMAGE'` scans; an
-        # `ELASTICSEARCH_IMAGE_NEXT` would be a pin nothing checks.
+        # Files under elasticsearch-java/ holding the pinned image, so no image is restated here.
+        # The `_IMAGE` suffix is what validate-corpus.sh scans.
         elasticsearch-image-file:
           - ELASTICSEARCH_IMAGE
           - ELASTICSEARCH_NEXT_IMAGE
-        # The server dimension discriminates the container-backed suites, not the JDK: off the
-        # baseline JDK the second server leg would replay byte-identical translator work against a
-        # store the baseline leg already covers. Excluding it keeps the coverage and drops a runner.
+        # The server leg only needs the baseline JDK.
         exclude:
           - elasticsearch-image-file: ELASTICSEARCH_NEXT_IMAGE
             java-version: "21"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
-          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
-          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
-          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
-          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
-          cache-dependency-path: elasticsearch-java/**/*.gradle*
+          cache-dependency-path: |
+            elasticsearch-java/**/*.gradle*
+            elasticsearch-java/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          # setup-java owns the cache above; two caches over one Gradle home conflict.
-          cache-disabled: true
-          # Pinned rather than taking the runner's floating preinstall, and to the same version
-          # the `example` job below pins and the adapter's README documents building with — so a
-          # Gradle major landing on the runner image cannot turn this job red for a reason that is
-          # not the change under review, and a failure here reproduces locally on that version.
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # ELASTICSEARCH_IMAGE_FILE is a filename under elasticsearch-java/, which build.gradle.kts
-      # forwards to the suites as the `elasticsearch.test.image.file` system property and declares
-      # as a task input — so the two legs run the same build against different pinned servers, and
-      # neither can be reported UP-TO-DATE on the other's result.
+      # build.gradle.kts forwards ELASTICSEARCH_IMAGE_FILE to the suites and declares it as an input.
       - name: Build and test (${{ matrix.elasticsearch-image-file }})
         run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false gradle build --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true gradle test --tests '*ElasticsearchAdversarialConformanceTest' --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
+          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*ElasticsearchAdversarialConformanceTest' --no-daemon
         env:
           ELASTICSEARCH_IMAGE_FILE: ${{ matrix.elasticsearch-image-file }}
 
-  # The example application, against the shared demo domain in demo/. It proves what the job above
-  # structurally cannot, and for this adapter the two halves are unusually separable:
-  #
-  #   1. The PUBLISHED package surface. Every suite in `test` compiles against the adapter's own
-  #      source set, so its POM and Gradle module metadata — dependency scopes included — are
-  #      executed nowhere. The example resolves `dev.cerbos:cerbos-elasticsearch` from mavenLocal as
-  #      a real Maven coordinate instead, which is why the step below publishes it first. NOT a
-  #      Gradle composite build: that substitutes the local source tree for the coordinate and
-  #      resolves neither file. See docs/adr/0002-examples-install-the-packed-artifact.md;
-  #      cerbos-sdk-java declaring protobuf at runtime-only scope is the shape of bug this exists for,
-  #      and elasticsearch-java/example/README.md records the break-tests that prove the arrangement
-  #      is load-bearing rather than decorative.
-  #   2. The Elasticsearch Java CLIENT. This adapter hands back a `Map<String, Object>` of plain JDK
-  #      values with no client type in its signature, so nothing in `test` ever asks the client
-  #      library to parse what it emits — the translator suite compares the map to a golden asset and
-  #      the conformance harness posts it as raw JSON over a bare HttpClient. The example is the only
-  #      place a generated `Query` is built from an emitted clause, paginated with `from`/`size`, and
-  #      composed with a `bool` clause the application owns.
-  #
-  # THIS JOB MUST STAY IN THIS WORKFLOW. renovate.json sets `automerge: true` for every non-major
-  # bump, and that is the path an Elasticsearch-client or Cerbos-SDK regression takes into `main`
-  # today: the bump arrives as one PR touching this adapter's manifest and the example's, and this
-  # job, being a check on that PR, is what blocks the automerge when the new version breaks real
-  # usage. Moved to a nightly run or a workflow of its own it would still pass or fail eventually,
-  # but not before the merge, which silently restores the gap it exists to close.
-  #
-  # What makes that bite is that every version the example resolves is an exact literal in a file
-  # under elasticsearch-java/, and example/build.gradle.kts calls `failOnDynamicVersions()` so it
-  # stays that way. There is deliberately no gradle.lockfile: Renovate can only maintain one by
-  # executing `./gradlew`, which this repository has no wrapper for and which the hosted app will not
-  # run without `allowedUnsafeExecutions`, so a committed lockfile would go stale on the first bump
-  # and fail this job for a reason that is not the bump. example/README.md has the full argument.
-  #
-  # One language-version leg on purpose: the demo domain discriminates the adapter's packaging and
-  # usage shapes, not the JDK. It runs on 17, the floor the adapter declares, which is the leg where a
-  # post-17 API reference in either the adapter or the example would surface.
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for Java ${{ matrix.java-version }} (${{ matrix.elasticsearch-image-file }})"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
+
+  # The example installs the published artifact and drives it with the Elasticsearch Java client,
+  # which no suite in `test` does. See docs/adr/0002-examples-install-the-packed-artifact.md.
+  # Keep this job in this workflow: it is what blocks Renovate's automerge of a breaking bump.
   example:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # The example reaches a pinned PDP through demo/docker-compose.yml and a pinned Elasticsearch
-      # through elasticsearch-java/ELASTICSEARCH_IMAGE, and these two scripts are what assert those
-      # pins still agree with conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST. Without
-      # them the run below would happily execute the whole end-to-end flow against a drifted PDP.
+      # Check the PDP and Elasticsearch pins before running against them.
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
@@ -152,32 +107,29 @@ jobs:
         run: ../demo/scripts/validate-demo.sh
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
+          # The adapter's floor.
           java-version: "17"
-          # Gradle's dependency cache, keyed on this adapter's build scripts. setup-gradle's own cache
-          # is written only by jobs on main and nothing here runs on main, so every job resolved cold
-          # from Maven Central — which answers a burst of cold resolutions with HTTP 429. This key is
-          # deterministic, so the `Warm Caches` workflow can write it on main for every PR to read.
+          # Must match the key warm-caches.yaml writes on main.
           cache: gradle
-          cache-dependency-path: elasticsearch-java/**/*.gradle*
+          cache-dependency-path: |
+            elasticsearch-java/**/*.gradle*
+            elasticsearch-java/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          # setup-java owns the cache above; two caches over one Gradle home conflict.
-          cache-disabled: true
-          # Pinned rather than taking the runner's floating preinstall, and to the same version the
-          # `test` job pins: this job's assertions are about resolution and publication, the two
-          # things a Gradle major is most likely to change the behaviour of. The version matches the
-          # Gradle container image the adapter's README documents building in.
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # The PDP is a container the runner starts from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action here,
-      # because an example must reach the PDP the way a deployed application does. Elasticsearch is
-      # example/run.sh's own, from elasticsearch-java/ELASTICSEARCH_IMAGE, and run.sh also publishes
-      # the adapter to mavenLocal for itself so that this is one command on a laptop too.
+      # run.sh publishes the adapter to mavenLocal and starts Elasticsearch itself.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh elasticsearch-java
+
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for the example"
+          path: |-
+            **/build/reports/
+            **/build/test-results/

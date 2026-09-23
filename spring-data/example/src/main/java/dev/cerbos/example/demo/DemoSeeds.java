@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example.demo;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -10,17 +15,11 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * {@code demo/seeds.json}, parsed. The rows every example application persists and the
- * principals every one of them plans for, read from the shared corpus rather than restated here
- * — a copy per example would be one more thing to update when the domain gains a row.
+ * {@code demo/seeds.json}, parsed.
  *
- * <p>Corpus files are repository-controlled and structurally checked by
- * {@code demo/scripts/validate-demo.sh} before this program ever runs; this is not untrusted
- * input.
- *
- * @param principals the three demo principals
- * @param applicationFilter the predicate the APPLICATION owns, never expressed in policy
- * @param documents the eight seed rows
+ * @param principals the demo principals
+ * @param applicationFilter the application's own predicate, which no policy expresses
+ * @param documents the seed rows
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record DemoSeeds(List<Principal> principals,
@@ -31,12 +30,7 @@ public record DemoSeeds(List<Principal> principals,
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Principal(String id, List<String> roles) {}
 
-    /**
-     * {@code archived == false AND region == 'emea'} — the application's own predicate. It lives
-     * in the corpus so {@code demo/scripts/validate-demo.sh} can recompute usage shape 5 from it
-     * and prove that shape discriminates: applying this predicate alone, or the adapter's filter
-     * alone, must both give the wrong answer.
-     */
+    /** The application's own predicate: {@code archived} and {@code region} must equal these. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ApplicationFilter(boolean archived, String region) {}
 
@@ -53,7 +47,7 @@ public record DemoSeeds(List<Principal> principals,
         }
     }
 
-    /** The named principal, or a failure naming the corpus — never a silently anonymous plan. */
+    /** The named principal; throws if the corpus has no such principal. */
     Principal principal(String id) {
         return principals.stream()
                 .filter(p -> id.equals(p.id()))

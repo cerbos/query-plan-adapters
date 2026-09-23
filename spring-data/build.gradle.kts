@@ -1,21 +1,24 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 plugins {
     java
-    // For `publishToMavenLocal`. example/ resolves the adapter as a real Maven coordinate
-    // rather than through a Gradle composite build, so the example executes the POM and the
-    // Gradle module metadata a consumer resolves — dependency scopes included. That is the
-    // whole point of docs/adr/0002-examples-install-the-packed-artifact.md, and it is not
-    // hypothetical here: cerbos-sdk-java declares protobuf at runtime-only scope in its own
-    // module metadata, which a composite build hides and a coordinate exposes.
+    // example/ resolves the adapter from mavenLocal so it runs against the published POM.
+    // See docs/adr/0002-examples-install-the-packed-artifact.md.
     `maven-publish`
 }
 
 group = "dev.cerbos"
 version = "0.1.0-alpha.1"
 
-// `options.release` (unlike source/targetCompatibility) also constrains the JDK API
-// surface: compiling on JDK 21/25 still resolves against the Java 17 class library, so a
-// stray post-17 API reference fails at compile time instead of with NoSuchMethodError on
-// a JDK 17 runtime.
+java {
+    withJavadocJar()
+    withSourcesJar()
+}
+
+// `release` also limits the JDK API to Java 17, so a post-17 API call fails at compile time.
 tasks.withType<JavaCompile> {
     options.release = 17
     options.compilerArgs.add("-Xlint:deprecation")
@@ -25,23 +28,10 @@ repositories {
     mavenCentral()
 }
 
-// The ORM version set this build compiles and tests against: `baseline` unless ADAPTER_TEST_ORM
-// (or -Dadapter.test.orm) says `next`. Both sets are declared here, once, and nothing below
-// restates a version.
-//
-// `baseline` is the Hibernate 6.6 / Spring Data JPA 3.5 line the golden asset was rendered under
-// (golden/expectations.json declares `"hibernate": "6.6"`) and the line example/ runs on Spring
-// Boot 3.5. `next` is the next major of each — Hibernate 7 and Spring Data JPA 4, the pair Spring
-// Boot 4 manages — and is a TEST-ONLY forward-compatibility leg, the spring-data analogue of
-// elasticsearch-java/ELASTICSEARCH_NEXT_IMAGE: `hibernate-core` is `compileOnly`, a consumer brings
-// their own, and until this leg a consumer on Hibernate 7 was proved nowhere. Hibernate renders
-// every statement the golden asset records, so on this leg the translator suite asserts a pinned
-// divergence list instead of the asset's bytes (SpringDataTranslatorTest,
-// `theAssetDeclaresTheRendererThatWroteIt`), and `goldenUpdate` refuses to run.
-//
-// An unknown value fails rather than falling back: a typo that quietly ran the baseline would
-// report the forward-compatibility leg green without executing it, the same shape of failure
-// `ADAPTER_TEST_DB` guards against in the harness.
+// The ORM versions to build and test against, chosen by ADAPTER_TEST_ORM (or -Dadapter.test.orm).
+// `baseline` is the Hibernate 6.6 line golden/expectations.json was rendered under. `next` is the
+// next major (Hibernate 7 / Spring Data JPA 4), a test-only leg on which SpringDataTranslatorTest
+// checks a pinned divergence list instead of the golden bytes. An unknown value fails.
 val ormVersionSets = mapOf(
     "baseline" to mapOf(
         "springDataJpa" to "3.5.13",
@@ -64,34 +54,17 @@ val orm = ormVersionSets[adapterTestOrm]
 dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against (see the README
-    // "Pin protobuf-java" gotcha) — older runtimes throw ProtobufRuntimeVersionException.
+    // "Pin protobuf-java" gotcha); older runtimes throw ProtobufRuntimeVersionException.
     implementation("com.google.protobuf:protobuf-java:4.35.1")
-    // Spring Data JPA + Jakarta Persistence are provided by the consuming application's
-    // Spring Boot BOM (or equivalent). Declaring them as `compileOnly` keeps them out of
-    // the published POM as transitive dependencies so they don't pin a specific version on
-    // downstream consumers — matching how Spring Data JPA itself marks `hibernate-core`
-    // as `<optional>true</optional>`.
-    //
-    // The consumer's floor is spring-data-jpa 3.5.2, NOT this build-time version:
-    // `Specification.unrestricted()` — what an ALWAYS_ALLOWED plan returns — arrived in 3.5.2,
-    // so anything older fails with NoSuchMethodError at first translation. Nothing compiles or
-    // tests against 3.5.2 itself, so the floor is a documented claim rather than a checked one:
-    // if you change what API the adapter uses, re-derive it. The other two statements of it are
-    // README.md "Install" and the Javadoc on SpringDataQueryPlanAdapter.alwaysAllowed().
-    //
-    // The `compileOnly` set follows the selected ORM set rather than staying on the baseline, on
-    // purpose: the `next` leg exists to prove that MySqlDoubleCastFunctionContributor and the
-    // adapter's classpath-guarded Hibernate probe COMPILE against the next major as well as run
-    // on it, and a main source set compiled against 6.6 and merely executed on 7.x would prove
-    // half of that. The published POM carries none of these, so the choice never reaches a
-    // consumer.
+    // The consumer brings Spring Data JPA, Jakarta Persistence and Hibernate, so they stay out of
+    // the published POM. The consumer floor is spring-data-jpa 3.5.2, for
+    // `Specification.unrestricted()`; nothing tests that version, so re-check it when the adapter
+    // starts using new API (it is also stated in README.md "Install" and on alwaysAllowed()).
+    // These follow the selected ORM set so the `next` leg also compiles against Hibernate 7.
     compileOnly("org.springframework.data:spring-data-jpa:${orm["springDataJpa"]}")
     compileOnly("jakarta.persistence:jakarta.persistence-api:${orm["jakartaPersistence"]}")
-    // Hibernate is needed only to compile MySqlDoubleCastFunctionContributor (the MySQL
-    // IEEE double-cast registration) and the adapter's classpath-guarded probe for it.
-    // `compileOnly` for the same reason as Spring Data JPA above: the consuming
-    // application provides its own Hibernate, and the adapter degrades gracefully (plain
-    // cb.toDouble casts) when Hibernate is absent at runtime.
+    // Only for MySqlDoubleCastFunctionContributor and its classpath probe; without Hibernate at
+    // runtime the adapter falls back to plain cb.toDouble casts.
     compileOnly("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
 
     testImplementation("org.springframework.data:spring-data-jpa:${orm["springDataJpa"]}")
@@ -100,16 +73,14 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers:2.0.5")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
-    // Real-database legs for AdversarialConformanceTest (selected via ADAPTER_TEST_DB /
-    // -Dadapter.test.db): PostgreSQL and MySQL containers + their JDBC drivers.
+    // PostgreSQL and MySQL legs of AdversarialConformanceTest (ADAPTER_TEST_DB).
     testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testImplementation("org.testcontainers:testcontainers-mysql:2.0.5")
     testRuntimeOnly("org.postgresql:postgresql:42.7.13")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
     testImplementation("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
     testImplementation("com.h2database:h2:2.4.240")
-    // Parses seeds.json/actions.json from the shared ../conformance/ corpus (see
-    // AdversarialConformanceTest and conformance/README.md).
+    // Reads the shared ../conformance/ corpus.
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -130,33 +101,14 @@ tasks.test {
         showStandardStreams = false
     }
 
-    // The suites read a shared directory from OUTSIDE this project — the conformance corpus
-    // (`AdversarialConformanceTest`, `SpringDataTranslatorTest`, `CerbosTestImage`), resolved
-    // from `user.dir` at runtime, which Gradle cannot infer. Undeclared, it is not an input: a
-    // `gradle build` over a stale `build/` reports BUILD SUCCESSFUL with `:test` UP-TO-DATE and
-    // runs nothing after a corpus edit.
-    //
-    // That is a green local validation of a change it never executed, which is the exact failure
-    // the corpus exists to prevent. CI never saw it because it always starts from a clean
-    // checkout, so the gap only ever bites the maintainer editing the corpus.
-    //
-    // The whole directory is declared rather than the specific files. The corpus is read by
-    // filename in several places and grows new ones, and a precise list would silently stop
-    // covering what it names — the same class of bug one level up.
+    // The suites read these at runtime, so Gradle cannot see them unless they are declared.
+    // Without this, `:test` stays UP-TO-DATE after a corpus, golden or image-pin edit.
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    // The golden expectations are read by SpringDataTranslatorTest the same way, and they live
-    // inside this project rather than outside it — but not under a source set, so Gradle would
-    // not see an edit to them either.
     inputs.dir(project.file("golden"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("goldenExpectations")
-    // The two database pins are read by DatabaseTestImages from `user.dir` at runtime, for the
-    // same reason as the corpus. Undeclared, bumping a server would leave `:test` UP-TO-DATE and
-    // the real-database leg would report a pass it never ran against the new build. Both are
-    // declared whichever leg runs: the harness reads both, and tracking only the selected leg's
-    // pin would replay a stale pass after the other one moved.
     inputs.file(project.file("POSTGRES_IMAGE"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("postgresImage")
@@ -164,19 +116,12 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("mysqlImage")
 
-    // Which ORM set the classpath resolved, forwarded so the translator suite can assert the
-    // Hibernate it runs IS the one this build selected rather than infer the leg from the
-    // classpath alone — a resolution that drifted to another major would otherwise read as
-    // whichever leg it happened to match. An input too, so switching sets re-runs the task
-    // rather than replaying the other leg's pass.
+    // Lets SpringDataTranslatorTest check the Hibernate on the classpath is the selected one.
     systemProperty("adapter.test.orm", adapterTestOrm)
     inputs.property("adapterTestOrm", adapterTestOrm)
 
-    // Select the database backing AdversarialConformanceTest: h2 (default), postgres, or
-    // mysql. The MySQL leg creates its schema with a byte-exact collation by default
-    // (utf8mb4_0900_bin); override adapter.test.mysql.collation to reproduce the
-    // over-grant on MySQL's default utf8mb4_0900_ai_ci — see the README
-    // "Database collation requirements" section.
+    // AdversarialConformanceTest's database: h2 (default), postgres or mysql. The MySQL collation
+    // can be overridden to reproduce the over-grant; see README.md "Database collation requirements".
     val adapterTestDb = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
     if (adapterTestDb != null) {
         systemProperty("adapter.test.db", adapterTestDb)
@@ -186,10 +131,8 @@ tasks.test {
     if (mysqlCollation != null) {
         systemProperty("adapter.test.mysql.collation", mysqlCollation)
     }
-    // The MySQL leg runs with Connector/J's default CLIENT-side prepared statements so the
-    // differential oracle pins the adapter's `cast(... as double)` rendering (see the README
-    // "MySQL: keeping arithmetic IEEE-faithful" gotcha). Set this to true to run the same
-    // leg with server-side prepared statements — both modes must pass.
+    // true runs the MySQL leg with server-side prepared statements; both modes must pass. See
+    // README.md "MySQL: keeping arithmetic IEEE-faithful".
     val mysqlServerPrep = System.getProperty("adapter.test.mysql.serverPrepStmts")
         ?: System.getenv("ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS")
     if (mysqlServerPrep != null) {
@@ -197,13 +140,9 @@ tasks.test {
     }
 }
 
-// Rewrites golden/expectations.json from the SQL the translator emits today, then asserts the
-// rewritten file — so the task fails if regeneration produced something the rules reject.
-//
-// Regeneration is a DELIBERATE act and the diff is the review, which is why it is a task of its
-// own rather than a flag on `test`: CI never runs it, so a translator change that moves the
-// emitted SQL fails there whatever anyone ran locally
-// (conformance/README.md, "Golden expectations").
+// Rewrites golden/expectations.json from what the translator emits, then checks it.
+// CI never runs this, so a changed translation fails `test` until someone regenerates and reviews
+// the diff. See conformance/README.md, "Golden expectations".
 tasks.register<Test>("goldenUpdate") {
     group = "verification"
     description = "Rewrite spring-data/golden/expectations.json from what the translator emits."
@@ -212,12 +151,9 @@ tasks.register<Test>("goldenUpdate") {
     useJUnitPlatform()
     filter { includeTestsMatching("dev.cerbos.queryplan.springdata.SpringDataTranslatorTest") }
     systemProperty("golden.update", "true")
-    // Forwarded for the same reason as on `test`. Under the `next` set Corpus.writeGoldenExpectations
-    // refuses before the write (conformance/README.md, "When the generator is an input", rule 2):
-    // the asset declares the Hibernate minor that rendered it, and the bytes would be another's.
+    // Under the `next` set the write is refused: the asset records the Hibernate that rendered it.
     systemProperty("adapter.test.orm", adapterTestOrm)
-    // The asset this task writes is also an input Gradle tracks for `test`; declaring it as an
-    // output here would make the two tasks fight over it, so the task is simply never up to date.
+    // The asset is an input of `test`, so it is not declared as an output here.
     outputs.upToDateWhen { false }
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -228,31 +164,32 @@ tasks.register<Test>("goldenUpdate") {
     }
 }
 
-// One publication, `dev.cerbos:cerbos-spring-data:<version>`, from the `java` component.
-//
-// What it publishes is the point: `implementation` dependencies (cerbos-sdk-java,
-// protobuf-java) land at runtime scope, and the `compileOnly` ones (spring-data-jpa,
-// jakarta.persistence-api, hibernate-core) do not appear at all — a consumer brings its own,
-// which is why they are compileOnly in the first place. example/ resolves this coordinate out
-// of mavenLocal and therefore proves that resolution, which a composite build substitutes away.
-//
-// The example is never part of the artifact: it is a separate Gradle build under example/ with
-// its own settings file, so it is not a source set here and cannot reach the jar. example/run.sh
-// asserts that rather than leaving it to inspection (ADR 0002's "examples must stay out of the
-// published artifacts they exercise", which for Java is a deliberate check rather than a
-// `files` allowlist).
-//
-// This is `publishToMavenLocal` only. Nothing here configures a Maven Central release, which
-// additionally requires POM `name`, `description`, `url`, `licenses`, `developers` and `scm`,
-// plus signing — Central rejects a POM without them. The other Java adapter
-// (elasticsearch-java) declares no publishing at all, so there is no convention here to copy
-// and inventing one is not this change's job; what the example resolves is the dependency
-// metadata, which is what it exists to exercise. Wiring up the `spring-data/v*` release is
-// separate work, and it will change this block.
+// publishToMavenLocal only: no Maven Central release is configured yet, so there is no signing.
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
+            pom {
+                name.set("Cerbos Spring Data adapter")
+                description.set("Translates Cerbos query plans into Spring Data JPA Specifications")
+                url.set("https://github.com/cerbos/query-plan-adapters/tree/main/spring-data")
+                licenses {
+                    license {
+                        name.set("Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("cerbosdev")
+                        name.set("Cerbos Developers")
+                        email.set("sdk@cerbos.dev")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/cerbos/query-plan-adapters")
+                }
+            }
         }
     }
 }

@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata.testmodel;
 
 import jakarta.persistence.Column;
@@ -10,13 +15,9 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 /**
- * One element of the corpus's {@code aNumberList}, as a row of its own.
- *
- * <p>An entity rather than an {@code @ElementCollection}: Hibernate never persists a null element
- * of an element collection, and the corpus carries one (a6 {@code [null, 2]}) — a VALUE CEL
- * compares, which a dropped row would turn into a list that no longer holds it. A related row
- * with a NULL {@code list_element} column is that null element under the adapter's
- * scalar-projection convention, exactly as a NULL {@code tags.name} is for {@code tagNames}.
+ * One element of the corpus's {@code aNumberList}. An entity, not an {@code @ElementCollection},
+ * because the corpus has a null element and Hibernate drops nulls from element collections. A
+ * NULL {@code list_element} is that null element.
  */
 @Entity
 @Table(name = "resource_number_list")

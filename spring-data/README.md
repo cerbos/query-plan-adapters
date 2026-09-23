@@ -14,7 +14,7 @@ Maven repository first, from a checkout of this repository:
 
 ```bash
 cd spring-data
-gradle publishToMavenLocal   # needs JDK 17+ and a local Gradle 8.x
+./gradlew publishToMavenLocal   # needs JDK 17+
 ```
 
 Then depend on it, with `mavenLocal()` among your Gradle repositories.
@@ -306,15 +306,15 @@ CI runs the differential suite on PostgreSQL and MySQL with mixed-case and soft-
 the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
 
 ```bash
-ADAPTER_TEST_DB=postgres gradle test --tests AdversarialConformanceTest   # passes
-ADAPTER_TEST_DB=mysql    gradle test --tests AdversarialConformanceTest   # passes (utf8mb4_0900_bin)
+ADAPTER_TEST_DB=postgres ./gradlew test --tests AdversarialConformanceTest   # passes
+ADAPTER_TEST_DB=mysql    ./gradlew test --tests AdversarialConformanceTest   # passes (utf8mb4_0900_bin)
 
 # MySQL's DEFAULT collation — FAILS, reproducing the over-grant
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
-  gradle test --tests AdversarialConformanceTest
+  ./gradlew test --tests AdversarialConformanceTest
 # Case-sensitive but not byte-exact — FAILS on seed h6
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
-  gradle test --tests AdversarialConformanceTest
+  ./gradlew test --tests AdversarialConformanceTest
 ```
 
 ## Supported operators
@@ -654,18 +654,12 @@ from the repository root with `demo/scripts/run-example.sh spring-data`.
 
 ## Build
 
-JDK 17+ and Gradle 8.x (CI pins 8.12). There is no Gradle wrapper. The suites read `../conformance/`,
-so in Docker mount the **repository root** and pass the Docker socket through (the differential
-suite starts containers):
+JDK 17+. Gradle comes from the committed wrapper. The suites read `../conformance/`, so build in a
+checkout of the **whole repository**; the differential suite needs Docker (it starts containers):
 
 ```bash
-# From the repository root:
-docker run --rm -v "$(pwd)":/repo -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TESTCONTAINERS_RYUK_DISABLED=true --network host -w /repo/spring-data gradle:8.12-jdk17 \
-  gradle build --no-daemon
-
-# Or locally, from spring-data/:
-gradle build --no-daemon
+# From spring-data/:
+./gradlew build
 ```
 
 | Variable | Values | Selects |
@@ -690,11 +684,11 @@ that overload there; the guard still fires on any `CriteriaDelete`.
 | `AdversarialConformanceTest` | Differential: real PDP plans, rows compared with `check()` per action | Docker (pinned PDP, plus PostgreSQL/MySQL when selected) |
 
 ```bash
-gradle test                            # all four
-gradle goldenUpdate                    # rewrite golden/expectations.json
-ADAPTER_TEST_DB=postgres gradle test   # differential suite on PostgreSQL
-ADAPTER_TEST_DB=mysql gradle test      # … on MySQL (see "Database collation requirements")
-ADAPTER_TEST_ORM=next gradle test      # every suite under Hibernate 7 / Spring Data JPA 4
+./gradlew test                            # all four
+./gradlew goldenUpdate                    # rewrite golden/expectations.json
+ADAPTER_TEST_DB=postgres ./gradlew test   # differential suite on PostgreSQL
+ADAPTER_TEST_DB=mysql ./gradlew test      # … on MySQL (see "Database collation requirements")
+ADAPTER_TEST_ORM=next ./gradlew test      # every suite under Hibernate 7 / Spring Data JPA 4
 ```
 
 The PostgreSQL and MySQL images are pinned by tag and digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
@@ -704,8 +698,8 @@ and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump t
 ### The golden expectations
 
 `golden/expectations.json` is this adapter's [golden expectation](../conformance/README.md#golden-expectations)
-file: the SQL it must emit for each corpus action, rewritten by `gradle goldenUpdate` and reviewed as
-a diff (`gradle test` never regenerates). Refused actions have no entry; their messages are pinned in
+file: the SQL it must emit for each corpus action, rewritten by `./gradlew goldenUpdate` and reviewed as
+a diff (`./gradlew test` never regenerates). Refused actions have no entry; their messages are pinned in
 `conformance/actions.json`. Each entry is the rendered Specification minus the
 `select distinct re1_0.id from resources re1_0` preamble — root `joins` (only where a to-one hop
 emits one, always asserted to be `left join`) and the `where` clause — for H2, PostgreSQL and MySQL,

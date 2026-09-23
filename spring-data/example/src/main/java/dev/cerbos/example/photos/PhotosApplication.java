@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example.photos;
 
 import dev.cerbos.example.CerbosClientConfig;
@@ -7,9 +12,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 
 /**
- * Component scanning starts at this class's package, so this application sees the photo/album/
- * workspace beans and nothing from the demo-domain program beside it. The PDP client is the one
- * thing the two share, and it is imported by name rather than scanned.
+ * The photo-sharing application. Component scanning covers only this package, so the demo-domain
+ * beans are not registered.
  */
 @SpringBootApplication
 @Import(CerbosClientConfig.class)

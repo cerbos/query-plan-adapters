@@ -20,7 +20,7 @@ They have separate policies, schemas and PDPs.
 
 ## Run it
 
-Prerequisites: Docker (with Compose), curl, jq, Gradle 8.x and JDK 17+.
+Prerequisites: Docker (with Compose), curl, jq and JDK 17+ (Gradle comes from the adapter's wrapper).
 
 **Demo domain** — from the repository root:
 
@@ -45,11 +45,11 @@ Or by hand:
 
 ```bash
 # terminal 1: install the adapter, start this example's PDP (ports 23592/23593)
-gradle -p .. publishToMavenLocal --no-daemon
+../gradlew -p .. publishToMavenLocal
 docker compose up -d
 
 # terminal 2: the app on :8080
-CERBOS_HOST=localhost:23593 gradle bootRun --no-daemon
+CERBOS_HOST=localhost:23593 ../gradlew bootRun
 
 # terminal 3
 curl -s "http://localhost:8080/photos?user=alice&action=view" | jq '[.[].id]'
@@ -223,7 +223,7 @@ Two fixed findings only show on real MySQL/SQL Server, not H2, so they are cover
 
 `dev.cerbos:cerbos-spring-data` resolves from **mavenLocal as a real Maven coordinate**, so its POM
 and Gradle module metadata are exercised ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)).
-`run.sh`, `smoke.sh` and `smoke-edge-cases.sh` each run `gradle -p .. publishToMavenLocal`
+`run.sh`, `smoke.sh` and `smoke-edge-cases.sh` each run `../gradlew -p .. publishToMavenLocal`
 themselves. It is not a composite build (`includeBuild("..")`), which would substitute the source
 tree and skip the published metadata. Two consequences:
 
