@@ -299,44 +299,49 @@ instead of collapsing it to a boolean. You will see this in the SQL:
 
 Most of the corpus translates directly: `LIKE … ESCAPE` for string operators, correlated `COUNT`
 subqueries for relation sizes and `exists_one`, arithmetic and string length computed in the
-database, and plain correlated predicates for model-to-model comparisons. What raises:
+database, and plain correlated predicates for model-to-model comparisons. What raises (the
+full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)):
 
-| Action | Why the adapter raises |
+| Case | Why the adapter raises |
 | --- | --- |
-| `ts-window`, `ts-vf` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
-| `cr-div-other-column` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
-| `cr-div-then-add`, `cr-div-then-add-ne` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
-| `p-matches` | `matches()` is RE2; no SQL dialect matches it. Use an operator override. |
-| `p-index` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
-| `p-timestamp` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
-| `cast-int-string`, `cast-double-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
-| `cast-int-double` | CEL truncates toward zero; PostgreSQL and MySQL round. |
-| `filter-as-condition`, `map-as-condition` | `filter()`/`map()` as the whole condition is a list, not a boolean. Only `size(filter(...))` and `hasIntersection(map(...), [...])` are boolean. |
-| `filter-as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
-| `index-scalar-list`, `index-number-list`, `index-number-list-not-eq`, `index-bool-list`, `index-bool-list-not-eq`, `index-bool-list-vs-number`, `index-number-list-vs-bool` | Positional access into a relation mapped by member field — no row order, as with `p-index`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
-| `map-eq-list` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `hier-empty-delim` | An empty hierarchy delimiter turns `descendentOf` into a prefix test whose `LIKE` would also match the path itself. |
+| `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
+| `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
+| `arithmetic/add/self-division-plus-constant-greater-than`, `arithmetic/add/self-division-plus-constant-not-equals` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
+| `regex/matches/anchored-prefix` | `matches()` is RE2; no SQL dialect matches it. Use an operator override. |
+| `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
+| `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
+| `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
+| `cast/int/negative-fraction` | CEL truncates toward zero; PostgreSQL and MySQL round. |
+| `collection/filter/as-whole-condition`, `collection/map/as-whole-condition` | `filter()`/`map()` as the whole condition is a list, not a boolean. Only `size(filter(...))` and `hasIntersection(map(...), [...])` are boolean. |
+| `collection/filter/as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
+| `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
+| `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
+| `hierarchy/descendent-of/empty-delimiter` | An empty hierarchy delimiter turns `descendentOf` into a prefix test whose `LIKE` would also match the path itself. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
 number of operands. The planner never emits these, but the adapter accepts plans from any source.
 
 ## Conformance contract
 
-The tests compare this adapter with the PDP pinned in `../conformance/CERBOS_VERSION` and
-`../conformance/CERBOS_IMAGE_DIGEST` (Cerbos 0.55.0), with strict evaluation both disabled and
-enabled. For each action the harness plans against a real PDP, translates the plan, runs it
-against 27 hostile rows, and compares the returned ids with per-row `checkResource` decisions —
-the PDP is the oracle for both sides. The Spring Data adapter is the reference behaviour.
+`spec/conformance_spec.rb` replays every plan recorded in
+[`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
+rows in SQLite and compares the ids with the ones `check()` allowed. It needs no PDP. On the
+current PDP (Cerbos 0.55.0), cases that return exactly the allowed rows, out of every golden case
+in the tier:
 
-The harness reads `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` and rejects anything
-else; CI runs both, each against a PDP configured with the same mode.
-
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Tested against the oracle | 259 corpus actions |
-| Fail-closed | 72 actions: 61 that this adapter cannot express, and the 11 that the reference adapter does not support either. Each must raise an error whose message the corpus pins, so a typo or a transport error cannot pass as the refusal |
-| Refused under the `omitted` NULL convention | 1 action — see [The NULL convention of the caller](#the-null-convention-of-the-caller) |
-| Known difference in the planner | The Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED`, but `checkResource` denies rows where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` instead of `has(R.attr.x)` for database attributes |
+| core | 26 / 26 |
+| extended | 61 / 80 |
+| adversarial | 171 / 227 |
+
+Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
+asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
+gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
+skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 that is one
+extended case, `null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing
+attribute to `ALWAYS_ALLOWED`, but `check()` denies those rows. Until the planner is fixed, use
+`R.attr.x != null` instead of `has(R.attr.x)` for database attributes.
 
 ## Mapping hazards
 
@@ -345,7 +350,7 @@ The conformance table covers the **plan**. The other half of the contract is the
 > The rows that a subquery of the adapter sees must be the same rows that your application put
 > into the resource attributes.
 
-If they differ, the filter returns rows the PDP denies, and no corpus action can see it. Each
+If they differ, the filter returns rows the PDP denies, and no corpus case can see it. Each
 hazard below was a real over-grant found while building this adapter
 ([#314](https://github.com/cerbos/query-plan-adapters/issues/314)):
 
@@ -356,7 +361,7 @@ hazard below was a real over-grant found while building this adapter
 | Subtype discrimination | **Rejected** | An association to an STI subclass also filters on the inheritance column, whose value set depends on which subclasses are loaded. Map onto the base class, or use an operator override. |
 | A to-one relation used as a collection | **Rejected** | `has_one`. The application reads one row; the subquery would see all of them. Map it as a dotted field path. |
 | A composite association key | **Rejected** | The adapter builds a single-column equality and refuses rather than join on the first column only. |
-| An absent to-one parent | **Proved by the corpus** | Write `R.attr.parent.children` as a nested `relation` mapping, not one flat `has_many :through`, so the adapter requires the parent hops to exist. See [A chain through a parent](#a-chain-through-a-parent). The `w1-*-chain` actions hold it under every polarity. |
+| An absent to-one parent | **Proved by the corpus** | Write `R.attr.parent.children` as a nested `relation` mapping, not one flat `has_many :through`, so the adapter requires the parent hops to exist. See [A chain through a parent](#a-chain-through-a-parent). The `relation/*/…to-one-chain` cases hold it under every polarity. |
 
 Five of the six are rejected because the adapter builds its subquery from the association
 reflection and can detect them there.
@@ -373,13 +378,11 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
-Everything runs in Docker; you do not need Ruby locally. The PDP version comes from
-`conformance/CERBOS_VERSION`.
+Everything runs in Docker; you do not need Ruby locally, and no suite needs a PDP.
 
 ```bash
 ./scripts/test.sh                                   # all suites
-./scripts/test.sh spec/translator_spec.rb           # offline: no PDP, no database server
-./scripts/golden-update.sh                          # rewrite golden/expectations.json
+./scripts/test.sh spec/conformance_spec.rb          # the conformance harness alone
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                   # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                   # YARD, failing on a warning or an undocumented object
@@ -388,15 +391,7 @@ RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
 Specs run in random order; rerun a failure with the seed RSpec prints (`--seed N`).
 
-| Suite | What it covers | Needs |
-| --- | --- | --- |
-| `spec/translator_spec.rb` | Translator unit test: replays every plan in `../conformance/wire-fixtures/` and asserts the SQL against [`golden/expectations.json`](golden/expectations.json), plus corpus-wide rules (every `LIKE` has an `ESCAPE`, no self-join of the resource table, every identifier names a declared table) | Nothing |
-| `spec/adapter_contract_spec.rb` | What a caller supplies: mapper forms, operator overrides, the per-call NULL convention, the four plan transports, refused association shapes | Nothing |
-| `spec/adversarial_conformance_spec.rb` | Differential harness over [`../conformance/`](../conformance/README.md) | Docker (starts a pinned PDP) |
-
-**Golden expectations.** `golden/expectations.json` records each action's relation rendered with
-`to_sql` on SQLite, literals inlined. Because ActiveRecord's renderer shapes those bytes, the file
-declares `"activerecord": "8.0"`, `golden-update.sh` refuses to run under another minor series,
-and the 7.1 leg asserts a pinned divergence list. `./scripts/test.sh` never regenerates it: run
-`./scripts/golden-update.sh` and review the diff. See
-[conformance/README.md, "Golden expectations"](../conformance/README.md#golden-expectations).
+| Suite | What it covers |
+| --- | --- |
+| `spec/conformance_spec.rb` | The conformance harness over [`../conformance/`](../conformance/README.md): one mapping, every recorded plan, and the ledger |
+| `spec/adapter_contract_spec.rb` | What a caller supplies: mapper forms, operator overrides, the per-call NULL convention, the four plan transports, refused association shapes |

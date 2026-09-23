@@ -2,9 +2,10 @@
 
 require "time"
 
-# Tables for the adversarial suite, able to hold every hostile corpus row: NULL elements,
-# duplicate or mirrored names, LIKE metacharacters, empty strings and empty collections.
-module AdversarialModels
+# The conformance dataset in SQLite: one table per attribute shape, able to hold every hostile
+# corpus row (NULL elements, duplicate or mirrored names, LIKE metacharacters, empty strings
+# and empty collections). conformance/README.md, "The dataset", says what each row must hold.
+module ConformanceStore
   module_function
 
   def establish!
@@ -62,7 +63,7 @@ module AdversarialModels
       end
 
       # `aNumberList` and `aBoolList` as child rows: one per element, with a nullable value
-      # and a position. A relation mapping cannot use the position, so every action on these
+      # and a position. A relation mapping cannot use the position, so every case indexing these
       # lists (e.g. `aNumberList[0]`) is refused at `index`.
       create_table :adversarial_number_list_elements, force: true do |t|
         t.integer :position, null: false
@@ -107,12 +108,12 @@ module AdversarialModels
         a_bool: seed.fetch("aBool"),
         a_string: seed.fetch("aString"),
         a_number: seed.fetch("aNumber"),
-        a_double: ConformanceCorpus.a_double(seed),
+        a_double: ConformanceCorpus.derived(seed, "aDouble"),
         a_optional_string: seed.fetch("aOptionalString"),
-        created_by: ConformanceCorpus.created_by(seed),
-        scope: ConformanceCorpus.scope(seed),
-        created_at: ConformanceCorpus.created_at(seed)&.then { |iso| Time.iso8601(iso) },
-        updated_at: ConformanceCorpus.updated_at(seed)&.then { |iso| Time.iso8601(iso) }
+        created_by: ConformanceCorpus.derived(seed, "createdBy"),
+        scope: ConformanceCorpus.derived(seed, "scope"),
+        created_at: ConformanceCorpus.derived(seed, "createdAt")&.then { |iso| Time.iso8601(iso) },
+        updated_at: ConformanceCorpus.derived(seed, "updatedAt")&.then { |iso| Time.iso8601(iso) }
       )
 
       # One row per level. A seed with no parent gets no row, which tests the absent-parent
@@ -158,7 +159,7 @@ module AdversarialModels
         sub_category = AdvSubCategory.create!(
           id: "#{id}-sub#{index}", name: sub_name, category_id: category.id
         )
-        ConformanceCorpus.labels(seed).each_with_index do |label_name, label_index|
+        ConformanceCorpus.derived(seed, "labels").each_with_index do |label_name, label_index|
           AdvLabel.create!(
             id: "#{id}-label#{index}-#{label_index}",
             name: label_name,
