@@ -2301,6 +2301,26 @@
         "param_2": 1
       }
     },
+    "size-frac-eq-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) != ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) != %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": 1.5,
+        "a_number_1": 10
+      }
+    },
+    "size-frac-ne-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) = ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) = %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": 1.5,
+        "a_number_1": 10
+      }
+    },
     "size-ge-one": {
       "where": {
         "sqlite": "CASE WHEN json_type(adversarial_resource.tags_json) = 'array' THEN json_array_length(adversarial_resource.tags_json) END >= ?",
@@ -2319,6 +2339,16 @@
         "length_1": 4294967296
       }
     },
+    "size-huge-gt-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) <= ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) <= %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": 5000000000,
+        "a_number_1": 10
+      }
+    },
     "size-huge-lt": {
       "where": {
         "sqlite": "length(adversarial_resource.a_string) < ?",
@@ -2326,6 +2356,36 @@
       },
       "params": {
         "length_1": 4294967296
+      }
+    },
+    "size-huge-lt-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) >= ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) >= %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": 5000000000,
+        "a_number_1": 10
+      }
+    },
+    "size-huge-neg-gt-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) <= ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) <= %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": -5000000000,
+        "a_number_1": 10
+      }
+    },
+    "size-huge-neg-lt-not": {
+      "where": {
+        "sqlite": "length(adversarial_resource.a_optional_string) >= ? OR adversarial_resource.a_number > ?",
+        "postgresql": "length(adversarial_resource.a_optional_string) >= %(length_1)s OR adversarial_resource.a_number > %(a_number_1)s"
+      },
+      "params": {
+        "length_1": -5000000000,
+        "a_number_1": 10
       }
     },
     "size-threshold": {

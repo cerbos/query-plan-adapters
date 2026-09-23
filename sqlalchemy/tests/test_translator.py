@@ -338,7 +338,7 @@ class TestCorpusShapes:
             "conditional": len(CONDITIONAL_ACTIONS),
             "unconditional": len(UNCONDITIONAL_ACTIONS),
             "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 264, "unconditional": 3, "throwing": 57}
+        } == {"conditional": 270, "unconditional": 3, "throwing": 57}
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two
