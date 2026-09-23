@@ -15,8 +15,7 @@ jobs:
   release-sqla:
     name: SQLA publish
     runs-on: ubuntu-latest
-    # PyPI trusted publishing: the project's trusted publisher names this workflow and the
-    # `pypi` environment, and the job's OIDC token stands in for an API token.
+    # PyPI trusted publishing names this workflow and the `pypi` environment.
     environment: pypi
     permissions:
       contents: read

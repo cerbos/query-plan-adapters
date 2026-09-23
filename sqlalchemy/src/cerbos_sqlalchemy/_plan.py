@@ -1,11 +1,7 @@
 # Copyright 2021-2026 Zenauth Ltd.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The plan's condition tree: decoding it from the wire, and the queries asked of its shape.
-
-Both SDK clients' spellings are normalised here, once, into three node types, so nothing
-downstream has to know which transport a plan came through.
-"""
+"""The plan's condition tree, decoded from either SDK's wire format into three node types."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -18,8 +14,7 @@ LAMBDA_BINDING_OPERATORS = frozenset(
     {"exists", "exists_one", "all", "filter", "map", "except"}
 )
 
-#: The operators whose collection operand is read from its declared storage rather than from
-#: ``attr_map``: the only two a collection's storage decides.
+#: Operators whose collection operand is read from its declared storage, not ``attr_map``.
 COLLECTION_STORAGE_OPERATORS = frozenset({"size", "index"})
 
 
@@ -45,13 +40,8 @@ Operand = Value | Variable | Expr
 def _widen_integral_literals(node: Any) -> Any:
     """Rebind wire integers that do not fit int64 as floats.
 
-    A plan literal is a protobuf ``Value.number_value`` — always a double — but
-    the JSON path renders an integral double without a fraction, so ``-1e19``
-    arrives as the Python int ``-10000000000000000000``. Binding that int is a
-    driver error on SQLite (``OverflowError: Python int too large to convert to
-    SQLite INTEGER``) rather than the comparison the policy wrote. Every int
-    outside int64 is such a double exactly, so widening it back is lossless;
-    ints inside int64 are left alone so nothing else this module emits moves.
+    Plan numbers are doubles, but JSON renders ``-1e19`` as an int, which SQLite
+    cannot bind (``OverflowError``). Such ints are exact doubles, so this is lossless.
     """
     if isinstance(node, dict):
         return {key: _widen_integral_literals(value) for key, value in node.items()}
@@ -67,7 +57,7 @@ def _widen_integral_literals(node: Any) -> Any:
 
 
 def parse_operand(node: object) -> Operand:
-    """Normalize the HTTP/gRPC wire spellings once, before semantic traversal."""
+    """Decode an HTTP or gRPC wire operand into the node types."""
     if isinstance(node, dict):
         if set(node) == {"expression"}:
             return parse_operand(node["expression"])

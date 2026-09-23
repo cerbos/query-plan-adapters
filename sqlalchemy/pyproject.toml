@@ -38,11 +38,9 @@ source = "scm"
 [tool.pdm.dev-dependencies]
 test = [
     "pytest>=7.1.2",
-    # The PostgreSQL driver for the harness's declared-collection-storage leg. psycopg2 rather
-    # than psycopg 3, whose dialect SQLAlchemy 1.4 does not have.
+    # PostgreSQL driver for the harness. psycopg2, since SQLAlchemy 1.4 lacks psycopg 3.
     "psycopg2-binary>=2.9.10",
-    # The async driver for the harness's AsyncSession leg: `get_query` returns a plain
-    # `Select`, and that leg executes it through `AsyncSession` rather than asserting it could.
+    # Async driver for the harness's AsyncSession leg.
     "aiosqlite>=0.17",
 ]
 lint = [
@@ -55,10 +53,8 @@ tools = [
 
 [tool.pdm.scripts]
 test = "pytest"
-# Rewrites golden/expectations.json from what the translator emits today, preserving every
-# `note`. A deliberate act, exactly like conformance/scripts/regenerate-wire-fixtures.sh: the
-# diff is the review. CI never sets GOLDEN_UPDATE, so a translator change that moves the
-# emitted SQL fails there whatever anyone ran locally.
+# Rewrites golden/expectations.json, keeping each `note`. Review the diff.
+# CI never sets GOLDEN_UPDATE, so an unreviewed SQL change fails there.
 "golden:update" = {cmd = "pytest tests/test_translator.py", env = {"GOLDEN_UPDATE" = "1"}}
 isort = {cmd = "isort src tests example"}
 ruff_format = {cmd = "ruff format src tests example"}
@@ -80,12 +76,11 @@ outdated = "pdm update --outdated"
 
 [tool.isort]
 profile = 'black'
-# This directory is named `sqlalchemy`, which isort otherwise takes for a first-party package.
+# This directory is named `sqlalchemy`, so isort would treat it as first-party.
 known_third_party = ["sqlalchemy"]
 
 [tool.ruff.lint]
 ignore = [
-    # The adapter refuses a shape with ValueError, and the harnesses fail with AssertionError;
-    # switching either to TypeError would change what a caller catches.
+    # Refusals raise ValueError by contract; TypeError would change what callers catch.
     "TRY004",
 ]
