@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Callable, Dict, NoReturn, Tuple
 
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import (
     ARRAY,
     JSON,
@@ -170,7 +171,7 @@ def _string_size(value: Any, _: Any) -> Any:
         # A JSON or array column holds a collection, and LENGTH() of it is a number that
         # answers a different question -- the length of its text, or nothing CEL means. Which
         # SQL counts its elements depends on how it is stored, so the caller has to say.
-        raise ValueError(
+        raise UnsupportedPlanError(
             "size() over a collection-typed column needs its storage declared: map the "
             'attribute in collection_columns with storage "json" or "pgArray"'
         )
@@ -191,7 +192,7 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
     ``int(-0.6)`` is 0 to CEL and -1 to them. Nothing in the plan says what type the
     operand's column holds, so no lowering is faithful for every row.
     """
-    raise ValueError(
+    raise UnsupportedPlanError(
         f"'{operator}()' cannot be lowered to SQL CAST: CAST reads a numeric prefix "
         "where CEL requires the whole string and raises otherwise, and PostgreSQL and "
         "MySQL round where CEL truncates toward zero"
@@ -245,7 +246,7 @@ def _require_signed_zero(denominator: Any) -> None:
         return
     if denominator != 0:
         return
-    raise ValueError(
+    raise UnsupportedPlanError(
         "division by a constant zero whose sign is indeterminate: the HTTP transport "
         "renders -0.0 as `-0`, which JSON decodes to the integer 0, so the adapter "
         "cannot tell +Infinity from -Infinity. Use the gRPC client, which preserves "
@@ -339,7 +340,7 @@ def arith_over_conditional(op_fn: Callable[[Any, Any], Any], left: Any, right: A
         left_value = left.value if isinstance(left, IEEEConstant) else left
         right_value = right.value if isinstance(right, IEEEConstant) else right
         if not (_is_number(left_value) and _is_number(right_value)):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 "arithmetic combines a non-finite value with a column, which SQL "
                 "cannot carry"
             )
@@ -399,14 +400,14 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
                     (other.is_(None), null()),
                     else_=(operator == "ne"),
                 )
-            raise ValueError(
+            raise UnsupportedPlanError(
                 "NaN can only be compared with numeric constants or SQLAlchemy "
                 "expressions"
             )
         if not isinstance(left_value, (int, float)) or not isinstance(
             right_value, (int, float)
         ):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 "Non-finite numeric constants can only be compared with numeric "
                 "constants"
             )
@@ -467,10 +468,10 @@ def _in(c: Any, values: Any) -> Any:
 def _parse_rfc3339(value: str) -> datetime:
     match = _RFC3339_TIMESTAMP.fullmatch(value)
     if match is None:
-        raise ValueError(f"Invalid RFC-3339 timestamp literal: {value}")
+        raise UnsupportedPlanError(f"Invalid RFC-3339 timestamp literal: {value}")
     digits = match.group(4) or ""
     if len(digits) > 6 and any(d != "0" for d in digits[6:]):
-        raise ValueError(
+        raise UnsupportedPlanError(
             "Timestamp literal precision exceeds the exact microsecond range: "
             f"{value}"
         )
@@ -480,7 +481,9 @@ def _parse_rfc3339(value: str) -> datetime:
         normalized = normalized.replace("z", "+00:00").replace("Z", "+00:00")
         return datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise ValueError(f"Invalid RFC-3339 timestamp literal: {value}") from exc
+        raise UnsupportedPlanError(
+            f"Invalid RFC-3339 timestamp literal: {value}"
+        ) from exc
 
 
 def _timestamp(value: Any, _: Any) -> Any:
@@ -492,19 +495,19 @@ def _timestamp(value: Any, _: Any) -> Any:
     elif isinstance(value, str):
         parsed = _parse_rfc3339(value)
     else:
-        raise ValueError(
+        raise UnsupportedPlanError(
             "timestamp() requires an RFC-3339 literal or a SQLAlchemy DateTime column"
         )
     if parsed.tzinfo is None:
-        raise ValueError(f"Timestamp literal must include an offset: {value}")
+        raise UnsupportedPlanError(f"Timestamp literal must include an offset: {value}")
     try:
         normalized = parsed.astimezone(timezone.utc)
     except (OverflowError, ValueError) as exc:
-        raise ValueError(
+        raise UnsupportedPlanError(
             f"Timestamp literal is outside CEL's supported instant range: {value}"
         ) from exc
     if normalized < _MIN_CEL_TIMESTAMP or normalized > _MAX_CEL_TIMESTAMP:
-        raise ValueError(
+        raise UnsupportedPlanError(
             f"Timestamp literal is outside CEL's supported instant range: {value}"
         )
     return normalized
@@ -516,15 +519,15 @@ def _timestamp(value: Any, _: Any) -> Any:
 def _hierarchy(value: Any, delimiter: Any) -> Hierarchy:
     delimiter = "." if delimiter is None else delimiter
     if not isinstance(delimiter, str) or not delimiter:
-        raise ValueError("hierarchy() delimiter must be a non-empty string")
+        raise UnsupportedPlanError("hierarchy() delimiter must be a non-empty string")
     return Hierarchy(value, delimiter)
 
 
 def _matching_hierarchies(left: Any, right: Any) -> Tuple[Hierarchy, Hierarchy]:
     if not isinstance(left, Hierarchy) or not isinstance(right, Hierarchy):
-        raise ValueError("Hierarchy operator requires hierarchy() operands")
+        raise UnsupportedPlanError("Hierarchy operator requires hierarchy() operands")
     if left.delimiter != right.delimiter:
-        raise ValueError("Hierarchy operands must use the same delimiter")
+        raise UnsupportedPlanError("Hierarchy operands must use the same delimiter")
     return left, right
 
 
@@ -547,7 +550,9 @@ def _ancestor_of(left: Any, right: Any) -> Any:
             prefix=False,
             suffix=True,
         )
-    raise ValueError("Hierarchy comparison between two columns is not supported")
+    raise UnsupportedPlanError(
+        "Hierarchy comparison between two columns is not supported"
+    )
 
 
 def _descendent_of(left: Any, right: Any) -> Any:
@@ -648,7 +653,7 @@ FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all"})
 # there is no enclosing override left to do so. Python then compares the intermediate with
 # `==`, yields a bare `False`, and that reaches `where()` as a perfectly valid boolean which
 # excludes every row: an emitted filter for a shape the adapter cannot express, and silent
-# because it never threw (`map-eq-list`, cerbos/query-plan-adapters#387).
+# because it never threw (`collection/map/equals-list-literal`, cerbos/query-plan-adapters#387).
 _LOWERABLE_OPERAND_TYPES = (
     ColumnElement,
     InstrumentedAttribute,
@@ -668,7 +673,7 @@ _LOWERABLE_OPERAND_TYPES = (
 
 def require_lowerable(operator: str, operand: Any) -> None:
     if not isinstance(operand, _LOWERABLE_OPERAND_TYPES):
-        raise ValueError(
+        raise UnsupportedPlanError(
             f"`{operator}` received an operand of type "
             f"{type(operand).__name__!r}, which is not a SQL expression or a plan "
             "literal: an operator override returning an intermediate value must be "

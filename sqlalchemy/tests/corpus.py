@@ -1,44 +1,29 @@
-"""The parts of the shared ``../conformance/`` corpus both of this adapter's suites read.
+"""The shared ``../conformance/`` corpus as this adapter's suites read it.
 
-``test_adversarial_conformance.py`` plans against a real PDP and executes the translated
-query against seeded SQLite rows; ``test_translator.py`` reads the same actions off the
-golden wire fixtures and asserts nothing but the emitted SQL. They must agree on two
-things or they prove less than they appear to:
-
-- **the mapping.** The unit test pins the SQL this adapter emits for one attribute map and
-  one set of operator overrides; the harness proves that same SQL returns the rows the PDP
-  allows. Two copies that drifted would leave the pinned statements describing columns and
-  correlated subqueries no harness ever executes, which is why the schema, ``ATTR_MAP``,
-  ``OPERATOR_OVERRIDES`` and ``ATTRIBUTE_NULL_REPRESENTATION`` live here rather than in
-  either suite.
-- **the classification.** Which actions this adapter must refuse, and with which message, is
-  a corpus decision (``conformance/actions.json``), not a per-suite one.
-
-What is deliberately NOT here: the seed rows, the derived fields and the ``check()`` oracle.
-Only the harness consumes those, and its coverage guards assert set equality against the
-corpus files, so they stay next to the code that reads them.
+``test_adversarial_conformance.py`` replays the recorded plans against real stores;
+``test_translator.py`` asks the same mapping the questions a store cannot answer. Both need
+the one mapping -- the schema, ``ATTR_MAP``, ``OPERATOR_OVERRIDES``, the collection storage
+and the NULL conventions -- so it lives here rather than in either suite.
 
 The code in this file is duplicated across adapters **on purpose** -- adapters share data,
-not code, so that every adapter stays standalone. Do not extract it into ``conformance/``,
-do not import another adapter's copy, and do not add a drift check between them. See
+not code, so that every adapter stays standalone. See
 `ADR 0007 <../../docs/adr/0007-adapters-share-data-not-code.md>`_.
 
 Test-only: it lives under ``tests/`` and never reaches the published package.
 """
 
+import glob
 import json
-import math
 import os
-from datetime import datetime
-from importlib.metadata import version as sqlalchemy_version
-from typing import Any, Dict, List, Sequence, Set, Tuple, Union
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Tuple, Union
 
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.model import PlanResourcesResponse
-from cerbos_image import CONFORMANCE_DIR
 from google.protobuf.json_format import ParseDict
 
-from cerbos_sqlalchemy import CollectionColumn, require_hops
+from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, require_hops
 from cerbos_sqlalchemy.query import OPERATOR_FNS
 from sqlalchemy import (
     JSON,
@@ -64,33 +49,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base
 
-ADAPTER = "sqlalchemy"
-
-WIRE_FIXTURES_DIR = os.path.join(CONFORMANCE_DIR, "wire-fixtures")
-
-#: The golden expectations this adapter owns. Never under ``conformance/`` -- see ADR 0007.
-GOLDEN_FILE = os.path.realpath(
-    os.path.join(os.path.dirname(__file__), "..", "golden", "expectations.json")
+CONFORMANCE_DIR = os.path.realpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "conformance")
 )
-
-#: The command that rewrites :data:`GOLDEN_FILE`. Documentation that travels with the data.
-GOLDEN_REGENERATE_COMMAND = "pdm run golden:update"
-
-#: The SQLAlchemy major line installed right now. ``pyproject.toml`` declares ``>=1.4`` and
-#: CI runs both, so this is a real dimension rather than a formality.
-INSTALLED_SQLALCHEMY_MAJOR = (
-    "1.4" if sqlalchemy_version("sqlalchemy").startswith("1.4") else "2.x"
-)
-
-#: The major :data:`GOLDEN_FILE` is generated under.
-#:
-#: The adapter emits a SQLAlchemy expression tree; SQL text is that tree plus SQLAlchemy's
-#: own compiler, and the two majors compile some trees differently — 2.x parenthesises a
-#: concatenation used as a comparison operand, and adds SQLite's ``+ 0.0`` float-division
-#: coercion. Neither is a translation difference, but both are byte differences, so the asset
-#: has to say which compiler wrote it. The other major asserts a pinned divergence set
-#: instead of the bytes (see ``test_translator.py``).
-GOLDEN_SQLALCHEMY_MAJOR = "2.x"
 
 
 def read_corpus_json(name: str) -> Any:
@@ -98,356 +59,96 @@ def read_corpus_json(name: str) -> Any:
         return json.load(f)
 
 
-# -- actions.json -----------------------------------------------------------
-#
-# Every group is parsed EXPLICITLY. Rebuilding the manifest field by field is what makes a
-# corpus group nobody named land as a failure: a dropped group makes its actions vanish from
-# every count and every parametrised case at once, and the suite then passes vacuously (the
-# projection trap conformance/README.md describes).
+# -- the golden files -------------------------------------------------------
+
+#: Both recorded PDPs, current first.
+PDP_TAGS: List[str] = [
+    read_corpus_json("pdp-versions.json")[which]["tag"]
+    for which in ("current", "previous")
+]
 
 
-class ActionsFile:
-    """``conformance/actions.json``, read group by group rather than duck-typed."""
-
-    def __init__(self, raw: Dict[str, Any]) -> None:
-        self.adapters: List[str] = _require_list(raw, "adapters")
-        self.conformance: List[str] = _require_list(raw, "conformance")
-        self.adapter_unsupported: Dict[str, List[Dict[str, Any]]] = _require_dict(
-            raw, "adapterUnsupported"
-        )
-        self.adapter_supported_expected: Dict[
-            str, List[Dict[str, Any]]
-        ] = _require_dict(raw, "adapterSupportedExpected")
-        self.expected_unsupported: List[Dict[str, Any]] = _require_list(
-            raw, "expectedUnsupported"
-        )
-        self.null_representation_omitted: List[Dict[str, Any]] = _require_list(
-            raw, "nullRepresentationOmitted"
-        )
-        self.known_divergences: List[Dict[str, Any]] = _require_list(
-            raw, "knownDivergences"
-        )
-        self.degenerate_oracles: Dict[str, str] = _degenerate_oracles(
-            _require_list(raw, "degenerateOracles")
-        )
-
-    def manifest_actions(self) -> Set[str]:
-        """Every action the corpus classifies, across every group."""
-        return (
-            set(self.conformance)
-            | {entry["action"] for entry in self.expected_unsupported}
-            | {entry["action"] for entry in self.null_representation_omitted}
-            | {entry["action"] for entry in self.known_divergences}
-        )
-
-    def skipped_divergences(self, adapter: str) -> Set[str]:
-        return {
-            entry["action"]
-            for entry in self.known_divergences
-            if adapter in entry["adapters"]
-        }
+def golden_cases(tag: str) -> List[Dict[str, Any]]:
+    """Every golden file recorded for one PDP tag, sorted by case id."""
+    root = os.path.join(CONFORMANCE_DIR, "golden", tag)
+    paths = glob.glob(os.path.join(root, "**", "*.json"), recursive=True)
+    cases = []
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            cases.append(json.load(f))
+    return sorted(cases, key=lambda case: case["id"])
 
 
-def _require_list(raw: Dict[str, Any], key: str) -> List[Any]:
-    value = raw.get(key)
-    if not isinstance(value, list):
-        raise AssertionError(f"actions.json {key} must be an array")
-    return value
-
-
-def _require_dict(raw: Dict[str, Any], key: str) -> Dict[str, Any]:
-    value = raw.get(key)
-    if not isinstance(value, dict):
-        raise AssertionError(f"actions.json {key} must be an object")
-    return value
-
-
-DEGENERATE_ORACLE_SHAPES = ("empty", "total")
-
-
-def _degenerate_oracles(entries: List[Any]) -> Dict[str, str]:
-    """``degenerateOracles`` as ``action -> "empty" | "total"``.
-
-    The corpus-level allowlist of actions whose check() oracle is empty or total BY
-    CONSTRUCTION. Every other compared action must have a non-empty, non-total oracle,
-    which the harness sweeps; a shape outside the two values would silently exempt an
-    action from that sweep, so it is a loud failure here instead.
-    """
-    oracles: Dict[str, str] = {}
-    for index, entry in enumerate(entries):
-        label = f"actions.json degenerateOracles[{index}]"
-        if not isinstance(entry, dict) or not isinstance(entry.get("action"), str):
-            raise AssertionError(f"{label} must be an object with a string action")
-        if entry.get("oracle") not in DEGENERATE_ORACLE_SHAPES:
-            raise AssertionError(
-                f"{label} ({entry['action']}) oracle must be one of "
-                f"{DEGENERATE_ORACLE_SHAPES}, got {entry.get('oracle')!r}"
-            )
-        if entry["action"] in oracles:
-            raise AssertionError(f"{label} repeats {entry['action']}")
-        oracles[entry["action"]] = entry["oracle"]
-    return oracles
-
-
-def parse_actions_file(raw: Dict[str, Any]) -> ActionsFile:
-    return ActionsFile(raw)
-
-
-def require_message(label: str, message: Any) -> str:
-    """The substring this adapter's error must contain, or a loud failure.
-
-    The message is what turns "it raised" into "it raised for the declared reason": without
-    it a mapper typo or an unrelated validation satisfies the throw suite just as well as
-    the documented limitation (cerbos/query-plan-adapters#326).
-    """
-    if not isinstance(message, str) or not message:
-        raise AssertionError(
-            f"actions.json pins no throw message for {label}: the throw suite "
-            "would accept a failure for any reason"
-        )
-    return message
-
-
-class Classification:
-    """The corpus's own view of every action, from this adapter's point of view.
-
-    ``nullRepresentationOmitted`` is deliberately NOT folded in: it is its own
-    classification, and the harness's four-way "exactly one outcome per action" guard
-    depends on the groups staying distinct. Read it with :func:`null_representation_throws`.
-    """
-
-    def __init__(
-        self,
-        oracle_actions: List[str],
-        throwing_actions: List[Tuple[str, str]],
-        supported_expected: Set[str],
-    ) -> None:
-        self.oracle_actions = oracle_actions
-        #: ``(action, pinned message substring)``, sorted.
-        self.throwing_actions = throwing_actions
-        self.supported_expected = supported_expected
-
-
-def classify_actions_for_adapter(manifest: ActionsFile, adapter: str) -> Classification:
-    unsupported = manifest.adapter_unsupported.get(adapter, [])
-    unsupported_actions = {entry["action"] for entry in unsupported}
-    supported_expected = {
-        entry["action"]
-        for entry in manifest.adapter_supported_expected.get(adapter, [])
-    }
-    oracle_actions = [
-        action for action in manifest.conformance if action not in unsupported_actions
-    ] + sorted(supported_expected)
-    throwing_actions = sorted(
-        [
-            (
-                entry["action"],
-                require_message(
-                    f'adapterUnsupported.{adapter}.{entry["action"]}',
-                    entry.get("message"),
-                ),
-            )
-            for entry in unsupported
-        ]
-        + [
-            (
-                entry["action"],
-                require_message(
-                    f'expectedUnsupported.{entry["action"]}.messages.{adapter}',
-                    entry.get("messages", {}).get(adapter),
-                ),
-            )
-            for entry in manifest.expected_unsupported
-            if entry["action"] not in supported_expected
-        ]
+def golden_case(case_id: str, tag: Union[str, None] = None) -> Dict[str, Any]:
+    """One golden file, from the current PDP unless ``tag`` says otherwise."""
+    path = os.path.join(
+        CONFORMANCE_DIR, "golden", tag or PDP_TAGS[0], case_id + ".json"
     )
-    return Classification(oracle_actions, throwing_actions, supported_expected)
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
-
-def null_representation_throws(
-    manifest: ActionsFile, adapter: str
-) -> List[Tuple[str, str, str]]:
-    """The ``nullRepresentationOmitted`` actions as ``(action, reason, message)``.
-
-    Every adapter must reject these -- the two NULL conventions are indistinguishable on the
-    wire -- so the message map names the whole roster and this adapter resolves its own
-    entry exactly as it does for a throwing action (#302).
-    """
-    return [
-        (
-            entry["action"],
-            entry["reason"],
-            require_message(
-                f'nullRepresentationOmitted.{entry["action"]}.messages.{adapter}',
-                entry.get("messages", {}).get(adapter),
-            ),
-        )
-        for entry in manifest.null_representation_omitted
-    ]
-
-
-# -- the golden wire fixtures -----------------------------------------------
-
-#: The instant ``regenerate-wire-fixtures.sh`` substitutes for the one operand it cannot pin.
-#:
-#: ``ts-window`` and ``ts-vf`` compare against ``now() - duration("24h")``, which the planner
-#: folds to a literal timestamp: a different value on every capture, so the script rewrites it
-#: to ``__NOW_MINUS_24H__`` to keep the drift check deterministic. Reading the fixture back
-#: therefore means choosing a value, and the choice is load-bearing HERE -- the PDP emits
-#: NANOSECOND precision, which is exactly why this adapter refuses both actions, and a tidy
-#: millisecond substitution would translate cleanly and quietly contradict ``actions.json``.
-PLANNED_AT = "2026-08-11T09:13:39.123456789Z"
 
 _NOW_MINUS_24H = "__NOW_MINUS_24H__"
 
 
-def wire_fixture_actions() -> List[str]:
-    """Every action the corpus has a golden wire fixture for, sorted."""
-    return sorted(
-        name[: -len(".json")]
-        for name in os.listdir(WIRE_FIXTURES_DIR)
-        if name.endswith(".json")
-    )
+def now_minus_24h() -> str:
+    """``now() - duration("24h")`` as the PDP folds it: RFC 3339 at nanosecond precision.
+
+    The precision is the point. The planner folds the literal with Go's nanosecond clock, and
+    a ``DateTime`` column holds microseconds, which is why this adapter refuses those plans.
+    A clock that happened to land on a whole microsecond would hide that, so the last digit
+    is forced non-zero.
+    """
+    ns = time.time_ns() - 24 * 3600 * 10**9
+    seconds, fraction = divmod(ns, 10**9)
+    if fraction % 1000 == 0:
+        fraction += 1
+    stamp = datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return f"{stamp}.{fraction:09d}Z"
 
 
-def _substitute_planned_at(node: Any, planned_at: str) -> Any:
+def _substitute(node: Any, planned_at: str) -> Any:
     if isinstance(node, dict):
-        return {k: _substitute_planned_at(v, planned_at) for k, v in node.items()}
+        return {k: _substitute(v, planned_at) for k, v in node.items()}
     if isinstance(node, list):
-        return [_substitute_planned_at(v, planned_at) for v in node]
+        return [_substitute(v, planned_at) for v in node]
     return planned_at if node == _NOW_MINUS_24H else node
 
 
-def _fixture_response_dict(action: str, planned_at: str) -> Dict[str, Any]:
-    with open(os.path.join(WIRE_FIXTURES_DIR, f"{action}.json"), encoding="utf-8") as f:
-        fixture = json.load(f)
+def _response_dict(
+    case: Dict[str, Any], planned_at: Union[str, None]
+) -> Dict[str, Any]:
     return {
         "requestId": "",
-        "action": fixture["action"],
-        "resourceKind": fixture["resourceKind"],
+        "action": case["request"]["action"],
+        "resourceKind": case["request"]["resourceKind"],
         "policyVersion": "default",
-        "filter": _substitute_planned_at(fixture["filter"], planned_at),
+        "filter": _substitute(case["plan"], planned_at or now_minus_24h()),
     }
 
 
-def plan_from_wire_fixture(
-    action: str, planned_at: str = PLANNED_AT
+def plan_from_golden(
+    case: Dict[str, Any], planned_at: Union[str, None] = None
 ) -> PlanResourcesResponse:
-    """The plan the pinned PDP produced for ``action``, as the HTTP SDK hands it to a caller.
+    """The recorded plan as the HTTP SDK hands it to a caller.
 
-    The fixture IS the PDP's HTTP response body, so the decoding here is the one
-    ``cerbos.sdk.client.CerbosClient`` performs -- ``PlanResourcesResponse.from_dict``, whose
-    ``decode_operand`` turns each ``{expression|variable|value}`` node into the model class
-    the adapter walks. It is deliberately not a hand-built plan: a plan somebody typed is a
-    belief about what the planner emits, and this repository keeps fixtures precisely because
-    that belief has been wrong before. See docs/adr/0006.
+    The golden ``plan`` is the PDP's ``filter`` object as the HTTP API returns it, so the
+    decoding is the one ``cerbos.sdk.client.CerbosClient`` performs.
     """
-    return PlanResourcesResponse.from_dict(_fixture_response_dict(action, planned_at))
+    return PlanResourcesResponse.from_dict(_response_dict(case, planned_at))
 
 
-def grpc_plan_from_wire_fixture(
-    action: str, planned_at: str = PLANNED_AT
+def grpc_plan_from_golden(
+    case: Dict[str, Any], planned_at: Union[str, None] = None
 ) -> response_pb2.PlanResourcesResponse:
-    """The same fixture decoded into the protobuf response the gRPC client returns.
+    """The same plan re-encoded as the gRPC client's protobuf response.
 
-    ``get_query`` accepts both, and reaches the condition through ``MessageToDict`` rather
-    than ``to_dict()`` for this one, so the protobuf arm is a second decoding of the same
-    wire bytes. See ``test_translator.py`` for what it does and does not prove -- a JSON
-    fixture cannot carry everything a real gRPC frame does.
+    JSON has already lost what the two transports disagree about (the sign of a ``-0``), so
+    this exercises the protobuf decoding arm without standing in for a real gRPC frame.
     """
     return ParseDict(
-        _fixture_response_dict(action, planned_at),
-        response_pb2.PlanResourcesResponse(),
+        _response_dict(case, planned_at), response_pb2.PlanResourcesResponse()
     )
-
-
-# -- the golden expectations ------------------------------------------------
-
-
-#: The reserved key an entry may carry alongside its expectation; never compared.
-NOTE_KEY = "note"
-
-
-def read_golden_expectations() -> Dict[str, Dict[str, Any]]:
-    """The golden expectations, keyed by action, each split into ``note`` and the value.
-
-    ``adapter`` is checked rather than ignored: the file is a flat map of action names, so a
-    copy taken from another adapter parses cleanly and would be compared against this
-    adapter's output with only the diff to say something went wrong.
-    """
-    with open(GOLDEN_FILE, encoding="utf-8") as f:
-        contents = json.load(f)
-    if contents.get("adapter") != ADAPTER:
-        raise AssertionError(
-            f'{GOLDEN_FILE} declares adapter "{contents.get("adapter")}", not "{ADAPTER}"'
-        )
-    if contents.get("sqlalchemy") != GOLDEN_SQLALCHEMY_MAJOR:
-        raise AssertionError(
-            f'{GOLDEN_FILE} declares SQLAlchemy "{contents.get("sqlalchemy")}", not '
-            f'"{GOLDEN_SQLALCHEMY_MAJOR}"'
-        )
-    recorded = {}
-    for action, entry in contents["expectations"].items():
-        expectation = {k: v for k, v in entry.items() if k != NOTE_KEY}
-        recorded[action] = {
-            "note": entry.get(NOTE_KEY),
-            "expectation": expectation,
-        }
-    return recorded
-
-
-def write_golden_expectations(expectations: Dict[str, Dict[str, Any]]) -> None:
-    """Rewrite the golden expectations, carrying every existing ``note`` across.
-
-    Only ever called under ``GOLDEN_UPDATE=1`` (``pdm run golden:update``). Regeneration is
-    the same deliberate act as ``conformance/scripts/regenerate-wire-fixtures.sh``, with the
-    same safety: the diff is what a reviewer reads, which is why the entries are written
-    sorted and one action per key. CI never sets the variable.
-
-    A missing file is not an error here, and only here -- that is how a new adapter
-    bootstraps one. Reading a missing file for an assertion stays an error, because a suite
-    that quietly asserts nothing is the failure mode the completeness guard exists to
-    prevent.
-
-    Regenerating under the wrong SQLAlchemy major IS an error. The two compilers render some
-    trees differently, so it would rewrite every entry that differs and present a compiler
-    swap as a translation change -- a diff a reviewer would have to read line by line to
-    discover said nothing.
-    """
-    if INSTALLED_SQLALCHEMY_MAJOR != GOLDEN_SQLALCHEMY_MAJOR:
-        raise AssertionError(
-            f"{GOLDEN_FILE} is generated under SQLAlchemy {GOLDEN_SQLALCHEMY_MAJOR}, and "
-            f"{sqlalchemy_version('sqlalchemy')} is installed. Regenerating here would "
-            "rewrite every entry the two compilers render differently."
-        )
-    # Notes are read WITHOUT the header validation `read_golden_expectations` applies. The
-    # file about to be overwritten may legitimately carry an older header -- that is what a
-    # header change looks like -- and refusing to carry the commentary across because of one
-    # would make every such change silently drop it.
-    notes: Dict[str, str] = {}
-    if os.path.exists(GOLDEN_FILE):
-        with open(GOLDEN_FILE, encoding="utf-8") as f:
-            for action, entry in json.load(f).get("expectations", {}).items():
-                if NOTE_KEY in entry:
-                    notes[action] = entry[NOTE_KEY]
-    body = {}
-    for action in sorted(expectations):
-        entry = dict(expectations[action])
-        note = notes.get(action)
-        body[action] = entry if note is None else {NOTE_KEY: note, **entry}
-    os.makedirs(os.path.dirname(GOLDEN_FILE), exist_ok=True)
-    with open(GOLDEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "adapter": ADAPTER,
-                "sqlalchemy": GOLDEN_SQLALCHEMY_MAJOR,
-                "regenerate": GOLDEN_REGENERATE_COMMAND,
-                "expectations": body,
-            },
-            f,
-            indent=2,
-        )
-        f.write("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -537,8 +238,8 @@ class AdvLabel(AdvBase):
 # `parent` and `parent.inner` are separate rows reached through a join, unlike
 # `obj.inner`, which is a flat column wearing a dotted name. A resource owns its
 # own parent chain — the unique foreign key is what makes it to-ONE — so a filter
-# that returned the parent instead of the child could not agree with the oracle
-# by accident.
+# that returned the parent instead of the child could not agree with the recorded
+# decisions by accident.
 class AdvParent(AdvBase):
     __tablename__ = "adversarial_parent"
 
@@ -594,7 +295,7 @@ class _Relation:
         # otherwise pull the resource table into the inner FROM as a cartesian
         # product (silently comparing against EVERY resource row).
         self.correlate_targets = correlate_targets
-        # For plain `in` membership over a chained string list (w1-in-chain).
+        # For plain `in` membership over a chained string list (relation/in/to-one-chain).
         self.member_field = member_field
         # Correlation for the INTERMEDIATE hops alone, when the collection is
         # reached through an optional to-one parent. CEL cannot dot through a
@@ -621,8 +322,9 @@ class _Relation:
 TAGS = _Relation(
     "tags",
     [AdvTag.resource_id == AdvResource.id],
-    # The root resource may be any number of lambda scopes up (w2-outer-relation
-    # plans a tags exists INSIDE the categories lambda).
+    # The root resource may be any number of lambda scopes up
+    # (collection/exists/outer-collection-inside-lambda plans a tags exists INSIDE the
+    # categories lambda).
     correlate_targets=[AdvResource],
 )
 TAG_NAMES = _Relation(
@@ -638,7 +340,8 @@ CATEGORIES = _Relation(
 )
 # c.subCategories: correlates to the *category* the enclosing lambda is scoped
 # to, never to the root resource — but its lambda body may still reference
-# outer resource columns (outer-attr-depth2), so both entities correlate.
+# outer resource columns (collection/exists/nested-with-outer-attribute), so both
+# entities correlate.
 SUB_OF_CATEGORY = _Relation(
     "c.subCategories",
     [AdvSubCategory.category_id == AdvCategory.id],
@@ -697,9 +400,8 @@ def _require_hops(rel: _Relation, expr: Any):
     The invariant lives in the library as ``cerbos_sqlalchemy.require_hops``; this
     is only the unpacking of the harness's ``_Relation`` marker into its arguments.
     The harness using the shipped helper rather than a private copy is what proves
-    the helper: every chained corpus action — ``w1-all-chain``,
-    ``w1-not-exists-chain``, ``w1-not-in-chain``, ``w1-not-hasint-chain`` and the
-    rest — is an oracle comparison against a real PDP that runs through this call.
+    the helper: every chained corpus case over ``mainCategory`` is compared with the
+    PDP's recorded decisions through this call.
     The ``size()`` chains are the exception: ``mainCategory.subCategories`` is
     declared in :data:`COLLECTION_COLUMNS`, and a NULL column is what makes an
     absent parent UNKNOWN there.
@@ -709,7 +411,9 @@ def _require_hops(rel: _Relation, expr: Any):
 
 def _require_relation(op: str, coll: Any) -> _Relation:
     if not isinstance(coll, _Relation):
-        raise ValueError(f"{op} over unsupported collection operand: {coll!r}")
+        raise UnsupportedPlanError(
+            f"{op} over unsupported collection operand: {coll!r}"
+        )
     return coll
 
 
@@ -792,7 +496,7 @@ def _has_intersection_fn(mapped: Any, values: Any):
         return _require_hops(rel, false())
     if isinstance(mapped, _Relation):
         if mapped.member_field is None:
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"hasIntersection over relation without member field: {mapped!r}"
             )
         return _require_hops(
@@ -803,7 +507,9 @@ def _has_intersection_fn(mapped: Any, values: Any):
     # hasIntersection(map(coll, x), list): map errors on any erroring element
     # (no absorption), so the error guard comes FIRST.
     if not (isinstance(mapped, tuple) and mapped[0] == "map"):
-        raise ValueError(f"hasIntersection over unsupported operand: {mapped!r}")
+        raise UnsupportedPlanError(
+            f"hasIntersection over unsupported operand: {mapped!r}"
+        )
     _, rel, projected = mapped
     return _require_hops(
         rel,
@@ -824,11 +530,13 @@ def _scalar_membership(column: Any, values: Any):
 
 def _relation_membership(relation: _Relation, value: Any):
     if isinstance(value, (list, dict)):
-        raise ValueError(
+        raise UnsupportedPlanError(
             "Membership with a structured element has no scalar SQL lowering"
         )
     if relation.member_field is None:
-        raise ValueError(f"in over relation without member field: {relation!r}")
+        raise UnsupportedPlanError(
+            f"in over relation without member field: {relation!r}"
+        )
     member = relation.member_field
     if value is None:
         predicate = member.is_(None)
@@ -875,8 +583,8 @@ OPERATOR_OVERRIDES = {
 #
 # `mainCategory.subCategories` is the one that proves "absent is not empty": a resource with no
 # category sends no `mainCategory` at all, so its column is NULL and `size() >= 0` must still
-# exclude it (`w1-size-nonneg-chain`). `tags` proves the other half, since every seed carries the
-# attribute and 14 carry it empty.
+# exclude it (`relation/size/non-negative-to-one-chain`). `tags` proves the other half, since
+# every seed carries the attribute and 14 carry it empty.
 COLLECTION_COLUMNS = {
     "request.resource.attr.tags": CollectionColumn(AdvResource.tags_json, "json"),
     "request.resource.attr.tagNames": CollectionColumn(
@@ -913,14 +621,14 @@ PG_ARRAY_COLLECTION_COLUMNS = {
 }
 
 
-def reads_declared_collection(action: str) -> bool:
-    """Whether ``action``'s plan reads a declared collection's storage.
+def reads_declared_collection(case: Dict[str, Any]) -> bool:
+    """Whether a golden case's plan reads a declared collection's storage.
 
     That is ``size()`` or ``index`` over any declared collection, and ``in`` or
     ``hasIntersection`` over one :data:`ATTR_MAP` does not map -- the attributes whose membership
     the adapter answers from the declaration rather than from a relation override.
 
-    Read off the wire fixture rather than listed, so an action added to the corpus over one of
+    Read off the recorded plan rather than listed, so a case added to the corpus over one of
     these attributes joins the PostgreSQL leg without anyone remembering to add it.
     """
 
@@ -945,16 +653,17 @@ def reads_declared_collection(action: str) -> bool:
             return True
         return any(walk(operand) for operand in operands)
 
-    fixture = _fixture_response_dict(action, PLANNED_AT)["filter"]
-    return walk(fixture.get("condition", {}))
+    return walk((case["plan"] or {}).get("condition", {}))
 
 
 # `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
-# under the OTHER null convention: the oracle sends a real null attribute for them
-# rather than omitting it. Declaring that here is what makes the equality family
-# definite for these two attributes and leaves it untouched for every other
-# mapping (cerbos/query-plan-adapters#308).
+# under the OTHER null convention: `resources.json` sends a real null attribute for
+# them rather than omitting it. Declaring that here is what makes the equality family
+# definite for these two attributes (cerbos/query-plan-adapters#308).
+# `aOptionalString` itself is omitted when NULL, so `== null` against it is a CEL
+# missing-attribute error, not a match, and is declared that way (#302).
 ATTRIBUTE_NULL_REPRESENTATION = {
+    "request.resource.attr.aOptionalString": "omitted",
     "tagName": "explicit",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
@@ -1002,9 +711,9 @@ def _inner_scalar(column):
 
 
 ATTR_MAP = {
-    # The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-    # actions). An adapter that resolves references by stripping a `request.resource.attr.`
-    # prefix never sees this name.
+    # The primary key, reached as `request.resource.id` rather than through `attr` (the
+    # `identifier/*` cases). An adapter that resolves references by stripping a
+    # `request.resource.attr.` prefix never sees this name.
     "request.resource.id": AdvResource.id,
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
@@ -1018,9 +727,10 @@ ATTR_MAP = {
     "request.resource.attr.createdAt": AdvResource.created_at,
     "request.resource.attr.updatedAt": AdvResource.updated_at,
     # obj.inner is not a real nested column — mirrors aString, the same trick
-    # the spring-data and prisma reference harnesses use for the p-struct probe.
+    # the spring-data and prisma reference harnesses use for the
+    # comparison/equals/nested-map-member case.
     "request.resource.attr.obj.inner": AdvResource.a_string,
-    # The corpus's one REAL to-one chain (the `rel-*` actions). This adapter has no
+    # The corpus's one REAL to-one chain (the `relation/*` cases). This adapter has no
     # relation model, so the caller supplies the hop as a correlated scalar
     # subquery — and that spelling needs no separate hop guard: an absent parent
     # makes the subquery SQL NULL, which is CEL's missing-path error, and NOT NULL
@@ -1046,8 +756,9 @@ ATTR_MAP = {
     "request.resource.attr.categories": CATEGORIES,
     "c": CATEGORIES,
     # The category's own name, read inside the categories lambda. Only
-    # rel-hop2-or-exists reaches it — every other categories probe dots straight
-    # through to subCategories — so it is mapped here rather than alongside them.
+    # relation/or/two-hops-or-collection-exists reaches it — every other categories probe
+    # dots straight through to subCategories — so it is mapped here rather than alongside
+    # them.
     "c.name": AdvCategory.name,
     "c.subCategories": SUB_OF_CATEGORY,
     "s": SUB_OF_CATEGORY,
@@ -1062,119 +773,21 @@ ATTR_MAP = {
 
 # -- rendering an emitted Select --------------------------------------------
 
-#: The dialects the golden expectations pin, most-executed first.
-#:
-#: SQLite is the store ``test_adversarial_conformance.py`` actually runs the corpus against,
-#: so its rendering is the one an oracle comparison stands behind. PostgreSQL executes only
-#: the actions that read a declared collection, and is the dialect the adapter's own source
-#: reasons about most — NaN ordering, ``CAST`` rounding, the ``string()`` cast over a boolean
-#: — so pinning its rendering is the only place most of that reasoning is visible at all. They are not close to
-#: identical: SQLite has no boolean type, so a ``CASE`` in a WHERE clause needs ``= 1`` and a
-#: negation renders as ``= 0``, and the two dialects spell float division differently.
-GOLDEN_DIALECTS = ("sqlite", "postgresql")
-
 
 def dialect(name: str):
-    # Imported here rather than at module scope: `sqlalchemy.dialects` pulls in every
-    # dialect module named, and only the rendering helpers below need them.
     from sqlalchemy.dialects import postgresql, sqlite
 
     return {"sqlite": sqlite.dialect(), "postgresql": postgresql.dialect()}[name]
-
-
-def json_parameter(label: str, value: Any) -> Any:
-    """One bound parameter, in the form the golden file records it.
-
-    A parameter has to survive a JSON round trip or the asset records something other than
-    what the driver is handed. Scalars and lists of scalars do. A ``datetime`` does not, so
-    it is normalised to its ISO-8601 spelling in the data and the actions that bind one are
-    pinned in code — the same answer the format prescribes for a value the encoding cannot
-    hold (``conformance/README.md``, "Golden expectations").
-
-    A non-finite float is refused outright rather than normalised: the adapter folds every
-    IEEE special before a bind is built, so one reaching here is a translation change, not an
-    encoding problem.
-    """
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, bool) or value is None:
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise AssertionError(
-                f"{label} binds the non-finite number {value!r}; the golden file cannot "
-                "record it faithfully"
-            )
-        return value
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (list, tuple)):
-        return [json_parameter(f"{label}[{i}]", item) for i, item in enumerate(value)]
-    raise AssertionError(
-        f"{label} binds a {type(value).__name__}, which the golden file has no encoding for"
-    )
 
 
 def render(query, dialect_name: str) -> Tuple[str, Dict[str, Any]]:
     """Compile ``query`` for one dialect, as ``(statement, parameters)``.
 
     The WHOLE ``Select`` is compiled, never the bare ``WHERE`` clause, because correlation is
-    only observable inside the enclosing SELECT: compiled on its own, a correlated subquery
-    renders the outer table into its own FROM as a cartesian product and silently compares
-    against every row of it.
-
-    ``render_postcompile`` expands an ``IN`` clause's single expanding bind into the one
-    placeholder per element the DBAPI is actually handed. Without it the statement records
-    ``IN (__[POSTCOMPILE_scope_1])``, which is a stage of SQLAlchemy's compiler rather than
-    anything a database ever sees, and hides how many values the clause carries.
-
-    Whitespace is collapsed because SQLAlchemy's compiler breaks clauses across lines and a
-    line break is not a translation decision. It is safe to do because every value in the
-    statement is a bind parameter — the ``parameters`` half of the pair is the proof — so no
-    string literal can have its own whitespace flattened.
+    only observable inside the enclosing SELECT. Whitespace is collapsed because SQLAlchemy's
+    compiler breaks clauses across lines, and every value is a bind parameter.
     """
     compiled = query.compile(
         dialect=dialect(dialect_name), compile_kwargs={"render_postcompile": True}
     )
     return " ".join(str(compiled).split()), dict(compiled.params)
-
-
-def statement_preamble() -> str:
-    """The ``SELECT ... FROM`` every emitted statement starts with.
-
-    ``get_query`` builds ``select(table).where(condition)``, so the columns and the FROM are
-    the same 180 times over and the golden entries record only what follows ``WHERE``. That
-    is only lossless while this holds, which is why ``test_translator.py`` asserts it for
-    every action rather than trusting it.
-    """
-    return " ".join(str(select(AdvResource).compile(dialect=dialect("sqlite"))).split())
-
-
-def where_clause(statement: str) -> Union[str, None]:
-    """The part of a rendered statement after ``WHERE``, or ``None`` when there is none."""
-    preamble = statement_preamble()
-    if statement == preamble:
-        return None
-    marker = preamble + " WHERE "
-    if not statement.startswith(marker):
-        raise AssertionError(
-            f"emitted statement does not start with the expected SELECT: {statement[:200]}"
-        )
-    return statement[len(marker) :]
-
-
-def statement_from(where: Union[str, None]) -> str:
-    """The inverse of :func:`where_clause`, so the recorded value is checkable both ways."""
-    preamble = statement_preamble()
-    return preamble if where is None else f"{preamble} WHERE {where}"
-
-
-def declared_columns() -> Sequence[str]:
-    """Every column name the corpus schema declares, for the "no stray identifier" rule."""
-    return sorted(
-        f"{table.name}.{column.name}"
-        for table in AdvBase.metadata.tables.values()
-        for column in table.columns
-    )

@@ -11,6 +11,7 @@ from typing import Any, Dict, Literal, Tuple, Union
 
 from cerbos_sqlalchemy._operators import scalar_kind
 from cerbos_sqlalchemy._plan import Expr, Operand, Value, Variable
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import and_, case, literal, not_, or_
 
 # How the caller represents a NULL column when building the attributes it sends
@@ -81,8 +82,8 @@ def _compared_attribute_and_literal(node: Operand) -> Union[Tuple[str, Value], N
     return variable.name, value
 
 
-def _null_operand_error(operator: str) -> ValueError:
-    return ValueError(
+def _null_operand_error(operator: str) -> UnsupportedPlanError:
+    return UnsupportedPlanError(
         f"Cannot translate `{operator}` against a null operand under "
         'null_attribute_representation="omitted": a NULL column sends no '
         "attribute, so Cerbos evaluates the comparison as a missing-attribute "

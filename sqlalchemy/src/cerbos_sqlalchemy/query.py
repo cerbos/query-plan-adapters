@@ -51,6 +51,7 @@ from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - historically 
     indexed_equality,
     require_index_position,
 )
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import Column, Table, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy.sql import Select
@@ -106,6 +107,14 @@ _ALLOW_KINDS = frozenset(
 
 # Boolean/ternary traversal is built in and cannot itself be overridden.
 _UNOVERRIDABLE_OPERATORS = frozenset({"and", "or", "not", "if"})
+
+
+class _UnhandledRelationError(UnsupportedPlanError, TypeError):
+    """A plan reaching a relation marker no operator override consumes.
+
+    Also a ``TypeError``, which is what this refusal raised before
+    :class:`UnsupportedPlanError` existed.
+    """
 
 
 def _validate_collection_columns(
@@ -226,7 +235,7 @@ def _require_table_mapping(
             # is a mapping error.
             if isinstance(column, ColumnElement):
                 continue
-            raise TypeError(
+            raise _UnhandledRelationError(
                 f"Attribute '{variable}' must be handled by an operator override "
                 "or map to a SQLAlchemy column"
             )

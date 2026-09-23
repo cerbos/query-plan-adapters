@@ -2,8 +2,8 @@
 
 Hand-built plans here isolate inputs a policy cannot vary, such as operator overrides
 and model declarations. Policy-reachable translation shapes belong in the shared
-corpus; ``test_translator.py`` pins their emitted SQL and the adversarial suite
-compares executed queries with the PDP. These tests need no PDP or container.
+corpus, whose recorded decisions ``test_adversarial_conformance.py`` compares executed
+queries with. These tests need no PDP or container.
 """
 
 import math
@@ -928,11 +928,9 @@ class TestKnownValueCollections:
     planner's struct matcher). The adapter must translate both shapes identically, or
     support becomes a data-dependent cliff that small-seed tests never cross.
 
-    **Both sides of the cliff are corpus actions**: `pv-exists`/`pv-all` ship the
-    value-list lambda and `pv-exists-unrolled`/`pv-all-unrolled` the or/and chain, each
-    with a wire fixture, a golden expectation and an oracle comparison. Two tests here
-    used to plan a principal with 9, 10 and 11 teams against a live PDP to cross it by
-    hand; the corpus crosses it with a real principal instead.
+    **Both sides of the cliff are corpus cases**: the `principal/*` cases ship both the
+    value-list lambda and the unrolled or/and chain, each replayed against the PDP's
+    recorded decisions. The corpus crosses the cliff with a real principal.
 
     What remains is the fold's own edge cases — an empty collection, a lambda rebinding
     its own variable, a `t.path` no element carries, a collection value that is not a

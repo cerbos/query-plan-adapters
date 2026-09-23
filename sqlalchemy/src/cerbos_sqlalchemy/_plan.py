@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, FrozenSet, Tuple, Union
 
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
+
 _INT64_MAX = 2**63 - 1
 _INT64_MIN = -(2**63)
 
@@ -83,7 +85,7 @@ def parse_operand(node: object) -> Operand:
                 node["operator"],
                 tuple(parse_operand(child) for child in node["operands"]),
             )
-    raise ValueError(f"Unrecognised operand shape: {node}")
+    raise UnsupportedPlanError(f"Unrecognised operand shape: {node}")
 
 
 def substitute_lambda_variable(
@@ -100,7 +102,7 @@ def substitute_lambda_variable(
             current = element
             for segment in name[len(variable_name) + 1 :].split("."):
                 if not isinstance(current, dict) or segment not in current:
-                    raise ValueError(
+                    raise UnsupportedPlanError(
                         f'Cannot resolve "{name}": collection element has no field '
                         f'"{segment}"'
                     )
@@ -194,7 +196,7 @@ def assert_no_same_collection_correlation(
                     and outer_variable != variable.name
                     and _reads_variable(body, outer_variable)
                 ):
-                    raise ValueError(
+                    raise UnsupportedPlanError(
                         f"Cannot correlate a macro over {collection.name} nested inside "
                         "another over the same collection: attr_map gives both lambda "
                         "scopes the same table, so the inner subquery would compare each "

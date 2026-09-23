@@ -22,10 +22,14 @@ two storage names the same strings in both:
   only a JSON string, a number only a JSON number (compared as doubles), and a boolean only a
   JSON boolean. SQLite and MySQL store a JSON true as 1, so reading the element back as SQL and
   comparing it with the literal would make ``[true][0] == 1`` true; the element's JSON type is
-  checked first (the corpus's ``index-bool-list-vs-number`` and ``index-number-list-vs-bool``).
+  checked first (the corpus's
+  ``type-mismatch/equals/boolean-list-element-against-number-literal`` and
+  ``type-mismatch/equals/number-list-element-against-boolean-literal``).
   Membership keeps them the same way: ``"2" in [2]`` and ``"true" in [true]`` are false, and a
   ``hasIntersection`` literal list may mix types, each element matching only its own
-  (``in-number-list-vs-string``, ``hasint-number-list-vs-string`` and their boolean mirrors).
+  (``type-mismatch/in/string-literal-in-resource-number-list``,
+  ``type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list`` and their
+  boolean mirrors).
 - ``size()`` of an empty collection is 0 and of an absent one is UNKNOWN, so ``size(x) == 0``
   selects the empty rows and never the missing ones.
 
@@ -42,6 +46,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import Boolean, Integer, literal, literal_column
 from sqlalchemy import types as sqltypes
 from sqlalchemy.exc import CompileError
@@ -100,7 +105,7 @@ def require_index_position(position: Any) -> int:
         or (isinstance(position, float) and not position.is_integer())
         or not 0 <= position <= _MAX_INDEX
     ):
-        raise ValueError(
+        raise UnsupportedPlanError(
             "Index access requires a constant non-negative 32-bit integer position"
         )
     return int(position)
@@ -122,11 +127,13 @@ def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> A
         return _ElementEqualsBool(document, index, literal(value, Boolean))
     if isinstance(value, (int, float)):
         if not math.isfinite(value):
-            raise ValueError("Indexed numeric comparisons require a finite literal")
+            raise UnsupportedPlanError(
+                "Indexed numeric comparisons require a finite literal"
+            )
         return _ElementEqualsNumber(document, index, literal(value))
     if isinstance(value, str):
         return _ElementEqualsString(document, index, literal(value))
-    raise ValueError(INDEXED_VALUE_REFUSAL)
+    raise UnsupportedPlanError(INDEXED_VALUE_REFUSAL)
 
 
 #: The refusal for a membership in a declared collection whose other side is not a scalar literal.
@@ -151,14 +158,14 @@ def collection_membership(declared: CollectionColumn, values: Any) -> Any:
             matches.append(_MemberEqualsBool(literal(value, Boolean)))
         elif isinstance(value, (int, float)):
             if not math.isfinite(value):
-                raise ValueError(
+                raise UnsupportedPlanError(
                     "Membership in a declared collection requires a finite numeric literal"
                 )
             matches.append(_MemberEqualsNumber(literal(value)))
         elif isinstance(value, str):
             matches.append(_MemberEqualsString(literal(value)))
         else:
-            raise ValueError(MEMBERSHIP_REFUSAL)
+            raise UnsupportedPlanError(MEMBERSHIP_REFUSAL)
     return _CollectionContains(_document(declared), *matches)
 
 
