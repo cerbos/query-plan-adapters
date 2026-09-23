@@ -1,8 +1,41 @@
 # frozen_string_literal: true
 
 require "bundler/gem_tasks"
-require "rspec/core/rake_task"
 
-RSpec::Core::RakeTask.new(:spec)
+begin
+  require "rubocop/rake_task"
 
-task default: :spec
+  RuboCop::RakeTask.new :lint do |task|
+    task.formatters = ["clang", "github"] if ENV["CI"]
+  end
+rescue LoadError
+  # Bundle installed without lint group
+end
+
+begin
+  require "rspec/core/rake_task"
+
+  RSpec::Core::RakeTask.new :test
+rescue LoadError
+  # Bundle installed without test group
+end
+
+begin
+  require "yard"
+
+  desc "Generate documentation"
+  YARD::Rake::YardocTask.new :docs do |task|
+    task.options = ["--fail-on-warning", "--no-stats"]
+
+    task.after = lambda do
+      stats = YARD::CLI::Stats.new(false)
+      stats.run "--compact", "--list-undoc"
+      undocumented = stats.instance_variable_get(:@undocumented)
+      abort "\nFound #{undocumented} undocumented objects" unless undocumented.zero?
+    end
+  end
+rescue LoadError
+  # Bundle installed without docs group
+end
+
+task default: [:docs, :lint, :test]

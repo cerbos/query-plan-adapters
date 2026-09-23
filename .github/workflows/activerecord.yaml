@@ -1,8 +1,6 @@
 name: ActiveRecord Test
 
-# No `policies/**` trigger. The shared policy suite at the repository root is gone, and
-# conformance/policies/ is the only policy suite for semantics
-# (docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md).
+# No `policies/**` trigger: conformance/policies/ is the only policy suite (ADR 0008).
 on:
   pull_request:
     paths:
@@ -19,20 +17,20 @@ defaults:
   run:
     working-directory: activerecord
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   test:
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        ruby-version: ["3.2", "3.3", "3.4"]
+        ruby-version: ["3.3", "3.4", "4.0"]
         activerecord-version: ["8.0"]
         include:
-          # The first version and the last version of the ActiveRecord range in the gemspec.
-          # The Gemfile pins each leg to ONE minor series, so the leg named 7.1 really is 7.1.
-          - ruby-version: "3.2"
+          # Low end of the gemspec's ActiveRecord range. The Gemfile pins each leg's minor.
+          - ruby-version: "3.3"
             activerecord-version: "7.1"
     runs-on: ubuntu-latest
     steps:
@@ -41,26 +39,22 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
-      # The suites run in Docker. The PDP is pinned by tag and digest, from
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST, and scripts/test.sh
-      # reads both files. Do not write either value in this file.
+      # Suites run in Docker; scripts/test.sh reads the PDP pin from conformance/. Don't
+      # hardcode it here.
       #
-      # Both of these are offline: the translator unit test replays conformance/wire-fixtures/
-      # and the contract suite builds its own plans, so neither starts a PDP. The ActiveRecord
-      # dimension is theirs — golden/expectations.json records SQL that ActiveRecord's own
-      # renderer produced, so the major is an input to the bytes and each leg asserts its side
-      # of that (spec/translator_spec.rb, RENDERING_DIFFERS_ON_ACTIVERECORD_71).
+      # Both suites are offline (no PDP). They carry the ActiveRecord dimension because the
+      # golden SQL depends on the ActiveRecord version (see RENDERING_DIFFERS_ON_ACTIVERECORD_71
+      # in spec/translator_spec.rb).
       - name: Run the translator unit test and the adapter contract suite
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
         run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb
 
-      # In the SAME job as the tests above, not a job of its own. Gated to the baseline leg,
-      # because the corpus discriminates the translator and the store, not the Ruby runtime —
-      # a second leg would multiply runner minutes for no extra cover.
+      # Keep this in the same job as the tests. Baseline leg only: the corpus tests the
+      # translator and store, not the Ruby version.
       - name: Run the adversarial differential suite
-        if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'
+        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
@@ -70,17 +64,19 @@ jobs:
           done
 
       - name: Lint
-        if: matrix.ruby-version == '3.4' && matrix.activerecord-version == '8.0'
+        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
         run: ./scripts/lint.sh
 
-  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
-  # non-major bump, so an ActiveRecord bump arrives as a PR touching this adapter — and this
-  # job, being a check on that PR, is what blocks the automerge when the new ORM breaks real
-  # usage. Moving it to a nightly run or a workflow of its own silently restores that gap.
-  #
-  # One Ruby leg only: the demo domain discriminates the published gem and the ORM, not the
-  # runtime — the same reasoning that gates the adversarial step above.
+      - name: Docs
+        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
+        run: ./scripts/docs.sh
+
+  # Keep this job in this workflow. Renovate automerges non-major bumps, and this job is the
+  # PR check that blocks an ActiveRecord bump that breaks real usage.
+  # One Ruby version only: the demo tests the gem and the ORM, not the Ruby version.
   example:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,16 +87,13 @@ jobs:
       - name: Validate demo domain
         run: ../demo/scripts/validate-demo.sh
 
-      # No `bundler-cache`: the example commits no Gemfile.lock, deliberately. It installs the
-      # adapter from the artifact run.sh builds, which has no stable checksum, and resolving the
-      # rest fresh is what lets an ActiveRecord release inside the declared range reach this job
-      # at all.
+      # No `bundler-cache`: the example has no Gemfile.lock on purpose. The gem run.sh builds
+      # has no stable checksum, and fresh resolution picks up new ActiveRecord releases.
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
-          ruby-version: "3.4"
+          ruby-version: "4.0"
 
-      # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
-      # here, because an example must reach the PDP the way a deployed application does.
+      # run-example.sh starts the pinned PDP from demo/docker-compose.yml. No
+      # cerbos-setup-action: the example reaches the PDP the way a deployed app does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh activerecord

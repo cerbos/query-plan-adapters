@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-# Reads the shared corpus of the repository (cerbos/query-plan-adapters#263).
+# Reads the shared conformance corpus (#263).
 #
-# Nothing here is data only for this adapter. The same rows and the same attributes go to both
-# sides of the differential comparison. Thus a value that this file invents, or a corpus field
-# that it drops, makes the oracle agree with the adapter for an incorrect reason and no test
-# downstream can see it. Two guards hold that shut:
+# The same data feeds both the adapter and the oracle, so an invented value or a dropped field
+# would make them agree silently. Two guards:
 #
-# * the derived fields come from conformance/derived-fields.json. They are not calculated here.
-# * the seed keys, the tag keys and the derived-field names are asserted against the JSON. A
-#   key that this harness does not read is an error, and so is a key that it reads and the
-#   corpus no longer carries.
+# * derived fields are read from conformance/derived-fields.json, never computed here.
+# * key sets are asserted against the JSON: an unread key is an error, and so is a missing one.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
 
@@ -21,12 +17,11 @@ module ConformanceCorpus
 
   SEEDS = SEEDS_FILE.fetch("seeds").freeze
   RESOURCE_KIND = SEEDS_FILE.fetch("resourceKind").freeze
-  # Verbatim. A projection here — an allowlist of principal attributes, for example — would
-  # drop the attribute that a new action discriminates on from the plan AND from the oracle,
-  # and the action would then pass without testing anything.
+  # Verbatim. An allowlist would drop a new attribute from both plan and oracle, and the action
+  # would pass without testing anything.
   PRINCIPAL = SEEDS_FILE.fetch("principal").freeze
 
-  # The key of this adapter in the manifest is the name of its directory.
+  # This adapter's key in actions.json (its directory name).
   ADAPTER = "activerecord"
 
   # --- corpus coverage guards ---------------------------------------------------------------
@@ -35,19 +30,14 @@ module ConformanceCorpus
     id aBool aString aNumber aOptionalString aNumberList aBoolList tags subCategoryNames
     parentSeedId
   ].freeze
-  # Corpus prose that no harness reads: the one documented exclusion from SEED_KEYS.
+  # Prose no harness reads; the only exclusion from SEED_KEYS.
   SEED_NOTE_KEY = "note"
-  # The one array of nested objects that a seed carries. A key added inside an element
-  # disappears from both sides of the differential as quietly as a key at the top level.
+  # Tags are the only nested objects in a seed, so their keys are guarded too.
   TAG_KEYS = %w[id name].freeze
   DERIVED_KEYS = %w[createdBy aDouble createdAt scope labels updatedAt].freeze
 
-  # The corpus principal is guarded the same way and for the same reason. It feeds the PLAN
-  # under test AND the check() oracle, so an attribute dropped on the way in vanishes from both
-  # sides at once: the plan folds to ALWAYS_DENIED and the oracle, built from the same
-  # principal, agrees with it. `id` and `roles` are deliberately in scope one level above the
-  # attributes, the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its tags
-  # (cerbos/query-plan-adapters#399).
+  # The principal feeds both the plan and the oracle, so its keys are guarded the same way,
+  # on two levels: the principal itself and its `attr` (#399).
   PRINCIPAL_KEYS = %w[id roles attr].freeze
   PRINCIPAL_ATTR_KEYS = %w[allowedTags context fewTeams manyTeams zero emptyTeams manyStructs nullableStructs missingStructs].freeze
 
@@ -65,19 +55,16 @@ module ConformanceCorpus
     raise "#{label} is missing #{missing.inspect}, which this harness reads." unless missing.empty?
   end
 
-  # SEEDS holds the parsed JSON rows without a change, so `keys` reports the key set of the
-  # corpus. Keep it that way. A reader that rebuilt each row field by field could only report
-  # the keys that this file already names, and the assertion would then prove nothing.
+  # SEEDS is the raw parsed JSON, so `keys` is the corpus's real key set. Keep it raw: a
+  # rebuilt row would only report keys this file already knows.
   SEEDS.each_with_index do |seed, index|
     assert_keys!("seeds.json seeds[#{index}]", seed.keys, SEED_KEYS, [SEED_NOTE_KEY])
     seed.fetch("tags").each_with_index do |tag, tag_index|
       assert_keys!("seeds.json seeds[#{index}].tags[#{tag_index}]", tag.keys, TAG_KEYS)
     end
 
-    # The two homogeneous scalar lists. Each element is stored in a typed column, so an element
-    # of another type would be coerced on the way into SQLite while check() still saw the
-    # original, and the two sides would then disagree about a value nobody wrote. A null
-    # element is a value in both lists and is stored as one.
+    # Elements go into a typed column. A wrong-typed element would be coerced in SQLite while
+    # check() saw the original. Null elements are allowed and stored.
     {"aNumberList" => [Numeric], "aBoolList" => [TrueClass, FalseClass]}.each do |key, types|
       list = seed.fetch(key)
       raise "seeds.json seeds[#{index}].#{key} must be a list" unless list.is_a?(Array)
@@ -90,14 +77,12 @@ module ConformanceCorpus
     end
   end
 
-  # PRINCIPAL holds the parsed JSON object and goes to the SDK without a change, so `keys`
-  # reports the key set of the corpus on both levels.
+  # PRINCIPAL is the raw parsed JSON, so `keys` is the corpus's real key set.
   assert_keys!("seeds.json principal", PRINCIPAL.keys, PRINCIPAL_KEYS)
   assert_keys!("seeds.json principal.attr", PRINCIPAL.fetch("attr").keys, PRINCIPAL_ATTR_KEYS)
 
-  # The two value shapes those attributes take. A reshaped attribute — a list flattened to a
-  # string, a string wrapped in a list — reaches the plan and the oracle at the same time, so
-  # the differential agrees and the action proves nothing.
+  # Check each attribute's value shape. A reshaped value would reach plan and oracle alike and
+  # go unnoticed.
   PRINCIPAL.fetch("attr").each do |name, value|
     if name == "zero"
       raise "principal zero must be numeric" unless value.is_a?(Numeric)
@@ -133,11 +118,10 @@ module ConformanceCorpus
     assert_keys!("derived-fields.json derived[#{id.inspect}]", entry.keys, DERIVED_KEYS)
   end
 
-  # --- classification, read from the manifest at run time ------------------------------------
+  # --- classification, read from actions.json -----------------------------------------------
   #
-  # Each group is read by name. A group that this file did not name would disappear from every
-  # count and from every test at the same time, and the run would then pass without a word.
-  # That is the projection trap in conformance/README.md.
+  # Each group is read by name. An unnamed group would vanish from every count and test
+  # silently (the projection trap in conformance/README.md).
 
   UNSUPPORTED = ACTIONS_FILE
     .fetch("adapterUnsupported", {})
@@ -155,18 +139,16 @@ module ConformanceCorpus
     .map { |entry| entry.fetch("action") }
     .freeze
 
-  # Actions that probe `== null` against an attribute whose NULL columns the oracle OMITS.
-  # The harness translates these with the null representation of the adapter set to omitted and
-  # asserts the rejection. Their oracle is empty by construction, and degenerateOracles says so.
+  # `== null` probes on attributes whose NULLs the oracle omits. Translated with the `omitted`
+  # representation and asserted to throw. Their oracle is empty by construction.
   NULL_REPRESENTATION_OMITTED = ACTIONS_FILE
     .fetch("nullRepresentationOmitted", [])
     .map { |entry| entry.fetch("action") }
     .freeze
 
-  # Actions whose check() oracle is empty or total BY CONSTRUCTION, whichever adapter compares
-  # them. Every other action the harness compares must have an oracle that is neither, because
-  # the differential cannot fail against a degenerate oracle; conformance/README.md, "The
-  # degeneracy guard". Read into action => "empty" | "total".
+  # Actions whose oracle is empty or total by construction: action => "empty" | "total".
+  # Every other compared action must have neither, since a degenerate oracle cannot fail
+  # (conformance/README.md, "The degeneracy guard").
   DEGENERATE_ORACLE_SHAPES = %w[empty total].freeze
   DEGENERATE_ORACLES = ACTIONS_FILE
     .fetch("degenerateOracles")
@@ -195,9 +177,8 @@ module ConformanceCorpus
       SUPPORTED_EXPECTED - SKIPPED
   ).freeze
 
-  # Every action that the corpus classifies, whichever adapter it belongs to. A divergence that
-  # only another adapter registered must still arrive here, so the size tripwire and the
-  # "classified exactly once" test bring it up for triage instead of letting it disappear.
+  # Every classified action, for any adapter, so the size tripwire and the "classified exactly
+  # once" test see divergences registered only by other adapters.
   MANIFEST_ACTIONS = (
     ACTIONS_FILE.fetch("conformance") +
       EXPECTED_UNSUPPORTED +
@@ -206,12 +187,8 @@ module ConformanceCorpus
       ACTIONS_FILE.fetch("knownDivergences", []).map { |entry| entry.fetch("action") }
   ).uniq.freeze
 
-  # The message that the error of a throwing action must contain.
-  #
-  # Without it, "it threw" is satisfied as happily by a typo in the attribute map, by an
-  # unrelated validation or by a transport error as by the limitation that the classification
-  # names — and the classification then rests on a failure that never reached its own mechanism
-  # (cerbos/query-plan-adapters#326).
+  # The message a throwing action's error must contain. Without it, any error (a mapping typo,
+  # a transport error) would pass as the classified limitation (#326).
   def require_message(label, message)
     if message.nil? || message.empty?
       raise "actions.json pins no throw message for #{label}: the throw suite would then " \
@@ -237,7 +214,7 @@ module ConformanceCorpus
       }
   ).freeze
 
-  # The same, for the group that every adapter must refuse under the `omitted` representation.
+  # The same, for actions every adapter must refuse under the `omitted` representation.
   NULL_OMITTED_THROWS = ACTIONS_FILE
     .fetch("nullRepresentationOmitted", [])
     .map { |entry|
@@ -250,18 +227,15 @@ module ConformanceCorpus
 
   # --- the golden wire fixtures (ADR 0006) ---------------------------------------------------
   #
-  # One recorded PlanResources response per corpus action, captured against the pinned PDP. The
-  # translator unit test reads its plans from here, so it needs no PDP and no policy — and it
-  # pins planner SHAPE rather than whatever this adapter happens to ask for.
+  # One recorded PlanResources response per corpus action, from the pinned PDP. The translator
+  # unit test reads its plans from here, so it needs no PDP.
 
   WIRE_FIXTURES_DIR = File.join(DIR, "wire-fixtures")
 
-  # regenerate-wire-fixtures.sh rewrites the folded `now() - duration("24h")` literal to this
-  # placeholder, because the real one moves on every replan and every fixture would then differ.
-  # A reader has to put an instant back, and the PRECISION of the one it chooses is load-bearing
-  # here: the planner emits nanoseconds, and that is exactly what ts-window and ts-vf are
-  # classified `adapterUnsupported` for. Substituting a microsecond instant would make both
-  # translate and read as a misclassification.
+  # The fixtures replace the folded `now() - duration("24h")` with a placeholder so replans do
+  # not churn. We put back an instant with nanosecond precision, as the planner emits:
+  # ts-window and ts-vf are refused for exactly that, and a microsecond value would let them
+  # translate.
   NOW_PLACEHOLDER = "__NOW_MINUS_24H__"
   PLANNED_AT = "2026-08-11T09:13:39.123456789Z"
 
@@ -271,8 +245,7 @@ module ConformanceCorpus
       .sort
   end
 
-  # @return [Hash] the recorded response, ready to hand to the adapter as-is: it carries the
-  #   plan under `filter`, which is the protobuf shape Plan.normalise already reads.
+  # @return [Hash] the recorded response; the plan is under `filter`, which Plan.normalise reads.
   def wire_fixture(action)
     substitute_planned_at(JSON.parse(File.read(File.join(WIRE_FIXTURES_DIR, "#{action}.json"))))
   end
@@ -311,13 +284,11 @@ module ConformanceCorpus
 
   # --- the real to-one relation (conformance/README.md, ADR 0005) -----------------------------
   #
-  # `parentSeedId` is the one seed key that resolves against another ROW. It names the seed
-  # whose four scalars this row's `parent` carries, and that seed's own `parentSeedId` names
-  # the ones `parent.inner` carries. The chain stops at two levels.
+  # `parentSeedId` names the seed whose scalars `parent` copies; that seed's own `parentSeedId`
+  # gives `parent.inner`. Two levels at most.
   #
-  # A resource owns a FRESH parent row, and does not point at the row of the named seed. Thus
-  # no two resources use one parent, and a filter that gave the parent in place of the child
-  # cannot agree with the oracle by accident.
+  # Each resource gets its own new parent row, so a filter that confused parent and child
+  # cannot match the oracle by accident.
   SEEDS_BY_ID = SEEDS.to_h { |seed| [seed.fetch("id"), seed] }.freeze
 
   def parent_seed_of(seed)
@@ -332,8 +303,7 @@ module ConformanceCorpus
     end
   end
 
-  # The four scalars of one hop as check() attributes. A NULL column is a MISSING attribute
-  # one hop out, exactly as it is on the root row.
+  # One hop's scalars as check() attributes. A NULL column is omitted, as on the root row.
   def relation_attr(seed)
     attr = {
       "aBool" => seed.fetch("aBool"),

@@ -4,19 +4,30 @@ source "https://rubygems.org"
 
 gemspec
 
-group :development, :test do
-  # CI exercises both ends of the range the gemspec declares. The trailing `.0` pins the leg to
-  # ONE minor series: `~> 7.1` would resolve to the newest 7.x, so the leg named 7.1 would
-  # quietly become 7.2 and neither end of the range would be exercised. It also keeps
-  # golden/expectations.json's declared generator meaningful — the asset names the series it was
-  # rendered under, and a floating resolution would age it out on every ActiveRecord minor.
+gem "rake", "~> 13.2"
+
+group :development do
+  gem "irb"
+end
+
+group :docs do
+  gem "commonmarker", "~> 2.10"
+  gem "webrick", "~> 1.9"
+  gem "yard", "~> 0.9"
+end
+
+group :lint do
+  gem "rubocop-rake", "~> 0.7"
+  gem "rubocop-rspec", "~> 3.6"
+  gem "standard", "~> 1.50"
+end
+
+group :test do
+  # The trailing `.0` pins each CI leg to one minor series. `~> 7.1` would resolve to 7.2.
+  # golden/expectations.json also names the series it was rendered under.
   gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}.0"
-  # The official Cerbos Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby). Both suites
-  # plan and check against a real PDP through it, so its output types are what the adapter
-  # is proved against.
+  # The official Cerbos Ruby SDK. The adapter is tested against its output types.
   gem "cerbos", "~> 0.13"
-  gem "rake", "~> 13.2"
   gem "rspec", "~> 3.13"
   gem "sqlite3", "~> 2.6"
-  gem "standard", "~> 1.50"
 end

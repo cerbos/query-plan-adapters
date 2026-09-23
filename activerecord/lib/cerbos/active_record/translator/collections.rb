@@ -3,7 +3,9 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # The collection macros (+exists+, +all+, +exists_one+, +filter+, +map+) and +size()+.
+      # The collection macros (`exists`, `all`, `exists_one`, `filter`, `map`) and `size()`.
+      #
+      # @private
       module Collections
         private
 
@@ -31,13 +33,11 @@ module Cerbos
           end
         end
 
-        # The three CEL quantifiers are different in one important way. Each one has different
-        # behaviour for an element whose body made an error. Thus each one gets its own guard
-        # for that error, and they do not share one guard:
+        # Each quantifier treats an element that errors differently:
         #
-        # * +exists+ ignores the errors if one element gives true;
-        # * +all+ ignores the errors if one element gives false;
-        # * +exists_one+ never ignores them, because it must count all the elements.
+        # * `exists` ignores errors if any element is true;
+        # * `all` ignores errors if any element is false;
+        # * `exists_one` never ignores them, since it counts every element.
         def quantifier(operator, scope, body)
           error_witness = scope.exists(ArelSupport.is_null(body))
 
@@ -61,19 +61,14 @@ module Cerbos
               raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
             end
 
-          # A chain must require its parent hops. Without that, `all` over an absent parent is
-          # vacuously TRUE and gives back a row that the PDP denies. See {Relations::Scope#guarded}.
+          # Require the parent hops, or `all` over a missing parent is TRUE and returns a
+          # denied row. See {Relations::Scope#guarded}.
           scope.guarded(quantified)
         end
 
-        # A macro over a list of constants. The planner sends the list itself when the collection
-        # is a principal attribute, because it knows those values when it makes the plan.
-        #
-        # The elements are known here, so the translator evaluates the body one time for each
-        # element and joins the results. SQL gives the correct answer without more work: OR and
-        # AND obey the same three-valued logic as the CEL quantifiers. OR is TRUE if one element
-        # is true, UNKNOWN if no element is true and one is unknown, and FALSE if all are false.
-        # That is exactly `exists`. AND is the same for `all`.
+        # A macro over a constant list, such as a principal attribute the planner inlined.
+        # Expands the body per element and joins with OR (`exists`) or AND (`all`). SQL's
+        # three-valued OR/AND already match how CEL's quantifiers treat errors.
         def value_list_macro(operator, values, lambda_node, environment)
           body_node, iterator = lambda_parts(lambda_node)
           bodies = values.map { |value| predicate(body_node, environment.bind(iterator, value)) }
@@ -83,17 +78,15 @@ module Cerbos
           when "all" then ArelSupport.and_node(bodies)
           when "exists_one" then exactly_one_of(bodies)
           else
-            # `filter` and `map` give a list, and the operator that uses it — `size` or
-            # `hasIntersection` — would need a second list-valued form. No corpus shape needs it,
-            # so the adapter refuses instead of keeping code that nothing proves.
+            # `filter`/`map` here would need a list-valued `size`/`hasIntersection`. No corpus
+            # shape needs it, so refuse.
             raise UnsupportedOperatorError,
               "#{operator} over a list of constants is not supported: only exists, all and " \
               "exists_one have a translation for that shape"
           end
         end
 
-        # `exists_one` never ignores an element that made an error, so the guard for the error
-        # comes first. After that it is an exact count of the elements that are true.
+        # UNKNOWN if any element errors, else true when exactly one element is true.
         def exactly_one_of(bodies)
           matches = bodies
             .map { |body| ArelSupport.case_node([[body, 1]], else_value: 0) }
@@ -129,14 +122,12 @@ module Cerbos
         def size(target)
           case target
           when Values::Collection
-            # size() counts the elements and does not evaluate them. Thus it also counts a
-            # member column that is NULL, and no element can make an error. The hop guard is
-            # still necessary: over an absent parent the count is 0, and `== 0`, `>= 0` and
-            # `!(> 0)` each give back a row that the PDP denies (#309, #316).
+            # Counting never errors, so NULL members count too. The hop guard is still needed:
+            # a missing parent counts 0, and `== 0` would return a denied row (#309, #316).
             target.scope.guarded(target.scope.count)
           when Values::FilteredCollection
-            # filter() is different from exists(). It never ignores an element that made an
-            # error. Thus one body with an UNKNOWN result makes the full count unknown.
+            # Unlike exists(), filter() never ignores an error: one UNKNOWN body makes the
+            # count UNKNOWN.
             target.scope.guarded(
               ArelSupport.case_node(
                 [[target.scope.exists(ArelSupport.is_null(target.body)), nil]],

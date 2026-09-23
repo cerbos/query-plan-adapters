@@ -4,19 +4,16 @@ require_relative "arel_support"
 
 module Cerbos
   module ActiveRecord
-    # Changes the CEL string operators +contains+, +startsWith+ and +endsWith+ into +LIKE+
-    # with an ESCAPE clause.
+    # Translates CEL `contains`, `startsWith` and `endsWith` into `LIKE ... ESCAPE`.
     #
-    # The ESCAPE clause is the important part. The needle in CEL is a literal string, but
-    # +LIKE+ reads +%+ and +_+ as wildcards. Thus a translation without an escape character
-    # changes the meaning. For <tt>R.attr.name.contains("a_b")</tt>, such a filter also
-    # matches +aXb+, and it gives rows that the PDP denies.
+    # The needle is literal in CEL, but `LIKE` treats `%` and `_` as wildcards. Unescaped,
+    # `contains("a_b")` would also match `aXb` and return rows the PDP denies.
+    #
+    # @private
     class StringMatcher
       ESCAPE_CHAR = "\\"
 
-      # SQL Server reads +[+ as the start of a character class. It does this even when an
-      # ESCAPE clause is present. Thus the adapter escapes +[+ with the two portable
-      # wildcards, and it does not leave +[+ to the dialect.
+      # Some dialects (e.g. SQL Server) read `[` as a character class, so escape it too.
       METACHARACTERS = [ESCAPE_CHAR, "%", "_", "["].freeze
 
       def initialize(dialect)
@@ -25,10 +22,8 @@ module Cerbos
 
       attr_reader :dialect
 
-      # @param receiver [Object] the haystack, in the order of the CEL source. It can be a
-      #   constant.
-      # @param needle [Object] the needle. It can be a column, for a comparison between two
-      #   fields.
+      # @param receiver [Object] the haystack, as in the CEL source. May be a constant.
+      # @param needle [Object] the needle. May be a column, to compare two fields.
       # @param prefix [Boolean] permit any characters before the needle
       # @param suffix [Boolean] permit any characters after the needle
       def match(receiver, needle, prefix:, suffix:)
@@ -46,17 +41,15 @@ module Cerbos
           ArelSupport.quote(receiver),
           pattern,
           ArelSupport.quote(ESCAPE_CHAR),
-          # CEL compares strings with attention to the case of the letters. If this flag were
-          # false, PostgreSQL would use ILIKE.
+          # Case-sensitive, like CEL. False would make PostgreSQL use ILIKE.
           true
         )
       end
 
-      # Puts an escape character before each LIKE metacharacter in a literal needle.
+      # Escapes each LIKE metacharacter in a literal needle.
       #
-      # The block form of gsub is necessary. It is not only a preference. A String replacement
-      # reads the backslash sequences again. Thus a replacement of "\\" with "\\" + "\\" gives
-      # one backslash, and the needle stays without an escape character.
+      # Use gsub's block form: a String replacement re-reads backslash sequences, so replacing
+      # `\` with `\\` would still yield a single `\`.
       def escape_literal(needle)
         METACHARACTERS.reduce(needle) do |escaped, metacharacter|
           escaped.gsub(metacharacter) { ESCAPE_CHAR + metacharacter }
@@ -65,12 +58,10 @@ module Cerbos
 
       private
 
-      # Puts an escape character before each LIKE metacharacter in a needle that is a column.
-      # The database does this when it runs the query.
+      # Escapes LIKE metacharacters in a column needle, in SQL at query time.
       #
-      # If the needle is NULL, REPLACE gives NULL, and thus the pattern is NULL. The result of
-      # the LIKE is unknown and the row stays out of the result. This is the same result as
-      # the CEL error for a missing attribute, which is a deny for that row.
+      # A NULL needle makes the pattern NULL, so LIKE is unknown and the row is excluded,
+      # matching CEL's missing-attribute deny.
       def column_pattern(needle, prefix:, suffix:)
         pattern = METACHARACTERS.reduce(ArelSupport.quote(needle)) do |escaped, metacharacter|
           ArelSupport.function(

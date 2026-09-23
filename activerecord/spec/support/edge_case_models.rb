@@ -14,12 +14,9 @@ module EdgeCaseModels
       create_table :edge_documents, force: true do |t|
         t.string :title
         t.integer :author_id
-        # A zero, a positive number and a negative number, for the division tests. IEEE-754
-        # gives NaN for 0/0, +Infinity for a positive numerator and -Infinity for a negative
-        # one, and each of the three needs a row.
+        # Zero, positive and negative rows for the division tests: x/0 is NaN, +Inf or -Inf.
         t.integer :n
-        # A double column, so a test can reach the int() cast that CEL and SQL disagree about:
-        # CEL removes the fraction toward zero, PostgreSQL and MySQL round to the nearest.
+        # For the int() cast: CEL truncates toward zero, PostgreSQL and MySQL round.
         t.float :score
       end
 
@@ -78,8 +75,8 @@ module EdgeCaseModels
     EdgeDocument.create!(id: 2, title: "two", n: 2, score: 2.5)
     EdgeDocument.create!(id: 3, title: "negative", n: -3, score: -0.6)
 
-    # The three rows a chain must tell apart: a parent with a matching child, a parent with no
-    # matching child, and NO parent at all. Only the last one is a missing path for CEL.
+    # A chain must tell apart: parent with a matching child, parent without one, and no parent
+    # at all. Only the last is a missing path for CEL.
     chained = EdgeTag.create!(id: 91, name: "chained", document_id: 1)
     EdgeTag.create!(id: 92, name: "childless", document_id: 2)
     EdgeTagLabel.create!(name: "urgent", tag_id: chained.id)
@@ -99,8 +96,7 @@ class EdgeComment < ActiveRecord::Base
   belongs_to :commentable, polymorphic: true
 end
 
-# A model with a default scope. The scope removes rows from every association that points at
-# it, and thus from the attributes that Cerbos sees.
+# Has a default scope, which hides rows from every association to it.
 class EdgeSoft < ActiveRecord::Base
   self.table_name = "edge_softs"
   default_scope { where("name != 'hidden'") }
@@ -115,8 +111,8 @@ class EdgeProfile < ActiveRecord::Base
   self.table_name = "edge_profiles"
 end
 
-# A single-table hierarchy. An association that points at the subclass also filters on the
-# inheritance column, and the adapter does not add that condition.
+# Single-table inheritance. An association to the subclass filters on the type column, which
+# the adapter does not add.
 class EdgeKind < ActiveRecord::Base
   self.table_name = "edge_kinds"
 end
@@ -127,18 +123,14 @@ class EdgeCpkKid < ActiveRecord::Base
   self.table_name = "edge_cpk_kids"
 end
 
-# A composite primary key. ActiveRecord then gives an ARRAY for the keys of the association,
-# and one equality cannot join on two columns.
+# Composite primary key: association keys are an array, and one equality cannot join on two
+# columns.
 class EdgeCpkParent < ActiveRecord::Base
   self.table_name = "edge_cpk_parents"
   self.primary_key = [:tenant_id, :code]
 
-  # The two ends of the supported range spell this association differently, and each REFUSES the
-  # other's spelling — 7.1 raises on an array in `foreign_key:` and tells you to use
-  # `query_constraints:`; 8.0 raises on `query_constraints:` and tells you to use `foreign_key:`.
-  # So the declaration is conditional. That is a fixture concern only: what the adapter is being
-  # asked to do with a composite key is the same on both, and the refusal it must raise is
-  # asserted once.
+  # 7.1 needs `query_constraints:` and 8.0 needs `foreign_key:`; each rejects the other.
+  # Fixture only: the adapter's refusal is the same on both.
   if ::ActiveRecord.version >= Gem::Version.new("7.2")
     has_many :kids, class_name: "EdgeCpkKid", foreign_key: [:tenant_id, :parent_code]
   else

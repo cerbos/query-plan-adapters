@@ -114,8 +114,9 @@ cd activerecord
 ./scripts/test.sh                                      # all three suites
 ./scripts/test.sh spec/translator_spec.rb              # offline: no PDP, no database server
 ./scripts/golden-update.sh                             # rewrite golden/expectations.json
-RUBY_VERSION=3.2 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
-./scripts/lint.sh
+RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
+./scripts/lint.sh                                      # RuboCop on Standard, via `rake lint`
+./scripts/docs.sh                                      # YARD, failing on a warning or an undocumented object
 ```
 
 `spec/translator_spec.rb` is the **translator unit test** and `spec/adapter_contract_spec.rb` is

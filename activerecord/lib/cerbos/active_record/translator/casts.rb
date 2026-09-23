@@ -3,24 +3,19 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # +int()+, +double()+, +string()+ and +timestamp()+.
+      # `int()`, `double()`, `string()` and `timestamp()`.
       #
-      # CEL converts a value exactly or makes an error, and Cerbos then denies the row. SQL
-      # converts what it can. Each cast here is translated only where the two agree.
+      # CEL casts exactly or errors (and the row is denied); SQL casts what it can. Each cast
+      # is translated only where the two agree.
+      #
+      # @private
       module Casts
         private
 
-        # CEL reads a whole string or it makes an error: `int("1junk")` is an error and Cerbos
-        # denies the row. `CAST('1junk' AS INTEGER)` gives 1 on SQLite, so the filter would give
-        # a row that the PDP denies. No portable SQL reads a number the way CEL does.
-        #
-        # A cast from a double is also not portable, and for a different reason. CEL removes the
-        # fraction toward zero, SQLite does the same, but PostgreSQL and MySQL round. Thus only an
-        # integer column is safe, and there the cast has nothing to do.
-        #
-        # Each of the two failures says its own reason. A message that named both would not show
-        # which mechanism stopped the translation, and the corpus pins these messages precisely so
-        # that a refusal proves the limitation it declares.
+        # Only an integer column is safe, where the cast is a no-op.
+        # - String: `int("1junk")` errors in CEL, but SQLite's CAST gives 1.
+        # - Double: CEL truncates toward zero; PostgreSQL and MySQL round.
+        # Each case has its own message because the corpus pins each one.
         def cast_to_int(value)
           return value.to_i if value.is_a?(Numeric)
 
@@ -43,8 +38,7 @@ module Cerbos
             "column directly, or give an operator override."
         end
 
-        # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the
-        # row, but SQL gives 0.0 and the filter would keep the row.
+        # Numeric columns only: `double("abc")` errors in CEL, but SQL gives 0.0.
         def cast_to_double(value)
           return value.to_f if value.is_a?(Numeric)
           return as_double(value) if NUMERIC_COLUMN_TYPES.include?(column_type(value))
@@ -55,35 +49,23 @@ module Cerbos
             "Compare the column directly, or give an operator override."
         end
 
-        # `CAST(x AS TEXT)` gives what CEL gives for a number and for a string. It does not for a
-        # boolean. SQLite and MySQL have no boolean type and keep 1 and 0, so the CAST makes "1"
-        # where CEL makes "true", and only PostgreSQL agrees. Thus a boolean column does not go
-        # through the CAST. See {#boolean_to_string}.
+        # `CAST(x AS TEXT)` matches CEL except for booleans: SQLite and MySQL give "1", not
+        # "true". Booleans go through {#boolean_to_string}.
         def cast_to_string(value)
           return boolean_to_string(value) if column_type(value) == :boolean
 
           cast(value, dialect.text_type)
         end
 
-        # +string()+ over a boolean column, as a CASE that spells the two words of CEL itself:
+        # `string()` on a boolean column, portable across dialects (#418):
         #
         #   CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
         #
-        # CASE WHEN is standard SQL, and SQLite, MySQL and PostgreSQL each read a boolean column
-        # as a condition. Thus one translation is correct on all three dialects, where a CAST is
-        # correct on one of them (cerbos/query-plan-adapters#418).
+        # The IS NULL arm matters: CEL errors on a null, so the row must stay out. Without it,
+        # NULL would become "false" and `string(x) != "true"` would return a denied row.
         #
-        # The IS NULL arm is necessary. A NULL boolean is a missing attribute, or a null value,
-        # and CEL has no +string()+ for either: it makes an error and Cerbos denies the row. A
-        # NULL column makes `WHEN col` UNKNOWN, so without that arm the CASE would go to its ELSE
-        # and give "false". Then `string(x) != "true"` would give a row that the PDP denies. With
-        # the arm the result is NULL, and the row stays out under both polarities.
-        #
-        # The result is text, and the translator records it as a string. Thus the operators that
-        # examine the kind of an operand (a comparison, `+`, a string match, `size()`) treat it as
-        # they treat any other string. The two words are literals and not a column, so MySQL
-        # compares them in the collation of the connection (see "The collation is part of the
-        # contract" in the README).
+        # The result is recorded as a string column. MySQL compares the literals in the
+        # connection collation (README, "The collation is part of the contract").
         def boolean_to_string(column)
           text = ArelSupport.case_node(
             [[ArelSupport.comparison("eq", column, nil), nil], [column, "true"]],
@@ -122,18 +104,16 @@ module Cerbos
             return value
           end
 
-          # A comparison between a string column and a Time compares two different text
-          # formats. ActiveRecord makes `2025-01-01 00:00:00`, but an RFC-3339 column holds
-          # `2025-01-01T00:00:00Z`. Thus the order of the results comes from the text and not
-          # from the instants. The adapter refuses this shape and does not make the SQL.
+          # A string column would compare as text: ActiveRecord writes `2025-01-01 00:00:00`
+          # but the column holds `2025-01-01T00:00:00Z`. Refuse.
           raise UnsupportedOperatorError,
             "timestamp() applied to a #{type.inspect} column: this adapter compares instants " \
             "using the database's own temporal type, so the attribute must map to a datetime " \
             "column rather than to a column holding a formatted timestamp string"
         end
 
-        # True if this temporal column went through `timestamp()`, and thus compares as an
-        # instant. See {Comparisons#assert_timestamp_wrapped}.
+        # True if this column went through `timestamp()`.
+        # See {Comparisons#assert_timestamp_wrapped}.
         def timestamp_operand?(value)
           @timestamp_operands.key?(value)
         end

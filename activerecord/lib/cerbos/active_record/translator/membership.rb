@@ -3,8 +3,10 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # +in+ and +hasIntersection+: a value against a list of constants, a list that holds a
-      # column, or a mapped relation.
+      # `in` and `hasIntersection` against a constant list, a list holding a column, or a
+      # mapped relation.
+      #
+      # @private
       module Membership
         private
 
@@ -20,24 +22,21 @@ module Cerbos
           scalar_membership(needle, haystack)
         end
 
-        # +value in R.attr.<relation>+. If the relation of a row is empty, the row stays out of
-        # the result. This agrees with the CEL deny for a missing attribute.
+        # `value in R.attr.<relation>`, as an EXISTS over the related rows.
         def relation_membership(scope, value)
           member = scope.member_column
           condition =
             if explicit_null?(value)
               null_equality(member, value)
             elsif cross_type_literal?(value, member_kind(scope))
-              # `"2" in [2]` is false in CEL, whose equality is heterogeneous. SQL would coerce
-              # one side onto the other's type: SQLite's REAL affinity reads the literal '2' as
-              # the number 2, and it holds a boolean element as the integer 1.
+              # `"2" in [2]` is false in CEL. SQLite would coerce '2' to 2 (and true to 1).
               false
             else
               ArelSupport.comparison("eq", member, value)
             end
 
-          # A bare EXISTS has two values, so `!("x" in chain)` over an absent parent is TRUE and
-          # gives back a row that the PDP denies (#315). The guard makes it NULL instead.
+          # Without the guard, `!("x" in chain)` over a missing parent is TRUE and returns a
+          # denied row (#315). The guard makes it NULL.
           result = scope.guarded(scope.exists(condition))
           if ArelSupport.arel_node?(value) && !explicit_null?(value)
             return unknown_if_any([ArelSupport.is_null(value)], result)
@@ -49,13 +48,10 @@ module Cerbos
           members = values.is_a?(Array) ? values : [values]
           return false if members.empty?
 
-          # The usual shape: a column against a list of constants. An IN clause reads better than
-          # a chain of equality tests.
+          # Common case: a column against constants, as an IN clause.
           if ArelSupport.arel_node?(needle) && members.none? { |member| ArelSupport.arel_node?(member) }
-            # `R.attr.aNumber in ["5", 2]` is false for the string in CEL, whose equality is
-            # heterogeneous. Inside IN, SQLite's NUMERIC affinity reads '5' as the number 5, so
-            # the adapter drops each constant the column's kind can never equal, as it does for
-            # the member column of a relation.
+            # Drop constants of another type: `aNumber in ["5"]` is false in CEL, but SQLite
+            # reads '5' as 5 inside IN.
             kind = scalar_kind(needle)
             members = members.reject { |member| cross_type_literal?(member, kind) }
             if members.empty?
@@ -73,20 +69,19 @@ module Cerbos
                 ArelSupport.quote(needle), present.map { |value| ArelSupport.quote(value) }
               )
             end
-            # A null element makes the membership test true for an attribute that is null. The
-            # attribute must be null and not only missing.
+            # A null element matches a null attribute (a null value, not a missing one).
             predicates << ArelSupport.comparison("eq", needle, nil) if present.length != members.length
 
             return ArelSupport.or_node(predicates)
           end
 
-          # A list that holds a column, or a needle that is a constant, needs one comparison for
-          # each element. `null in [R.attr.x]` is the example: it is true when the column is null.
+          # A column in the list, or a constant needle: one comparison per element.
+          # E.g. `null in [R.attr.x]` is true when the column is null.
           ArelSupport.or_node(members.map { |member| member_equality(needle, member) })
         end
 
-        # CEL equality for one element of a membership test. Two nulls are equal in CEL, but the
-        # result of that comparison in SQL is UNKNOWN, so the adapter writes it out.
+        # CEL equality for one element. Two nulls are equal in CEL but UNKNOWN in SQL, so spell
+        # that case out.
         def member_equality(needle, member)
           needle_is_node = ArelSupport.arel_node?(needle)
           member_is_node = ArelSupport.arel_node?(member)
@@ -101,8 +96,8 @@ module Cerbos
           ArelSupport.to_predicate(compare("eq", needle, member))
         end
 
-        # The CEL kind of the bare values in a relation mapped by +member_field+, read from the
-        # column that holds them; nil when the column's type is not one the adapter classifies.
+        # The CEL kind of a `member_field` relation's values, from its column type. Nil if the
+        # type is not classified.
         def member_kind(scope)
           kind_of_column_type(scope.model.columns_hash[scope.mapping.member_field.to_s]&.type)
         end
@@ -116,25 +111,21 @@ module Cerbos
         end
 
         def has_intersection(left, right)
-          # hasIntersection gives the same result if the operands change sides. The planner
-          # keeps the order of the source. Thus the list of literals can come on each side.
+          # hasIntersection is symmetric and the planner keeps source order, so the literal list
+          # can be on either side.
           left, right = right, left if left.is_a?(Array) && !right.is_a?(Array)
           values = right.is_a?(Array) ? right : [right]
 
           case left
           when Values::Collection
-            # As with membership: a bare EXISTS is FALSE for an absent parent, so
-            # `!hasIntersection(chain, [...])` would be TRUE for it (#315).
-            # A literal of another type than the elements never intersects, as in membership.
+            # Guarded as in membership (#315). Literals of another type never intersect.
             kind = member_kind(left.scope)
             values = values.reject { |value| cross_type_literal?(value, kind) }
             left.scope.guarded(
               left.scope.exists(scalar_membership(left.scope.member_column, values))
             )
           when Values::MappedCollection
-            # map() makes an error for each element that makes an error, and it ignores no
-            # errors. Thus the guard for the error must come before the test for a true
-            # element.
+            # map() never ignores an element's error, so check for errors before matches.
             left.scope.guarded(
               ArelSupport.case_node(
                 [

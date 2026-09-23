@@ -2,71 +2,68 @@
 
 require "active_record"
 
-require_relative "active_record/attribute_mapping"
-require_relative "active_record/errors"
-require_relative "active_record/plan"
-require_relative "active_record/translator"
-require_relative "active_record/version"
-
+# Namespace shared with the `cerbos` gem, the official Cerbos Ruby SDK.
 module Cerbos
-  # Changes a Cerbos +PlanResources+ response into an +ActiveRecord::Relation+. Thus the
-  # database applies the authorization rules from the Cerbos policies, and the application
-  # code does not.
+  # Turns a Cerbos `PlanResources` response into an `ActiveRecord::Relation`, so the database
+  # applies the policy's rules.
   #
-  #   plan = cerbos.plan_resources(principal: principal, resource: {kind: "document"}, action: "view")
+  # Start with {.query_plan_to_relation}. The result is a normal relation: add scopes, order,
+  # pagination or eager loading as usual.
   #
-  #   documents = Cerbos::ActiveRecord.query_plan_to_relation(
-  #     plan: plan,
-  #     model: Document,
-  #     attributes: {
-  #       "request.resource.attr.ownerId" => Cerbos::ActiveRecord.field("owner_id"),
-  #       "request.resource.attr.status"  => Cerbos::ActiveRecord.field("status"),
-  #       "request.resource.attr.tags"    => Cerbos::ActiveRecord.relation(
-  #         :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
-  #       )
-  #     }
-  #   )
-  #
-  #   documents.order(:created_at).limit(20)
-  #
-  # The result is a usual relation. Thus you can add scopes, an order, pagination and eager
-  # loading to it.
-  #
-  # If the adapter cannot translate a shape of plan correctly, it raises an
-  # {ActiveRecord::Error}. It does not give a filter that is only approximately correct,
-  # because such a filter gives rows that the PDP denies.
+  # If a plan cannot be translated exactly, the adapter raises an {Error}. It never returns an
+  # approximate filter, because that could return rows the PDP denies.
   module ActiveRecord
-    # @param plan [Object] a +Cerbos::Output::PlanResources+ from the official Ruby SDK
-    #   (https://github.com/cerbos/cerbos-sdk-ruby), the JSON of a +PlanResources+ response
-    #   after a parse, or an object that has +kind+ and +condition+ in those shapes
-    # @param model [Class] the subclass of +ActiveRecord::Base+ to filter
-    # @param attributes [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
-    #   the plan variable name and its mapping to the model. Make the values with
-    #   {Cerbos::ActiveRecord.field} and {Cerbos::ActiveRecord.relation}.
-    # @param operator_overrides [Hash{String => #call}] the operator name and a callable
-    #   object. The adapter gives the operands to that object after it resolves them. Use this
-    #   for a shape that your database can translate correctly but portable SQL cannot. A JSON
-    #   containment operator and a full-text index are two examples.
-    # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
-    #   Cerbos, for each attribute that declares nothing of its own. With +:explicit+, the
-    #   default, a NULL column sends an attribute whose value is null, and thus
-    #   <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with the PDP. With
-    #   +:omitted+, a NULL column sends no attribute at all. CEL then raises a
-    #   missing-attribute error and the PDP denies the row, but +IS NULL+ would give that row.
-    #   Thus the adapter refuses each null constant in the plan under +:omitted+.
+    # Translate a query plan into a relation of the rows it allows.
     #
-    #   Declare the convention PER ATTRIBUTE with the +null_representation:+ argument of
-    #   {Cerbos::ActiveRecord.field}, and this value is then the fallback. One policy suite can
-    #   correctly mix the two: the same column can be mapped twice and sent as an explicit null
-    #   under one attribute name and omitted under another, which one option of the call cannot
-    #   express. An attribute that declares +:explicit+ makes the equality family (+eq+, +ne+,
-    #   +in+) translate so that it can never be SQL UNKNOWN, because CEL holds a null VALUE
-    #   under that convention and UNKNOWN keeps the row out under both polarities. The order
-    #   and string operators do not change: a null receiver raises a no-overload error in CEL,
-    #   which denies exactly as UNKNOWN does (cerbos/query-plan-adapters#308).
-    # @return [ActiveRecord::Relation] +model.none+ if the plan always denies, +model.all+ if
-    #   the plan always allows, and a filtered relation for all the other plans
-    # @raise [Error] if the adapter cannot translate the plan correctly
+    # @param plan [Object] a `Cerbos::Output::PlanResources` from the Ruby SDK
+    #   (https://github.com/cerbos/cerbos-sdk-ruby), a parsed `PlanResources` JSON response, or
+    #   any object with `kind` and `condition` in those shapes.
+    # @param model [Class] the `ActiveRecord::Base` subclass to filter.
+    # @param attributes [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
+    #   plan variable name => model mapping. Build values with {Cerbos::ActiveRecord.field} and
+    #   {Cerbos::ActiveRecord.relation}.
+    # @param operator_overrides [Hash{String => #call}] operator name => callable that gets the
+    #   resolved operands. Use it for shapes your database can express but portable SQL cannot,
+    #   such as JSON containment or full-text search.
+    # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
+    #   Cerbos, for attributes that declare nothing themselves.
+    #   `:explicit` (default): the attribute is sent with a null value, so `R.attr.x == null`
+    #   matches and `IS NULL` agrees with the PDP.
+    #   `:omitted`: the attribute is not sent. CEL errors and the PDP denies, but `IS NULL` would
+    #   match, so the adapter refuses any null constant in the plan.
+    #
+    #   Set it per attribute with `null_representation:` on {Cerbos::ActiveRecord.field}; this
+    #   value is the fallback. Per-attribute lets one column be mapped twice under different
+    #   conventions. Under `:explicit`, `eq`, `ne` and `in` are translated so they never yield
+    #   SQL UNKNOWN. Order and string operators are unchanged: CEL errors on a null receiver,
+    #   which denies just like UNKNOWN (cerbos/query-plan-adapters#308).
+    #
+    # @return [ActiveRecord::Relation] a filtered relation.
+    # @return [ActiveRecord::Relation] `model.none` if the plan always denies.
+    # @return [ActiveRecord::Relation] `model.all` if the plan always allows.
+    #
+    # @raise [Error] when the adapter cannot translate the plan correctly.
+    # @raise [ArgumentError] when `null_attribute_representation` is invalid, or an override
+    #   names a structural operator.
+    #
+    # @example
+    #   plan = cerbos.plan_resources(principal: principal, resource: {kind: "document"}, action: "view")
+    #
+    #   documents = Cerbos::ActiveRecord.query_plan_to_relation(
+    #     plan: plan,
+    #     model: Document,
+    #     attributes: {
+    #       "request.resource.attr.ownerId" => Cerbos::ActiveRecord.field("owner_id"),
+    #       "request.resource.attr.status"  => Cerbos::ActiveRecord.field("status"),
+    #       "request.resource.attr.tags"    => Cerbos::ActiveRecord.relation(
+    #         :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
+    #       )
+    #     }
+    #   )
+    #
+    #   documents.order(:created_at).limit(20)
+    #
+    # @see https://github.com/cerbos/cerbos-sdk-ruby Cerbos Ruby SDK
     def self.query_plan_to_relation(
       plan:, model:, attributes:,
       operator_overrides: {}, null_attribute_representation: :explicit
@@ -80,3 +77,9 @@ module Cerbos
     end
   end
 end
+
+require_relative "active_record/attribute_mapping"
+require_relative "active_record/errors"
+require_relative "active_record/plan"
+require_relative "active_record/translator"
+require_relative "active_record/version"

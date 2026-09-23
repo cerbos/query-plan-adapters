@@ -1,0 +1,65 @@
+inherit_mode:
+  merge:
+    - Exclude
+
+require:
+  - standard
+
+plugins:
+  - rubocop-rake
+  - rubocop-rspec
+  - standard-custom
+  - standard-performance
+
+inherit_gem:
+  standard: config/ruby-3.3.yml
+
+AllCops:
+  Exclude:
+    - bin/rake
+    - bin/rspec
+    - bin/rubocop
+    - bin/yard
+    - vendor/**/*
+    - example/vendor/**/*
+    - example/.bundle-path/**/*
+  NewCops: enable
+
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    # Specs keep shared fixtures as constants inside their example group.
+    - spec/**/*
+
+# These specs test the conformance corpus, not a class.
+RSpec/DescribeClass:
+  Exclude:
+    - spec/adversarial_conformance_spec.rb
+    - spec/translator_spec.rb
+
+RSpec/ExampleLength:
+  Enabled: false
+
+RSpec/IncludeExamples:
+  Enabled: false
+
+# Same reason as Lint/ConstantDefinitionInBlock above.
+RSpec/LeakyConstantDeclaration:
+  Exclude:
+    - spec/**/*
+
+RSpec/MultipleExpectations:
+  Enabled: false
+
+RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+
+RSpec/NestedGroups:
+  Enabled: false
+
+# Named for the suite, not mirrored from lib/. The docs cite it by name.
+RSpec/SpecFilePathFormat:
+  Exclude:
+    - spec/adapter_contract_spec.rb
+
+Style/FrozenStringLiteralComment:
+  Enabled: true

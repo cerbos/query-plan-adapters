@@ -4,9 +4,10 @@ require_relative "arel_support"
 
 module Cerbos
   module ActiveRecord
-    # The small number of operations for which no portable SQL is available. For each of them,
-    # an incorrect selection changes the meaning of the filter. It does not change only the
-    # text of the SQL.
+    # The few operations with no portable SQL. Picking the wrong form changes what the filter
+    # means, not just how it reads.
+    #
+    # @private
     class Dialect
       MYSQL_ADAPTERS = %w[mysql mysql2 trilogy].freeze
 
@@ -24,9 +25,8 @@ module Cerbos
         new(model.connection.adapter_name)
       end
 
-      # MySQL has no +||+ operator for the concatenation of strings with its default
-      # +sql_mode+. The other databases that this adapter supports have no +CONCAT+ function.
-      # SQLite got +CONCAT+ only in version 3.44.
+      # MySQL reads `||` as OR by default. Elsewhere use `||`: SQLite before 3.44 has no
+      # `CONCAT`.
       def concat(left, right)
         if mysql?
           ArelSupport.function("CONCAT", [left, right])
@@ -35,17 +35,14 @@ module Cerbos
         end
       end
 
-      # CEL +size()+ counts the characters of a string. The +LENGTH+ function of MySQL counts
-      # the bytes. Thus it gives the wrong size for a string with multi-byte characters. The
-      # +CHAR_LENGTH+ function of MySQL counts the characters. The +LENGTH+ function of SQLite
-      # and PostgreSQL counts the characters.
+      # CEL `size()` counts characters. MySQL's `LENGTH` counts bytes, so MySQL uses
+      # `CHAR_LENGTH`. SQLite and PostgreSQL `LENGTH` already count characters.
       def char_length(expression)
         ArelSupport.function(mysql? ? "CHAR_LENGTH" : "LENGTH", [expression])
       end
 
-      # The type name that a CAST must use to get an IEEE-754 binary64 value. The correct name
-      # is important. The +numeric+ type of PostgreSQL is an exact decimal type. If the
-      # adapter used it, arithmetic with fractions would not agree with the doubles of CEL.
+      # The CAST type for an IEEE-754 double. Not PostgreSQL `numeric`: it is exact decimal, so
+      # fractional arithmetic would not match CEL doubles.
       def double_type
         case adapter_name
         when "sqlite", "sqlite3" then "REAL"
@@ -54,7 +51,7 @@ module Cerbos
         end
       end
 
-      # The type name that a CAST to a string must use. MySQL has no +TEXT+ target for a CAST.
+      # The CAST type for a string. MySQL cannot CAST to `TEXT`.
       def text_type
         mysql? ? "VARCHAR" : "TEXT"
       end

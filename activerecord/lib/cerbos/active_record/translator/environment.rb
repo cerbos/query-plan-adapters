@@ -3,8 +3,10 @@
 module Cerbos
   module ActiveRecord
     class Translator
-      # Resolves the plan variables with the attribute map from the caller. It also resolves
-      # the iterator variables that the collection macros around them connected to a scope.
+      # Resolves plan variables through the caller's attribute map, and macro iterator
+      # variables through their bound scope.
+      #
+      # @private
       class Environment
         def initialize(translator:, bindings:)
           @translator = translator
@@ -33,8 +35,7 @@ module Cerbos
 
           scope = bindings[head]
 
-          # A macro over a list of constants binds the iterator to an element of that list.
-          # An element is a value and has no fields, so a reference with a dot is an error.
+          # Bound to a constant list element, which has no fields.
           unless scope.is_a?(Relations::Scope)
             return scope if rest.nil?
 
@@ -57,13 +58,10 @@ module Cerbos
 
         private
 
-        # Resolves a plan variable that walks INTO a mapped relation, for example
-        # <tt>request.resource.attr.mainCategory.subCategories</tt>. The longest part of the
-        # name that the attribute map holds is the start of the chain, and each remaining part
-        # names a nested relation in the +fields:+ of the part before it.
+        # Resolves a path into a mapped relation, such as `R.attr.mainCategory.subCategories`:
+        # the longest mapped prefix starts the chain, and each later part is a nested relation.
         #
-        # @return [Values::Collection, nil] nil when no part of the name is a mapped relation,
-        #   so the caller can raise the message for an attribute that has no mapping at all
+        # @return [Values::Collection, nil] nil when no prefix is a mapped relation
         def resolve_chain(name)
           segments = name.split(".")
 
@@ -83,9 +81,8 @@ module Cerbos
           nil
         end
 
-        # Each part after the mapped start must name a nested relation. A nested field would be
-        # a scalar read from a collection, and the adapter does not choose one row of a
-        # collection by itself.
+        # Each part must be a nested relation. A scalar field would mean picking one row of a
+        # collection, which the adapter will not guess.
         def walk_members(scope, segments, name)
           segments.each do |segment|
             member = scope.mapping.fields[segment]
@@ -108,7 +105,7 @@ module Cerbos
         def element(scope)
           return Values::Collection.new(scope: scope) unless scope.mapping&.member_field
 
-          # A scalar list contains null VALUES, unlike an absent field on a struct element.
+          # A scalar list holds null values, unlike a missing field on a struct element.
           translator.register_null_representation(scope.member_column, :explicit)
         end
 

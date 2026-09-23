@@ -9,8 +9,7 @@ defaults:
   run:
     working-directory: activerecord
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   publish:
@@ -18,18 +17,16 @@ jobs:
     environment: rubygems
     permissions:
       contents: read
-      # Trusted publishing to RubyGems. Thus the repository secrets hold no permanent API
-      # key.
+      # Trusted publishing to RubyGems, so no API key is stored in secrets.
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # `defaults.run.working-directory` applies only to `run` steps. An action step reads its
-      # own input. Without these, both steps look for the Gemfile in the root of the
-      # repository, which has none, and the release fails.
+      # `defaults.run.working-directory` only affects `run` steps, so these actions need
+      # their own `working-directory` to find the Gemfile.
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
-          ruby-version: "3.4"
+          ruby-version: "4.0"
           bundler-cache: true
           working-directory: activerecord
 
