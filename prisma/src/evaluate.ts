@@ -1,6 +1,7 @@
 // Evaluating operators whose operands are all constants, with CEL's semantics.
 
 import type { Value } from "@cerbos/core";
+import { UnsupportedQueryPlanError } from "./errors";
 
 export const ARITHMETIC_OPERATORS = new Set(["add", "sub", "mult", "div"]);
 
@@ -31,7 +32,7 @@ export function evaluateConstantComparison(
           (typeof left === "string" && typeof right === "string")
         )
       ) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           `${operator} constant comparison requires two numbers or two strings`
         );
       }
@@ -49,7 +50,7 @@ export function evaluateConstantComparison(
     }
   }
 
-  throw new Error(`Unsupported constant comparison operator: ${operator}`);
+  throw new UnsupportedQueryPlanError(`Unsupported constant comparison operator: ${operator}`);
 }
 
 /** Orders numbers numerically and strings by Unicode code point, as CEL does. */
@@ -61,7 +62,7 @@ function compareConstantValues(
     return left === right ? 0 : left < right ? -1 : 1;
   }
   if (typeof left !== "string" || typeof right !== "string") {
-    throw new Error("Cannot order constant values of different types");
+    throw new UnsupportedQueryPlanError("Cannot order constant values of different types");
   }
 
   const leftCodePoints = Array.from(left, (character) =>
@@ -127,7 +128,7 @@ export function foldArithmetic(
     return String(left) + String(right);
   }
   if (typeof left !== "number" || typeof right !== "number") {
-    throw new Error(`${operator} operator requires string or number operands`);
+    throw new UnsupportedQueryPlanError(`${operator} operator requires string or number operands`);
   }
   switch (operator) {
     case "add":
@@ -139,6 +140,6 @@ export function foldArithmetic(
     case "div":
       return left / right;
     default:
-      throw new Error(`Unsupported operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 }

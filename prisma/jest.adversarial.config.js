@@ -48,7 +48,7 @@ module.exports = {
   // script. The SQLite leg's setup is a no-op.
   globalSetup: "<rootDir>/jest.globalSetup.adversarial.js",
   globalTeardown: "<rootDir>/jest.globalTeardown.adversarial.js",
-  // Isolated from the main jest.config.js run: this suite talks to a Cerbos sidecar loaded
-  // with conformance/policies (resource kind "adversarial").
+  // Isolated from the main jest.config.js run: this suite replays the recorded goldens in
+  // conformance/golden/ against a real store (no PDP).
   testMatch: ["<rootDir>/src/adversarial.test.ts"],
 };

@@ -7,8 +7,9 @@ import type { TranslationContext } from "./mapping";
 import { isOperatorOperand, isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
+import { UnsupportedQueryPlanError } from "./errors";
 
-export { PlanKind };
+export { PlanKind, UnsupportedQueryPlanError };
 
 export type PrismaFilter = Record<string, any>;
 
@@ -184,7 +185,7 @@ export function queryPlanToPrisma({
       // as a condition is already rejected inside handleCollectionOperator with its own
       // message; nested inside a comparison or size() both remain translatable.)
       if (isOperatorOperand(condition) && condition.operator === "map") {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
             "only comparisons or size() over its result have a boolean meaning"
         );
@@ -195,6 +196,6 @@ export function queryPlanToPrisma({
       };
     }
     default:
-      throw Error(`Invalid query plan.`);
+      throw new UnsupportedQueryPlanError(`Invalid query plan.`);
   }
 }

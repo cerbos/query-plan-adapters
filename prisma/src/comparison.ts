@@ -33,6 +33,7 @@ import type { OperatorOperand } from "./plan";
 import { relationFilter, wrapInRelations } from "./relations";
 import { tryHandleTernaryComparison } from "./ternary";
 import { resolveOperand, tryFoldValueExpression } from "./translate";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /**
  * Helper function to process relational operators (eq, ne, lt, etc.)
@@ -49,16 +50,16 @@ export function handleRelationalOperator(
 
   ({ operator, operands } = normalizeBinaryOperands(operator, operands));
   if (!CERBOS_TO_PRISMA_OPERATOR[operator]) {
-    throw new Error(`Unsupported operator: ${operator}`);
+    throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 
   const leftOperand = operands.find(
     (o) => isNamedOperand(o) || isOperatorOperand(o)
   );
-  if (!leftOperand) throw new Error("No valid left operand found");
+  if (!leftOperand) throw new UnsupportedQueryPlanError("No valid left operand found");
 
   const rightOperand = operands.find((o) => o !== leftOperand);
-  if (!rightOperand) throw new Error("No valid right operand found");
+  if (!rightOperand) throw new UnsupportedQueryPlanError("No valid right operand found");
 
   if (isOperatorOperand(leftOperand) && leftOperand.operator === "size") {
     return handleSizeComparison(operator, leftOperand, rightOperand, context);
@@ -84,7 +85,7 @@ export function handleRelationalOperator(
       (o) => isOperatorOperand(o) && o.operator === "map"
     )
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Direct comparison of map(...) to a value is not supported (operator: ${operator}). ` +
         `Wrap the map() expression in hasIntersection(map(...), [...]) instead.`
     );
@@ -113,7 +114,7 @@ export function handleRelationalOperator(
       right.valueType === "dateTime" &&
       (!left.timestampWrapped || !right.timestampWrapped)
     ) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()"
       );
     }
@@ -122,7 +123,7 @@ export function handleRelationalOperator(
       right.valueType !== undefined &&
       left.valueType !== right.valueType
     ) {
-      throw new Error("Cannot compare fields with different mapped value types");
+      throw new UnsupportedQueryPlanError("Cannot compare fields with different mapped value types");
     }
     return buildFieldToFieldFilter(
       context,
@@ -149,16 +150,16 @@ function handleSizeComparison(
 ): PrismaFilter {
   const collectionOperand = sizeOperand.operands[0];
   if (!collectionOperand || !isNamedOperand(collectionOperand)) {
-    throw new Error("size operator requires a named collection operand");
+    throw new UnsupportedQueryPlanError("size operator requires a named collection operand");
   }
 
   if (!isValueOperand(valueOperand)) {
-    throw new Error("size comparison requires a numeric value operand");
+    throw new UnsupportedQueryPlanError("size comparison requires a numeric value operand");
   }
 
   const count = valueOperand.value;
   if (typeof count !== "number") {
-    throw new Error("size comparison requires a numeric value");
+    throw new UnsupportedQueryPlanError("size comparison requires a numeric value");
   }
 
   const isNonEmpty =
@@ -170,14 +171,14 @@ function handleSizeComparison(
     (operator === "le" && count === 0);
 
   if (!isNonEmpty && !isEmpty) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Unsupported size comparison: size(...) ${operator} ${count}`
     );
   }
 
   const { relations } = resolveFieldReference(collectionOperand.name, context);
   if (!relations || relations.length === 0) {
-    throw new Error("size operator requires a relation mapping");
+    throw new UnsupportedQueryPlanError("size operator requires a relation mapping");
   }
 
   // The count applies to the deepest relation; every relation before it is a hop to reach it.
@@ -208,7 +209,7 @@ function buildFieldToFieldFilter(
   );
 
   if (!isNamedOperand(leftOperand) || !isNamedOperand(rightOperand)) {
-    throw new Error("Field-to-field comparison requires two named operands");
+    throw new UnsupportedQueryPlanError("Field-to-field comparison requires two named operands");
   }
 
   const container = fieldReferenceContainer(
@@ -233,7 +234,7 @@ function buildFieldToFieldFilter(
     // definite predicate returns rows the PDP refuses; a plain one drops rows the PDP allows.
     // Refuse it rather than pick a direction — declare both attributes, or neither.
     if (leftExplicit !== rightExplicit) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
           "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither."
       );
@@ -286,7 +287,7 @@ function fieldReferenceContainer(
     const leftInScope = leftName.startsWith(prefix);
     const rightInScope = rightName.startsWith(prefix);
     if (leftInScope !== rightInScope) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Cannot compare a collection element column with an outer column (${leftName} vs ${rightName}): ` +
           "Prisma field references only work between fields of the same model"
       );
@@ -305,7 +306,7 @@ function fieldReferenceContainer(
     (left.relations && left.relations.length > 0) ||
     (right.relations && right.relations.length > 0)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Cannot compare columns across relations: Prisma field references only work between fields of the same model"
     );
   }
@@ -348,7 +349,7 @@ function handleArithmeticComparison(
     ARITHMETIC_OPERATORS.has(otherOperand.operator) &&
     tryFoldValueExpression(otherOperand, context) === null
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Arithmetic on both sides of a comparison is not supported: the expression cannot be solved to a plain column filter"
     );
   }
@@ -363,7 +364,7 @@ function handleArithmeticComparison(
   if (isResolvedValue(arithLeft) && isResolvedValue(arithRight)) {
     const folded = foldArithmetic(arithOp, arithLeft.value, arithRight.value);
     if (!isResolvedFieldReference(other)) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `${arithOp} with two values requires a field reference on the other side`
       );
     }
@@ -376,7 +377,7 @@ function handleArithmeticComparison(
   }
 
   if (!isResolvedValue(other)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${arithOp} operator with field references requires a value on the other side of the comparison`
     );
   }
@@ -397,7 +398,7 @@ function handleArithmeticComparison(
     constant = arithLeft.value;
     fieldIsLeft = false;
   } else {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${arithOp} operator requires exactly one field reference and one value, or two values`
     );
   }
@@ -409,7 +410,7 @@ function handleArithmeticComparison(
   // String concatenation solving (eq/ne only).
   if (arithOp === "add" && typeof constant === "string") {
     if (effectiveOperator !== "eq" && effectiveOperator !== "ne") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Operator ${effectiveOperator} is not supported with string concatenation`
       );
     }
@@ -427,7 +428,7 @@ function handleArithmeticComparison(
   }
 
   if (typeof constant !== "number" || typeof other.value !== "number") {
-    throw new Error(`${arithOp} comparison requires numeric operands`);
+    throw new UnsupportedQueryPlanError(`${arithOp} comparison requires numeric operands`);
   }
 
   if (
@@ -435,7 +436,7 @@ function handleArithmeticComparison(
     (effectiveOperator === "eq" || effectiveOperator === "ne") &&
     (!Number.isInteger(constant) || !Number.isInteger(other.value))
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Fractional addition equality cannot be translated safely: solving IEEE-754 addition into a plain Prisma column comparison is not reversible"
     );
   }
@@ -457,7 +458,7 @@ function handleArithmeticComparison(
       break;
     case "mult":
       if (constant === 0) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "Multiplication by a constant zero must be folded by the Cerbos planner"
         );
       }
@@ -468,12 +469,12 @@ function handleArithmeticComparison(
       break;
     case "div":
       if (!fieldIsLeft) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "Division by a column is not supported: the comparison cannot be solved to a plain column filter"
         );
       }
       if (constant === 0) {
-        throw new Error("Division by a constant zero is not supported");
+        throw new UnsupportedQueryPlanError("Division by a constant zero is not supported");
       }
       solved = other.value * constant;
       if (constant < 0) {
@@ -481,7 +482,7 @@ function handleArithmeticComparison(
       }
       break;
     default:
-      throw new Error(`Unsupported operator: ${arithOp}`);
+      throw new UnsupportedQueryPlanError(`Unsupported operator: ${arithOp}`);
   }
 
   return buildComparisonFilter(context, fieldRef, effectiveOperator, solved);
@@ -510,7 +511,7 @@ function solveAdd(
   if (typeof comparisonValue === "number" && typeof addConstant === "number") {
     return comparisonValue - addConstant;
   }
-  throw new Error("Type mismatch in add comparison");
+  throw new UnsupportedQueryPlanError("Type mismatch in add comparison");
 }
 
 /**
@@ -521,7 +522,7 @@ export function handleInOperator(
   context: TranslationContext
 ): PrismaFilter {
   if (operands.length !== 2) {
-    throw new Error("in requires exactly two operands");
+    throw new UnsupportedQueryPlanError("in requires exactly two operands");
   }
   const member = assertDefined(operands[0], "in requires a member operand");
   const collection = assertDefined(
@@ -546,12 +547,12 @@ export function handleInOperator(
   }
 
   if (isNamedOperand(member) && isNamedOperand(collection)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column"
     );
   }
 
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     "in requires a field member and literal list, or a literal member and field collection"
   );
 }

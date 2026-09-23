@@ -10,6 +10,7 @@ import type {
   PrismaFilter,
 } from "./index";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
+import { UnsupportedQueryPlanError } from "./errors";
 
 // Each translation owns its lambda scopes, including when a function mapper re-enters the
 // adapter. Scopes collect nullable element fields for three-valued-logic guards.
@@ -326,7 +327,7 @@ export function assertNullOperandTranslatable(
   declared?: NullAttributeRepresentation
 ): void {
   if ((declared ?? translation.nullRepresentation) === "omitted") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
         "(deny) while a NULL-selecting filter would return those rows. Send NULL columns as " +

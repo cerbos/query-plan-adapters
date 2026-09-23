@@ -16,6 +16,7 @@ import {
   isValueOperand,
 } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /** The boolean collection macros: each takes a collection and a lambda. */
 export const COLLECTION_OPERATORS = new Set([
@@ -68,7 +69,7 @@ export function substituteLambdaVariable(
           !(segment in current) ||
           current[segment] === undefined
         ) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`
           );
         }
@@ -363,7 +364,7 @@ export function constantFoldExpression(
       const [condition, thenBranch, elseBranch] = operands;
       if (condition !== undefined && isValueOperand(condition)) {
         if (typeof condition.value !== "boolean") {
-          throw new Error("if (ternary) condition must be a boolean expression");
+          throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
         }
         return assertDefined(
           condition.value ? thenBranch : elseBranch,

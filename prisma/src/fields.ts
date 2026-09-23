@@ -11,6 +11,7 @@ import {
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import { CERBOS_TO_PRISMA_OPERATOR, assertDefined } from "./plan";
 import { wrapInRelations } from "./relations";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /**
  * Prisma has no model-agnostic always-false `where` shape — empty logical arrays are ignored —
@@ -18,7 +19,7 @@ import { wrapInRelations } from "./relations";
  * ALWAYS_DENIED before it reaches the adapter.
  */
 export function rejectConstantFalse(): never {
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     "A constant-false conditional predicate must be folded by the Cerbos planner"
   );
 }
@@ -80,7 +81,7 @@ function assertScalarValue(
   operator: string
 ): void {
   if (value !== null && typeof value === "object") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} requires scalar values: Prisma cannot compare list or map elements`
     );
   }
@@ -90,7 +91,7 @@ function assertScalarValue(
     fieldRef.valueType !== "dateTime" &&
     typeof value !== fieldRef.valueType
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} value type does not match mapped ${fieldRef.valueType} field`
     );
   }
@@ -101,7 +102,7 @@ export function assertStringField(
   operator: string
 ): void {
   if (fieldRef.valueType !== undefined && fieldRef.valueType !== "string") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} requires a string field, got ${fieldRef.valueType}`
     );
   }

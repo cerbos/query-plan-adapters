@@ -7,6 +7,7 @@ import type { PrismaFilter } from "./index";
 import { resolveFieldReference } from "./mapping";
 import type { RelationConfig, TranslationContext } from "./mapping";
 import { isNamedOperand, isOperatorOperand } from "./plan";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /** The Prisma operator that reaches into a relation for an existence test. */
 export function relationOperator(relation: RelationConfig): string {
@@ -173,7 +174,7 @@ function buildExpressionHopsExistFilter(
  */
 export function negateFilter(filter: PrismaFilter): PrismaFilter {
   if (Object.keys(filter).length === 0) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Cannot negate an unconditional filter: Prisma evaluates { NOT: {} } as true and matches " +
         "every row, where the negated condition matches none"
     );
