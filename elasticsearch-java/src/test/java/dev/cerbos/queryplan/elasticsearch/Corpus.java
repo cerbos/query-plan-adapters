@@ -34,31 +34,17 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * This adapter's reader for the shared {@code ../conformance/} corpus, and for the golden
- * expectations that belong to it alone.
+ * Reads the shared {@code ../conformance/} corpus and this adapter's golden expectations.
  *
- * <p><strong>Deliberately duplicated.</strong> Every adapter carries its own loader —
- * {@code prisma/src/corpus.ts}, {@code sqlalchemy/tests/corpus.py}, {@code pgx/corpus_test.go},
- * spring-data's {@code Corpus.java}, this one — so that each stays standalone and none of them can
- * break another by changing. Do not extract a shared one, and do not add a drift check between the
- * copies: they are allowed to differ ({@code docs/adr/0007-adapters-share-data-not-code.md}).
- *
- * <p>What lives here is what BOTH of this adapter's corpus suites must agree on: the classification
- * in {@code actions.json}, the wire-fixture decoding, and the call arguments the corpus is
- * translated through — {@link #FIELD_MAP}, {@link #NESTED_PATHS}, {@link #SCALAR_TYPES}, {@link #COLLECTION_FIELDS} and
- * {@link #EXPLICIT_NULL_ATTRIBUTES}, gathered into {@link #OPTIONS}. That last group is the load-bearing part:
- * {@link ElasticsearchTranslatorTest} pins the Query DSL this adapter emits for a corpus action and
- * {@link ElasticsearchAdversarialConformanceTest} proves the documents that same query returns, and
- * the two statements are only about the same query while both are built from these arguments.
- *
- * <p>The seeds, the derived fields, the {@code check()} oracle and the coverage guards over all
- * three stay in the harness, which is the only thing that consumes them.
+ * <p>Every adapter keeps its own copy of this loader; do not extract a shared one (ADR 0007).
+ * {@link ElasticsearchTranslatorTest} and {@link ElasticsearchAdversarialConformanceTest} both
+ * translate through {@link #OPTIONS}, so they test the same query.
  */
 final class Corpus {
 
     private Corpus() {}
 
-    /** The corpus key for this adapter — its directory name, as every other harness uses. */
+    /** This adapter's key in the corpus files: its directory name. */
     static final String ADAPTER = "elasticsearch-java";
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -70,25 +56,23 @@ final class Corpus {
     // -- conformance/actions.json ---------------------------------------------------------------
 
     /**
-     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
-     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
-     * set is exactly the roster minus the adapters that promoted the shape.
+     * An {@code expectedUnsupported} entry. {@code messages} is keyed by adapter name and holds
+     * the message each adapter that rejects the shape must raise.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record UnsupportedShape(String action, String shape, Map<String, String> messages) {}
 
     /**
-     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these — the two NULL
-     * conventions are indistinguishable on the wire — so {@code messages} names the whole roster
-     * with no promotions to subtract.
+     * A {@code nullRepresentationOmitted} entry. Every adapter must reject these, because the two
+     * NULL conventions look the same on the wire.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record NullRepresentationOmitted(String action, String reason, Map<String, String> messages) {}
 
     /**
-     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring this adapter's error must contain — present on the first, absent on the
-     * second, which does not throw.
+     * An {@code adapterUnsupported} or {@code adapterSupportedExpected} entry. {@code message} is
+     * the substring this adapter's error must contain; entries of the second kind do not throw
+     * and carry none.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record AdapterUnsupported(String action, String reason, String message) {}
@@ -97,16 +81,16 @@ final class Corpus {
     record KnownDivergence(String action, String reason, List<String> adapters) {}
 
     /**
-     * A {@code degenerateOracles} entry: an action whose check() oracle is empty or total BY
-     * CONSTRUCTION. {@code oracle} is {@code "empty"} or {@code "total"}.
+     * A {@code degenerateOracles} entry: an action whose {@code check()} oracle is empty or total
+     * by construction. {@code oracle} is {@code "empty"} or {@code "total"}.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record DegenerateOracle(String action, String oracle, String reason) {}
 
     /**
-     * The corpus allowlist of degenerate oracles, action to {@code "empty"} or {@code "total"}.
-     * Every harness sweeps each action it oracle-compares against this: a listed action must have
-     * exactly the declared oracle, and any other must have a non-empty, non-total one.
+     * Maps each declared degenerate action to {@code "empty"} or {@code "total"}. A listed action
+     * must have exactly that oracle; every other compared action must have a non-empty,
+     * non-total one.
      */
     static Map<String, String> degenerateOracleShapes(List<DegenerateOracle> entries) {
         if (entries == null) {
@@ -130,10 +114,8 @@ final class Corpus {
     }
 
     /**
-     * Every group in actions.json must be named here: Jackson silently drops a field this
-     * record does not declare, and a dropped group makes its actions vanish from every count
-     * and every parameterised case at once — the projection trap conformance/README.md warns
-     * about. The manifest tripwire in each suite is what makes an undropped group load-bearing.
+     * Declares every group in actions.json. Jackson silently drops an undeclared field, which
+     * would remove that group's actions from every count and test case.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     record ActionsFile(
@@ -184,10 +166,8 @@ final class Corpus {
     }
 
     /**
-     * The substring this adapter's error must contain, or a loud failure. The message is what
-     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
-     * unrelated validation satisfies the throw suite just as well as the documented limitation
-     * (cerbos/query-plan-adapters#326).
+     * Returns the pinned message, or throws if there is none. Without a message, any exception
+     * (for example a mapper typo) would pass the throw test.
      */
     static String requireMessage(String label, String message) {
         if (message == null || message.isEmpty()) {
@@ -197,7 +177,7 @@ final class Corpus {
         return message;
     }
 
-    /** Actions this adapter oracle-compares: conformance minus its own unsupported, plus promotions. */
+    /** Actions this adapter compares against the oracle: conformance minus its unsupported, plus promotions. */
     static Stream<String> oracleActions(ActionsFile actions, String adapter) {
         Set<String> unsupported = actions.adapterUnsupportedFor(adapter).stream()
                 .map(AdapterUnsupported::action)
@@ -209,13 +189,11 @@ final class Corpus {
     }
 
     /**
-     * Every action this adapter must refuse, each with the message it must refuse it with:
-     * {@code adapterUnsupported[me]} plus {@code expectedUnsupported} minus its own promotions.
+     * Every action this adapter must refuse, with its message: {@code adapterUnsupported[me]}
+     * plus {@code expectedUnsupported} minus its own promotions.
      *
-     * <p>{@code nullRepresentationOmitted} is deliberately NOT folded in here — the harness keeps
-     * it a separate classification because the corpus does ({@link #nullRepresentationThrows}).
-     * On this adapter it happens to throw unconditionally, which is a fact about Elasticsearch
-     * rather than about the group, and {@link ElasticsearchTranslatorTest} states it as one.
+     * <p>{@code nullRepresentationOmitted} stays separate, as it is in the corpus; see
+     * {@link #nullRepresentationThrows}.
      */
     static Map<String, String> throwingActions(ActionsFile actions, String adapter) {
         Set<String> promoted = actions.adapterSupportedExpectedFor(adapter).stream()
@@ -251,22 +229,12 @@ final class Corpus {
     // -- conformance/wire-fixtures/ -------------------------------------------------------------
 
     /**
-     * The instant {@code regenerate-wire-fixtures.sh} substitutes for the one operand it cannot
-     * pin.
+     * The instant substituted for {@code __NOW_MINUS_24H__} in the wire fixtures.
      *
-     * <p>{@code ts-window} and {@code ts-vf} compare against {@code now() - duration("24h")},
-     * which the planner folds to a literal timestamp: a different value on every capture, so the
-     * script rewrites it to {@code __NOW_MINUS_24H__} to keep the drift check deterministic.
-     * Reading a fixture back therefore means CHOOSING a value, and on THIS adapter the choice
-     * decides the classification rather than only the recorded bytes: the adapter refuses a
-     * timestamp literal carrying sub-millisecond precision, which is exactly what
-     * {@code actions.json} declares those two actions unsupported for. A tidy millisecond
-     * substitution would translate cleanly and quietly contradict the corpus.
-     *
-     * <p>Nanosecond precision, deliberately, and the same instant {@code sqlalchemy/tests/corpus.py}
-     * and spring-data's loader chose: the PDP emits nanoseconds.
-     * {@link ElasticsearchTranslatorTest} asserts BOTH directions of that dependency, so this
-     * stays a decision rather than an accident.
+     * <p>{@code ts-window} and {@code ts-vf} compare against {@code now() - duration("24h")}, which
+     * the regenerate script replaces with that placeholder. The value must have nanosecond
+     * precision, as the PDP emits: this adapter refuses sub-millisecond timestamps, and that
+     * refusal is why {@code actions.json} marks those two actions unsupported.
      */
     static final String PLANNED_AT = "2026-08-11T09:13:39.123456789Z";
 
@@ -286,14 +254,8 @@ final class Corpus {
     }
 
     /**
-     * The plan the pinned PDP produced for {@code action}, decoded into the protobuf response
-     * the SDK hands a caller.
-     *
-     * <p>The fixture IS the PDP's HTTP response body, so the decoding here is protobuf's own
-     * canonical JSON mapping ({@link JsonFormat}) — the same mapping the PDP's HTTP API writes.
-     * It is deliberately not a hand-built plan: a plan somebody typed is a BELIEF about what the
-     * planner emits, and this repository keeps fixtures precisely because that belief has been
-     * wrong before. See {@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}.
+     * The plan the pinned PDP produced for {@code action}. The fixture is the PDP's HTTP response
+     * body, decoded with protobuf's JSON mapping ({@link JsonFormat}). See ADR 0006.
      */
     static PlanResourcesResponse planFromWireFixture(String action) {
         return planFromWireFixture(action, PLANNED_AT);
@@ -318,19 +280,14 @@ final class Corpus {
     // -- the corpus mapped onto the index --------------------------------------------------------
 
     /**
-     * The corpus's field map. Read by BOTH corpus suites: the harness executes the queries it
-     * produces against a seeded index, and the translator suite pins them.
+     * The corpus field map, used by both corpus suites.
      *
-     * <p>Every level of every path is mapped even where the action is fail-closed. An unmapped
-     * field throws {@code "Unknown attribute"} instead of the mechanism {@code actions.json}
-     * names, which passes the throw test for the wrong reason
-     * (cerbos/query-plan-adapters#326).
+     * <p>Every path is mapped, including ones only fail-closed actions read. An unmapped field
+     * throws {@code "Unknown attribute"} instead of the message {@code actions.json} pins.
      */
     static final Map<String, String> FIELD_MAP = Map.ofEntries(
-            // The primary key, reached as `request.resource.id` rather than through `attr` (the
-            // `id-*` actions). It maps onto the indexed `id` keyword field rather than
-            // Elasticsearch's own `_id` metadata field: an adapter that resolves references by
-            // stripping a `request.resource.attr.` prefix never sees this name at all.
+            // The primary key (`request.resource.id`), mapped to the indexed `id` keyword field
+            // rather than Elasticsearch's `_id` metadata field.
             Map.entry("request.resource.id", "id"),
             Map.entry("request.resource.attr.aBool", "aBool"),
             Map.entry("request.resource.attr.aString", "aString"),
@@ -341,25 +298,21 @@ final class Corpus {
             Map.entry("request.resource.attr.createdAt", "createdAt"),
             Map.entry("request.resource.attr.updatedAt", "updatedAt"),
             Map.entry("request.resource.attr.owner", "owner"),
-            // `coOwner` is the explicit-null alias of the `scope` field, the second half of
-            // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the
-            // same field under both conventions (cerbos/query-plan-adapters#308).
+            // `coOwner` is the explicit-null alias of `scope`, which is omitted when NULL, so the
+            // corpus carries the same field under both conventions (`null-value-f2f`).
             Map.entry("request.resource.attr.coOwner", "coOwner"),
             Map.entry("request.resource.attr.scope", "scope"),
             Map.entry("request.resource.attr.obj.inner", "obj.inner"),
             Map.entry("request.resource.attr.tags", "tags"),
             Map.entry("request.resource.attr.tagNames", "tagNames"),
-            // The homogeneous number and boolean lists, flat arrays like tagNames. Every action
-            // reading them indexes a position, which is refused before the field is looked up;
-            // they are mapped anyway, so a walk that looked the field up first would still refuse
-            // with the positional-read message rather than "Unknown attribute" (#326).
+            // Flat number and boolean arrays, like tagNames.
             Map.entry("request.resource.attr.aNumberList", "aNumberList"),
             Map.entry("request.resource.attr.aBoolList", "aBoolList"),
             Map.entry("request.resource.attr.categories", "categories"),
             Map.entry("request.resource.attr.mainCategory.subCategories", "mainCategory.subCategories"),
             Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
-            // The corpus's one REAL to-one chain (the `rel-*` actions), indexed as plain objects
-            // because Elasticsearch has no join.
+            // The corpus's to-one relation (`rel-*` actions), indexed as plain objects because
+            // Elasticsearch has no join.
             Map.entry("request.resource.attr.parent.aBool", "parent.aBool"),
             Map.entry("request.resource.attr.parent.aString", "parent.aString"),
             Map.entry("request.resource.attr.parent.aNumber", "parent.aNumber"),
@@ -370,10 +323,9 @@ final class Corpus {
             Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"));
 
     /**
-     * The attributes the corpus sends to {@code check()} as EXPLICIT nulls
-     * (cerbos/query-plan-adapters#308). Elasticsearch cannot represent that convention — a JSON
-     * null is not indexed, so an explicitly-null value and a missing field are the same document
-     * — so declaring them here is what turns a narrow answer into a refusal.
+     * Attributes the corpus sends to {@code check()} as explicit nulls. Elasticsearch does not
+     * index a JSON null, so an explicit null and a missing field look the same; declaring these
+     * makes the adapter refuse instead of answering.
      */
     static final Set<String> EXPLICIT_NULL_ATTRIBUTES = Set.of(
             "request.resource.attr.owner", "request.resource.attr.coOwner");
@@ -384,24 +336,16 @@ final class Corpus {
             "categories", "categories.subCategories", "categories.subCategories.labels");
 
     /**
-     * The field paths the corpus index maps as FLAT arrays of scalars — {@code tagNames} is a
-     * {@code keyword} array, {@code aNumberList} a {@code double} one and {@code aBoolList} a
-     * {@code boolean} one. The adapter cannot tell {@code size(aString)} from
-     * {@code size(tagNames)} on its own, so a {@code size()} over a field declared in neither
-     * this set nor {@link #NESTED_PATHS} is refused ({@code string-size}, {@code size-huge-*}).
-     * No corpus action sizes a flat array today; the declaration is here so the harness states
-     * the whole mapping rather than the part the corpus happens to reach.
+     * The field paths the corpus index maps as flat arrays of scalars. The adapter cannot tell
+     * {@code size(aString)} from {@code size(tagNames)} by itself, so it refuses {@code size()} on
+     * a field declared neither here nor in {@link #NESTED_PATHS}.
      */
     static final Set<String> COLLECTION_FIELDS = Set.of("tagNames", "aNumberList", "aBoolList");
 
     /**
-     * The CEL scalar type of every scalar field the corpus index maps, keyed by Elasticsearch
-     * field name — top-level, the to-one chain, the flat arrays (their element type) and every
-     * nested sub-field. The adapter refuses a comparison against a field declared here in no
-     * type, because Elasticsearch coerces a query term onto the field's mapped type where CEL's
-     * cross-type equality is false (cerbos/query-plan-adapters#496); declaring the whole mapping
-     * rather than the fields the corpus happens to compare is what keeps a new action from
-     * reading that refusal as the adapter's answer.
+     * The CEL scalar type of every scalar field in the corpus index, keyed by Elasticsearch field
+     * name. The adapter refuses a comparison against an undeclared field, because Elasticsearch
+     * coerces a query term to the field's mapped type where CEL's cross-type equality is false.
      */
     static final Map<String, ElasticsearchQueryPlanAdapter.ScalarType> SCALAR_TYPES = scalarTypes();
 
@@ -443,7 +387,7 @@ final class Corpus {
         return Map.copyOf(types);
     }
 
-    /** The one set of declarations both corpus suites translate through. */
+    /** The options both corpus suites translate through. */
     static final ElasticsearchQueryPlanAdapter.Options OPTIONS =
             ElasticsearchQueryPlanAdapter.Options.of(FIELD_MAP)
                     .withNestedPaths(NESTED_PATHS)
@@ -462,10 +406,10 @@ final class Corpus {
 
     // -- elasticsearch-java/golden/expectations.json ---------------------------------------------
 
-    /** The reserved key an entry may carry alongside its expectation; never compared. */
+    /** Optional commentary key on a golden entry; never compared. */
     static final String NOTE_KEY = "note";
 
-    /** The command that rewrites the asset. Documentation that travels with the data. */
+    /** The command that rewrites the golden file. */
     static final String GOLDEN_REGENERATE_COMMAND = "gradle goldenUpdate";
 
     static Path goldenFile() {
@@ -475,27 +419,14 @@ final class Corpus {
     /**
      * The emitted query as JSON, with every object's keys sorted.
      *
-     * <p><strong>There is no rendering step here, and that is the whole serialisation decision.</strong>
-     * This adapter's {@code Result.Conditional} carries a {@code Map<String, Object>} of plain JDK
-     * values — the Elasticsearch Query DSL IS JSON, and no Elasticsearch client library is on the
-     * classpath to turn it into anything else. So the entry records the translator's return value
-     * verbatim: no dialect, no compiler, no generator to declare in the header the way sqlalchemy
-     * and spring-data must ({@code conformance/README.md}, "When the generator is an input").
-     * {@link ElasticsearchTranslatorTest} asserts that claim rather than only stating it.
-     *
-     * <p>Sorting is the one normalisation, and it is about the FILE rather than the value: the
-     * adapter builds its queries with {@link Map#of}, whose iteration order is randomised per JVM
-     * run, so unsorted bytes would produce a fresh diff on every regeneration. A JSON object is
-     * unordered, and the comparison itself is order-independent either way — Jackson's
-     * {@code ObjectNode} equality is a map comparison. Arrays keep their order untouched, which is
-     * what matters: {@code bool.must} clause order is part of the value.
+     * <p>No rendering is needed: the adapter returns plain JDK maps and lists, which are already
+     * Query DSL JSON. Keys are sorted because {@link Map#of} iteration order changes per JVM run.
+     * Array order is kept, since it is part of the value.
      */
     static JsonNode canonicalJson(Object value) {
         rejectNonFinite(value, value);
         try {
-            // Written and READ BACK, rather than converted in memory: a JSON text is what the
-            // asset holds and what a deployed caller puts in a request body, so the recorded node
-            // is the one a parser produces rather than the one an in-memory conversion would.
+            // Round-trip through JSON text, so the result is what a parser of the request body sees.
             return sortKeys(JSON.readTree(JSON.writeValueAsString(value)));
         } catch (IOException e) {
             throw new IllegalStateException("the emitted query does not survive a JSON round trip,"
@@ -505,14 +436,8 @@ final class Corpus {
     }
 
     /**
-     * Refuse a non-finite number before it is written, because the round trip would NOT catch it.
-     *
-     * <p>JSON has no NaN and no infinity, and Jackson's {@code QUOTE_NON_NUMERIC_NUMBERS} is on by
-     * default — so writing one produces the STRING {@code "NaN"}, which parses back cleanly and
-     * has silently stopped being a number. The asset would record a term query against a string,
-     * and so would the request body a deployed caller sends. This adapter refuses every arithmetic
-     * shape today, so nothing in the corpus reaches it; the guard is here for the lowering that
-     * one day does.
+     * Rejects NaN and infinity. Jackson writes them as quoted strings, which parse back cleanly as
+     * strings, so the round trip alone would not catch them.
      */
     private static void rejectNonFinite(Object node, Object whole) {
         if (node instanceof Map<?, ?> map) {
@@ -543,12 +468,8 @@ final class Corpus {
     }
 
     /**
-     * The golden expectations, keyed by action, in file order, each with its {@code note}
-     * removed — commentary is carried across regeneration and never compared.
-     *
-     * <p>{@code adapter} is checked rather than ignored: the file is a flat map of action names,
-     * so a copy taken from another adapter parses cleanly and would be compared against this
-     * adapter's output with only the diff to say something went wrong.
+     * The golden expectations keyed by action, in file order, with each {@code note} removed.
+     * Throws if the file's {@code adapter} is not this adapter, to catch a copy from another one.
      */
     static Map<String, ObjectNode> readGoldenExpectations() {
         JsonNode contents;
@@ -572,22 +493,14 @@ final class Corpus {
     }
 
     /**
-     * Rewrite the golden expectations, carrying every existing {@code note} across.
+     * Rewrites the golden expectations, keeping every existing {@code note}. Called only under
+     * {@code -Dgolden.update=true} ({@code gradle goldenUpdate}); CI never sets it.
      *
-     * <p>Only ever called under {@code -Dgolden.update=true} ({@code gradle goldenUpdate}).
-     * Regeneration is the same deliberate act as {@code conformance/scripts/regenerate-wire-fixtures.sh},
-     * with the same safety: the diff is what a reviewer reads, which is why the entries are
-     * written sorted and one action per key. CI never sets the property.
-     *
-     * <p>A missing file is not an error here, and only here — that is how a new adapter
-     * bootstraps one. Reading a missing file for an assertion stays an error, because a suite
-     * that quietly asserts nothing is the failure mode the completeness guard exists to prevent.
+     * <p>A missing file is allowed here, so a new file can be bootstrapped.
      */
     static void writeGoldenExpectations(Map<String, ObjectNode> expectations) {
-        // Notes are read WITHOUT the header validation `readGoldenExpectations` applies. The file
-        // about to be overwritten may legitimately carry an older header — that is what a header
-        // change looks like — and refusing to carry the commentary across because of one would
-        // make every such change silently drop it.
+        // Read notes without the header check, since the file being replaced may have an older
+        // header.
         Map<String, String> notes = new LinkedHashMap<>();
         if (Files.exists(goldenFile())) {
             JsonNode existing;
@@ -625,7 +538,7 @@ final class Corpus {
         }
     }
 
-    /** Two-space indent, no space before a colon, LF line endings — the other assets' shape. */
+    /** Two-space indent, no space before a colon, LF line endings. */
     private static DefaultPrettyPrinter prettyPrinter() {
         DefaultIndenter indenter = new DefaultIndenter("  ", "\n");
         return new DefaultPrettyPrinter()
