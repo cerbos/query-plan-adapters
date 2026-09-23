@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.Value;
@@ -32,36 +37,12 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Measures — and bounds — the cost of nested collection-macro translation.
+ * Bounds the SQL size of nested {@code exists} chains. The lambda body is translated once per
+ * polarity (see {@link TriPredicate}), so the subquery count grows with depth. The test asserts at
+ * most {@code 2^d - 1} correlated subqueries for depth 1 to 4 and prints timings without asserting
+ * them. Runs offline on H2.
  *
- * <p>Every collection macro emits its tri-state unknown-element machinery alongside the
- * membership check, and the lambda body is re-translated once per polarity (Hibernate 6
- * negation is stateful, so a Predicate tree cannot be shared between a positive and a
- * negated occurrence — see {@link TriPredicate}). That re-translation is multiplicative
- * through nesting: with a per-macro body multiplier of k, a depth-d chain of macros emits
- * on the order of k^d correlated subqueries. This suite pins the multiplier by counting
- * the correlated subqueries in the actual SQL Hibernate generates for exists-chains of
- * depth 1..4, and records translation/execution wall times against a seeded H2 database
- * (a few thousand rows across the relation chain).
- *
- * <p>The subquery-count assertions are the regression tripwire: they encode the
- * single-subquery-per-macro translation (per-macro multiplier 2: at most {@code 2^d - 1}
- * correlated subqueries for a depth-d exists chain). Under the previous
- * EXISTS-plus-two-COUNT-probes translation the same chains emitted 3/12/39/120
- * subqueries, so this test fails loudly if that shape ever comes back. Timings are
- * printed for observability, not asserted (wall-clock assertions flake in CI).
- *
- * <p>Runs against plain H2 with hand-built plan operands — no PDP container — so it is
- * cheap enough to stay in the default build.
- *
- * <p><strong>Why the plans here are still hand-built</strong>, when
- * {@link SpringDataTranslatorTest} reads its plans from {@code conformance/wire-fixtures/}
- * (cerbos/query-plan-adapters#383): the property under test is the multiplier as depth
- * GROWS, and the corpus stops at {@code macro-depth3-*} — three levels, below the depth
- * guard's default limit of 5. A fixture cannot supply the depth-4 chain that makes the
- * curve visible, so a hand-built plan is the only way to reach it. What is measured is a
- * count of subqueries rather than a filter, so it is also the one place where being wrong
- * about the exact wire shape would not change the answer.
+ * <p>Plans are hand-built because the corpus stops at depth 3.
  */
 class MacroNestingBenchmarkTest {
 
@@ -90,8 +71,7 @@ class MacroNestingBenchmarkTest {
                             "name", AttributeMapping.field("name"),
                             "labels", AttributeMapping.relation("labels", Map.of(
                                     "name", AttributeMapping.field("name"),
-                                    // labels ↔ subCategories is bidirectional, which gives the
-                                    // benchmark a legal fourth hop without inventing new entities.
+                                    // labels and subCategories map each other, giving a fourth hop.
                                     "subCategories", AttributeMapping.relation("subCategories", Map.of(
                                             "name", AttributeMapping.field("name")
                                     ))
@@ -104,8 +84,7 @@ class MacroNestingBenchmarkTest {
 
     @BeforeAll
     static void setUp() {
-        // A dedicated in-memory database: the seed volume here must not leak into the other
-        // suites sharing the default test-pu URL.
+        // A separate database, so these rows stay out of other suites using test-pu.
         emf = Persistence.createEntityManagerFactory("test-pu", Map.of(
                 "jakarta.persistence.jdbc.url",
                 "jdbc:h2:mem:cerbosbench;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
@@ -119,11 +98,7 @@ class MacroNestingBenchmarkTest {
         if (emf != null) emf.close();
     }
 
-    /**
-     * Seeds a shared relation pool — 15 categories × 3 subCategories × 3 labels — and links
-     * every resource to 3 categories. Row counts across the chain: 300 resources, 900
-     * resource↔category links, 45 category↔subCategory links, 135 subCategory↔label links.
-     */
+    /** 300 resources with 3 categories each, 3 subCategories per category, 3 labels per sub. */
     private static void seed() {
         EntityManager em = emf.createEntityManager();
         EntityTransaction tx = em.getTransaction();
@@ -171,7 +146,7 @@ class MacroNestingBenchmarkTest {
         em.close();
     }
 
-    // -- plan-operand builders (hand-built wire shapes, as the unit suite does) --
+    // -- plan-operand builders --
 
     private static Operand exprOp(String op, Operand... operands) {
         Expression.Builder e = Expression.newBuilder().setOperator(op);
@@ -191,14 +166,11 @@ class MacroNestingBenchmarkTest {
         return exprOp("lambda", body, var(varName));
     }
 
-    /** The relation attribute each nesting level iterates, and the leaf constant it matches. */
+    /** The relation each level iterates, and the name the innermost level matches. */
     private static final String[] HOPS = {"subCategories", "labels", "subCategories"};
     private static final String[] LEAF = {"cat-1", "sub-1", "lab-1", "sub-1"};
 
-    /**
-     * Builds {@code categories.exists(v1, v1.subCategories.exists(v2, ... vd.name == LEAF))}
-     * nested to {@code depth} macros.
-     */
+    /** {@code categories.exists(v1, v1.subCategories.exists(v2, ... vd.name == LEAF))}. */
     private static Operand existsChain(int depth) {
         return existsLevel(1, depth, "request.resource.attr.categories");
     }
@@ -264,8 +236,7 @@ class MacroNestingBenchmarkTest {
     void nestedExistsSubqueryCountStaysSingleSubqueryPerPolarity() {
         List<Measurement> results = new ArrayList<>();
         for (int depth = 1; depth <= 4; depth++) {
-            // Warm-up translation once so first-use metamodel initialization doesn't skew
-            // the recorded numbers, then measure.
+            // Warm up once so first-use initialization does not skew the timings.
             measure(depth);
             results.add(measure(depth));
         }
@@ -280,7 +251,7 @@ class MacroNestingBenchmarkTest {
         }
 
         for (Measurement m : results) {
-            int bound = (1 << m.depth()) - 1; // 2^d - 1: one subquery per macro, per polarity
+            int bound = (1 << m.depth()) - 1; // 2^d - 1
             assertTrue(m.subqueries() <= bound,
                     "depth-" + m.depth() + " exists chain emitted " + m.subqueries()
                             + " correlated subqueries (bound " + bound + ") — the macro "

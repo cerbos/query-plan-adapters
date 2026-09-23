@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import com.google.protobuf.NullValue;
@@ -38,19 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The {@link Options} record: a caller-supplied argument the corpus structurally cannot vary,
- * so its contract lives here (CLAUDE.md, "What a translator unit test may pin", kind 2).
- *
- * <p>Two contracts. <strong>Immutability</strong> — every collection is copied on construction
- * and each {@code with…} returns a new instance, so an {@code Options} built once can be shared,
- * and a caller mutating the map it passed in cannot change which columns an authorization
- * filter resolves after the fact. <strong>Macro-depth precedence</strong> — a value declared on
- * the call wins, the {@link SpringDataQueryPlanAdapter#MAX_MACRO_DEPTH_PROPERTY system
- * property} applies when none is, and the default applies when neither is; the property keeps
- * working because it is the only knob a caller who cannot reach every call site has.
- *
- * <p>Offline: {@code translator-pu} carries no JDBC connection, and everything here is decided
- * while the Specification builds its predicate.
+ * Tests {@link Options}: it copies its collections and is immutable, and the macro-depth limit
+ * comes from the option, then the system property, then the default. Runs offline.
  */
 class OptionsTest {
 
@@ -127,11 +121,7 @@ class OptionsTest {
                             NullAttributeRepresentation.EXPLICIT, null));
         }
 
-        /**
-         * A non-positive bound is a configuration error at construction, and a plain
-         * {@link IllegalArgumentException}: no plan has been refused, so it is none of the
-         * three refusal types.
-         */
+        /** A plain {@link IllegalArgumentException}, not a refusal type: no plan was refused. */
         @Test
         void aNonPositiveMacroDepthIsRejectedAtConstruction() {
             for (int depth : new int[] {0, -1}) {
@@ -146,10 +136,7 @@ class OptionsTest {
     @Nested
     class MacroDepthPrecedence {
 
-        /**
-         * categories → subCategories → labels → subCategories → labels → subCategories: the
-         * bidirectional many-to-many pair gives arbitrarily deep legal join chains.
-         */
+        /** Alternates subCategories and labels to build a deep join chain. */
         private static final Map<String, AttributeMapping> DEEP_MAPPER = Map.of(
                 "request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
                         "name", AttributeMapping.field("name"),
@@ -219,10 +206,7 @@ class OptionsTest {
             assertTranslates(existsChain(6), deep.withMaxMacroDepth(6));
         }
 
-        /**
-         * The property is read per translation, so a change between two evaluations of the
-         * SAME Specification takes effect — the behaviour the README documents.
-         */
+        /** The property is read each time the Specification builds a predicate. */
         @Test
         void thePropertyIsReadPerTranslation() {
             Specification<ResourceEntity> spec = SpringDataQueryPlanAdapter.toSpecification(
@@ -251,10 +235,7 @@ class OptionsTest {
         }
     }
 
-    /**
-     * The positional overloads are the record with the rest at its defaults: the same plan under
-     * the same declarations behaves the same whichever form carried them.
-     */
+    /** The positional overloads behave the same as the {@link Options} form. */
     @Nested
     class PositionalOverloadsDelegate {
 

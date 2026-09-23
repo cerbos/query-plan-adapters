@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example;
 
 import dev.cerbos.sdk.CerbosBlockingClient;
@@ -9,23 +14,18 @@ import org.springframework.context.annotation.Configuration;
 import java.time.Duration;
 
 /**
- * The PDP client, shared by both applications in this example.
+ * The PDP client shared by both applications in this example.
  *
- * <p>It sits in the parent package precisely so neither application's component scan reaches it —
- * each scans its own package — and both {@code @Import} it explicitly. One definition of how this
- * example connects to a PDP, rather than two waiting to disagree about it.
+ * <p>It lives in the parent package so neither application's component scan picks it up; both
+ * {@code @Import} it instead.
  */
 @Configuration
 public class CerbosClientConfig {
 
-    // Bound stalled PDP calls in this example and in real applications. Healthy calls finish
-    // in milliseconds; this generous deadline fails a stalled stream instead of hanging forever.
+    // Fails a stalled PDP call instead of hanging. Healthy calls take milliseconds.
     private static final Duration CERBOS_CALL_TIMEOUT = Duration.ofSeconds(30);
 
-    /**
-     * {@code cerbos.address} is {@code ${CERBOS_HOST}} with no fallback — see the comment on it
-     * in {@code application.yaml} for why a default would be worse than a failure to start.
-     */
+    // cerbos.address has no default; see application.yaml.
     @Bean
     CerbosBlockingClient cerbosBlockingClient(@Value("${cerbos.address}") String address)
             throws CerbosClientBuilder.InvalidClientConfigurationException {

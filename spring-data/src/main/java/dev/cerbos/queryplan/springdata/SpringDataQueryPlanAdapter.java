@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
@@ -20,41 +25,24 @@ import java.util.Set;
 
 /**
  * Translates a Cerbos {@code PlanResources} response into a Spring Data JPA
- * {@link Specification} that can be executed by any {@code JpaSpecificationExecutor}.
+ * {@link Specification} for a {@code JpaSpecificationExecutor}.
  *
- * <p>Every {@code toSpecification} overload returns a Specification covering all three plan
- * kinds, so the caller never switches on the kind: {@code KIND_ALWAYS_ALLOWED} yields
- * {@link Specification#unrestricted()} (Spring Data omits the {@code WHERE} clause),
- * {@code KIND_ALWAYS_DENIED} yields an always-false predicate ({@code 1=0}), and a
- * conditional plan yields the translated predicate tree. All three compose with the caller's
- * own Specifications via {@code .and(...)} / {@code .or(...)}. To skip the database entirely
- * on a denied plan, test {@code planResult.isAlwaysDenied()} on the SDK response (or
- * {@code response.getFilter().getKind()} on the raw protobuf) before translating.
+ * <p>Every plan kind yields a Specification: {@code KIND_ALWAYS_ALLOWED} gives
+ * {@link Specification#unrestricted()}, {@code KIND_ALWAYS_DENIED} an always-false predicate,
+ * and a conditional plan the translated predicate. To skip the query on a denied plan, check
+ * {@code planResult.isAlwaysDenied()} first. Hand the Specification to a repository method;
+ * calling {@link Specification#toPredicate} yourself is not supported.
  *
- * <p>Hand the Specification to a repository method and let Spring Data invoke it. Calling
- * {@link Specification#toPredicate} yourself is not a supported path.
+ * <p>A shape the adapter cannot translate faithfully throws rather than returning a filter:
+ * {@link UnsupportedPlanShapeException}, {@link UnmappedAttributeException} or
+ * {@link MalformedPlanException}, all subtypes of {@link IllegalArgumentException}. Most are
+ * raised when the Specification is first evaluated, not by {@code toSpecification}.
  *
- * <p>Everything a caller tells the adapter lives in one immutable record, {@link Options}; the
- * positional overloads are that record with the rest left at its defaults. The adapter fails
- * closed: a shape the Criteria API cannot express faithfully throws
- * {@link UnsupportedPlanShapeException} rather than emitting a best-effort filter, an attribute
- * the mapping does not cover throws {@link UnmappedAttributeException}, and a plan that
- * violates the planner's wire contract throws {@link MalformedPlanException}. All three extend
- * {@link IllegalArgumentException}, which remains the documented base type. Translation of a
- * conditional plan is deferred to the Specification's first evaluation, so that is where the
- * three are raised — except the {@link NullAttributeRepresentation#OMITTED} scan, which runs
- * from {@code toSpecification} itself.
- *
- * <p><strong>The returned Specification is SELECT-only.</strong> Never pass it to
- * {@code JpaSpecificationExecutor.delete(Specification)} or any other criteria bulk
- * operation. When the attribute mapping contains {@link AttributeMapping.Relation} entries,
- * the translation builds correlated subqueries over collection/join tables, and Hibernate's
- * multi-table bulk delete first clears those {@code @ElementCollection}/join tables using
- * the same predicate — self-invalidating the correlated subquery so that 0 entity rows are
- * deleted while their collection rows are silently destroyed (which can in turn flip the
- * outcome of ownership/blocklist policies for the surviving rows). The adapter detects the
- * bulk-delete invocation context and throws {@link UnsupportedOperationException} before
- * anything is deleted. To delete policy-permitted rows, select first and delete by id:
+ * <p><strong>The Specification is SELECT-only.</strong> Do not pass it to
+ * {@code delete(Specification)} or another criteria bulk operation: with a
+ * {@link AttributeMapping.Relation} in play, Hibernate's bulk delete clears the collection
+ * tables first and the correlated subquery then deletes no entity rows. The adapter throws
+ * {@link UnsupportedOperationException} in that case. Select the ids and delete by id instead:
  *
  * <pre>{@code
  * Specification<MyEntity> spec = SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING);
@@ -65,21 +53,13 @@ import java.util.Set;
 public final class SpringDataQueryPlanAdapter {
 
     /**
-     * System property bounding collection-macro nesting depth
-     * ({@code exists}/{@code exists_one}/{@code all}/{@code filter}/
-     * {@code size(filter(...))}) accepted by the translator. Each nesting level multiplies the
-     * number of correlated subqueries in the translated filter (×2 for the {@code exists} family,
-     * ×3 for {@code exists_one}/{@code size(filter(...))} — see the collection-macro Javadoc in
-     * the translator), so unbounded nesting can silently degrade query latency on large tables.
-     * Plans nested deeper than the limit throw {@link UnsupportedPlanShapeException} at
-     * translation time (fail closed).
+     * System property bounding collection-macro nesting depth ({@code exists}, {@code all},
+     * {@code filter} and so on). Each level multiplies the correlated subqueries in the filter.
+     * Deeper plans throw {@link UnsupportedPlanShapeException}.
      *
-     * <p>Precedence, resolved once per translation: a limit declared on the call's
-     * {@link Options#withMaxMacroDepth(int) Options} wins; otherwise this property, when set;
-     * otherwise {@value #DEFAULT_MAX_MACRO_DEPTH}. The property is the process-wide default
-     * for callers that cannot reach every {@code toSpecification} call; a value it holds that is
-     * not a positive integer is a configuration error and throws a plain
-     * {@link IllegalArgumentException} — it is not a refusal of the plan.
+     * <p>{@link Options#withMaxMacroDepth(int)} takes precedence; without either,
+     * {@value #DEFAULT_MAX_MACRO_DEPTH} applies. A value that is not a positive integer throws
+     * {@link IllegalArgumentException}.
      */
     public static final String MAX_MACRO_DEPTH_PROPERTY =
             "dev.cerbos.queryplan.springdata.maxMacroDepth";
@@ -88,30 +68,17 @@ public final class SpringDataQueryPlanAdapter {
     public static final int DEFAULT_MAX_MACRO_DEPTH = 5;
 
     /**
-     * Everything a caller tells the adapter about the translation.
+     * Translation options. Immutable and safe to share: collections are copied and each
+     * {@code with…} method returns a new instance. Start from {@link #of(Map)}.
      *
-     * <p>Immutable: every collection is defensively copied on construction, and each
-     * {@code with…} method returns a new instance, so an {@code Options} can be built once and
-     * shared across calls and threads. Start from {@link #of(Map)} — the mapping is the one
-     * declaration every plan needs — and add the rest as the application requires. The
-     * positional {@code toSpecification} overloads are exactly this record with the remaining
-     * components at their defaults.
-     *
-     * @param mapping maps each plan variable ({@code request.resource.attr.<name>},
-     *        {@code request.resource.id}) to a JPA path or relation — see
-     *        {@link AttributeMapping}; a variable the map does not cover throws
-     *        {@link UnmappedAttributeException}
-     * @param operatorOverrides per-operator replacement translations, keyed by Cerbos operator
-     *        name and consulted only for resolved scalar (field, value) leaves — see
-     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
-     *        overridable
-     * @param nullAttributeRepresentation the caller's NULL-column convention for attributes
-     *        whose mapping does not declare one — see
-     *        {@link SpringDataQueryPlanAdapter#toSpecification(PlanResourcesResult, Map, Map,
-     *        NullAttributeRepresentation)}
-     * @param maxMacroDepth the collection-macro nesting bound, including literal-collection folds,
-     *        for this call. This does not bound the total expression size. Empty falls
-     *        back to {@link #MAX_MACRO_DEPTH_PROPERTY} and then {@link #DEFAULT_MAX_MACRO_DEPTH}
+     * @param mapping maps each plan variable to a JPA path or relation; see
+     *        {@link AttributeMapping}
+     * @param operatorOverrides replacement translations keyed by Cerbos operator name; see
+     *        {@link OperatorFunction} for where they apply
+     * @param nullAttributeRepresentation the NULL-column convention for attributes whose mapping
+     *        does not declare one
+     * @param maxMacroDepth the collection-macro nesting bound for this call; when empty,
+     *        {@link #MAX_MACRO_DEPTH_PROPERTY} and then {@link #DEFAULT_MAX_MACRO_DEPTH} apply
      */
     public record Options(
             Map<String, AttributeMapping> mapping,
@@ -132,9 +99,11 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Options holding only a mapping: no overrides, the
-         * {@link NullAttributeRepresentation#EXPLICIT} convention, and no macro-depth
-         * declaration of their own.
+         * Options with only a mapping: no overrides, {@link NullAttributeRepresentation#EXPLICIT},
+         * and no macro-depth bound of their own.
+         *
+         * @param mapping maps each plan variable to a JPA path or relation
+         * @return the options
          */
         public static Options of(Map<String, AttributeMapping> mapping) {
             return new Options(mapping, Map.of(), NullAttributeRepresentation.EXPLICIT,
@@ -155,11 +124,11 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Bound collection-macro nesting for this call. An explicit value here wins over
-         * {@link #MAX_MACRO_DEPTH_PROPERTY}; the property and then
-         * {@link #DEFAULT_MAX_MACRO_DEPTH} apply only when none is declared.
+         * Bounds collection-macro nesting for this call, overriding
+         * {@link #MAX_MACRO_DEPTH_PROPERTY}.
          *
          * @param maxMacroDepth a positive integer
+         * @return new options with the bound set
          * @throws IllegalArgumentException if {@code maxMacroDepth} is less than 1
          */
         public Options withMaxMacroDepth(int maxMacroDepth) {
@@ -167,10 +136,7 @@ public final class SpringDataQueryPlanAdapter {
                     OptionalInt.of(maxMacroDepth));
         }
 
-        /**
-         * The macro-depth bound in force for a translation: the declared value, else the
-         * system property, else the default. Read per translation, like the property always was.
-         */
+        /** The declared bound, else the system property, else the default. */
         int effectiveMaxMacroDepth() {
             return maxMacroDepth.orElseGet(SpringDataQueryPlanAdapter::readMaxMacroDepth);
         }
@@ -178,24 +144,17 @@ public final class SpringDataQueryPlanAdapter {
 
     private SpringDataQueryPlanAdapter() {}
 
-    // -- Options overloads --
-
     /**
-     * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA {@link Specification}
-     * under the caller's {@link Options}. Every positional overload delegates here.
+     * Translates a plan from the Java SDK's {@code CerbosBlockingClient.plan(...)}.
      *
-     * @param <T> the entity type the Specification will be executed against
-     * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
-     *        {@code KIND_ALWAYS_DENIED}, or a conditional plan)
-     * @param options the caller's declarations — mapping, overrides, NULL convention, macro
-     *        depth
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the conditional plan carries no condition
-     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
-     *         under {@link NullAttributeRepresentation#OMITTED}; every other refusal is
-     *         deferred to the Specification's first evaluation — see the class documentation
+     * @param <T> the entity type
+     * @param planResult the SDK plan result
+     * @param options the translation options
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if a conditional plan has no condition
+     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}. Other refusals are raised when the
+     *         Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Options options) {
@@ -212,21 +171,18 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
-     * {@link Specification} under the caller's {@link Options}. Every positional
-     * {@code PlanResourcesResponse} overload delegates here.
+     * Translates a raw {@link PlanResourcesResponse}, for responses obtained without the SDK
+     * client.
      *
-     * @param <T> the entity type the Specification will be executed against
-     * @param response the raw {@code PlanResources} RPC response
-     * @param options the caller's declarations — mapping, overrides, NULL convention, macro
-     *        depth
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
-     *         carries no condition
-     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
-     *         under {@link NullAttributeRepresentation#OMITTED}; every other refusal is
-     *         deferred to the Specification's first evaluation — see the class documentation
+     * @param <T> the entity type
+     * @param response the raw {@code PlanResources} response
+     * @param options the translation options
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
+     *         no condition
+     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}. Other refusals are raised when the
+     *         Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response, Options options) {
@@ -245,37 +201,16 @@ public final class SpringDataQueryPlanAdapter {
         };
     }
 
-    // -- PlanResourcesResult overloads --
-
     /**
-     * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA
-     * {@link Specification}, using the default operator translations.
+     * Translates a plan from the Java SDK with the default operator translations.
      *
-     * <p>Equivalent to {@link #toSpecification(PlanResourcesResult, Map, Map)} with no
-     * operator overrides.
-     *
-     * <p><strong>The returned Specification is SELECT-only</strong> — see
-     * {@link SpringDataQueryPlanAdapter the class documentation} for the corruption
-     * mechanism this prevents and the select-ids-then-{@code deleteAllById} alternative.
-     *
-     * @param <T> the entity type the Specification will be executed against
-     * @param planResult the SDK plan result ({@code KIND_ALWAYS_ALLOWED},
-     *        {@code KIND_ALWAYS_DENIED}, or a conditional plan)
-     * @param mapper maps each plan variable ({@code request.resource.attr.<name>},
-     *        {@code request.resource.id}) to a JPA path or relation — see
+     * @param <T> the entity type
+     * @param planResult the SDK plan result
+     * @param mapper maps each plan variable to a JPA path or relation; see
      *        {@link AttributeMapping}
-     * @return a Specification selecting exactly the rows the plan permits — every row for
-     *         {@code KIND_ALWAYS_ALLOWED} ({@link Specification#unrestricted()}), no row for
-     *         {@code KIND_ALWAYS_DENIED} ({@code 1=0}), the translated predicate tree
-     *         otherwise
-     * @throws MalformedPlanException if the conditional plan carries no condition.
-     *         Translation of the condition itself is deferred: unsupported shapes
-     *         ({@link UnsupportedPlanShapeException}), unmapped attributes
-     *         ({@link UnmappedAttributeException}) and wire-contract violations
-     *         ({@link MalformedPlanException}) throw (fail closed) when the Specification is
-     *         first evaluated by the repository, not from this call. All three extend
-     *         {@link IllegalArgumentException}.
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if a conditional plan has no condition. Other refusals are
+     *         raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
@@ -283,29 +218,16 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a Cerbos query plan (as returned by the Java SDK's
-     * {@code CerbosBlockingClient.plan(...)}) into a Spring Data JPA {@link Specification},
-     * consulting {@code overrides} for scalar leaf translations.
+     * Translates a plan from the Java SDK with operator overrides.
      *
-     * <p>Prefer this {@link PlanResourcesResult} entry point when using the Cerbos Java SDK
-     * client. The {@link #toSpecification(PlanResourcesResponse, Map, Map)} overloads accept
-     * the raw protobuf response instead — useful when the response was obtained without the
-     * SDK client wrapper (e.g. deserialized, proxied, or hand-built in tests, since
-     * {@code PlanResourcesResult} cannot be constructed outside the SDK package).
-     *
-     * @param <T> the entity type the Specification will be executed against
+     * @param <T> the entity type
      * @param planResult the SDK plan result
-     * @param mapper maps each plan variable to a JPA path or relation — see
-     *        {@link AttributeMapping}
-     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
-     *        consulted only for resolved scalar (field, value) leaves — see
-     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
-     *        overridable
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the conditional plan carries no condition; see
-     *         {@link #toSpecification(PlanResourcesResult, Map)} for the deferred
-     *         fail-closed contract covering the translation itself
+     * @param mapper maps each plan variable to a JPA path or relation
+     * @param overrides replacement translations keyed by Cerbos operator name; see
+     *        {@link OperatorFunction}
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if a conditional plan has no condition. Other refusals are
+     *         raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
@@ -316,26 +238,19 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a Cerbos query plan into a Spring Data JPA {@link Specification}, declaring
-     * how the caller represents a NULL column in the attributes it sends to {@code check()}.
+     * Translates a plan from the Java SDK, declaring how the caller sends NULL columns to
+     * {@code check()}. Under {@link NullAttributeRepresentation#OMITTED}, null comparison
+     * operands are rejected by this call.
      *
-     * <p>The planner emits the same {@code eq(attr, null)} node under both conventions, so the
-     * plan cannot reveal which one is in use. Under
-     * {@link NullAttributeRepresentation#OMITTED} a NULL column carries no attribute, CEL
-     * raises a missing-attribute error, and {@code check()} denies the row — {@code IS NULL}
-     * would return exactly the rows the PDP refuses. Every null comparison operand in the plan
-     * is therefore rejected eagerly, from this call rather than at Specification evaluation.
-     *
-     * @param <T> the entity type the Specification will be executed against
+     * @param <T> the entity type
      * @param planResult the SDK plan result
      * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides per-operator replacement translations, keyed by Cerbos operator name
+     * @param overrides replacement translations keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the conditional plan carries no condition
-     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
-     *         under {@link NullAttributeRepresentation#OMITTED}
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if a conditional plan has no condition
+     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult,
@@ -347,27 +262,16 @@ public final class SpringDataQueryPlanAdapter {
                 .withNullAttributeRepresentation(nullAttributeRepresentation));
     }
 
-    // -- PlanResourcesResponse overloads --
-
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
-     * {@link Specification}, using the default operator translations.
+     * Translates a raw {@link PlanResourcesResponse} with the default operator translations.
      *
-     * <p>Equivalent to {@link #toSpecification(PlanResourcesResponse, Map, Map)} with no
-     * operator overrides. Accepts the wire-level protobuf directly, so it works with
-     * responses obtained without the SDK client wrapper; when calling the PDP through the
-     * Cerbos Java SDK, the {@link #toSpecification(PlanResourcesResult, Map)} overloads are
-     * the natural fit.
-     *
-     * @param <T> the entity type the Specification will be executed against
-     * @param response the raw {@code PlanResources} RPC response
-     * @param mapper maps each plan variable to a JPA path or relation — see
+     * @param <T> the entity type
+     * @param response the raw {@code PlanResources} response
+     * @param mapper maps each plan variable to a JPA path or relation; see
      *        {@link AttributeMapping}
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
-     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
-     *         for the deferred fail-closed contract covering the translation itself
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
+     *         no condition. Other refusals are raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
@@ -375,22 +279,16 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
-     * {@link Specification}, consulting {@code overrides} for scalar leaf translations.
+     * Translates a raw {@link PlanResourcesResponse} with operator overrides.
      *
-     * @param <T> the entity type the Specification will be executed against
-     * @param response the raw {@code PlanResources} RPC response
-     * @param mapper maps each plan variable to a JPA path or relation — see
-     *        {@link AttributeMapping}
-     * @param overrides per-operator replacement translations, keyed by Cerbos operator name;
-     *        consulted only for resolved scalar (field, value) leaves — see
-     *        {@link OperatorFunction} for exactly which translation sites are (and are not)
-     *        overridable
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
-     *         carries no condition; see {@link #toSpecification(PlanResourcesResult, Map)}
-     *         for the deferred fail-closed contract covering the translation itself
+     * @param <T> the entity type
+     * @param response the raw {@code PlanResources} response
+     * @param mapper maps each plan variable to a JPA path or relation
+     * @param overrides replacement translations keyed by Cerbos operator name; see
+     *        {@link OperatorFunction}
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
+     *         no condition. Other refusals are raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
@@ -401,24 +299,20 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a raw {@link PlanResourcesResponse} protobuf into a Spring Data JPA
-     * {@link Specification}, declaring how the caller represents a NULL column in the
-     * attributes it sends to {@code check()}.
+     * Translates a raw {@link PlanResourcesResponse}, declaring how the caller sends NULL
+     * columns to {@code check()}. Under {@link NullAttributeRepresentation#OMITTED}, null
+     * comparison operands are rejected by this call.
      *
-     * <p>See {@link #toSpecification(PlanResourcesResult, Map, Map,
-     * NullAttributeRepresentation)} for what the representation changes.
-     *
-     * @param <T> the entity type the Specification will be executed against
-     * @param response the raw {@code PlanResources} RPC response
+     * @param <T> the entity type
+     * @param response the raw {@code PlanResources} response
      * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides per-operator replacement translations, keyed by Cerbos operator name
+     * @param overrides replacement translations keyed by Cerbos operator name
      * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return a SELECT-only Specification selecting exactly the rows the plan permits — see
-     *         {@link #toSpecification(PlanResourcesResult, Map)}
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter
-     *         carries no condition
-     * @throws UnsupportedPlanShapeException if the plan carries a null comparison operand
-     *         under {@link NullAttributeRepresentation#OMITTED}
+     * @return a SELECT-only Specification selecting the rows the plan permits
+     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
+     *         no condition
+     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
+     *         {@link NullAttributeRepresentation#OMITTED}
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response,
@@ -430,39 +324,20 @@ public final class SpringDataQueryPlanAdapter {
                 .withNullAttributeRepresentation(nullAttributeRepresentation));
     }
 
-    // -- The three plan kinds --
-
-    /**
-     * {@code KIND_ALWAYS_ALLOWED} — Spring Data's own "no restriction" Specification, whose
-     * implementation is {@code (root, query, cb) -> null}. {@code SimpleJpaRepository} guards
-     * with {@code if (predicate != null) query.where(predicate)}, so no {@code WHERE 1=1} is
-     * emitted, and it is a true identity for {@code .and(...)} / {@code .or(...)}. Requires
-     * spring-data-jpa 3.5.2 or later.
-     */
+    /** Its predicate is null, so no {@code WHERE} is emitted. Needs spring-data-jpa 3.5.2+. */
     private static <T> Specification<T> alwaysAllowed() {
         return Specification.unrestricted();
     }
 
-    /** {@code KIND_ALWAYS_DENIED} — an always-false predicate ({@code 1=0}). */
     private static <T> Specification<T> alwaysDenied() {
         return (root, query, cb) -> cb.disjunction();
     }
 
     /**
-     * {@code KIND_CONDITIONAL} — a Specification whose lambda rebuilds the entire predicate
-     * tree from the {@code Root}/{@code CriteriaQuery} it is handed, on every invocation. That
-     * is required, not incidental: {@code JpaSpecificationExecutor.findAll(spec, Pageable)}
-     * fires a separate {@code COUNT} query with its own {@code CriteriaQuery} and {@code Root},
-     * and Hibernate 6 rejects a {@code Predicate} built against a different {@code Root}
-     * ({@code SqlTreeCreationException: Could not locate TableGroup}).
-     *
-     * <p>The caller's maps were defensively copied when {@link Options} was built, because of
-     * that re-invocation: capturing them by reference would let post-translation mutation
-     * silently change which columns the authorization filter resolves.
-     *
-     * <p>The one refusal raised here rather than at evaluation is the
-     * {@link NullAttributeRepresentation#OMITTED} scan. It always runs: the call-level option is
-     * only the fallback, and an attribute can declare OMITTED while the call declares EXPLICIT.
+     * Rebuilds the predicate on every invocation: a paged {@code findAll} runs a separate
+     * {@code COUNT} query with its own {@code Root}, and Hibernate 6 rejects a predicate built
+     * on another {@code Root}. The OMITTED scan always runs, because an attribute can declare
+     * OMITTED when the call does not.
      */
     private static <T> Specification<T> conditional(Operand condition, Options options) {
         assertNoNullComparisonOperands(
@@ -472,30 +347,13 @@ public final class SpringDataQueryPlanAdapter {
                         .traverse(condition, Scope.root(root, query, options.mapping()));
     }
 
-    // -- NULL representation guard --
-
     /**
-     * Rejects every null literal operand in the plan under
-     * {@link NullAttributeRepresentation#OMITTED}.
+     * Rejects every null literal operand governed by {@link NullAttributeRepresentation#OMITTED},
+     * where {@code check()} denies NULL rows that {@code IS NULL} would return.
      *
-     * <p>A NULL column then carries no attribute at all, so CEL raises a missing-attribute
-     * error and {@code check()} denies the row — {@code IS NULL} would return exactly the rows
-     * the PDP refuses (cerbos/query-plan-adapters#302).
-     *
-     * <p>The scan runs over the plan tree rather than at each emission site because the
-     * translator lowers a null constant to {@code IS NULL} from several places (scalar leaf,
-     * scalar {@code in} with null elements, relation membership, {@code hasIntersection}). For
-     * the same reason it matches on the OPERAND and never on an allowlist of operators: a null
-     * constant reaches a NULL-selecting predicate through more shapes than the obvious
-     * {@code eq}/{@code ne}/{@code in}, and any operator added later would silently escape a
-     * list that has to be maintained by hand.
-     *
-     * <p>The rejection is also deliberately wider than the over-granting shapes:
-     * {@code ne(x, null)} on its own is aligned, but negation is applied around the built
-     * predicate rather than pushed into the leaf, so a leaf cannot tell whether an enclosing
-     * {@code not} will flip {@code IS NOT NULL} back into a NULL-selecting predicate. Rejecting
-     * every null operand is correct under any nesting; narrowing it requires negation-parity
-     * tracking.
+     * <p>It scans operands rather than a list of operators, because a null constant becomes
+     * {@code IS NULL} in several places. It also rejects {@code ne(x, null)}: an enclosing
+     * {@code not} could turn it back into a NULL-selecting predicate.
      */
     private static void assertNoNullComparisonOperands(
             Operand operand, Map<String, AttributeMapping> mapper,
@@ -506,11 +364,8 @@ public final class SpringDataQueryPlanAdapter {
         var expression = operand.getExpression();
         List<Operand> operands = expression.getOperandsList();
 
-        // A comparison between a mapped attribute and a literal is decided by that attribute's
-        // own declaration, which is what lets one call carry both conventions (#308). Confined
-        // to that shape: a null buried in a macro over a literal list reaches a comparison long
-        // after this scan, and nothing here can say which column it will land against, so those
-        // keep using the call-level fallback.
+        // An attribute-vs-literal comparison uses the attribute's own declaration. Any other
+        // null, e.g. inside a macro over a literal list, uses the call-level fallback.
         NullAttributeRepresentation declared =
                 declaredForComparedAttribute(expression.getOperator(), operands, mapper);
         NullAttributeRepresentation governing = declared != null ? declared : fallback;
@@ -518,27 +373,20 @@ public final class SpringDataQueryPlanAdapter {
                 && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
             throw Refusals.nullOperandUnderOmitted(expression.getOperator());
         }
-        // A comparison the declaration settled has nothing below it left to scan.
         if (declared == null) {
             operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
         }
     }
 
-    /**
-     * The operators CEL evaluates to a definite boolean over a null value, and so the only ones
-     * an attribute's declared convention can settle.
-     */
+    /** The operators CEL evaluates to a definite boolean over a null value. */
     private static final Set<String> EQUALITY_FAMILY = Set.of("eq", "ne", "in");
 
     /**
-     * The declared NULL convention of the attribute a binary comparison names, or {@code null}
-     * when the node is not a comparison between one mapped attribute and one literal.
+     * The declared NULL convention of the attribute in an attribute-vs-literal comparison, or
+     * {@code null} for any other node.
      */
     private static NullAttributeRepresentation declaredForComparedAttribute(
             String operator, List<Operand> operands, Map<String, AttributeMapping> mapper) {
-        // Anything outside the equality family — a collection macro, hasIntersection, a string
-        // match — keeps using the call-level fallback, because the declaration says nothing
-        // about what its null means there.
         if (!EQUALITY_FAMILY.contains(operator) || operands.size() != 2) {
             return null;
         }
@@ -572,26 +420,18 @@ public final class SpringDataQueryPlanAdapter {
         };
     }
 
-    // -- Evaluation context --
-
     /**
-     * Detects whether the Specification is being evaluated for the {@code SELECT} query it was
-     * handed: in every Spring Data SELECT path ({@code findAll}/{@code findOne}/{@code count}/
-     * {@code exists}/pagination) the {@code Root} is created via {@code query.from(...)}, so it is
-     * a member of {@code query.getRoots()}. In {@code SimpleJpaRepository.delete(Specification)}
-     * the {@code Root} comes from a {@code CriteriaDelete} while the {@code CriteriaQuery}
-     * argument is a fresh throwaway {@code createQuery(cls)} whose root set does not contain it
-     * (and newer Spring Data versions pass {@code null} for the query). Correlated subqueries are
-     * only sound in the first case — see {@link ChainSubqueries#chainSubquery}.
+     * Whether the Specification is evaluated for a SELECT. There the {@code Root} is one of
+     * {@code query.getRoots()}; in {@code delete(Specification)} it comes from a
+     * {@code CriteriaDelete}, and the query is unrelated or null.
      */
     private static boolean isSelectInvocation(Root<?> root, CriteriaQuery<?> query) {
         return query != null && query.getRoots().contains(root);
     }
 
     /**
-     * {@link #MAX_MACRO_DEPTH_PROPERTY} as an integer, or the default when unset. A value that
-     * is not a positive integer is a misconfigured JVM, not a plan the adapter refuses, so it is
-     * a plain {@link IllegalArgumentException} rather than one of the {@link Refusals}.
+     * {@link #MAX_MACRO_DEPTH_PROPERTY} as an integer, or the default when unset. A bad value
+     * is a configuration error, so it throws a plain {@link IllegalArgumentException}.
      */
     private static int readMaxMacroDepth() {
         String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);

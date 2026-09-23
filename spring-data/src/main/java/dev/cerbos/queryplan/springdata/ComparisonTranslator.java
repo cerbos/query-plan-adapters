@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
@@ -19,63 +24,20 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * The comparison-translation module: every leaf comparison — plain {@code field op value},
- * field-to-field, constant-vs-constant, constant-receiver string matches, arithmetic,
- * ternary-wrapped and {@code size()} comparisons — enters through {@link #translate} and
- * nowhere else. Inside, one operand-resolution seam ({@link #resolve}) classifies each
- * operand into a {@link Resolved} shape, and {@link #dispatch} translates the resolved
- * pair; predicate-level rewrites (the CEL ternary, the eq/ne string-concat solve) are
- * explicit steps in {@code translate}/{@code dispatch}, ordered by code structure. What
- * this replaces: a chain of order-dependent probes (ternary → size → arithmetic → a leaf
- * collector loop) where each probe re-scanned the raw operands and an ownership referee
- * decided whether the {@code add} fold/solve path or the arithmetic path translated a
- * given shape — the ordering was the specification, and it lived in comments.
+ * Translates every leaf comparison: field against value, field against field, constant against
+ * constant, constant-receiver string matches, arithmetic, ternary and {@code size()}
+ * comparisons.
  *
- * <p>Two of the pipeline's steps are collaborators of their own because their shapes are not
- * operand resolutions: the ternary rewrite ({@link TernaryTranslator}) substitutes branches
- * back into the RAW comparison and walks again, and {@code size()}
- * ({@link SizeTranslator}) emits subqueries. The double-space lowering that
- * {@link #dispatch} routes every remaining arithmetic-rooted pair to is
- * {@link ArithmeticTranslator}, which reaches back here for the constant fold and the raw
- * expression comparison so those are spelled once.
+ * <p>{@link #resolve} classifies each operand into a {@link Resolved} shape without converting
+ * it, and {@link #dispatch} translates the pair. Conversion is lazy because the error a
+ * malformed operand raises depends on the whole comparison, and those messages are pinned.
  *
- * <p>Design note — rejected alternative: an eagerly-converting resolver
- * ({@code resolve(operand) -> Constant(javaValue) | Column(path) | NumericSql(expr)})
- * that folds {@code add(value, value)} with {@link PlanValues#foldAdd} and converts
- * VALUES/paths at classification time was sketched first. It was rejected because
- * conversion errors are part of the observable contract: WHICH message a malformed
- * operand raises depends on the whole comparison's shape (a boolean inside {@code add}
- * is a foldAdd type error against a field but "Arithmetic comparison requires numeric
- * operands" against a constant; an unknown attribute must not preempt an "Unexpected
- * X() expression" on the sibling operand), so eager conversion either re-orders pinned
- * messages or forces the resolver to take a context parameter — which reintroduces the
- * caller-knows-best coupling the seam exists to remove. The chosen shape classifies
- * structurally and converts lazily at the dispatch site that consumes the operand.
- *
- * <p><b>Extension recipe — adding a new comparison-operand type</b>. The
- * {@code timestamp()} support is the worked example, implemented exactly this way:
- * <ol>
- *   <li>Add {@code Resolved} cases: {@link Resolved.TimestampField} /
- *       {@link Resolved.TimestampConstant}, the latter with a lazy accessor that
- *       parses the argument (its errors are then part of the contract);</li>
- *   <li>Classify them in {@link #resolve}'s EXPRESSION arm (before the {@code Opaque}
- *       fallback); a pure-constant argument folds in the accessor — never in
- *       dispatch;</li>
- *   <li>Handle the new pairings in {@link #dispatch} next to the existing typed cases
- *       ({@link #timestampLeaf} compares the column against the parsed instant via
- *       {@link LeafTranslator#withOverride} so {@link OperatorFunction} overrides keep
- *       working).</li>
- * </ol>
- * Nothing else changes: no new probe, no re-scan, no ordering decision — unmatched
- * pairings still fall through to {@link #leafOperandError}, whose "Unexpected
- * X() expression in leaf operand of Y" message stays the pinned fail-closed behavior.
+ * <p>To add an operand type, add a {@code Resolved} case, classify it in {@link #resolve} and
+ * handle its pairings in {@link #dispatch}, as the {@code timestamp()} cases do. Unhandled
+ * pairings fall through to {@link #leafOperandError}.
  */
 final class ComparisonTranslator {
 
-    /**
-     * The orderable/equality comparison operators (eq/ne/lt/gt/le/ge) — shared by the
-     * ternary rewrite, the arithmetic path, and the constant-vs-constant fold.
-     */
     static final Set<String> COMPARISON_OPS =
             Set.of("eq", "ne", "lt", "gt", "le", "ge");
 
@@ -97,24 +59,10 @@ final class ComparisonTranslator {
     }
 
     /**
-     * The single entry point for the {@code default} arm of
-     * {@link PlanWalker#traverseExpression}: translate {@code op(operands...)} where
-     * {@code op} is not one of the structural operators handled by name. The pipeline is
-     * fixed by code order, not by probe-chain position:
-     * <ol>
-     *   <li><b>Ternary rewrite</b> on the RAW operands — a {@code cmp(if(...), other)}
-     *       substitutes each branch back into the comparison and recurses, so it must see
-     *       source order before any mirroring;</li>
-     *   <li><b>Normalization</b> to field-first form (mirroring directional operators —
-     *       see {@link NormalizedBinary}); every later stage assumes it;</li>
-     *   <li><b>size() comparisons</b> as a dedicated step: the emptiness shortcuts
-     *       (EXISTS / NOT EXISTS), the COUNT/LENGTH shapes and the tri-state
-     *       {@code size(filter(...))} guard are subquery translations, not operand
-     *       resolutions, and their SQL shapes are pinned by the differential oracle;</li>
-     *   <li><b>Operand resolution</b> — each operand through the single {@link #resolve}
-     *       seam;</li>
-     *   <li><b>Dispatch</b> on the resolved pair ({@link #dispatch}).</li>
-     * </ol>
+     * Translates an operator that {@link PlanWalker#traverseExpression} does not handle by
+     * name. The ternary rewrite runs first, on the raw operands, because it needs source order.
+     * Then the operands are normalized field-first ({@link NormalizedBinary}), {@code size()}
+     * comparisons are tried, and everything else is resolved and dispatched.
      */
     Predicate translate(String op, List<Operand> operands, Scope scope) {
         Predicate ternaryPred = ternary.tryTernaryComparison(op, operands, scope);
@@ -122,11 +70,8 @@ final class ComparisonTranslator {
             return ternaryPred;
         }
         NormalizedBinary nb = NormalizedBinary.of(op, operands);
-        // Every leaf operator is binary. Extra operands are a malformed plan and must
-        // fail loudly rather than silently dropping one — BEFORE the size() probe,
-        // whose last-match-wins operand scan would otherwise translate a partial
-        // comparison (e.g. eq(size(coll), variable, value) as COUNT = value, silently
-        // discarding the variable constraint).
+        // Check arity before the size() probe: its operand scan keeps the last match and would
+        // silently drop an extra operand.
         if (nb.operands().size() != 2) {
             throw Refusals.malformed(
                     nb.op() + " requires exactly 2 operands, got " + nb.operands().size());
@@ -141,34 +86,21 @@ final class ComparisonTranslator {
                 nb.operands(), scope);
     }
 
-    // -- the operand-resolution seam --
+    // -- operand resolution --
 
-    /**
-     * A comparison operand resolved to its translation-relevant shape — the single seam
-     * every leaf comparison goes through ({@link #resolve}). Resolution is purely
-     * structural: values convert and constants fold LAZILY (at the dispatch site that
-     * consumes them), because WHICH error a malformed operand raises depends on the shape
-     * of the whole comparison — e.g. a non-numeric constant inside {@code add} is a
-     * type-mismatch when solved against a field but an
-     * "Arithmetic comparison requires numeric operands" when lowered to SQL arithmetic —
-     * and eager conversion here would re-order those pinned messages.
-     */
+    /** A comparison operand classified by shape. Values convert on demand in dispatch. */
     private sealed interface Resolved {
-        /** A plan constant (raw VALUE node); {@link #value()} converts on demand. */
+        /** A plan constant. */
         record Constant(Operand operand) implements Resolved {
             Object value() {
                 return PlanValues.protoValueToJava(operand.getValue());
             }
         }
 
-        /** A mapped column reference; the path resolves at the consuming dispatch site. */
+        /** A mapped attribute. */
         record Field(String variable) implements Resolved {}
 
-        /**
-         * {@code add(value, value)} — a pure-constant subtree. {@link #fold()} folds it
-         * with {@link PlanValues#foldAdd} (strings concatenate, numbers add), so by the
-         * time the resolved pair is dispatched no "who owns the fold" question exists.
-         */
+        /** {@code add(value, value)}, folded by {@link PlanValues#foldAdd}. */
         record ConstantAdd(Operand left, Operand right) implements Resolved {
             Object fold() {
                 return PlanValues.foldAdd(
@@ -178,44 +110,29 @@ final class ComparisonTranslator {
         }
 
         /**
-         * {@code add(field, value)} / {@code add(value, field)} — solvable for the field
-         * under eq/ne against a constant ({@link PlanValues#solveAdd}) when the solve is
-         * algebraically exact (string concatenation, in-range long/long integers); every
-         * other pairing — including fractional doubles, which IEEE subtraction cannot
-         * invert — lowers to SQL arithmetic.
+         * {@code add(field, value)} or {@code add(value, field)}. Under eq/ne against a
+         * constant it is solved for the field when the solve is exact; otherwise it lowers to
+         * SQL arithmetic.
          */
         record FieldPlusConstant(String fieldVariable, Operand constant, boolean fieldIsLeft)
                 implements Resolved {}
 
-        /**
-         * Any other arithmetic-rooted expression ({@code sub}/{@code mult}/{@code div}/
-         * {@code mod}, or {@code add} in a shape with nested expressions or wrong arity) —
-         * lowered to double-space SQL by {@link ArithmeticTranslator}.
-         */
+        /** Any other arithmetic expression, lowered to SQL by {@link ArithmeticTranslator}. */
         record Arithmetic(String operator) implements Resolved {}
 
-        /**
-         * {@code timestamp(variable)} — a temporal column wrapped in the CEL
-         * {@code timestamp()} cast. The path resolves at the consuming dispatch site
-         * ({@link #timestampLeaf}), which also owns the column-type contract.
-         */
+        /** {@code timestamp(variable)}. */
         record TimestampField(String variable) implements Resolved {}
 
         /**
-         * {@code timestamp(value)} — a constant instant. The planner constant-folds
-         * {@code now()}/{@code now() - duration(...)} arithmetic and re-wraps the result
-         * in {@code timestamp("<RFC-3339>")} on the wire (PDP-verified), so both policy
-         * literals and folded relative windows arrive in this shape. {@link #instant()}
-         * parses lazily: {@link Instant#parse} first, {@link OffsetDateTime#parse} as
-         * the fallback for non-UTC offsets (Cerbos emits literals verbatim, including
-         * offsets and nanosecond precision) — normalizing to the absolute instant,
-         * matching CEL timestamp equality across offsets.
+         * {@code timestamp(value)}. The planner folds {@code now() - duration(...)} into this
+         * shape too. {@link #instant()} accepts any RFC-3339 offset and normalizes to the
+         * absolute instant, as CEL timestamp equality does.
          */
         record TimestampConstant(Operand operand) implements Resolved {
             Instant instant() {
                 Object raw = PlanValues.protoValueToJava(operand.getValue());
-                // CEL's own timestamp() rejects a non-string or unparseable literal, so
-                // the planner cannot emit one: both are malformed, not unsupported.
+                // CEL's timestamp() rejects a non-string or unparseable literal, so the planner
+                // cannot emit one.
                 if (!(raw instanceof String s)) {
                     throw Refusals.malformed(
                             "timestamp() constant must be an RFC-3339 string, got "
@@ -235,26 +152,15 @@ final class ComparisonTranslator {
         }
 
         /**
-         * {@code string(variable)} — CEL's string conversion over a mapped column. Only a
-         * BOOLEAN column has a lowering ({@link #booleanStringComparison}); the column's type is
-         * read at the consuming dispatch site, and every other type is refused there with the
-         * leaf-operand message a {@code string()} operand has always raised.
+         * {@code string(variable)}. Only a {@link Boolean} column is translated
+         * ({@link #booleanStringComparison}).
          */
         record StringOfField(String variable) implements Resolved {}
 
-        /**
-         * An operand no leaf comparison understands ({@code map()}, {@code lambda},
-         * {@code timestamp()} over a nested expression, an unset node...). Dispatch
-         * routes these to {@link #leafOperandError}, which reports from the RAW operands
-         * so each shape keeps its exact message.
-         */
+        /** An operand no leaf case handles, reported by {@link #leafOperandError}. */
         record Opaque() implements Resolved {}
     }
 
-    /**
-     * THE operand-resolution seam: classify one comparison operand. Adding a new operand
-     * type starts here — see the extension recipe on {@link ComparisonTranslator}.
-     */
     private Resolved resolve(Operand o) {
         return switch (o.getNodeCase()) {
             case VALUE -> new Resolved.Constant(o);
@@ -262,11 +168,8 @@ final class ComparisonTranslator {
             case EXPRESSION -> {
                 PlanResourcesFilter.Expression e = o.getExpression();
                 String exprOp = e.getOperator();
-                // timestamp(variable) / timestamp(value) — the only shapes the planner
-                // emits for temporal comparisons (PDP-verified: the folded now()-duration
-                // constant is re-wrapped in timestamp(), never a bare string). A nested
-                // expression inside timestamp() has no verified translation and stays
-                // Opaque → leafOperandError.
+                // The planner emits temporal comparisons as timestamp(variable) or
+                // timestamp(value). A nested expression has no translation.
                 if ("timestamp".equals(exprOp) && e.getOperandsCount() == 1) {
                     Operand arg = e.getOperands(0);
                     if (arg.getNodeCase() == Operand.NodeCase.VARIABLE) {
@@ -277,8 +180,6 @@ final class ComparisonTranslator {
                     }
                     yield new Resolved.Opaque();
                 }
-                // string(variable). Anything else inside string() — a nested expression, a
-                // constant — stays Opaque → leafOperandError.
                 if ("string".equals(exprOp) && e.getOperandsCount() == 1
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
                     yield new Resolved.StringOfField(e.getOperands(0).getVariable());
@@ -307,45 +208,36 @@ final class ComparisonTranslator {
         };
     }
 
-    /** Whether this operand resolved to an {@code add}-rooted expression (any shape). */
     private static boolean isAddRooted(Resolved r) {
         return r instanceof Resolved.ConstantAdd
                 || r instanceof Resolved.FieldPlusConstant
                 || (r instanceof Resolved.Arithmetic a && "add".equals(a.operator()));
     }
 
-    /** Whether this operand resolved to any arithmetic-rooted expression. */
     private static boolean isArithmeticRooted(Resolved r) {
         return r instanceof Resolved.ConstantAdd
                 || r instanceof Resolved.FieldPlusConstant
                 || r instanceof Resolved.Arithmetic;
     }
 
-    // -- dispatch on the resolved pair --
+    // -- dispatch --
 
     /**
-     * Translate one leaf comparison from its resolved operand pair. Cases are ordered by
-     * code structure, top to bottom; {@code operands} is the (normalized) raw operand list,
-     * kept only for the paths that must see raw shapes — SQL arithmetic lowering
-     * ({@link ArithmeticTranslator} walks subtrees) and error reporting
-     * ({@link #leafOperandError} pins per-shape messages).
+     * Translates one comparison from its resolved pair. {@code operands} are the normalized
+     * raw operands, needed by arithmetic lowering and by error reporting.
      */
     private Predicate dispatch(String op, Resolved left, Resolved right,
                                List<Operand> operands, Scope scope) {
-        // Constant-vs-constant comparisons are statically evaluated. The planner never emits
-        // them directly, but ternary substitution produces them — the else branch of
-        // `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
+        // The planner never emits two constants, but ternary substitution does: the else
+        // branch of `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
         if (COMPARISON_OPS.contains(op)
                 && left instanceof Resolved.Constant lc
                 && right instanceof Resolved.Constant rc) {
             return constantComparison(op, lc.value(), rc.value());
         }
 
-        // Constant-receiver string matches: `"a,b".contains(R.attr.x)` arrives as
-        // contains(value, variable) — the CONSTANT is the haystack and the COLUMN the
-        // needle (NormalizedBinary deliberately leaves these in source order). An unfolded
-        // concat receiver (`("a" + "b").contains(R.attr.x)`) folds here too — NOT into the
-        // add-solve path, which would translate the INVERTED column-haystack LIKE.
+        // `"a,b".contains(R.attr.x)`: the constant is the haystack and the column the needle.
+        // A concat receiver is folded here too; the add solve would swap haystack and needle.
         StringMatch match = StringMatch.of(op);
         if (match != null && right instanceof Resolved.Field needleField) {
             Object receiver = left instanceof Resolved.Constant c ? c.value()
@@ -353,27 +245,20 @@ final class ComparisonTranslator {
                     : null;
             if (receiver != null) {
                 if (!(receiver instanceof String haystack)) {
-                    // `5.contains(x)` has no overload in CEL; the planner never folds one.
+                    // CEL has no contains() on a number, so the planner cannot emit this.
                     throw Refusals.malformed(
                             op + " requires a string receiver, got "
                                     + PlanValues.typeName(receiver));
                 }
                 Path<?> needle = scope.path(needleField.variable());
-                // The needle is a column, so it is escaped dynamically; a NULL needle is
-                // a missing attribute → CEL error → deny (fieldToFieldLike guards it).
                 return fieldToFieldLike(cb.literal(haystack), needle, match);
             }
-            // A NULL receiver constant is not a haystack; fall through so the null-RHS
-            // leaf branch below owns the error message.
+            // A null receiver falls through to the null-value error below.
         }
 
         if (COMPARISON_OPS.contains(op)) {
-            // timestamp(field) vs timestamp(constant) — the wire shape of every
-            // time-window / retention-cutoff policy (`timestamp(R.attr.createdAt) <
-            // now() - duration("24h")` folds its RHS to timestamp("<instant>")).
-            // NormalizedBinary cannot reorder these (both operands are EXPRESSION
-            // nodes, equal rank), so the value-first form is MIRRORED here — never
-            // inverted: the planner preserves policy source order.
+            // Both operands are expressions, so NormalizedBinary cannot reorder them; the
+            // value-first form is mirrored here.
             if (left instanceof Resolved.TimestampField tsField
                     && right instanceof Resolved.TimestampConstant tsConst) {
                 return timestampLeaf(op, tsField, tsConst, scope);
@@ -382,35 +267,26 @@ final class ComparisonTranslator {
                     && right instanceof Resolved.TimestampField tsField) {
                 return timestampLeaf(NormalizedBinary.mirror(op), tsField, tsConst, scope);
             }
-            // Two constant instants — reachable through ternary substitution, like the
-            // numeric constant-vs-constant fold above; instant comparison is exact.
+            // Reachable through ternary substitution.
             if (left instanceof Resolved.TimestampConstant lts
                     && right instanceof Resolved.TimestampConstant rts) {
                 return timestampConstantComparison(op, lts.instant(), rts.instant());
             }
-            // string(column) eq/ne a string constant. NormalizedBinary puts the string()
-            // operand first (an EXPRESSION outranks a VALUE), so the value-first spelling
-            // arrives here too. Ordering operators and non-string constants fall through to
-            // leafOperandError, as does every column that is not a boolean.
+            // NormalizedBinary puts string() first, so both spellings arrive here. Other
+            // operators and constants reach leafOperandError.
             if (("eq".equals(op) || "ne".equals(op))
                     && left instanceof Resolved.StringOfField sf
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
                 return booleanStringComparison(op, sf, text, operands, scope);
             }
-            // Fold: `field op add(value, value)` — the folded constant compares like any
-            // plan constant (normalization guarantees the field arrives first). Strings
-            // concatenate here, matching CEL — this shape never enters double space.
+            // `field op add(value, value)`: strings concatenate, as in CEL.
             if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
                 return leaf.applyLeaf(op, scope.path(f.variable()), ca.fold());
             }
-            // Solve: `add(field, const) eq/ne constant` — for the ALGEBRAICALLY EXACT
-            // shapes only (string concatenation, in-range long/long integers).
-            // Fractional/oversized numeric pairs fall through to numericComparison:
-            // IEEE subtraction does not invert IEEE addition (fl(fl(t-c)+c) != t), so
-            // a Java-side solve would return rows the PDP's check() denies — the SQL
-            // side must compute fl(field + const) and compare it to the target in
-            // double space, sharing IEEE semantics with the ordering operators.
+            // `add(field, c) eq/ne value` is solved in Java only when the solve is exact
+            // (strings, in-range integers). Floating-point subtraction does not invert
+            // addition, so other numbers are compared in SQL.
             if (("eq".equals(op) || "ne".equals(op))
                     && left instanceof Resolved.FieldPlusConstant fpc
                     && right instanceof Resolved.Constant other
@@ -419,14 +295,10 @@ final class ComparisonTranslator {
                             PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                 return solveAddComparison(op, fpc, other, scope);
             }
-            // Everything else arithmetic-rooted lowers to SQL-side double-space arithmetic.
             if (isArithmeticRooted(left) || isArithmeticRooted(right)) {
                 return arithmetic.numericComparison(op, operands, scope);
             }
         } else if (isAddRooted(left) || isAddRooted(right)) {
-            // add under a non-comparison operator (string matches, unknown operators):
-            // only the constant fold against a field translates; everything else reports
-            // the add-specific shape errors.
             return addFoldOrError(op, operands, scope);
         }
 
@@ -434,9 +306,8 @@ final class ComparisonTranslator {
             return fieldToFieldComparison(op, a.variable(), b.variable(), scope);
         }
 
-        // The ordinary scalar leaf: one mapped column against one plan constant. Order-
-        // insensitive on purpose — receiver-sensitive operators are never normalized, so a
-        // null receiver arrives value-first and must still reach the null-RHS message.
+        // Either order: string-match operators are not normalized, so a null receiver arrives
+        // value-first and must still reach the null-value error.
         Resolved.Field field = left instanceof Resolved.Field lf ? lf
                 : right instanceof Resolved.Field rf ? rf : null;
         Resolved.Constant constant = left instanceof Resolved.Constant lc2 ? lc2
@@ -448,22 +319,13 @@ final class ComparisonTranslator {
         throw leafOperandError(op, operands);
     }
 
-    /** `field op value` (or value-first for non-normalized operators): the scalar leaf. */
     private Predicate leafFieldValue(String op, Resolved.Field field,
                                      Resolved.Constant constant, Scope scope) {
         Object value = constant.value();
 
-        // A structured constant — a CEL list literal (`R.attr.tags == ["a", "b"]`
-        // arrives as eq(variable, value-list) verbatim; PDP-verified in both operand
-        // orders) or, defensively, a struct VALUE (protoValueToJava can produce a Map,
-        // though the planner emits map literals as struct() expressions, which
-        // leafOperandError already names). No scalar-column comparison exists for
-        // these: letting the value through dies inside Hibernate with a raw coercion
-        // error ("Could not convert ... ListN to java.lang.String") instead of the
-        // adapter's named-IllegalArgumentException contract. Checked BEFORE path
-        // resolution so a Relation-mapped attribute reports this shape too, not the
-        // generic "is a Relation" resolution error. Reports the shape only — element
-        // values never leak into the message.
+        // A list or map constant has no scalar-column comparison, and Hibernate would fail
+        // with a raw coercion error. Checked before path resolution so a Relation-mapped
+        // attribute gets this message too. The message never includes element values.
         if (value instanceof List<?> || value instanceof Map<?, ?>) {
             throw Refusals.unsupported(
                     op + " comparison against a " + constantShape(value)
@@ -477,21 +339,17 @@ final class ComparisonTranslator {
         Path<?> path = scope.path(field.variable());
 
         if (value == null) {
-            // A registered override owns the operator's full translation, including a null RHS.
             return leaf.withOverride(op, path, null, () -> switch (op) {
                 case "eq" -> cb.isNull(path);
                 case "ne" -> cb.isNotNull(path);
-                // `x < null` is legal CEL over a dyn attribute (it errors at check time,
-                // which denies); no ordering predicate reproduces that, so refuse it.
+                // `x < null` is a CEL error, which denies. No ordering predicate matches that.
                 default -> throw Refusals.unsupported(
                         "Null values are only supported with eq and ne operators (got " + op + ")");
             });
         }
 
-        // An attribute the caller sends as an explicit null holds a null VALUE in CEL,
-        // so equality against a non-null operand is definite. An operator the caller
-        // overrode is left to the override: replacing it would make this declaration
-        // silently discard the caller's own translation (#308).
+        // An explicit-null attribute holds a null value in CEL, so eq/ne is definite. An
+        // overridden operator is left to the override.
         if (("eq".equals(op) || "ne".equals(op))
                 && !leaf.overridden(op)
                 && leaf.isExplicitNull(field.variable(), scope)) {
@@ -502,32 +360,13 @@ final class ComparisonTranslator {
     }
 
     /**
-     * {@code timestamp(field) op timestamp(constant)}: compare a temporal column against
-     * a parsed constant instant. {@code op} is already field-first (the dispatch mirrors
-     * value-first forms before calling here).
+     * {@code timestamp(field) op timestamp(constant)}, with {@code op} already field-first.
      *
-     * <p><b>Column-type contract.</b> Only column types that unambiguously denote an
-     * absolute instant are translated:
-     * <ul>
-     *   <li>{@link Instant} — bound as-is;</li>
-     *   <li>{@link OffsetDateTime} — bound as the instant at UTC. Hibernate 6 stores
-     *       both with {@code SqlTypes.TIMESTAMP_UTC} (normalized to UTC before
-     *       binding), so the database comparison is an instant comparison regardless
-     *       of the bound offset.</li>
-     * </ul>
-     * {@code LocalDateTime} (no zone — the stored wall-clock time could mean any
-     * instant), {@code java.util.Date} (JDBC binding routes through zone conversions),
-     * {@code String} (format- and offset-dependent lexicographic order) and everything
-     * else throw a NAMED error instead of guessing: a wrong zone assumption here would
-     * silently include rows the PDP's {@code check()} denies (or vice versa) — an
-     * authorization-relevant divergence, so the adapter fails closed. A registered
-     * {@link OperatorFunction} override is consulted FIRST (with the parsed
-     * {@link Instant} as the value), so callers who know their column's zone semantics
-     * can translate those types themselves.
-     *
-     * <p>A NULL column value makes every comparison UNKNOWN under SQL three-valued
-     * logic → the row is excluded, matching CEL: a missing attribute is an evaluation
-     * error and {@code check()} denies (PDP-verified for eq/ne/lt and mirrored forms).
+     * <p>Only {@link Instant} and {@link OffsetDateTime} columns are translated, because both
+     * denote an absolute instant. {@code LocalDateTime}, {@code java.util.Date} and
+     * {@code String} do not, and guessing a zone could return rows the PDP denies, so they
+     * throw. A registered {@link OperatorFunction} override is tried first, with the parsed
+     * {@link Instant}. A NULL column makes the comparison UNKNOWN, matching CEL's deny.
      */
     private Predicate timestampLeaf(String op, Resolved.TimestampField field,
                                     Resolved.TimestampConstant constant, Scope scope) {
@@ -541,10 +380,8 @@ final class ComparisonTranslator {
             } else if (OffsetDateTime.class.equals(javaType)) {
                 bound = instant.atOffset(ZoneOffset.UTC);
             } else {
-                // Unmapped rather than unsupported: the plan is fine and the Criteria
-                // API could compare the column, but the MAPPING does not say which
-                // instant a LocalDateTime/Date/String holds. The caller resolves it by
-                // remapping the column or registering an override — a declaration.
+                // Unmapped, not unsupported: the caller fixes it by remapping the column or
+                // registering an override.
                 throw Refusals.unmapped(
                         "timestamp() comparison requires a column mapped to java.time.Instant "
                                 + "or java.time.OffsetDateTime, but '" + field.variable()
@@ -558,47 +395,20 @@ final class ComparisonTranslator {
         });
     }
 
-    /**
-     * Statically evaluate a comparison between two constant instants — reachable via
-     * ternary substitution, mirroring {@link #constantComparison}. Instant comparison
-     * is total and exact, so the collapse is oracle-faithful.
-     */
     private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
         return constant(holds(op, left.compareTo(right)));
     }
 
     /**
-     * {@code string(boolColumn) eq/ne "text"}: CEL's string conversion of a boolean column,
-     * compared with a string constant.
+     * {@code string(boolColumn) eq/ne "text"}. CEL renders a bool as exactly {@code "true"} or
+     * {@code "false"}, so the constant is matched here and only the boolean column reaches SQL.
+     * SQL has no portable spelling of the conversion: {@code CAST} gives {@code '1'} on MySQL,
+     * and a text-producing {@code CASE} compares in the connection collation, which is
+     * case-insensitive under MySQL Connector/J.
      *
-     * <p>CEL renders a bool as exactly {@code "true"} or {@code "false"}, so the comparison is
-     * decided HERE, byte for byte, and the store is only ever asked about the boolean column:
-     * {@code string(x) == "true"} is {@code x == true}, {@code string(x) == "false"} is
-     * {@code x == false}, and any other constant matches no value at all. Both SQL spellings of
-     * the conversion are wrong somewhere. A {@code CAST} renders {@code 'true'} on H2 and
-     * PostgreSQL and {@code '1'} on MySQL, which stores a boolean as a number. And
-     * {@code CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END} compared
-     * with the constant puts two LITERALS on the comparison, which a store compares in its
-     * CONNECTION collation rather than a column's: MySQL Connector/J leaves that at
-     * {@code utf8mb4_0900_ai_ci} even on a server whose columns are case-sensitive, and there
-     * the CASE form returned every true row for {@code string(x) == "TRUE"}, all of which CEL
-     * denies (measured on this repository's MySQL leg; cerbos/query-plan-adapters#418 proposed
-     * the CASE).
-     *
-     * <p>A NULL column is a missing attribute, or an explicit null, on the check side, and CEL
-     * has no {@code string()} for either: it raises, and the PDP denies the row under both
-     * polarities. The two word arms keep that by construction ({@code NULL = true} is UNKNOWN);
-     * the no-match arm states it, as {@link #solveAddComparison} does for an unsolvable
-     * concatenation. That is also why an explicit-null declaration does not make this equality
-     * definite the way it does a plain column's.
-     *
-     * <p>The two word arms go through {@link LeafTranslator#applyLeaf} with the boolean the
-     * constant names, as the bare boolean attribute does, so an {@code eq}/{@code ne} override
-     * sees them. Every other column type keeps the refusal a {@code string()} operand has always
-     * raised: a number's or an instant's text form is what the dialects render on their own
-     * terms, and nothing here reproduces CEL's. {@link Boolean} only, not the primitive: the
-     * leaf's type check would read a {@code boolean} path as incompatible with a
-     * {@link Boolean} value and fold the comparison to a constant.
+     * <p>Any other constant matches nothing. A NULL column stays UNKNOWN, because CEL's
+     * {@code string()} errors on it and the PDP denies. Only {@link Boolean} columns qualify:
+     * a primitive {@code boolean} path fails the leaf's type check and folds to a constant.
      */
     private Predicate booleanStringComparison(String op, Resolved.StringOfField field,
                                               String value, List<Operand> operands, Scope scope) {
@@ -613,11 +423,7 @@ final class ComparisonTranslator {
                 () -> cb.isNull(path));
     }
 
-    /**
-     * Shape description for a structured constant in an error message: size and kind
-     * only — never element values, matching the adapter's no-value-leak discipline
-     * (see {@link PlanValues#typeName}).
-     */
+    // Size and kind only: element values never go into an error message.
     private static String constantShape(Object value) {
         if (value instanceof List<?> l) {
             return "list of " + l.size() + " element" + (l.size() == 1 ? "" : "s");
@@ -631,16 +437,9 @@ final class ComparisonTranslator {
     }
 
     /**
-     * Solve {@code add(field, const) eq/ne constant} for the field — only reached for
-     * algebraically exact solves (string concatenation, in-range long/long integers;
-     * {@link #dispatch} routes fractional doubles to
-     * {@link ArithmeticTranslator#numericComparison} because IEEE subtraction does not
-     * invert IEEE addition). When no solution exists (e.g.
-     * {@code "projects:123" == "users:" + R.id} can never be true), eq is always-false;
-     * ne is NOT always-true — a missing attribute makes the concatenation a CEL
-     * evaluation error ({@code "users:" + null}) → deny, so NULL rows must stay
-     * excluded: IS NOT NULL, never an unconditional {@code 1=1} (which would leak exactly
-     * the rows the PDP denies).
+     * Solves {@code add(field, c) eq/ne value} for the field. With no solution (e.g.
+     * {@code "projects:123" == "users:" + R.id}) eq is always false and ne always true, except
+     * that a NULL field stays UNKNOWN: {@code "users:" + null} is a CEL error, which denies.
      */
     private Predicate solveAddComparison(String op, Resolved.FieldPlusConstant fpc,
                                          Resolved.Constant other, Scope scope) {
@@ -655,10 +454,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * {@code add} under a non-comparison operator. The only translatable shape is the
-     * constant fold against a field ({@code ("a" + "b") op field} with the fold as the
-     * VALUE side); the rest report the add-specific shape errors, matching the raw
-     * operand layout (either side may hold the {@code add}).
+     * {@code add} under a string match or unknown operator. Only a folded
+     * {@code add(value, value)} against a field translates; everything else throws.
      */
     private Predicate addFoldOrError(String op, List<Operand> operands, Scope scope) {
         Operand addExprOperand = null;
@@ -672,8 +469,6 @@ final class ComparisonTranslator {
             }
         }
         if (otherOperand == null) {
-            // Both operands are add() expressions — there IS a second operand, it just
-            // isn't a scalar to fold against, so say that instead of misreporting arity.
             throw Refusals.unsupported(
                     op + " between two add() expressions is not supported: got "
                             + Refusals.describeOperand(operands.get(0)) + " and "
@@ -702,37 +497,31 @@ final class ComparisonTranslator {
     }
 
     /**
-     * Report an operand shape no leaf case accepts. Reads the RAW operands in order so
-     * each malformed shape keeps its exact message: {@code map()} points at the supported
-     * {@code hasIntersection} wrapping, other expressions name themselves, unset nodes
-     * report their node case, and an all-constant pair reports the missing variable.
+     * Reports an operand shape no case accepts. Reads the raw operands left to right so each
+     * shape keeps its pinned message.
      */
     private IllegalArgumentException leafOperandError(String op, List<Operand> operands) {
         String variable = null;
         for (Operand o : operands) {
             switch (o.getNodeCase()) {
                 case VARIABLE -> variable = o.getVariable();
-                // Conversion can itself reject a malformed VALUE — same order as reading
-                // the operands left to right.
+                // Converting a malformed VALUE throws here, in operand order.
                 case VALUE -> PlanValues.protoValueToJava(o.getValue());
                 case EXPRESSION -> {
-                    // H3: map() compositions are only accepted inside hasIntersection.
-                    // A direct comparison like eq(map(...), [...]) reaches here; point users
-                    // at the supported shape rather than throwing a generic operand error.
                     String innerOp = o.getExpression().getOperator();
+                    // map() is only supported inside hasIntersection.
                     if ("map".equals(innerOp)) {
                         throw Refusals.unsupported(
                                 "Direct comparison of map(...) to a value is not supported "
                                         + "(operator: " + op + "). Wrap the map() expression in "
                                         + "hasIntersection(map(...), [...]) instead.");
                     }
-                    // eq(except(variable, value-list), value-list) — the comparison
-                    // form of the two-list except() (PDP-verified wire shape).
+                    // eq(except(variable, list), list): the comparison form of except().
                     if ("except".equals(innerOp)) {
                         throw Refusals.exceptUnsupported();
                     }
-                    // A computed operand — a cast, an index, a lambda, a nested
-                    // timestamp(): legal CEL the leaf cases have no column shape for.
+                    // A cast, index, lambda or nested timestamp(): legal CEL with no column
+                    // shape.
                     throw Refusals.unsupported(
                             "Unexpected " + innerOp + "() expression in leaf operand of " + op);
                 }
@@ -740,8 +529,8 @@ final class ComparisonTranslator {
                         "Unexpected operand type in leaf expression: " + o.getNodeCase());
             }
         }
-        // Two constants under an operator the constant fold does not cover: a
-        // comparison the planner evaluates itself and never ships.
+        // Two constants under an operator the constant fold does not cover. The planner
+        // evaluates these itself.
         if (variable == null) {
             return Refusals.malformed("Missing variable operand for " + op);
         }
@@ -749,21 +538,12 @@ final class ComparisonTranslator {
     }
 
     /**
-     * Statically evaluate a comparison between two plan constants and collapse it to an
-     * always-true ({@code 1=1}) or always-false ({@code 1=0}) predicate — the same collapse
-     * the unsolvable {@code add}-solve cases use. Numbers compare in double space: protobuf
-     * {@code Value.getNumberValue()} is a double, and {@link PlanValues#protoValueToJava}
-     * only splits Long/Double for whole-number cosmetics, not semantics. Strings compare
-     * lexicographically; booleans (and mixed incomparable types) support eq/ne only —
-     * eq → false, ne → true — while ordering them is a planner bug and throws.
+     * Evaluates a comparison of two constants to always-true ({@code 1=1}) or always-false
+     * ({@code 1=0}). Numbers compare as doubles and strings lexicographically; other types
+     * support only eq/ne, and ordering them throws.
      *
-     * <p>Numeric ordering uses the primitive IEEE operators, NOT {@link Double#compare}:
-     * the total order ranks {@code NaN} above every number (and {@code -0.0} below
-     * {@code 0.0}), so {@code Double.compare} would collapse {@code gt}/{@code ge}
-     * against a NaN constant — reachable via an unfolded {@code div(0,0)}, e.g. the
-     * else arm of {@code (aBool ? 1.0 : 0.0/0.0) > 0.5} — to always-true, returning
-     * rows the PDP denies. Cerbos 0.55 uses IEEE false for an unordered NaN pair, so the primitive
-     * comparison also preserves its result under negation.
+     * <p>Uses the primitive operators, not {@link Double#compare}, which ranks NaN above every
+     * number. A NaN constant (e.g. an unfolded {@code 0.0/0.0}) must compare false, as in CEL.
      */
     Predicate constantComparison(String op, Object left, Object right) {
         if ("eq".equals(op) || "ne".equals(op)) {
@@ -787,17 +567,14 @@ final class ComparisonTranslator {
         if (left instanceof String ls && right instanceof String rs) {
             return constant(holds(op, ls.compareTo(rs)));
         }
-        // Ordering two booleans, or a string against a number, has no CEL
-        // overload: the planner would have rejected the policy.
+        // CEL cannot order two booleans or a string against a number, so the planner would
+        // have rejected the policy.
         throw Refusals.malformed(
                 "Cannot order constant operands of " + op + ": "
                         + PlanValues.typeName(left) + " vs " + PlanValues.typeName(right));
     }
 
-    /**
-     * Whether {@code op} holds for a {@link Comparable#compareTo} result — the total orders
-     * (strings, instants). Numbers never come through here: see {@link #constantComparison}.
-     */
+    /** Applies {@code op} to a {@code compareTo} result. Not used for numbers. */
     private static boolean holds(String op, int cmp) {
         return switch (op) {
             case "eq" -> cmp == 0;
@@ -811,15 +588,13 @@ final class ComparisonTranslator {
         };
     }
 
-    /** A statically decided comparison: always-true ({@code 1=1}) or always-false ({@code 1=0}). */
     private Predicate constant(boolean result) {
         return result ? cb.conjunction() : cb.disjunction();
     }
 
     /**
-     * Compare two mapped columns directly (eq/ne/lt/gt/le/ge) or pattern-match one column
-     * against another (contains/startsWith/endsWith). Operand source order is preserved —
-     * two variables rank equally, so {@link NormalizedBinary} never swaps them.
+     * Compares or pattern-matches two columns. Source order is kept: {@link NormalizedBinary}
+     * never swaps two variables.
      */
     private Predicate fieldToFieldComparison(String op, String leftVar, String rightVar,
                                              Scope scope) {
@@ -837,15 +612,10 @@ final class ComparisonTranslator {
                     ? leaf.definiteEquality(op, left, right, leftExplicit, rightExplicit)
                     : tri.unknown();
         }
-        // Mixing the two conventions across one comparison has no faithful rendering.
-        // The declared side needs a definite answer for its NULL (CEL holds a null
-        // VALUE); the undeclared side needs UNKNOWN for its NULL (a missing attribute,
-        // which CEL denies under both polarities). A definite predicate returns rows the
-        // PDP refuses; a plain one drops rows the PDP allows. Refuse it rather than pick
-        // a direction — declare both attributes, or neither.
+        // A NULL on the explicit-null side needs a definite answer and a NULL on the other
+        // side needs UNKNOWN. No single predicate does both, so refuse. It is unmapped because
+        // the caller fixes it by declaring the convention on both attributes or neither.
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
-            // Unmapped: the two declarations conflict, and the message tells the
-            // caller which declaration to change.
             throw Refusals.unmapped(
                     "Cannot translate `" + op + "` between two columns under mixed null"
                             + " conventions: cannot compare an attribute declared"
@@ -871,10 +641,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * Raw-typed comparison of two SQL expressions — the shared dispatch of field-to-field
-     * comparisons and arithmetic expression-vs-expression comparisons. Constant-RHS shapes
-     * do NOT route here: they bind through the plain-value overloads on purpose (double
-     * bind parameters — see {@link ArithmeticTranslator#numericComparison}).
+     * Compares two SQL expressions. A constant right-hand side is bound as a value instead
+     * (see {@link ArithmeticTranslator#numericComparison}).
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     Predicate comparePredicate(String op,
@@ -892,29 +660,18 @@ final class ComparisonTranslator {
         };
     }
 
-    /** Escaped by {@link #fieldToFieldLike} in this order: the escape character itself first. */
+    // Escaped in this order: the escape character itself must go first.
     private static final List<String> LIKE_METACHARACTERS = List.of("\\", "%", "_", "[");
 
     /**
-     * {@code haystackColumn LIKE wildcards(escape(needleColumn))} — the column-to-column
-     * analogue of the constant LIKE path in {@link LeafTranslator#defaultLeaf}. The needle
-     * is data, so its LIKE metacharacters are escaped dynamically with nested
-     * {@code REPLACE} (portable: H2/Postgres/MySQL/Oracle/SQL Server): {@code \} first,
-     * then {@code %}, {@code _}, and {@code [}, mirroring {@link PlanValues#escapeLike} and
-     * the same explicit {@code '\'} escape char. {@code [} is escaped because SQL Server
-     * LIKE treats {@code [...]} as a character class even under an ESCAPE clause;
-     * {@code \[} is a literal {@code [} on every targeted dialect ({@code ]} needs no
-     * escaping once no {@code [} can open a class — see {@link PlanValues#escapeLike}).
+     * {@code haystack LIKE pattern(needle)} for a column needle. The needle's LIKE
+     * metacharacters are escaped with nested {@code REPLACE}, as {@link PlanValues#escapeLike}
+     * does for constants. {@code [} is escaped because SQL Server treats it as a character
+     * class.
      *
-     * <p>A NULL needle must make the whole predicate UNKNOWN, not FALSE. CEL raises a
-     * missing-attribute error, which denies under BOTH polarities, and only UNKNOWN
-     * reproduces that: this used to be spelled {@code needle IS NOT NULL AND haystack LIKE
-     * pattern}, which is definite-FALSE for a NULL needle, and {@code NOT FALSE} is TRUE —
-     * so every negated column-needle match returned exactly the rows whose needle is NULL,
-     * which the PDP denies (cerbos/query-plan-adapters#387). Nesting the guard in a CASE
-     * that yields a NULL PATTERN keeps the LIKE itself UNKNOWN, and still defends against
-     * dialects whose {@code CONCAT} treats NULL as {@code ''} and would otherwise build a
-     * match-anything {@code '%%'}.
+     * <p>A NULL needle gives a NULL pattern, so the LIKE is UNKNOWN under both polarities, as
+     * CEL's missing-attribute error denies under both. It also stops a dialect whose
+     * {@code CONCAT} treats NULL as {@code ''} from building a match-all {@code '%%'}.
      */
     private Predicate fieldToFieldLike(Expression<?> haystack, Expression<?> needle,
                                        StringMatch match) {

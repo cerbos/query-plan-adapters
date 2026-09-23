@@ -1,27 +1,28 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 /**
- * How the caller represents a NULL column when building the attributes it sends to
- * {@code check()}.
+ * How the caller represents a NULL column in the attributes it sends to {@code check()}.
  *
- * <p>The planner emits the same {@code eq(attr, null)} node either way, so the plan cannot
- * reveal which convention is in use and the adapter has to be told.
- *
- * <p>See <a href="https://github.com/cerbos/query-plan-adapters/issues/302">issue #302</a>.
+ * <p>The planner emits the same {@code eq(attr, null)} node either way, so the adapter has to
+ * be told.
  */
 public enum NullAttributeRepresentation {
 
     /**
-     * A NULL column is sent as an explicit {@code null} attribute. CEL compares
-     * {@code null == null}, so {@code IS NULL} selects exactly the rows {@code check()} allows.
-     * This is the historical behaviour and the default.
+     * A NULL column is sent as an explicit {@code null} attribute, so {@code IS NULL} selects
+     * exactly the rows {@code check()} allows. The default.
      */
     EXPLICIT,
 
     /**
-     * A NULL column sends no attribute at all. CEL then raises a missing-attribute error, which
-     * Cerbos treats as a deny, so a filter that <em>selects</em> NULL rows returns rows the PDP
-     * denies. Null comparison operands are rejected instead of translated.
+     * A NULL column is sent as no attribute at all, which Cerbos denies as a missing-attribute
+     * error. Null comparison operands are then rejected rather than translated to
+     * {@code IS NULL}.
      */
     OMITTED
 }

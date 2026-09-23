@@ -11,11 +11,11 @@ Elasticsearch Java client and runs it against a real Elasticsearch server.
 demo/scripts/run-example.sh elasticsearch-java
 ```
 
-Needs `docker` (with compose), `curl`, `jq`, Gradle 8.x and JDK 17+. The runner starts the pinned
-Cerbos PDP and diffs the program's JSON output against `demo/expected.json`. This directory's
-[`run.sh`](run.sh) does the rest:
+Needs `docker` (with compose), `curl`, `jq` and JDK 17+; Gradle comes from the adapter's wrapper.
+The runner starts the pinned Cerbos PDP and diffs the program's JSON output against
+`demo/expected.json`. This directory's [`run.sh`](run.sh) does the rest:
 
-1. publishes the adapter to mavenLocal (`gradle publishToMavenLocal`);
+1. publishes the adapter to mavenLocal (`../gradlew publishToMavenLocal`);
 2. checks the published jar contains the adapter and none of the example's classes;
 3. checks the Elasticsearch client's major matches [`../ELASTICSEARCH_IMAGE`](../ELASTICSEARCH_IMAGE)'s;
 4. starts Elasticsearch;
@@ -207,11 +207,10 @@ touch `elasticsearch-java/**`, which two things ensure:
 **There is no `gradle.lockfile`**, although the examples on npm, PDM and Go commit theirs.
 (`spring-data/example/` has none either, and predates the question.) Renovate can maintain a Gradle
 lockfile only by running `./gradlew … --write-locks`, and only where a self-hosted administrator has
-enabled `allowedUnsafeExecutions: ["gradleWrapper"]` — the hosted app does not, and this repository
-has no Gradle wrapper. A committed lockfile would go stale on the first bump and fail every bump PR
+enabled `allowedUnsafeExecutions: ["gradleWrapper"]`, and the hosted app does not. A committed lockfile would go stale on the first bump and fail every bump PR
 for a reason that is not the bump; a gate that is always red distinguishes nothing.
 
 What stays uncovered: **transitive** versions are not pinned. That gap is smaller in Gradle than in
 npm or Python, because a Maven POM declares one version rather than a range, so a new transitive
-release does not enter the build on its own. Locking becomes the right answer once the repository
-has a Gradle wrapper.
+release does not enter the build on its own. Locking becomes the right answer once Renovate can run
+the Gradle wrapper here.

@@ -1,25 +1,20 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 import java.util.List;
 
-/**
- * A parsed CEL lambda operand: its body and the name of its iteration variable.
- *
- * <p>Three operator families unpack a lambda — the collection macros, {@code size(filter(...))}
- * and {@code hasIntersection(map(...), ...)} — and each keeps its own wording for the same
- * three wire-contract violations, so the messages are caller-supplied and only the shape check
- * is shared.
- */
+/** A parsed CEL lambda operand: its body and the name of its iteration variable. */
 record ParsedLambda(Operand body, String varName) {
 
     /**
-     * Validate and unpack a {@code lambda(body, var)} operand — an EXPRESSION with operator
-     * {@code lambda}, exactly two operands, the second a VARIABLE. Error messages are
-     * caller-supplied so each operator keeps its exact wording; the classification is not,
-     * because every failure here is the wire contract ({@code lambda(body, variable)})
-     * being violated.
+     * Validates and unpacks a {@code lambda(body, variable)} operand. Each caller supplies its
+     * own messages because they are pinned per operator; every failure is a malformed plan.
      */
     static ParsedLambda parse(Operand lambdaOperand, String notLambdaMessage,
                               String arityMessage, String varMessage) {

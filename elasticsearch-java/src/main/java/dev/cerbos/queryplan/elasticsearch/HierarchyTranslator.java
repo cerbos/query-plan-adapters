@@ -16,28 +16,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The hierarchy relations ({@code ancestorOf} / {@code descendentOf} / {@code overlaps}).
- *
- * <p>A Cerbos hierarchy is a delimited path, and the three relations are statements about
- * SEGMENT prefixes: {@code ancestorOf(A, B)} holds when A's segments are a strict prefix of B's,
- * {@code descendentOf} is the same relation with the operands swapped, and {@code overlaps} is
- * the inclusive union of both directions with equality in the middle.
- *
- * <p>Only one side is ever a document field in a plan the planner can produce, so each relation
- * becomes a term-level query over that field's whole stored path:
+ * Translates {@code ancestorOf}, {@code descendentOf} and {@code overlaps}. A hierarchy is a
+ * delimited path, and the relations compare segment prefixes. With one side a field and the other
+ * a constant:
  *
  * <pre>
- *   field is a strict DESCENDANT of a constant -> prefix on &lt;constant&gt;&lt;delimiter&gt;
- *   field is a strict ANCESTOR  of a constant -> terms over the constant's proper prefixes
- *   overlaps                                  -> bool.should of both, plus a term on the
- *                                                whole constant path
+ *   field is a strict descendant -&gt; prefix on &lt;constant&gt;&lt;delimiter&gt;
+ *   field is a strict ancestor   -&gt; terms over the constant's proper prefixes
+ *   overlaps                     -&gt; bool.should of both, plus a term on the whole constant
  * </pre>
- *
- * <p>The operand model, the strict-prefix enumeration and the two edge cases below mirror the
- * Spring Data adapter's HierarchyTranslator, which is this repository's reference lowering: same
- * wire contract, same raw-string comparison of the field value, same refusal to guess. Only the
- * emitted form differs, because a prefix query is term-level where a SQL LIKE is not — which is
- * also why none of the corpus's metacharacter traps need escaping here.
  */
 final class HierarchyTranslator {
 
@@ -72,19 +59,12 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Lower one hierarchy relation. Negated overlap requires the compared field to exist;
-     * negated strict ancestry remains refused until its own corpus probe covers that lowering.
-     *
-     * <p>The emitted clauses are built from the DEFAULT term-level forms rather than through
-     * {@code operatorOverrides}: an override replaces one named plan OPERATOR, and a hierarchy
-     * relation is not {@code startsWith} or {@code in} even though it borrows their shapes.
-     * Hierarchy therefore introduces no new mapping assumption: it needs the same
-     * exactly-compared ({@code keyword}) field mapping every term-level query this adapter emits
-     * already needs.
+     * Translates one relation. Negated {@code overlaps} requires the field to exist; negated
+     * {@code ancestorOf}/{@code descendentOf} is refused. Operator overrides do not apply here.
      */
     Map<String, Object> translate(String operator, List<Operand> operands, Polarity polarity) {
         if (comparesANonStringField(operands)) {
-            // A hierarchy over a field declared as a non-string is a CEL type error: never true.
+            // A hierarchy over a non-string field is a CEL type error, so nothing matches.
             return Queries.matchNone();
         }
         if (!polarity.holds() && !"overlaps".equals(operator)) {
@@ -108,10 +88,6 @@ final class HierarchyTranslator {
         throw negatedHierarchy(operator);
     }
 
-    /**
-     * Whether a {@code hierarchy(<field>, ...)} operand names a field the caller declared with a
-     * scalar type other than {@link ScalarType#STRING}.
-     */
     private boolean comparesANonStringField(List<Operand> operands) {
         for (Operand operand : operands) {
             if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
@@ -130,7 +106,6 @@ final class HierarchyTranslator {
         return false;
     }
 
-    /** {@code ancestorOf(A, B)} and its mirror {@code descendentOf(A, B)}. */
     private static Map<String, Object> hierarchyStrict(
             String operator, Hierarchy left, Hierarchy right) {
         boolean isAncestor = "ancestorOf".equals(operator);
@@ -146,15 +121,11 @@ final class HierarchyTranslator {
         if (ancestor instanceof Hierarchy.FieldRef field
                 && descendant instanceof Hierarchy.Constant constant) {
             List<String> prefixes = strictPrefixes(constant.segments(), field.delimiter());
-            // A one-segment path has no proper prefix, so NOTHING is a strict ancestor of it. An
-            // empty `terms` list is a query Elasticsearch accepts and matches nothing with, but it
-            // reads as an oversight; `match_none` says the emptiness was the answer.
+            // A one-segment path has no strict ancestor.
             return prefixes.isEmpty() ? Queries.matchNone() : Queries.terms(field.field(), prefixes);
         }
         if (ancestor instanceof Hierarchy.Constant a && descendant instanceof Hierarchy.Constant d) {
-            // Both sides constant: the relation is decidable here, and only one answer is
-            // reachable — the planner folds a false constant comparison away rather than shipping
-            // it, so a plan that arrives holding one is an upstream bug and not a filter to guess.
+            // The planner folds a false constant comparison away, so only a true one is expected.
             if (d.segments().size() > a.segments().size() && isPrefixOf(a.segments(), d.segments())) {
                 return Queries.matchAll();
             }
@@ -163,11 +134,10 @@ final class HierarchyTranslator {
         throw unsupportedHierarchyOperands(operator, left, right);
     }
 
-    /** {@code overlaps(A, B)} — the inclusive union, symmetric in its operands. */
     private static Map<String, Object> hierarchyOverlaps(
             String operator, Hierarchy left, Hierarchy right) {
         if (left instanceof Hierarchy.Constant a && right instanceof Hierarchy.Constant b) {
-            // Inclusive and symmetric: whichever path is shorter must be a prefix of the other.
+            // The shorter path must be a prefix of the longer.
             boolean overlap = a.segments().size() <= b.segments().size()
                     ? isPrefixOf(a.segments(), b.segments())
                     : isPrefixOf(b.segments(), a.segments());
@@ -195,14 +165,14 @@ final class HierarchyTranslator {
         String delimiter = field.delimiter();
         String whole = String.join(delimiter, constant.segments());
         List<Map<String, Object>> clauses = new ArrayList<>();
-        // ...the field is a strict ancestor of the constant...
+        // The field is a strict ancestor of the constant,
         List<String> prefixes = strictPrefixes(constant.segments(), delimiter);
         if (!prefixes.isEmpty()) {
             clauses.add(Queries.terms(field.field(), prefixes));
         }
-        // ...or equal to it...
+        // or equal to it,
         clauses.add(Queries.term(field.field(), whole));
-        // ...or a strict descendant of it.
+        // or a strict descendant of it.
         clauses.add(Queries.prefix(field.field(), whole + delimiter));
         return Queries.boolShould(List.copyOf(clauses));
     }
@@ -214,9 +184,8 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Resolve one {@code hierarchy(...)} wrapper into the three forms the planner emits:
-     * {@code hierarchy(<value>)} with the default {@code .} delimiter,
-     * {@code hierarchy(<value|field>, <delimiter>)}, and {@code hierarchy(list(<segments>))}.
+     * Resolves {@code hierarchy(<value|field>)} (delimiter {@code .}),
+     * {@code hierarchy(<value|field>, <delimiter>)} or {@code hierarchy(list(<segments>))}.
      */
     private Hierarchy resolveHierarchy(String operator, Operand operand) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
@@ -269,7 +238,6 @@ final class HierarchyTranslator {
                 || operand.getNodeCase() == Operand.NodeCase.VARIABLE;
     }
 
-    /** A delimited path that is either a literal or a document field holding the whole path. */
     private Hierarchy pathHierarchy(Operand path, String delimiter) {
         if (path.getNodeCase() == Operand.NodeCase.VALUE) {
             return new Hierarchy.Constant(splitLiteral(literalString(path), delimiter), delimiter);
@@ -297,12 +265,8 @@ final class HierarchyTranslator {
     }
 
     /**
-     * The operand combinations a term-level query cannot answer, each named for its own mechanism.
-     *
-     * <p>A {@link Hierarchy.Segmented} that survived {@link #normalizeHierarchy} carries a
-     * document field as a path SEGMENT, so comparing it would mean concatenating a stored value
-     * into a path before matching — the same missing evaluation step that refuses arithmetic here.
-     * Two {@link Hierarchy.FieldRef}s are the ordinary field-to-field comparison.
+     * A {@code list()} path with a field segment would need the field concatenated into the path;
+     * two field operands are a field-to-field comparison. Neither is expressible.
      */
     private static UnsupportedPlanShapeException unsupportedHierarchyOperands(
             String operator, Hierarchy left, Hierarchy right) {
@@ -316,16 +280,9 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Why strict ancestry remains refused in the false direction.
-     *
-     * <p>A SQL adapter gets the exclusion free from three-valued logic: {@code NULL LIKE 'x%'} is
-     * UNKNOWN, so a row with no scope drops out of a negated hierarchy test on its own. Here the
-     * relation lowers to {@code prefix} / {@code terms} / {@code term}, and a
-     * {@code bool.must_not} around any of them MATCHES a document that has no value for the field
-     * — which is the CEL missing-attribute error, an error the PDP denies on. An
-     * {@code exists}-guarded negation would express it, exactly as {@code eq}, {@code in},
-     * {@code contains} and {@code startsWith} already are. The corpus now proves that guard
-     * for overlap; strict ancestry still lacks its own negated probe and remains refused.
+     * A bare {@code bool.must_not} would match documents missing the field, where CEL errors. An
+     * {@code exists} guard would fix that, but the corpus has no negated strict-ancestry action to
+     * prove it yet, so it stays refused.
      */
     private static UnsupportedPlanShapeException negatedHierarchy(String operator) {
         return unsupported("Negated " + operator + " cannot be expressed safely: "
@@ -342,7 +299,7 @@ final class HierarchyTranslator {
         return true;
     }
 
-    /** Every proper (strict) ancestor of a segment list, joined back with {@code delimiter}. */
+    /** Every strict ancestor of a segment list, joined with {@code delimiter}. */
     private static List<String> strictPrefixes(List<String> segments, String delimiter) {
         if (segments.size() <= 1) {
             return List.of();
@@ -358,14 +315,8 @@ final class HierarchyTranslator {
     }
 
     /**
-     * Split on a LITERAL delimiter, keeping trailing empty segments — {@code split(..., -1)}
-     * semantics without handing the delimiter to the regex engine, where {@code .} (the default)
-     * would match every character.
-     *
-     * <p>An empty delimiter is refused by name. Splitting on it would produce one segment per
-     * character plus a trailing empty one, and a relation over THAT segmentation is not the
-     * relation the policy stated — there is no delimiter for the field's stored path to be
-     * compared on.
+     * Splits on a literal delimiter, keeping trailing empty segments. {@link String#split} would
+     * treat the default {@code .} as a regex. An empty delimiter is refused.
      */
     private static List<String> splitLiteral(String raw, String delimiter) {
         if (delimiter.isEmpty()) {

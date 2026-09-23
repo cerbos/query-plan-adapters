@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.example.demo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,49 +20,26 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * The elasticsearch-java example: the program {@code demo/scripts/run-example.sh elasticsearch-java}
- * runs.
+ * Runs the five demo usage shapes and prints one JSON document to stdout, which
+ * {@code demo/scripts/run-example.sh elasticsearch-java} diffs against {@code demo/expected.json}.
  *
- * <p>It takes no arguments, exercises the
- * <a href="https://github.com/cerbos/query-plan-adapters/issues/349">five shared usage shapes</a>
- * against {@code demo/}'s policies and seed rows, and prints exactly one JSON document to stdout for
- * the shared runner to diff against {@code demo/expected.json}.
- *
- * <p>Three things it is handed, and where each comes from:
- *
- * <ul>
- *   <li>{@code CERBOS_HOST} — the environment variable the shared runner sets. There is deliberately
- *       no fallback; see {@link #cerbosHost()}.</li>
- *   <li>{@code -Ddemo.dir} — the shared corpus directory. The path arithmetic lives in
- *       {@code run.sh}: how many directories up the repository root sits is the launcher's business,
- *       not the application's.</li>
- *   <li>{@code -Delasticsearch.url} — the store {@code run.sh} started. Also the launcher's, and for
- *       a sharper reason: {@code run.sh} owns the container and publishes the port, so a second
- *       spelling of the address in here would be a constant nothing holds equal to the first.</li>
- * </ul>
+ * <p>Inputs, all set by {@code run.sh}: the {@code CERBOS_HOST} environment variable, and the
+ * {@code demo.dir}, {@code elasticsearch.url} and {@code adapter.dir} system properties.
  */
 public final class DemoApplication {
 
-    // Bound stalled PDP calls in this example and in real applications. Healthy calls finish
-    // in milliseconds; this generous deadline fails a stalled stream instead of hanging forever.
+    // Fail a stalled PDP call instead of hanging. Healthy calls take milliseconds.
     private static final Duration CERBOS_CALL_TIMEOUT = Duration.ofSeconds(30);
 
     /**
-     * The real stdout, captured before {@link #main} redirects {@link System#out}.
-     *
-     * <p>The contract is one JSON document on stdout and everything else on stderr. Nothing here logs
-     * to stdout today, but the Elasticsearch REST client, gRPC and Jackson all sit on this classpath
-     * and any of them is free to print without a logging configuration. Rather than configuring each,
-     * stdout is redirected to stderr for the whole JVM and the one line that must reach the runner is
-     * written through this handle.
+     * The real stdout. {@link #main} sends {@link System#out} to stderr so that only the JSON
+     * document, written here, reaches stdout whatever the libraries print.
      */
     private static final PrintStream STDOUT = System.out;
 
     private DemoApplication() {}
 
     public static void main(String[] args) throws Exception {
-        // Before anything can print, and before anything can connect: a misinvocation costs one clear
-        // message rather than a connection failure part-way through seeding.
         System.setOut(System.err);
 
         Path demoDir = demoDir();
@@ -67,23 +49,16 @@ public final class DemoApplication {
 
         DemoSeeds seeds = DemoSeeds.read(demoDir.resolve("seeds.json"));
 
-        // CerbosBlockingClient is not AutoCloseable, so only the store is closed here. The JVM exits
-        // immediately after the document is written, which takes the gRPC channel with it.
+        // CerbosBlockingClient is not AutoCloseable; the JVM exit closes its channel.
         CerbosBlockingClient cerbos = cerbosClient(cerbosHost);
 
         try (DemoIndex index = new DemoIndex(elasticsearchUrl)) {
             Map<String, Object> document = Map.of(
-                    // The runner checks this against the adapter it was asked for, so a stale build
-                    // directory or a copied run.sh fails there instead of quietly passing on the
-                    // shared expectations.
+                    // The runner checks this matches the adapter it was asked to run.
                     "adapter", "elasticsearch-java",
                     "shapes", new DemoShapes(cerbos, index, seeds).run());
 
-            // Map keys sorted, which is the same canonical form demo/scripts/run-example.sh puts both
-            // sides of its diff into (`jq -S`). Java's Map.of has no defined iteration order, so
-            // without this the document a human reads on a failure is shuffled differently on every
-            // run while the diff stays stable — the worst of both. Record components are unaffected
-            // and stay in declaration order.
+            // Sort map keys so the output is stable; Map.of has no defined iteration order.
             STDOUT.println(new ObjectMapper()
                     .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
                     .writerWithDefaultPrettyPrinter()
@@ -97,9 +72,6 @@ public final class DemoApplication {
         return new CerbosClientBuilder(host).withPlaintext().withTimeout(CERBOS_CALL_TIMEOUT).buildBlockingClient();
     }
 
-    /**
-     * The shared corpus directory, passed as {@code -Ddemo.dir} by {@code run.sh}.
-     */
     private static Path demoDir() {
         Path demoDir = Path.of(requiredProperty("demo.dir"));
         if (!Files.isRegularFile(demoDir.resolve("seeds.json"))) {
@@ -110,14 +82,8 @@ public final class DemoApplication {
     }
 
     /**
-     * The runner sets {@code CERBOS_HOST}, and there is deliberately no fallback anywhere in this
-     * example. The obvious default — Cerbos's own 3592/3593 — is where any other local PDP
-     * listens (a {@code cerbos server}, a {@code docker run}, another project's), so an unset
-     * {@code CERBOS_HOST} would not fail: it would quietly plan against whichever policy suite that
-     * PDP serves, and produce a diff against {@code demo/expected.json} that reads as an adapter
-     * bug. Two examples shipped that exact default, which is why
-     * {@code demo/scripts/validate-demo.sh} now fails the build on a hardcoded PDP address rather
-     * than trusting prose.
+     * No default address: a default would silently reach any other local PDP, with different
+     * policies. {@code demo/scripts/validate-demo.sh} rejects a hardcoded PDP address.
      */
     private static String cerbosHost() {
         String host = System.getenv("CERBOS_HOST");
@@ -140,26 +106,13 @@ public final class DemoApplication {
     }
 
     /**
-     * Asserts the adapter class this program just linked against came out of the published jar and
-     * not out of the adapter's own build directory.
+     * Fails unless the adapter was loaded from the published jar. A composite build
+     * ({@code includeBuild("..")}) or a project dependency would substitute the local project, and
+     * every shape would still pass without the POM ever being resolved.
      *
-     * <p>This is the Java analogue of the {@code sys.path} guard in {@code sqlalchemy/example/}, and
-     * it exists because the failure it catches is silent. A single line in
-     * {@code settings.gradle.kts} — {@code includeBuild("..")} — turns the declared coordinate into a
-     * Gradle composite build, which substitutes the adapter's local project for it. Everything still
-     * compiles, every shape still passes, and the POM and module metadata this example exists to
-     * execute are never resolved at all
-     * ({@code docs/adr/0002-examples-install-the-packed-artifact.md}).
-     *
-     * <p>Two conditions, because the substitutions do not all look the same. A composite build puts
-     * the adapter's own {@code build/libs/*.jar} on the classpath, which is a jar; a project
-     * dependency or a source set puts {@code build/classes/java/main}, which is a directory. Naming
-     * the adapter directory rather than asserting a location inside the local Maven repository keeps
-     * this independent of where that repository is configured to live — and it covers one more case
-     * for free, since {@code example/build} is under it too: a launcher that COPIES the resolved jars
-     * somewhere before running (which is exactly what the {@code application} plugin's
-     * {@code installDist} does) would erase the distinction this checks, and is caught here rather
-     * than passing.
+     * <p>A class directory fails the jar check; a jar under the adapter directory (its own
+     * {@code build/libs}, or copies such as {@code installDist} makes under {@code example/build})
+     * fails the location check.
      */
     private static void assertAdapterCameFromThePublishedArtifact() {
         CodeSource source =

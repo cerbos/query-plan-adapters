@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
@@ -6,28 +11,14 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A binary expression normalized to field-side-first. The planner preserves policy source
- * order, so a constant may precede the field it constrains ({@code 5 < R.attr.x} arrives
- * as {@code lt(value(5), variable(x))}). Normalizing once here — most field-like operand
- * first (variable > nested expression > constant value), mirroring directional operators
- * when swapping — lets every downstream handler assume field-first order. A consequence
- * is that {@link OperatorFunction} overrides are consulted under the mirrored operator:
- * a value-first {@code lt} is looked up as {@code gt}.
+ * A binary expression reordered so the most field-like operand comes first (variable, then
+ * expression, then constant). The planner keeps policy source order, so {@code 5 < R.attr.x}
+ * arrives value-first and is mirrored to {@code gt}; {@link OperatorFunction} overrides are
+ * then looked up under the mirrored operator.
  *
- * <p>Only operators whose semantics survive a swap are reordered: symmetric ones
- * ({@code eq}/{@code ne}/{@code in}/{@code hasIntersection}) and the mirrorable
- * inequalities ({@code lt}/{@code gt}/{@code le}/{@code ge}). The CEL string-match
- * methods ({@code contains}/{@code startsWith}/{@code endsWith}) are RECEIVER-SENSITIVE:
- * {@code "a,b".contains(R.attr.x)} arrives as {@code contains(value, variable)} where
- * the constant is the haystack — swapping it would silently invert haystack and needle
- * (translating {@code x LIKE '%a,b%'} instead of testing whether {@code "a,b"} contains
- * the column value). Those keep planner source order and are handled positionally by
- * the constant-receiver case of {@link ComparisonTranslator#dispatch}.
- *
- * <p>This is the one place operand order is decided: the comparison seam, {@code in} and
- * {@code hasIntersection} all normalize through {@link #of}, and the arithmetic and
- * timestamp paths reuse {@link #mirror} when they have to swap a pair this record could not
- * rank (two EXPRESSION nodes rank equally).
+ * <p>Only symmetric operators and {@code lt}/{@code gt}/{@code le}/{@code ge} are reordered.
+ * The string-match methods are not: in {@code "a,b".contains(R.attr.x)} the constant is the
+ * haystack, and swapping would invert haystack and needle.
  */
 record NormalizedBinary(String op, List<Operand> operands) {
 

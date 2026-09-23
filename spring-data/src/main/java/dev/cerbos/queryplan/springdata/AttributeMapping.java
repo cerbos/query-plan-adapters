@@ -1,15 +1,19 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * Maps one Cerbos attribute reference (the {@code variable} name in a query plan, e.g.
- * {@code request.resource.attr.ownerId} or {@code request.resource.id}) onto the JPA model,
- * either as a scalar {@linkplain Field path} or as a collection {@linkplain Relation
- * relation}. The mapper passed to
+ * Maps one plan variable (e.g. {@code request.resource.attr.ownerId} or
+ * {@code request.resource.id}) to a scalar {@linkplain Field path} or a collection
+ * {@linkplain Relation relation} on the JPA model. The map passed to
  * {@link SpringDataQueryPlanAdapter#toSpecification(dev.cerbos.sdk.PlanResourcesResult, Map)
- * toSpecification} is keyed by the full attribute reference:
+ * toSpecification} is keyed by the full variable name:
  *
  * <pre>{@code
  * Map<String, AttributeMapping> MAPPING = Map.of(
@@ -37,23 +41,19 @@ import java.util.Objects;
  *           lambda bodies</td></tr>
  * </table>
  *
- * <p>Plan variables that are missing from the mapper, or whose mapping cannot be resolved
- * against the entity model (e.g. a {@code Relation} used where a scalar path is required),
- * cause translation to throw {@link UnmappedAttributeException} (an
- * {@link IllegalArgumentException}) — the adapter fails closed rather than guessing a column.
+ * <p>A variable that is missing from the map, or mapped in a way the operator cannot use,
+ * throws {@link UnmappedAttributeException}.
  */
 public sealed interface AttributeMapping permits AttributeMapping.Field, AttributeMapping.Relation {
 
     /**
      * Maps an attribute to a scalar JPA path on the entity.
      *
-     * <p>{@code jpaPath} is resolved segment-by-segment via {@code Path.get(...)}, so dotted
-     * paths traverse {@code @Embedded} objects (and to-one associations):
-     * {@code field("details.pixelWidth")}, {@code field("owner.id")}. Use this for any
-     * attribute compared as a single value ({@code eq}/{@code ne}/ordering/LIKE/temporal
-     * comparisons, scalar {@code in}, ...).
+     * <p>A dotted path can go through {@code @Embedded} objects and to-one associations, e.g.
+     * {@code field("details.pixelWidth")} or {@code field("owner.id")}. Associations are
+     * LEFT-joined, so a missing one makes only its own comparison UNKNOWN.
      *
-     * @param jpaPath entity property name, or a dot-separated path through embeddables
+     * @param jpaPath entity property name, or a dot-separated path
      * @return the scalar mapping
      */
     static Field field(String jpaPath) {
@@ -61,32 +61,16 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Maps an attribute to a scalar JPA path, declaring that its column can be SQL NULL and
-     * how the caller represents that NULL in the attributes it sends to {@code check()}.
+     * Maps an attribute to a scalar JPA path whose column can be NULL, and declares how the
+     * caller sends that NULL to {@code check()}. It overrides the call-level
+     * {@link NullAttributeRepresentation}, so one call can mix both conventions.
      *
-     * <p>Declaring it asserts both facts; the {@link #field(String) one-argument form} means
-     * "treat this column as NOT NULL", which is the historical rendering.
+     * <p>Under {@link NullAttributeRepresentation#EXPLICIT}, {@code eq}, {@code ne} and
+     * {@code in} are rendered so a NULL column gives a definite result, as CEL does, instead of
+     * SQL UNKNOWN. Under {@link NullAttributeRepresentation#OMITTED}, null operands against
+     * this attribute are rejected.
      *
-     * <p>This is per attribute rather than per call because one policy suite can legitimately
-     * mix the two conventions — the same column can be mapped twice, sent as an explicit null
-     * under one attribute name and omitted under another. The call-level
-     * {@link NullAttributeRepresentation} cannot express that, which is what made
-     * <a href="https://github.com/cerbos/query-plan-adapters/issues/308">#308</a> unfixable
-     * with <a href="https://github.com/cerbos/query-plan-adapters/issues/302">#302</a>'s
-     * option alone.
-     *
-     * <p>Under {@link NullAttributeRepresentation#EXPLICIT} CEL holds a null VALUE, so
-     * {@code null != "x"} is TRUE and {@code null == "x"} is FALSE, both definite, while SQL
-     * answers UNKNOWN and excludes the row under BOTH polarities. The equality family
-     * ({@code eq}, {@code ne}, {@code in}) is therefore rendered so it can never be UNKNOWN.
-     * Ordering and string operators are left alone: a null receiver raises a no-overload error
-     * in CEL, which denies exactly as UNKNOWN does.
-     *
-     * <p>Under {@link NullAttributeRepresentation#OMITTED} the rendering is unchanged; what
-     * the declaration adds is the same null-operand rejection the call-level option performs,
-     * scoped to this attribute.
-     *
-     * @param jpaPath entity property name, or a dot-separated path through embeddables
+     * @param jpaPath entity property name, or a dot-separated path
      * @param nullAttributeRepresentation how a NULL in this column reaches {@code check()}
      * @return the scalar mapping
      */
@@ -96,12 +80,8 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Maps an attribute to a bare-value collection — typically an
-     * {@code @ElementCollection<String>} — whose elements ARE the compared values.
-     *
-     * <p>Collection operators ({@code in}, {@code hasIntersection}, {@code exists}-family
-     * lambdas over the bare element, {@code size(...)}) translate to correlated subqueries
-     * against the collection table, comparing the element itself.
+     * Maps an attribute to a collection whose elements are the compared values, typically an
+     * {@code @ElementCollection} of strings.
      *
      * @param joinAttribute the entity's collection property name
      * @return the relation mapping
@@ -111,13 +91,9 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Maps an attribute to an entity collection ({@code @OneToMany}) whose
-     * {@code defaultMemberField} stands in for the member element wherever the policy treats
-     * the collection as a list of bare values.
-     *
-     * <p>Example: with {@code relation("tags", "name")}, the policy expression
-     * {@code "urgent" in R.attr.tags} compares against {@code tag.name} rather than the
-     * {@code Tag} entity itself.
+     * Maps an attribute to an entity collection whose {@code defaultMemberField} is used
+     * wherever the policy treats elements as bare values. With {@code relation("tags", "name")},
+     * {@code "urgent" in R.attr.tags} compares against {@code tag.name}.
      *
      * @param joinAttribute the entity's collection property name
      * @param defaultMemberField member-entity field used when the policy addresses the
@@ -129,13 +105,10 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Maps an attribute to an entity collection ({@code @OneToMany}) with explicit mappings
-     * for the member fields referenced inside lambda bodies.
-     *
-     * <p>Example: {@code relation("tags", Map.of("name", field("name")))} lets
-     * {@code R.attr.tags.exists(t, t.name == "x")} resolve {@code t.name} on the member
-     * entity. Nested {@code fields} entries may themselves be {@code relation(...)} mappings,
-     * supporting multi-hop chains ({@code R.attr.categories.subCategories...}).
+     * Maps an attribute to an entity collection with mappings for the member fields that lambda
+     * bodies reference. With {@code relation("tags", Map.of("name", field("name")))},
+     * {@code t.name} in {@code R.attr.tags.exists(t, t.name == "x")} resolves on the member
+     * entity. A nested entry may itself be a {@code relation(...)}, for multi-hop chains.
      *
      * @param joinAttribute the entity's collection property name
      * @param fields policy-facing member field name → mapping on the member entity
@@ -147,9 +120,8 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
 
     /**
      * Maps an attribute to an entity collection with both a {@linkplain #relation(String,
-     * String) default member field} (for bare-value operators such as {@code in} /
-     * {@code hasIntersection}) and {@linkplain #relation(String, Map) explicit nested field
-     * mappings} (for lambda bodies).
+     * String) default member field} and {@linkplain #relation(String, Map) nested field
+     * mappings}.
      *
      * @param joinAttribute the entity's collection property name
      * @param defaultMemberField member-entity field used when the policy addresses the
@@ -162,10 +134,8 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Scalar mapping: {@code jpaPath} is an entity property name or a dot-separated
-     * {@code @Embedded}/to-one path, resolved via {@code Path.get(...)} at translation time.
-     * {@code nullAttributeRepresentation} is nullable and declares this column's NULL
-     * convention when set. Create via {@link #field(String)} or
+     * Scalar mapping. {@code nullAttributeRepresentation} is null when the mapping declares no
+     * NULL convention. Create via {@link #field(String)} or
      * {@link #field(String, NullAttributeRepresentation)}.
      */
     record Field(String jpaPath, NullAttributeRepresentation nullAttributeRepresentation)
@@ -174,21 +144,15 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
             Objects.requireNonNull(jpaPath, "jpaPath");
         }
 
-        /** A mapping that declares no NULL convention — see {@link #field(String)}. */
+        /** A mapping that declares no NULL convention; see {@link #field(String)}. */
         public Field(String jpaPath) {
             this(jpaPath, null);
         }
     }
 
     /**
-     * Collection mapping: {@code joinAttribute} names the entity's collection property;
-     * {@code defaultMemberField} (nullable) stands in for the element when the policy treats
-     * the collection as bare values; {@code fields} maps policy-facing member field names
-     * used inside lambda bodies. Create via the {@code relation(...)} factory methods, whose
-     * Javadoc describes when each combination applies.
-     *
-     * <p>The {@code fields} map is defensively copied, so later mutation of the caller's map
-     * cannot silently change which columns the authorization filter resolves.
+     * Collection mapping. {@code defaultMemberField} may be null; {@code fields} is copied.
+     * Create via the {@code relation(...)} factory methods.
      */
     record Relation(String joinAttribute, String defaultMemberField, Map<String, AttributeMapping> fields)
             implements AttributeMapping {

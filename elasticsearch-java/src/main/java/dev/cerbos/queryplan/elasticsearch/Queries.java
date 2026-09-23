@@ -9,22 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The Query DSL builders: the default lowering of each leaf operator, and the compound shapes
- * ({@code bool}, {@code nested}, {@code exists}) the translators assemble them into.
- *
- * <p>Every emitted clause is a plain JDK {@code Map} built here, so the whole package agrees on
- * one spelling per shape and no client library type ever reaches the result — a property the
- * golden asset asserts.
+ * Query DSL builders. Every clause is a plain JDK {@code Map}, so no client library type reaches
+ * the result.
  */
 final class Queries {
 
     private Queries() {}
 
-    /**
-     * The default lowering of every leaf operator, keyed by plan operator. A caller's
-     * {@link OperatorFunction} override for the same key replaces the entry; adding a leaf
-     * operator starts here.
-     */
+    /** Default translation of each leaf operator. A caller's override replaces an entry. */
     static final Map<String, OperatorFunction> DEFAULT_OPERATORS = Map.ofEntries(
             Map.entry("eq", Queries::term),
             Map.entry("lt", (field, value) -> range(field, "lt", value)),

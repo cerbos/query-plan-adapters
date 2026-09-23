@@ -1,24 +1,18 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 /**
- * The exception factories, and the refusals more than one collaborator raises by name.
+ * Factories for every exception the adapter raises, plus the refusals raised from more than
+ * one place, so each pinned message is spelled once.
  *
- * <p>Every refusal in the package goes through one of the three factories, which is what makes
- * the classification a property of the walk rather than of the message text: the site that
- * raises a refusal is the site that knows whether the plan was malformed, the mapping was short,
- * or the Criteria API has no shape for it. The named refusals below are the ones raised from
- * more than one place — {@code except} from the walk, the leaf resolver and {@code size()};
- * the unknown attribute from both resolution arms of {@link Scope}; the OMITTED-convention
- * rejection from the pre-walk scan — so the message is spelled once and the corpus pin in
- * {@code conformance/actions.json} has one string to hold.
- *
- * <p>{@link #internal} is deliberately not a refusal. A branch that only an adapter bug can
- * reach — a switch default under a guard that already enumerated its cases, a routing
- * invariant between two collaborators — is an {@link IllegalStateException}, so a caller
- * catching the documented {@link IllegalArgumentException} base type never mistakes one for a
- * classified refusal.
+ * <p>{@link #internal} is for adapter bugs, not refusals: it returns an
+ * {@link IllegalStateException}, so it is never mistaken for a refusal of the plan.
  */
 final class Refusals {
 
@@ -45,13 +39,7 @@ final class Refusals {
         return new IllegalStateException(message);
     }
 
-    /**
-     * Cerbos {@code except()} is a two-list function ({@code list.except(list)}) whose
-     * list-difference result has no JPA Criteria translation. PDP-verified arrival shapes:
-     * inside {@code size()} ({@code gt(size(except(variable, value-list)), 0)}) and as a
-     * comparison operand ({@code eq(except(variable, value-list), value-list)}); the lambda
-     * form this adapter once translated never appears on the wire.
-     */
+    /** Cerbos {@code except(list, list)} is a list difference, which JPA Criteria cannot express. */
     static UnsupportedPlanShapeException exceptUnsupported() {
         return unsupported(
                 "except is not supported: Cerbos except(list, list) computes a list "
@@ -66,20 +54,15 @@ final class Refusals {
         return unmapped("Unknown attribute: " + cerbosVar);
     }
 
-    /**
-     * A lambda body reference that is neither the lambda's own variable nor resolvable further
-     * out — a name the plan never bound.
-     */
+    /** A lambda body references a name the plan never bound. */
     static MalformedPlanException notALambdaReference(String variable, String lambdaVar) {
         return malformed("Variable '" + variable + "' does not start with lambda variable '"
                 + lambdaVar + "'");
     }
 
     /**
-     * A null comparison operand under {@link NullAttributeRepresentation#OMITTED}: a NULL
-     * column then sends no attribute, so CEL raises a missing-attribute error and
-     * {@code check()} denies the row, while a NULL-selecting filter would return it
-     * (cerbos/query-plan-adapters#302).
+     * A null comparison operand under {@link NullAttributeRepresentation#OMITTED}, where
+     * {@code check()} denies NULL rows that a NULL-selecting filter would return.
      */
     static UnsupportedPlanShapeException nullOperandUnderOmitted(String operator) {
         return unsupported(
@@ -92,16 +75,14 @@ final class Refusals {
     }
 
     /**
-     * Shape-only description of an operand for error messages: node case plus the attribute
-     * name (VARIABLE) or inner operator (EXPRESSION). Constant VALUES report their type
-     * only — never their content — matching the adapter's no-value-leak discipline.
+     * Describes an operand for error messages: the variable name, the operator, or for a
+     * constant only its protobuf kind, never its value.
      */
     static String describeOperand(Operand o) {
         return switch (o.getNodeCase()) {
             case VARIABLE -> "VARIABLE '" + o.getVariable() + "'";
             case EXPRESSION -> "EXPRESSION " + o.getExpression().getOperator() + "()";
-            // The protobuf kind, not the converted value: conversion could itself throw on
-            // a malformed VALUE, and this helper must stay safe inside error paths.
+            // Not converted: conversion can throw, and this runs inside error paths.
             case VALUE -> "VALUE (" + o.getValue().getKindCase() + ")";
             default -> o.getNodeCase().toString();
         };

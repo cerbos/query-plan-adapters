@@ -44,55 +44,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Translator unit test: for every action in the shared {@code ../conformance/} corpus, the
- * Elasticsearch Query DSL this adapter emits. Offline — no Cerbos sidecar, no Elasticsearch, no
- * Docker.
+ * Translator unit test: checks the Query DSL this adapter emits for every corpus action against
+ * {@code golden/expectations.json}, and that every refused action throws the message
+ * {@code conformance/actions.json} pins. Plans come from {@code conformance/wire-fixtures/}.
+ * Needs no Docker, PDP or Elasticsearch.
  *
- * <p>This suite asserts ONE thing, and the three assertions its predecessors braided around it
- * belong elsewhere now:
- *
- * <table border="1">
- *   <caption>Who owns which assertion</caption>
- *   <tr><th>assertion</th><th>owner</th></tr>
- *   <tr><td>the plan the PDP produces for a policy</td>
- *       <td>{@code conformance/wire-fixtures/}, replanned and diffed by the
- *           {@code Conformance Corpus} workflow</td></tr>
- *   <tr><td>which shapes this adapter must refuse, and with what message</td>
- *       <td>{@code conformance/actions.json} — read below, never restated</td></tr>
- *   <tr><td>the documents a query returns</td>
- *       <td>{@link ElasticsearchAdversarialConformanceTest}, against a real Elasticsearch with
- *           {@code check()} as the oracle</td></tr>
- *   <tr><td><strong>the query this adapter emits for a plan</strong></td>
- *       <td><strong>here</strong></td></tr>
- * </table>
- *
- * <p><strong>The plans are read, not written.</strong> A hand-built plan is a BELIEF about what the
- * planner emits, and this repository keeps golden fixtures because that belief has been wrong
- * before ({@code docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md}). The
- * hand-built plans that remain in {@link ElasticsearchQueryPlanAdapterTest} are there for shapes no
- * policy can produce — malformed operands, caller-supplied arguments, literal validation — which is
- * the one thing a fixture cannot supply.
- *
- * <p><strong>The expectations are data, not literals.</strong> The queries this adapter is pinned
- * to emit live in {@code elasticsearch-java/golden/expectations.json}, a golden expectation file
- * this adapter owns — never under {@code conformance/}, where every adapter workflow triggers and
- * one adapter re-pinning one query would re-run all the others. It is regenerated with
- * {@code gradle goldenUpdate} and reviewed as a diff, exactly like the wire fixtures it is asserted
- * against ({@code conformance/README.md}, "Golden expectations").
- *
- * <p><strong>This file reads as mostly-throws, and that is the adapter.</strong> The Elasticsearch
- * Query DSL compares a FIELD against a literal: it has no arithmetic, no casts, no conditional
- * values, no field-to-field comparison, no count threshold, and no way to index an explicit null or
- * an empty array. Most of the corpus is therefore fail-closed here, and
- * every refusal is asserted against the message {@code actions.json} pins rather than a bare "it
- * threw" — which for an adapter with this ratio is the difference between a suite and a formality
- * (cerbos/query-plan-adapters#326). {@link WhereTheRefusalsHappen} states the property the
- * per-action assertions cannot: the shape of those refusals taken together.
- *
- * <p><strong>Adding a corpus action fails this file.</strong> Every wire fixture must be accounted
- * for here exactly once — a golden expectation or a throw carrying the message
- * {@code actions.json} pins — and the completeness guard below is what makes a new action land as a
- * failure rather than as silence.
+ * <p>Most of the corpus is refused here, because the Query DSL only compares a field against a
+ * literal. Every wire fixture must be either a golden entry or a pinned throw, so a new corpus
+ * action fails this suite until it is classified.
  */
 class ElasticsearchTranslatorTest {
 
@@ -101,24 +60,9 @@ class ElasticsearchTranslatorTest {
     private static final ActionsFile ACTIONS = Corpus.actionsFile();
 
     /**
-     * The shapes {@code actions.json} says this adapter must refuse, each with the message it must
-     * refuse them with. Identical to the classification the harness asserts against a live PDP;
-     * asserting it here as well is what lets the completeness guard below be total, and it costs a
-     * millisecond rather than two containers.
-     *
-     * <p>The {@code nullRepresentationOmitted} probe is folded in on THIS adapter's terms.
-     * Elsewhere it is a refusal under one convention and a translation under the other, so the
-     * corpus keeps it a group of its own and the harness keeps it separate. Here it is
-     * unconditional: Elasticsearch cannot index an explicit null distinguishably from a missing
-     * field, so there is no representation option to flip.
-     * {@link #theNullRepresentationProbeIsRefusedRegardless} is where that is stated rather than
-     * assumed.
-     *
-     * <p>A throwing action needs no golden expectation of its own: the message is already corpus
-     * data, pinned once in {@code actions.json} and read by every adapter. Writing it into this
-     * adapter's asset too would create two places to change one string with nothing to say which is
-     * authoritative — and on an adapter that refuses most of the corpus, the asset would be largely
-     * a restatement of shared data.
+     * Actions this adapter must refuse, with their pinned messages. Includes the
+     * {@code nullRepresentationOmitted} probe, which this adapter refuses under either null
+     * convention (see {@link #theNullRepresentationProbeIsRefusedRegardless}).
      */
     private static final Map<String, String> THROWING = throwingActions();
 
@@ -127,20 +71,11 @@ class ElasticsearchTranslatorTest {
         for (NullRepresentationOmitted probe : Corpus.nullRepresentationThrows(ACTIONS)) {
             throwing.put(probe.action(), Corpus.nullOmittedMessage(probe, Corpus.ADAPTER));
         }
-        // Unmodifiable rather than Map.copyOf: the sort order is what makes the throw suite's
-        // parameterised cases read the same way twice, and Map.copyOf's iteration order is
-        // unspecified.
+        // Keep the sorted order so parameterised cases are stable; Map.copyOf's order is not.
         return Collections.unmodifiableMap(throwing);
     }
 
-    /**
-     * Every emitted query, translated once per action and read by everything below — the comparison
-     * against the asset, the rules, and the regeneration that writes it.
-     *
-     * <p>One pass, deliberately: the rules are about what the translator emits RIGHT NOW rather
-     * than about the pinned bytes, and a second pass would let those two answers drift apart within
-     * a single run.
-     */
+    /** Every emitted query, translated once per action and shared by all tests below. */
     private static Map<String, Result> emitted;
 
     private static Map<String, ObjectNode> recorded;
@@ -150,22 +85,16 @@ class ElasticsearchTranslatorTest {
     static void setUp() {
         emitted = new LinkedHashMap<>();
         for (String action : Corpus.wireFixtureActions()) {
-            // A throwing action is never translated here: its message is corpus data, and asking
-            // the translator for a query it must refuse would fail in this loop rather than in the
-            // throw suite that owns the question.
+            // Throwing actions are checked by the throw test, not translated here.
             if (!THROWING.containsKey(action)) {
                 emitted.put(action, Corpus.translate(action));
             }
         }
 
-        // `gradle goldenUpdate` rewrites the file from what the translator emits today and
-        // preserves every note. That is the same deliberate act as regenerating the wire fixtures,
-        // and the safety is identical: the diff is what a reviewer reads. CI never sets the
-        // property, so a translator change that moves the emitted query fails there whatever anyone
-        // ran locally. Skipping the throwing actions above is also what keeps regeneration from
-        // papering over a misclassification — an action moved into `adapterUnsupported` that this
-        // adapter still translates fails the throw suite, and one moved out of it that this adapter
-        // still refuses fails regeneration itself.
+        // `./gradlew goldenUpdate` rewrites the file from current output, keeping notes. CI never
+        // sets the property. Because throwing actions are skipped above, an action wrongly
+        // classified as unsupported fails the throw test, and one wrongly classified as supported
+        // fails here during regeneration.
         if (Boolean.getBoolean("golden.update")) {
             Map<String, ObjectNode> expectations = new TreeMap<>();
             emitted.forEach((action, result) -> expectations.put(action, expectationOf(result)));
@@ -184,20 +113,9 @@ class ElasticsearchTranslatorTest {
     private static final String QUERY = "query";
 
     /**
-     * The whole translator output for one action, in the shape the golden file records.
-     *
-     * <p><strong>Serialised verbatim, because the Query DSL already is JSON.</strong> A
-     * {@code Result.Conditional} carries a {@code Map<String, Object>} of plain JDK values — there
-     * is no Elasticsearch client object to render, and no client library on the classpath to render
-     * it with — so unlike sqlalchemy (a compiled expression) and spring-data (a rendered Criteria
-     * tree) this asset has no generator to declare in its header ({@code conformance/README.md},
-     * "When the generator is an input").
-     * {@link WhatTheEmittedQueryContains#everyEmittedValueIsAPlainJdkType} is that claim asserted
-     * rather than stated.
-     *
-     * <p>The plan kind is recorded alongside, because it is the other half of the translator's
-     * answer: an {@code ALWAYS_ALLOWED} plan produces no query at all, and a consumer switches on
-     * the kind before it ever looks at one.
+     * The translator output for one action as the golden file records it: the plan kind, plus the
+     * query for a conditional plan. The query is plain JDK maps and lists, so it is recorded
+     * as-is with no generator.
      */
     private static ObjectNode expectationOf(Result result) {
         ObjectNode entry = JSON.createObjectNode();
@@ -218,9 +136,8 @@ class ElasticsearchTranslatorTest {
         if (result instanceof Result.Conditional) {
             return "CONDITIONAL";
         }
-        // `Result` is sealed over exactly those three, so this is unreachable today — and it is
-        // written as a failure rather than a default because a FOURTH kind silently recorded as
-        // CONDITIONAL would be an entry claiming a query that a consumer never receives.
+        // Unreachable while `Result` is sealed over three kinds. A new kind must fail here rather
+        // than be recorded as CONDITIONAL.
         throw new IllegalStateException("unrecognised plan kind: " + result.getClass());
     }
 
@@ -254,10 +171,8 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
-     * {@code assertThrows} just as well as the limitation the corpus documents
-     * (cerbos/query-plan-adapters#326). The harness makes the same assertion against a live PDP;
-     * here it costs a millisecond, which is what lets the completeness guard below be total.
+     * Checks the message, not just the throw, so an unrelated error (for example a mapper typo)
+     * cannot pass for the declared limitation.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("throwingActionsWithMessages")
@@ -269,10 +184,7 @@ class ElasticsearchTranslatorTest {
                         + ex.getMessage());
     }
 
-    /**
-     * Adding a throwing action without pinning its message must fail this suite rather than
-     * silently degrade the throw assertions to a bare "it threw" (#326).
-     */
+    /** A throwing action with no pinned message fails classification. */
     @Test
     void throwingActionWithNoPinnedMessageFailsClassification() {
         for (String absent : new String[] {null, ""}) {
@@ -288,21 +200,16 @@ class ElasticsearchTranslatorTest {
                 .sorted()
                 .toList();
 
-        // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
-        // rather than as silence. This is the assertion that makes the asset self-maintaining —
-        // adding a hostile shape to the corpus forces someone to look at the query this adapter
-        // emits for it, and `goldenUpdate` refuses to invent one for a shape that throws.
+        // Every wire fixture has a golden entry or a pinned throw.
         assertEquals(Corpus.wireFixtureActions(), classified,
                 "every wire fixture must be accounted for exactly once");
-        // Disjoint: an action carrying a golden expectation AND declared unsupported would satisfy
-        // the union above while asserting two contradictory things.
+        // An action cannot be both.
         assertEquals(classified.size(), Set.copyOf(classified).size(),
                 "an action is either recorded or thrown, never both");
-        // The asset is written sorted, so a translator change reads as the list of shapes it moved.
+        // Sorted, so a translator change diffs as the list of actions it moved.
         assertEquals(new ArrayList<>(new TreeSet<>(recordedActions)), recordedActions,
                 "golden/expectations.json must stay sorted by action");
-        // ...and the corpus manifest is the same set the fixtures are, so a fixture nobody
-        // classified cannot hide behind an actions.json that never named it.
+        // The actions.json manifest names the same set as the fixtures.
         assertEquals(new TreeSet<>(Corpus.wireFixtureActions()), ACTIONS.manifestActions());
 
         // Update these tripwires only after replaying new actions against the oracle.
@@ -328,17 +235,9 @@ class ElasticsearchTranslatorTest {
 
     @Test
     void theUnconditionalActionsAreThePlanKindsTheCorpusDeclares() {
-        // Two corpus actions carry no condition at all, and an entry with no `query` is only
-        // lossless while it is one of them — a translation that quietly stopped emitting a filter
-        // would record exactly the same absence. They mean OPPOSITE things, which is why the plan
-        // kind is recorded next to the query rather than inferred from it:
-        //
-        //   `p-has` is the corpus's one knownDivergences entry — the planner folds has() on a
-        //   missing attribute to ALWAYS_ALLOWED while check() denies those rows, so a caller
-        //   searches unfiltered and sees every document.
-        //
-        //   `in-empty` is `R.attr.aString in []`, which the planner decides statically: nothing is
-        //   a member of the empty list, so the plan is ALWAYS_DENIED and a caller runs no search.
+        // An entry with no `query` could also mean a translation that stopped emitting a filter,
+        // so the plan kind is recorded and pinned here. `p-has` is a knownDivergences entry: the
+        // planner folds it to ALWAYS_ALLOWED while check() denies some rows.
         assertEquals(List.of("in-empty", "p-has", "pv-empty-all", "pv-empty-exists", "pv-empty-not-all",
                 "pv-empty-not-exists", "pv-structs-missing"), unconditionalActions());
         assertEquals(List.of("p-has", "pv-empty-all", "pv-empty-not-exists"), actionsOfKind("ALWAYS_ALLOWED"));
@@ -347,16 +246,9 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * The corpus's {@code nullRepresentationOmitted} probe, and why this adapter needs no option.
-     *
-     * <p>{@code null-eq-missing} compares {@code aOptionalString == null}, and the planner emits
-     * the same {@code eq(attr, null)} node whichever convention the caller uses — so every other
-     * adapter has to be TOLD which one it is. Elasticsearch cannot index an explicit null
-     * distinguishably from a missing field, so every null-SELECTING direction already fails closed
-     * and only the {@code exists}-shaped ones translate. That is why the classification is folded
-     * into {@link #THROWING} above rather than parameterised over a representation, and this is the
-     * assertion that says so: if a future change starts emitting a null-selecting query here, the
-     * adapter acquires a representation dependency it must then declare.
+     * {@code null-eq-missing} produces the same plan under either null convention, so other
+     * adapters need an option to choose one. Elasticsearch does not index an explicit null, so this
+     * adapter refuses the probe whether or not the attribute is declared explicit-null.
      */
     @Test
     void theNullRepresentationProbeIsRefusedRegardless() {
@@ -365,9 +257,7 @@ class ElasticsearchTranslatorTest {
                 .map(NullRepresentationOmitted::action).toList());
         for (NullRepresentationOmitted probe : probes) {
             String message = Corpus.nullOmittedMessage(probe, Corpus.ADAPTER);
-            // Refused with the declared message whether or not the caller declares an
-            // explicit-null attribute at all — the two ends of the option every other adapter
-            // carries, both landing on the same refusal here.
+            // Refused with the explicit-null attribute declared and without it.
             IllegalArgumentException declared = assertThrows(IllegalArgumentException.class,
                     () -> Corpus.translate(probe.action()));
             assertTrue(declared.getMessage().contains(message), declared.getMessage());
@@ -381,17 +271,10 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * The one operand a wire fixture cannot pin, and the assertion that the reader's choice of
-     * instant is a real input to this adapter's classification rather than a tidy default.
-     *
-     * <p>{@code regenerate-wire-fixtures.sh} rewrites {@code ts-window}'s folded
-     * {@code now() - duration("24h")} literal to a placeholder because it differs on every capture,
-     * so reading the fixture back means choosing an instant. The PDP emits NANOSECONDS, and this
-     * adapter refuses a timestamp literal an ordinary Elasticsearch {@code date} field cannot
-     * preserve — which is exactly the reason {@code actions.json} gives for these two actions. At
-     * millisecond precision the same fixture TRANSLATES, so a tidier substitution in
-     * {@link Corpus#PLANNED_AT} would quietly contradict the corpus, and nothing else in this
-     * repository would notice.
+     * {@code ts-window} and {@code ts-vf} compare against a folded {@code now()} that the fixtures
+     * store as a placeholder. At the PDP's nanosecond precision they are refused, as
+     * {@code actions.json} declares; at millisecond precision they translate. This pins
+     * {@link Corpus#PLANNED_AT} to nanoseconds.
      */
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"ts-window", "ts-vf"})
@@ -408,56 +291,37 @@ class ElasticsearchTranslatorTest {
                         + "nanoseconds are not what refuses it");
     }
 
-    /**
-     * The asset carries the command that rewrites it, so a reader who opens the file after a
-     * failing assertion is told how to look at the difference. That is only useful while the
-     * command exists.
-     */
+    /** The golden file names its regenerate command, so that command must exist in the build. */
     @Test
     void theAssetNamesACommandThisBuildDefines() throws Exception {
         String[] parts = Corpus.GOLDEN_REGENERATE_COMMAND.split(" ");
-        assertEquals("gradle", parts[0]);
+        assertEquals("./gradlew", parts[0]);
         assertTrue(Files.readString(Path.of(System.getProperty("user.dir"), "build.gradle.kts"))
                         .contains("tasks.register<Test>(\"" + parts[1] + "\")"),
                 () -> "build.gradle.kts defines no task named " + parts[1]);
     }
 
-    /**
-     * "Offline" is a property of this class, so it is asserted rather than described.
-     *
-     * <p>A suite that quietly acquired a PDP or a container would still PASS — that is exactly the
-     * drift worth catching — so the check is on what this file may reach rather than on what it
-     * does, with the complement asserted so it is about this file rather than about a spelling that
-     * appears nowhere in the tree.
-     */
-    /**
-     * This file and every test helper it reaches. {@link Corpus} is the one: it decodes the wire
-     * fixtures and translates them, so a PDP client or a container acquired THERE would make this
-     * suite online just as surely as one imported here — and the scan of this file alone would
-     * not see it.
-     */
+    /** This file and the test helpers it uses; none may reach a PDP or a container. */
     private static final List<String> OFFLINE_SOURCES =
             List.of("ElasticsearchTranslatorTest", "Corpus");
 
+    /** The suite stays offline: neither it nor {@link Corpus} imports a PDP or container client. */
     @Test
     void thisSuiteReachesNoPdpAndNoContainer() {
         List<String> forbidden = List.of("org.testcontainers.", "dev.cerbos.sdk.", "java.net.http.");
-        // The IMPORT LINES, not a substring of the file: the names below appear in this method as
-        // string literals, and a substring scan would match itself.
+        // Check import lines, not the whole file, since these names appear here as literals.
         for (String source : OFFLINE_SOURCES) {
             assertEquals(List.of(), importsOf(source).stream()
                             .filter(imported -> forbidden.stream().anyMatch(imported::startsWith))
                             .toList(),
                     source + " reaches a PDP or a container, so this suite is no longer offline");
         }
-        // The list above is the helpers this file names. Every sibling test source it refers to
-        // in code must be on it, or a new helper is scanned by nobody.
+        // Every sibling this file uses in code must be in OFFLINE_SOURCES.
         assertEquals(Set.of("Corpus"), siblingsReferencedBy("ElasticsearchTranslatorTest"),
                 "this suite reaches a test helper OFFLINE_SOURCES does not scan");
         assertEquals(Set.of(), siblingsReferencedBy("Corpus"),
                 "Corpus reaches a test helper OFFLINE_SOURCES does not scan");
-        // ...and the container-backed siblings DO import each of them, so the assertion above is
-        // about this file rather than about a package prefix nothing in the tree uses.
+        // The container-backed siblings do import these, so the prefixes are real.
         List<String> siblings = Stream.of("ElasticsearchAdversarialConformanceTest",
                         "ElasticsearchSurfaceTest", "TestElasticsearch")
                 .flatMap(name -> importsOf(name).stream())
@@ -484,9 +348,8 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * The other test sources in this package one source names in CODE — comments, Javadoc and
-     * string literals stripped first, because this file links its container-backed siblings in
-     * prose and names them as literals in the complement assertion above without reaching them.
+     * Sibling test classes this source names in code. Comments and string literals are stripped
+     * first, since this file names its siblings in both without using them.
      */
     private static Set<String> siblingsReferencedBy(String simpleName) {
         String code;
@@ -510,28 +373,14 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * Where in the walk each rejection happens, and how many corpus shapes reach each site.
-     *
-     * <p>{@code actions.json} pins a substring of the message per action, so the throw suite above
-     * proves every refusal is the declared one. It cannot say anything about the SHAPE of the
-     * refusals taken together, and on an adapter that refuses most of the corpus that is the more
-     * interesting property: it matters whether that happens at a dozen sites or at one catch-all.
-     *
-     * <p>Three things are asserted. <strong>Total</strong> — every refusal matches a site this
-     * adapter actually has, so a shape rejected by an accident cannot pass as a declared
-     * limitation, which is the #326 trap at corpus scale. <strong>Pinned counts</strong> — a
-     * translator change that moves a shape from one site to another shows up as a diff even though
-     * both sites throw and {@code actions.json} is unchanged. <strong>No unmapped field</strong> —
-     * {@code "Unknown attribute"} is not a limitation of the Query DSL at all, it is this suite's
-     * own field map coming up short, and it is the exact accident #326 was filed for.
+     * Maps every refusal to the adapter site that raised it and pins the count per site. Every
+     * refusal must match exactly one site, a change that moves a shape between sites shows up as
+     * a diff, and no refusal may be an unmapped field.
      */
     @Nested
     class WhereTheRefusalsHappen {
 
-        /**
-         * One entry per {@code throw} site in {@link ElasticsearchQueryPlanAdapter} the corpus
-         * reaches, named for the mechanism rather than for the message.
-         */
+        /** Message fragments for each refusal site the corpus reaches, named by mechanism. */
         private final Map<String, String> sites = Map.ofEntries(
                 Map.entry("two-list difference", "except is not supported:"),
                 Map.entry("whole-list comparison", " against a list literal cannot be expressed:"),
@@ -543,31 +392,26 @@ class ElasticsearchTranslatorTest {
                 Map.entry("regex dialect syntax", "matches regex uses syntax outside"),
                 Map.entry("unanchored regex", "matches regex patterns must be fully anchored"),
 
-                // resolveLeafOperand's default: the operand slot holds a computed sub-expression —
-                // arithmetic, a cast, a ternary, an index, a projection, a count, a lambda. A term
-                // or range query compares a FIELD against a literal, and there is nowhere to
-                // evaluate anything on the way.
+                // resolveLeafOperand's default: the operand is computed (arithmetic, cast, ternary,
+                // index, projection, count, lambda), and a term or range query needs a literal.
                 Map.entry("computed leaf operand", " expression in leaf operand"),
-                // The hierarchy relations lower to term-level queries over the field's whole
-                // stored path (#332), so the only one still refused is the one whose path is
-                // CONSTRUCTED by list() from a document field — a concatenation the Query DSL has
-                // no more form for than it has for arithmetic.
+                // A hierarchy path built by list() from a document field; the Query DSL cannot
+                // concatenate.
                 Map.entry("hierarchy path built from a field",
                         "hierarchy path constructed by list() from a document field"),
                 // applyResolvedLeaf: both operands resolve to document fields.
                 Map.entry("field-to-field", "cannot compare two document fields without scripts"),
-                // normalizeLeafOperator: a string operator whose RECEIVER is the constant, so the
-                // document field is the needle rather than the haystack.
+                // normalizeLeafOperator: a string operator whose receiver is the constant.
                 Map.entry("constant receiver", " with a document field as the receiver argument"),
-                // The explicit-null convention Elasticsearch cannot index (#302, #308).
+                // Elasticsearch does not index an explicit null.
                 Map.entry("explicit null",
                         "cannot distinguish an explicit null value from a missing field"),
                 Map.entry("null in a document array",
                         "null membership in a document array requires an explicit null-value mapping"),
                 Map.entry("null in an intersection",
                         "hasIntersection with null requires an explicit null-value mapping"),
-                // Elasticsearch does not index an empty array, so the polarities that would read a
-                // missing collection as an allow are refused (#309).
+                // Elasticsearch does not index an empty array, so polarities that would read a
+                // missing collection as an allow are refused.
                 Map.entry("positive all over a collection",
                         "all cannot distinguish a missing collection from an empty collection"),
                 Map.entry("negated exists over a collection",
@@ -579,20 +423,20 @@ class ElasticsearchTranslatorTest {
                 Map.entry("collection emptiness", " emptiness cannot distinguish a missing collection"),
                 // exists_one needs a count of matching nested documents.
                 Map.entry("exists_one", "exists_one cannot be expressed by Elasticsearch nested queries"),
-                // A count comparison over a declared collection that is not an emptiness check.
+                // A count comparison that is not an emptiness check.
                 Map.entry("count threshold", "Unsupported size comparison:"),
-                // size() over a field the caller declared as neither a nested path nor a flat
-                // collection: the adapter cannot tell a string's length from an array count.
+                // size() over a field declared as neither nested nor a flat collection: the adapter
+                // cannot tell a string's length from an array count.
                 Map.entry("count over an undeclared collection",
                         "size() over a field not declared as a collection"),
-                // size() whose argument is a computed collection (a filter() projection).
+                // size() over a computed collection, such as a filter().
                 Map.entry("count over a computed collection", "Unsupported size() expression"),
-                // A ternary used as the condition itself, refused by name at the top of the walk.
+                // A ternary used as the condition itself.
                 Map.entry("conditional value as a condition",
                         "if (CEL ternary) cannot be expressed"),
-                // An ordinary Elasticsearch date field cannot preserve sub-millisecond precision.
+                // An Elasticsearch date field cannot hold sub-millisecond precision.
                 Map.entry("sub-millisecond timestamp", "Sub-millisecond timestamp literals"),
-                // An empty delimiter leaves no segment boundary to compare a stored path against.
+                // An empty delimiter leaves no segment boundary to compare against.
                 Map.entry("empty hierarchy delimiter", "hierarchy delimiter is empty"),
                 // RE2 parses `^a|b$` as two alternatives; Lucene's whole-field `a|b` does not.
                 Map.entry("top-level regex alternation",
@@ -660,10 +504,8 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * The #326 assertion, stated over the whole corpus. An unmapped field makes an action throw
-         * {@code "Unknown attribute"} — which is the field map coming up short, not a limitation of
-         * the Query DSL — and it once let six actions pass the throw suite while never reaching the
-         * mechanism their {@code actions.json} reasons claim.
+         * No refusal is {@code "Unknown attribute"}: that means the corpus field map is incomplete,
+         * not that the Query DSL cannot express the shape.
          */
         @Test
         void noRefusalIsAnUnmappedField() {
@@ -678,8 +520,7 @@ class ElasticsearchTranslatorTest {
                 }
             }
             assertEquals(List.of(), unmapped);
-            // Anti-vacuity: the detector must recognise the message it is looking for, built here
-            // rather than hoped for.
+            // Anti-vacuity: the detector recognises a real unmapped-field message.
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                     () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
                             Corpus.planFromWireFixture("cs-eq"),
@@ -689,11 +530,8 @@ class ElasticsearchTranslatorTest {
     }
 
     /**
-     * The properties a regenerated asset must not silently accept.
-     *
-     * <p>Pinned bytes do not survive {@code gradle goldenUpdate} being run and committed unread;
-     * rules do. So each of these is stated over every translated corpus action rather than over a
-     * chosen shape, and each carries an anti-vacuity assertion.
+     * Rules over every translated corpus action, each with an anti-vacuity check. These still
+     * hold if a regenerated golden file is committed without review.
      */
     @Nested
     class WhatTheEmittedQueryContains {
@@ -722,10 +560,8 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * Decompose an emitted query into the leaf clauses it makes and the nested scopes it opens.
-         *
-         * <p>An unrecognised clause is a failure rather than something skipped: a rule that
-         * silently ignores a node it does not know is a rule a new emission shape walks past.
+         * Splits an emitted query into leaf clauses and nested scopes. An unknown clause fails, so
+         * a new emission shape cannot slip past the rules.
          */
         private void walk(String action, JsonNode query, List<Comparison> leaves,
                           List<NestedScope> scopes) {
@@ -745,7 +581,6 @@ class ElasticsearchTranslatorTest {
                     case "match_all", "match_none" -> { }
                     case "exists" -> leaves.add(new Comparison(
                             action, name, body.get("field").asText(), null));
-                    // term / terms / range / prefix / wildcard / regexp: one field, one operand.
                     case "term", "terms", "range", "prefix", "wildcard", "regexp" ->
                             body.properties().forEach(field -> leaves.add(new Comparison(
                                     action, name, field.getKey(), field.getValue())));
@@ -756,11 +591,8 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * The one rule the harness cannot make. The adapter is handed a plan, never an index, so a
-         * field name it emits is never checked against anything — and a query naming a field no
-         * document holds is not an error, it is a query that matches nothing and silently denies.
-         * The harness cannot catch that either: a query returning no document agrees with an oracle
-         * that allows none.
+         * The adapter never sees the index, so a misspelled field would match nothing and silently
+         * deny. The harness cannot catch that when the oracle also allows nothing.
          */
         @Test
         void everyFieldNamedIsOneTheCorpusMapsOrANestedScopeOfOne() {
@@ -775,8 +607,7 @@ class ElasticsearchTranslatorTest {
                     .toList();
 
             assertEquals(List.of(), stray);
-            // Anti-vacuity, in two parts: the corpus must still emit comparisons at all, and it
-            // must still reach INSIDE a nested scope, which a root-only rule would miss.
+            // Anti-vacuity: comparisons exist, including some inside a nested scope.
             assertFalse(comparisons().isEmpty());
             assertTrue(comparisons().stream().anyMatch(leaf -> Corpus.NESTED_PATHS.stream()
                             .anyMatch(path -> leaf.field().startsWith(path + "."))),
@@ -784,11 +615,8 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * A {@code nested} query evaluates its inner clause against ONE inner document, and a field
-         * outside the path is not visible there — so an inner clause naming one matches nothing,
-         * silently. This is the Elasticsearch spelling of a subquery that lost its correlation, and
-         * it is the class of bug no row-level oracle catches while the seeded data happens to
-         * agree.
+         * Inside a {@code nested} query only fields under that path are visible, so an inner clause
+         * naming any other field silently matches nothing.
          */
         @Test
         void everyNestedQueryOnlyNamesFieldsInsideItsOwnPath() {
@@ -804,22 +632,16 @@ class ElasticsearchTranslatorTest {
             }
 
             assertEquals(List.of(), offenders);
-            // Anti-vacuity, in two parts: the corpus must open nested scopes, and every path they
-            // name must be one the corpus index maps as `nested` — a `nested` query against a plain
-            // object path is rejected by Elasticsearch at search time rather than here.
+            // Anti-vacuity: nested scopes exist, and each path is mapped as `nested` (Elasticsearch
+            // would reject one that is not only at search time).
             assertFalse(nested.isEmpty());
             nested.forEach(scope -> assertTrue(
                     Corpus.NESTED_PATHS.contains(scope.path()), scope.path()));
         }
 
         /**
-         * No emitted query ever asks Elasticsearch about a null.
-         *
-         * <p>Elasticsearch does not index a JSON null, so a {@code term} query against one matches
-         * nothing and a {@code must_not} around it matches everything — both silently wrong. The
-         * adapter refuses every null-selecting direction and lowers the presence-selecting ones to
-         * {@code exists}; a regenerated asset that acquired a null literal would be an
-         * authorization bug rather than a diff.
+         * No emitted query contains a null literal. Elasticsearch does not index nulls, so a
+         * {@code term} on null matches nothing and its {@code must_not} matches everything.
          */
         @Test
         void noEmittedQueryBindsANullLiteral() {
@@ -830,8 +652,7 @@ class ElasticsearchTranslatorTest {
                     .toList();
 
             assertEquals(List.of(), offenders);
-            // Anti-vacuity: the corpus must still drive the null comparisons this rule polices, and
-            // they must still translate — into `exists`, the only shape that survives.
+            // Anti-vacuity: the null comparisons are still in the corpus and lower to `exists`.
             for (String action : List.of("null-ne", "null-not-eq", "vf-null-ne")) {
                 assertTrue(recordedActions.contains(action), action);
             }
@@ -851,15 +672,9 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * Wildcard metacharacters in a needle are this repository's founding bug class (#258/#259)
-         * in its Elasticsearch spelling. A {@code wildcard} query reads {@code *} and {@code ?} as
-         * operators, so an unescaped one in a value turns a substring test into a pattern match and
-         * returns documents the PDP denies. The adapter escapes them and adds the anchors itself,
-         * so the only unescaped metacharacters a value may carry are those anchors.
-         *
-         * <p>{@code %}, {@code _} and {@code [} are deliberately NOT in this rule: a wildcard query
-         * is term-level and matches them literally, which is why this adapter needs none of the
-         * {@code LIKE ... ESCAPE} machinery the SQL adapters do.
+         * {@code *} and {@code ?} in a {@code wildcard} value must be escaped, apart from the
+         * anchors the adapter adds; otherwise a substring test becomes a pattern match. {@code %},
+         * {@code _} and {@code [} are literal in a wildcard query.
          */
         @Test
         void everyWildcardNeedleEscapesItsMetacharacters() {
@@ -873,9 +688,8 @@ class ElasticsearchTranslatorTest {
                     .toList();
 
             assertEquals(List.of(), offenders);
-            // Anti-vacuity, in three parts: the corpus must emit wildcard queries at all; the
-            // escaping must have something to do — `like-backslash` ends with a single backslash,
-            // which the adapter doubles; and the detector must reject something.
+            // Anti-vacuity: wildcards are emitted, `like-backslash`'s trailing backslash is
+            // doubled, and the detector rejects an unescaped `*`.
             assertFalse(wildcards.isEmpty());
             assertEquals("*\\\\", recordedQuery("like-backslash")
                     .get("wildcard").get("aString").get("value").asText());
@@ -914,14 +728,8 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * The serialisation decision, asserted.
-         *
-         * <p>This adapter emits a {@code Map<String, Object>} of plain JDK values, which IS the
-         * Query DSL — so the asset records the translator's return value verbatim and declares no
-         * generator. That claim holds only while nothing on the way out is a library type with a
-         * serialiser of its own, whose version would then be an input to the recorded bytes exactly
-         * as SQLAlchemy's compiler and Hibernate's renderer are to those adapters'
-         * ({@code conformance/README.md}, "When the generator is an input").
+         * Every emitted value is a plain JDK type. A library type with its own serializer would
+         * make that library's version an input to the golden file.
          */
         @Test
         void everyEmittedValueIsAPlainJdkType() {
@@ -955,16 +763,9 @@ class ElasticsearchTranslatorTest {
         }
 
         /**
-         * A query leaves this adapter as part of a JSON request body, so a value JSON cannot carry
-         * is a value the deployed adapter could not have sent either.
-         *
-         * <p>The interesting half is that a round trip does NOT catch it. Jackson quotes a
-         * non-finite number by default, so {@code NaN} is written as the string {@code "NaN"},
-         * parses back cleanly, and has silently stopped being a number — a {@code range} query
-         * against a string rather than a broken one. {@link Corpus#canonicalJson} therefore
-         * refuses it explicitly, and this is the assertion that the refusal is live rather than
-         * unreachable: the detector is proved against a value built here, and the corpus actions
-         * whose arithmetic would produce one are confirmed refused before a literal is ever built.
+         * {@link Corpus#canonicalJson} rejects NaN, which Jackson would otherwise write as the
+         * string {@code "NaN"}. The corpus actions whose arithmetic could produce one are refused
+         * first.
          */
         @Test
         void aValueJsonCannotCarryIsRefusedRatherThanRecorded() {

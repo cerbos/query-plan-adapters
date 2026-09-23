@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
@@ -13,17 +18,12 @@ import com.google.protobuf.Value;
 import java.util.List;
 
 /**
- * {@code size(x) op N}: string length over a scalar column, element count over a relation
+ * Translates {@code size(x) op N}: string length of a column, element count of a relation
  * chain, and the strict {@code size(filter(...))} count.
  *
- * <p>Owns the threshold arithmetic — a fractional or out-of-int-range constant against an
- * integral COUNT/LENGTH is decided statically, never truncated — and the choice between the
- * two-valued EXISTS shortcuts and the tri-state COUNT: a direct relation may take
- * {@code EXISTS}/{@code NOT EXISTS}, a chain never may, because an absent to-one parent has to
- * leave the comparison UNKNOWN under both polarities. It is a step of
- * {@link ComparisonTranslator#translate}, not a resolved-operand case, because its SQL shapes
- * are subquery translations pinned by the differential oracle rather than a (field, value)
- * pair.
+ * <p>A direct relation may use the two-valued EXISTS shortcuts. A chain always uses a COUNT
+ * guarded by {@link ChainSubqueries#requireLeadingHops}, so an absent to-one parent stays
+ * UNKNOWN under both polarities.
  */
 final class SizeTranslator {
 
@@ -41,19 +41,15 @@ final class SizeTranslator {
     }
 
     /**
-     * The comparison against an integral size, with its constant already resolved.
-     *
-     * <p>A fractional constant f can never be hit exactly by a COUNT or LENGTH. Truncating it
-     * ({@code >= 1.5} becoming {@code >= 1}) over-included rows the PDP denies, so it is
-     * resolved into integer-count semantics:
+     * The constant, adjusted for an integral count. Truncating a fraction ({@code >= 1.5} as
+     * {@code >= 1}) would return rows the PDP denies, so:
      * <ul>
-     *   <li>{@code eq f} → always-false, {@code ne f} → always-true: {@code decided} holds the
-     *       answer, and each size kind still has to keep the rows CEL denies excluded;</li>
-     *   <li>{@code ge f}/{@code gt f} → {@code ge ceil(f)} (the count being integral makes
-     *       {@code gt} and {@code ge} coincide);</li>
-     *   <li>{@code le f}/{@code lt f} → {@code le floor(f)}.</li>
+     *   <li>{@code eq f} is always false and {@code ne f} always true, held in
+     *       {@code decided};</li>
+     *   <li>{@code gt f} and {@code ge f} become {@code ge ceil(f)};</li>
+     *   <li>{@code lt f} and {@code le f} become {@code le floor(f)}.</li>
      * </ul>
-     * An integral constant keeps its operator, and {@code decided} is {@code null}.
+     * An integral constant keeps its operator and {@code decided} is {@code null}.
      */
     private record Threshold(String op, long value, Boolean decided) {
 
@@ -66,17 +62,13 @@ final class SizeTranslator {
                 case "ne" -> new Threshold(op, (long) Math.floor(raw), Boolean.TRUE);
                 case "gt", "ge" -> new Threshold("ge", (long) Math.ceil(raw), null);
                 case "lt", "le" -> new Threshold("le", (long) Math.floor(raw), null);
-                // size() yields an int; anything but a comparison over it is a CEL type error
-                // the planner would not have shipped.
+                // The planner only emits comparisons over size().
                 default -> throw Refusals.malformed("Unsupported size comparison operator: " + op);
             };
         }
     }
 
-    /**
-     * What {@code size()} is taken of: a variable, and — for {@code size(filter(...))} — the
-     * lambda that selects which of its elements count.
-     */
+    /** The variable {@code size()} is taken of, plus the lambda for {@code size(filter(...))}. */
     private record SizeArgument(String variable, ParsedLambda filter) {
 
         static SizeArgument parse(PlanResourcesFilter.Expression sizeExpr) {
@@ -93,14 +85,12 @@ final class SizeTranslator {
             String argOperator = arg.getNodeCase() == Operand.NodeCase.EXPRESSION
                     ? arg.getExpression().getOperator() : null;
             if ("filter".equals(argOperator)) {
-                // size(coll.filter(x, pred)) — count only the elements matching the lambda.
                 List<Operand> filterOps = arg.getExpression().getOperandsList();
                 if (filterOps.size() != 2) {
                     throw Refusals.malformed("Unsupported size(filter(...)) expression");
                 }
                 if (filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
-                    // filter() over a computed collection (a map() projection, a nested
-                    // filter): legal CEL with no join chain to count over.
+                    // filter() over a computed collection: legal CEL with no join chain.
                     throw Refusals.unsupported("Unsupported size(filter(...)) expression");
                 }
                 return new SizeArgument(filterOps.get(0).getVariable(),
@@ -110,12 +100,10 @@ final class SizeTranslator {
                                 "lambda requires exactly 2 operands"));
             }
             if ("except".equals(argOperator)) {
-                // size(coll.except([...])) — the PDP-verified wire shape of every real
-                // except() policy. List difference has no JPA translation; the shared
-                // named error points at the equivalent exists(...) rewrite.
+                // size(coll.except([...])): list difference has no JPA translation.
                 throw Refusals.exceptUnsupported();
             }
-            // size() of a computed collection (a map() projection, a literal list).
+            // A computed collection, e.g. a map() projection or a literal list.
             throw Refusals.unsupported(
                     "Unsupported size() expression: size() argument must be a collection "
                             + "attribute or filter(...), got " + Refusals.describeOperand(arg));
@@ -123,14 +111,12 @@ final class SizeTranslator {
     }
 
     /**
-     * Translate {@code op(size(...), N)}, or return {@code null} when the comparison has no
-     * {@code size()} operand or no numeric constant. Operands must already be normalized
-     * field-first (see {@link NormalizedBinary}).
+     * Translates {@code op(size(...), N)}, or returns {@code null} when there is no
+     * {@code size()} operand or numeric constant. Operands must already be field-first.
      */
     Predicate trySizeComparison(String op, List<Operand> operands, Scope scope) {
-        // Detect the size() operand first: every ordinary leaf comparison probes through
-        // here, and converting the VALUE operand up front would materialize lists/structs
-        // only to discard them when no size() expression is present.
+        // Every leaf comparison passes through here, so avoid converting values until a
+        // size() operand is found.
         PlanResourcesFilter.Expression sizeExpr = null;
         Double constant = null;
         for (Operand o : operands) {
@@ -158,12 +144,11 @@ final class SizeTranslator {
         return matchingElementCount(ref, arg.filter(), threshold, scope);
     }
 
-    /** {@code size(string)} — CEL string length, {@code LENGTH(column) <op> N}. */
+    /** {@code LENGTH(column) op N}. */
     private Predicate stringLength(SizeArgument arg, Scope.ResolvedScalar scalar,
                                    Threshold threshold, Scope scope) {
-        // Only a genuine scalar ATTRIBUTE has a string length to take. The bare lambda element
-        // lands in the scalar arm too, but its mapping is the Relation it came from — size()
-        // of a relation element is not a length.
+        // A bare lambda element also resolves as a scalar, but its mapping is a Relation and
+        // has no string length.
         if (!(scalar.mapping() instanceof AttributeMapping.Field)) {
             throw Refusals.unmapped(
                     "size() requires a collection (Relation) mapping for " + arg.variable());
@@ -176,19 +161,14 @@ final class SizeTranslator {
         if (!String.class.equals(path.getJavaType())) {
             return tri.unknown();
         }
-        // Every "vacuously true" arm below still requires IS NOT NULL, never an unconditional
-        // 1=1: a NULL column is a missing attribute → CEL error → deny.
+        // An always-true arm is still IS NOT NULL: a NULL column is a missing attribute,
+        // which CEL denies.
         if (threshold.decided() != null) {
             return threshold.decided() ? cb.isNotNull(path) : cb.disjunction();
         }
-        // cb.length(...) is Expression<Integer>, so the threshold must fit in an int. An
-        // unguarded narrowing cast wraps thresholds outside int range (2147483648 →
-        // −2147483648, 4294967296 → 0), silently flipping the filter — `size(s) > 4294967296`
-        // became `LENGTH(s) > 0` (always-true over-inclusion while check() denies every row).
-        // No string's length leaves int range, so these comparisons fold statically instead.
+        // cb.length is an Integer expression, and narrowing an out-of-range threshold would
+        // wrap (4294967296 becomes 0). No string length leaves int range, so those fold here.
         if (threshold.value() > Integer.MAX_VALUE) {
-            // LENGTH(s) < 2^31 for every present string: eq/gt/ge can never hold; lt/le/ne
-            // always hold for a present string.
             return switch (threshold.op()) {
                 case "eq", "gt", "ge" -> cb.disjunction();
                 case "lt", "le", "ne" -> cb.isNotNull(path);
@@ -197,8 +177,6 @@ final class SizeTranslator {
             };
         }
         if (threshold.value() < Integer.MIN_VALUE) {
-            // LENGTH(s) >= 0 > any threshold below int range: gt/ge/ne always hold for a
-            // present string; eq/lt/le can never hold.
             return switch (threshold.op()) {
                 case "gt", "ge", "ne" -> cb.isNotNull(path);
                 case "eq", "lt", "le" -> cb.disjunction();
@@ -211,20 +189,12 @@ final class SizeTranslator {
     }
 
     /**
-     * {@code size(collection)} — counts rows without evaluating a lambda, so no element can be
-     * UNKNOWN and the plain EXISTS/COUNT comparisons are already exact.
+     * {@code size(collection)}. No lambda is evaluated, so no element can be UNKNOWN.
      */
     private Predicate elementCount(Scope.ResolvedRelation ref, Threshold threshold, Scope scope) {
         if (threshold.decided() != null) {
-            // A COUNT is never fractional, so the comparison is statically decided. It is not
-            // unconditional though: an absent to-one parent is a CEL missing-path error (deny),
-            // and folding to TRUE would return every parentless row (#309).
-            //
-            // The guard has to be TRI-STATE, like every other chained comparison: `hops AND
-            // constant` is two-valued, so `NOT(hops AND constant)` is TRUE for a parentless row
-            // under BOTH collapses and readmits all of them (cerbos/query-plan-adapters#333). A
-            // CASE with no ELSE yields SQL NULL instead, leaving the comparison UNKNOWN under
-            // both polarities.
+            // Decided statically, but over a chain an absent to-one parent must stay UNKNOWN
+            // under both polarities, so the answer is guarded by requireLeadingHops.
             if (!ref.isChained()) {
                 return threshold.decided() ? cb.conjunction() : cb.disjunction();
             }
@@ -234,13 +204,8 @@ final class SizeTranslator {
         }
         String op = threshold.op();
         long n = threshold.value();
-        // The EXISTS emptiness shortcuts below are TWO-valued, so a chain must not take them:
-        // `NOT EXISTS` is TRUE for an absent to-one parent, which is why `!(size(chain) > 0)`
-        // readmitted every parentless row even though `size(chain) == 0` — guarded by a
-        // separate AND — did not (cerbos/query-plan-adapters#316). Guarding the COUNT
-        // EXPRESSION instead of each comparison shortcut is what makes `== 0`, `> 0`, `>= N` and
-        // all their negations inherit the guard: the count is SQL NULL without the hop, so
-        // every comparison built on it is UNKNOWN under BOTH polarities.
+        // The EXISTS shortcuts are two-valued: NOT EXISTS is TRUE for an absent parent. A chain
+        // uses the guarded COUNT instead, which is NULL without the hop.
         if (!ref.isChained()) {
             boolean nonEmpty = ("gt".equals(op) && n == 0L) || ("ge".equals(op) && n == 1L);
             boolean empty = ("eq".equals(op) && n == 0L)
@@ -253,9 +218,8 @@ final class SizeTranslator {
                 return tri.not(anyElement(scope, ref));
             }
         }
-        // Arbitrary N (and every threshold over a chain) → correlated (SELECT COUNT(...)) <op>
-        // N. For a multi-hop chain the COUNT joins through every hop, so it counts the
-        // FLATTENED tail elements — the same element set the EXISTS shortcuts range over.
+        // A correlated COUNT, joined through every hop, so it counts the flattened tail
+        // elements.
         return compareCount(
                 subqueries.requireLeadingHops(scope, ref,
                         subqueries.countSubquery(scope, ref).sub(), Long.class),
@@ -267,11 +231,9 @@ final class SizeTranslator {
     }
 
     /**
-     * {@code size(coll.filter(x, pred))}. CEL filter has NO error absorption — any element whose
-     * predicate errors (NULL-derived UNKNOWN body) errors the whole expression (deny), even when
-     * the count comparison would otherwise hold. Same strict table as {@code exists_one}: the
-     * strict match count is SQL NULL whenever any element body is UNKNOWN, so every comparison
-     * against it goes UNKNOWN and the row stays excluded under both polarities.
+     * {@code size(coll.filter(x, pred))}. CEL filter errors if any element's predicate errors,
+     * so the strict count is NULL when any body is UNKNOWN and the row is excluded under both
+     * polarities.
      */
     private Predicate matchingElementCount(Scope.ResolvedRelation ref, ParsedLambda filter,
                                            Threshold threshold, Scope scope) {
@@ -279,13 +241,9 @@ final class SizeTranslator {
                 filter.body(), Scope.lambda(tailJoin, sub, ref.tail(), filter.varName(), rebased));
         return walker.enterMacro("size(filter(...))", () -> {
             if (threshold.decided() != null) {
-                // The count comparison itself is statically decided (a COUNT is never
-                // fractional), but an erroring lambda body must still deny the row: the poison
-                // term is 0 when every element body is determined and SQL NULL otherwise,
-                // making the collapse UNKNOWN exactly when CEL errors. An absent to-one parent
-                // denies for a different reason and needs its own guard (#309) — carried on the
-                // poison EXPRESSION rather than ANDed beside it, so both polarities inherit it
-                // the way every other chained comparison does (cerbos/query-plan-adapters#333).
+                // The count is decided, but an UNKNOWN body must still deny: the poison term is
+                // 0 when every body is determined and NULL otherwise. It is also guarded for an
+                // absent to-one parent.
                 Expression<Long> poison = subqueries.requireLeadingHops(scope, ref,
                         subqueries.undeterminedPoisonSubquery(scope, ref, bodyBuilder),
                         Long.class);
@@ -296,7 +254,6 @@ final class SizeTranslator {
         });
     }
 
-    /** Compare a numeric size expression (COUNT subquery or LENGTH) against a constant. */
     private <N extends Number & Comparable<N>> Predicate compareCount(
             Expression<N> count, String op, N n) {
         return switch (op) {

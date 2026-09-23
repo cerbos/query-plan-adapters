@@ -19,24 +19,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The collection shapes: {@code exists} / {@code all} over a nested path, the fold of either over
- * a literal value list (with the lambda-variable substitution it needs), and {@code
- * hasIntersection} in both its flat and its {@code map}-projected forms.
+ * Translates collection shapes: {@code exists}/{@code all} over a nested path or a literal list,
+ * and {@code hasIntersection}, flat or over a {@code map()} projection.
  *
- * <p>These are the shapes that re-enter the walk — a lambda body is walked under a
- * {@link Scope.Lambda}, a folded value list is walked at the top level — which is why this class
- * holds the {@link PlanWalker} rather than the other way round, and why the missing-versus-empty
- * refusals that make Elasticsearch's unindexed empty array visible all sit here.
+ * <p>Elasticsearch does not index an empty array, so a missing collection and an empty one look
+ * the same. Shapes that depend on the difference are refused.
  */
 final class CollectionTranslator {
 
-    /**
-     * Operators whose second operand is a lambda that binds an iteration variable.
-     *
-     * <p>{@code except} is deliberately absent: Cerbos {@code except(list, list)} is a two-list
-     * function returning a list difference, and no lambda form of it exists on the wire. It is
-     * refused by name wherever it can appear ({@link Refusals#exceptUnsupported()}).
-     */
+    /** Operators whose second operand is a lambda binding an iteration variable. */
     private static final Set<String> LAMBDA_BINDING_OPERATORS =
             Set.of("exists", "exists_one", "all", "filter", "map");
 
@@ -52,10 +43,9 @@ final class CollectionTranslator {
         this.leaf = leaf;
     }
 
-    /** A {@code lambda(body, variable)} operand, taken apart. */
+    /** A {@code lambda(body, variable)} operand. */
     private record Lambda(Operand body, String variable) {
 
-        /** The body and the bound variable, or a refusal naming what the wire contract broke. */
         static Lambda of(Expression lambda, String arityMessage) {
             List<Operand> operands = lambda.getOperandsList();
             if (operands.size() != 2) {
@@ -68,8 +58,6 @@ final class CollectionTranslator {
         }
     }
 
-    // --- Collection operators (exists, all) ---
-
     Map<String, Object> translateMacro(String operator, List<Operand> operands, Polarity polarity) {
         boolean whenTrue = polarity.holds();
         if (operands.size() != 2) {
@@ -79,12 +67,8 @@ final class CollectionTranslator {
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
 
-        // A literal value-list collection arrives when the planner could not unroll a macro
-        // over a known collection: at <= 10 elements it folds exists/all into an or/and chain
-        // itself (cerbos/cerbos#2570, #2817; maxItems = 10 in the planner's struct matcher),
-        // above that the lambda ships with the folded value list as its collection operand.
-        // Apply the same fold here instead of demanding a nested mapping that cannot exist
-        // for a literal.
+        // The planner unrolls a macro over a literal list of up to 10 elements itself; a longer
+        // list arrives as the collection operand, so fold it here the same way.
         if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
             return handleKnownValueCollection(
                     operator, listOperand.getValue(), lambdaOperand, polarity);
@@ -128,14 +112,16 @@ final class CollectionTranslator {
                     "Negated exists cannot distinguish a missing collection from an empty collection in Elasticsearch");
         }
 
-        // Only exists reaches here positively, and only all negatively: a document qualifies when
-        // it holds an element the predicate is definitely false for. An element for which the
-        // lambda is undefined prevents both true and false, preserving CEL errors.
+        // Only positive exists and negated all reach here. Either way a document matches when
+        // one nested element satisfies the body under this polarity.
         Scope scope = new Scope.Lambda(esField, lambda.variable());
         return Queries.nestedQuery(esField, walker.operand(lambda.body(), scope, polarity));
     }
 
-    /** A positive scalar equality needs one matching term, not per-element correlation. */
+    /**
+     * {@code exists(x, x == v)} over a flat array is a single term match. Returns {@code null}
+     * for any other shape.
+     */
     private Map<String, Object> flatScalarExistsEquality(
             String operator, Operand lambdaOperand, String field, Polarity polarity) {
         if (!"exists".equals(operator) || !polarity.holds()
@@ -156,24 +142,15 @@ final class CollectionTranslator {
                 && right.getVariable().equals(variable)
                 && left.getNodeCase() == Operand.NodeCase.VALUE;
         if (!variableFirst && !valueFirst) return null;
-        // Reuse the leaf's scalar/null validation and the caller's operator overrides.
         return leaf.applyResolvedLeaf("eq", body.getOperandsList(),
                 new Scope.Root(Map.of(variable, field)), Polarity.TRUE);
     }
 
     /**
-     * Fold a collection macro whose collection operand is a literal value list: substitute each
-     * element into the lambda body and combine the per-element expressions with {@code or}
-     * ({@code exists}) or {@code and} ({@code all}), then translate the combined expression
-     * through the normal traversal — the same fold the planner itself applies to known
-     * collections of 10 or fewer elements, so the emitted query does not depend on which side
-     * of that threshold the collection lands.
-     *
-     * <p>Unlike a nested-field collection, a literal list is fully known at plan time: there is
-     * no missing-versus-empty ambiguity, so the fold is exact under negation too and none of
-     * the nested-query restrictions on {@code all} or negated {@code exists} apply. The empty
-     * collection keeps CEL identity semantics: {@code exists} over {@code []} is false,
-     * {@code all} over {@code []} is true.
+     * Folds {@code exists}/{@code all} over a literal list into an {@code or}/{@code and} of the
+     * body with each element substituted, then walks the result. A literal list is never missing,
+     * so this is exact under negation too. Over {@code []}, {@code exists} is false and
+     * {@code all} is true.
      */
     private Map<String, Object> handleKnownValueCollection(
             String operator,
@@ -211,10 +188,8 @@ final class CollectionTranslator {
     }
 
     /**
-     * Fail closed, by name, for a collection macro over a literal value list that has no flat
-     * translation. {@code filter} and {@code map} reach the leaf traversal rather than
-     * {@link #translateMacro}, so without this they would surface an unrelated operand-shape
-     * error instead of naming the real limitation.
+     * Refuses a macro over a literal list that cannot be folded. Without this, {@code filter} and
+     * {@code map} would reach the leaf translator and fail with an unrelated message.
      */
     static void rejectUnfoldableValueListMacro(String operator, List<Operand> operands) {
         if (LAMBDA_BINDING_OPERATORS.contains(operator)
@@ -230,12 +205,9 @@ final class CollectionTranslator {
     }
 
     /**
-     * Substitute a lambda iteration variable with a concrete collection element inside a lambda
-     * body. A bare reference to the variable becomes the element itself; a
-     * {@code variable.path.to.field} reference drills into the element (failing closed when the
-     * path is missing — the CEL evaluation of that element would error). A nested macro whose
-     * lambda rebinds the same variable name shadows the outer variable, so substitution only
-     * descends into its collection operand.
+     * Replaces the lambda variable with {@code element} in a lambda body. {@code v.a.b} reads a
+     * field of the element and throws if it is missing. A nested lambda that rebinds the same
+     * name shadows it, so only that macro's collection operand is substituted.
      */
     private static Operand substituteLambdaVariable(
             Operand operand, String varName, Value element) {
@@ -259,8 +231,6 @@ final class CollectionTranslator {
                 Expression.Builder rebuilt = expr.toBuilder();
                 if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
                         && shadowsVariable(ops.get(1), varName)) {
-                    // The nested lambda rebinds our variable: substitute only in the
-                    // collection operand.
                     rebuilt.setOperands(0, substituteLambdaVariable(ops.get(0), varName, element));
                     return Operand.newBuilder().setExpression(rebuilt).build();
                 }
@@ -275,7 +245,6 @@ final class CollectionTranslator {
         }
     }
 
-    /** True when {@code lambdaOperand} is a lambda whose iteration variable is {@code varName}. */
     private static boolean shadowsVariable(Operand lambdaOperand, String varName) {
         if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
                 || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
@@ -287,7 +256,6 @@ final class CollectionTranslator {
                 && varName.equals(ops.get(1).getVariable());
     }
 
-    /** Drill a dotted path into a struct element, failing closed on a missing field. */
     private static Value resolveElementPath(String fullRef, String path, Value element) {
         Value current = element;
         for (String segment : path.split("\\.")) {
@@ -301,12 +269,9 @@ final class CollectionTranslator {
         return current;
     }
 
-    // --- hasIntersection (flat + nested/map) ---
-
     /**
-     * {@code hasIntersection} in the TRUE direction. The false direction throws before any
-     * operand is examined: a {@code bool.must_not} over the {@code terms} query it lowers to
-     * would match a document whose collection is missing, which CEL errors on.
+     * {@code hasIntersection}. The negated form is refused: {@code bool.must_not} would match a
+     * document whose collection is missing, which CEL errors on.
      */
     Map<String, Object> translateHasIntersection(List<Operand> operands, Polarity polarity) {
         if (!polarity.holds()) {
@@ -320,8 +285,7 @@ final class CollectionTranslator {
         Operand first = operands.get(0);
         Operand second = operands.get(1);
 
-        // hasIntersection is symmetric, so the map() projection may sit on either side. The
-        // operands are mirrored so both spellings take the one nested lowering.
+        // hasIntersection is symmetric, so the map() projection may be on either side.
         if (isMapProjection(first)) {
             return handleMapHasIntersection(first.getExpression(), second);
         }
@@ -378,8 +342,7 @@ final class CollectionTranslator {
         List<?> valueList = values instanceof List<?> l ? l : List.of(values);
         LeafTranslator.rejectNullIntersection(valueList);
         LeafTranslator.rejectNonScalarElements("hasIntersection", valueList);
-        // The projection is built from the default `terms` rather than an override, so the
-        // projected sub-field's declared type always decides which elements can match.
+        // The default `terms` query is used here, not an override, so always filter by type.
         List<?> members = leaf.typedIntersection(nestedField, valueList, List.of());
         if (members.isEmpty()) {
             return Queries.matchNone();

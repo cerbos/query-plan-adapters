@@ -1,6 +1,6 @@
 {
   "adapter": "elasticsearch-java",
-  "regenerate": "gradle goldenUpdate",
+  "regenerate": "./gradlew goldenUpdate",
   "expectations": {
     "cast-not-timestamp": {
       "kind": "CONDITIONAL",

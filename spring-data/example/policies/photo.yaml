@@ -1,22 +1,20 @@
 # yaml-language-server: $schema=https://api.cerbos.dev/latest/cerbos/policy/v1/Policy.schema.json
 #
-# Photo-sharing example policy. The cerbos-spring-data adapter translates
-# the PDP's query-plan response into a JPA Specification<Photo> at runtime,
-# so each rule below corresponds to one or more JPA Criteria predicates.
+# Photo-sharing example policy. What each user action exercises:
 #
-#   view    : public + not archived OR ownerId == self
-#   edit    : ownerId == self
-#   delete  : ownerId == self
-#   comment : public + not archived, OR "friends" tag set, OR ownerId == self
-#   discover         : numeric comparison on a scalar and an embedded field
-#   located          : nullable-field isSet/null semantics
-#   similar          : intersection with a principal list attribute
-#   needs-moderation : exists() over structured label entities
-#   fully-reviewed   : all() over labels, including the empty-set case
-#   unlabelled       : size() over a relation
-#   exactly-one-reviewed: exists_one() over a relation
-#   percent/underscore-title: literal SQL LIKE metacharacter escaping
-#   admin            : unconditional ALLOW on all actions
+#   view, comment        : public and not archived, or owned (comment also allows a "friends" tag)
+#   edit, delete         : owned
+#   discover             : numeric comparison on a column and an embedded field
+#   located              : null check on a nullable column
+#   similar              : intersection with a principal list attribute
+#   needs-moderation     : exists() over label entities
+#   fully-reviewed       : all() over labels, including no labels
+#   unlabelled           : size() over a relation
+#   exactly-one-reviewed : exists_one() over a relation
+#   percent/underscore-title : LIKE metacharacters matched literally
+#   delegated-view, *group-grant : grant relation with nullable child fields
+#
+# The admin role is allowed every action except the edge-* ones.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   resource: photo
@@ -124,9 +122,8 @@ resourcePolicy:
         match:
           expr: 'request.resource.attr.title.contains("_")'
 
-    # Enterprise delegated access: the local JPA tenant Specification is the mandatory outer
-    # boundary; these policy checks add defense in depth and validate each grant against its
-    # owning photo so a malformed cross-tenant grant cannot authorize.
+    # The application's tenant Specification is the outer boundary. The policy also checks the
+    # tenant, and requires each grant's tenant to match its photo's.
     - actions: ["delegated-view"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -140,8 +137,9 @@ resourcePolicy:
               (grant.userId == request.principal.id ||
                grant.groupId in request.principal.attr.groups))
 
-    # These three actions deliberately distinguish CEL UNKNOWN from false for nullable child
-    # fields. A null-only grant is excluded under both the positive and unguarded negated forms.
+    # These three actions check that a null groupId is treated as unknown, not false. A photo
+    # whose grants all have a null groupId matches neither group-grant nor no-group-grant; the
+    # explicit null guard in no-group-grant-safe makes it match.
     - actions: ["group-grant"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -197,20 +195,14 @@ resourcePolicy:
     # ------------------------------------------------------------------------
     # Edge-case regression scenarios
     #
-    # Each `edge-*` action below pins one historical adapter bug at the
-    # full-stack level (Spring Boot app + live PDP + real repository). They are
-    # exercised only by the dedicated "edge"-tenant fixtures in SeedData.java
-    # and asserted by scripts/smoke-edge-cases.sh — see "Edge-case regression
-    # scenarios" in the example README. Some expressions are deliberately
-    # pathological (labeled inline); they are probes, not policy-writing
-    # recommendations.
+    # Each edge-* action is a regression probe run against the "edge"-tenant
+    # rows in SeedData.java by scripts/smoke-edge-cases.sh. Some expressions
+    # are intentionally odd; they are not examples of how to write policy.
     # ------------------------------------------------------------------------
 
-    # Pins PR #274: eq over (field + constant) used an algebraic solve
-    # (0.1 - 0.7 = -0.6) that IEEE addition does not invert. check() denies
-    # score = -0.6 (-0.6 + 0.7 == 0.09999999999999998, not 0.1) but the old
-    # adapter emitted `WHERE score = -0.6` and INCLUDED that row. No double
-    # satisfies this equation, so the correct result set is empty.
+    # The adapter must not solve this as `score = -0.6`: in IEEE doubles
+    # -0.6 + 0.7 is 0.09999999999999998. No seeded score satisfies it, so the
+    # result is empty.
     - actions: ["edge-ieee-eq"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -218,8 +210,7 @@ resourcePolicy:
         match:
           expr: request.resource.attr.score + 0.7 == 0.1
 
-    # Pins PR #274 (ne direction): the old solve emitted `WHERE score != -0.6`,
-    # wrongly EXCLUDING the score = -0.6 row that check() allows here.
+    # The negated form: the score = -0.6 row must be included.
     - actions: ["edge-ieee-ne"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -227,11 +218,8 @@ resourcePolicy:
         match:
           expr: request.resource.attr.score + 0.7 != 0.1
 
-    # Pins PR #275: ordering against a constant NaN used Double.compare (a
-    # total order ranking NaN above every number), so the NaN else-arm of this
-    # ternary collapsed to always-true and non-public rows leaked through.
-    # CEL/IEEE define every NaN ordering as false. 0.0/0.0 is a deliberate
-    # NaN-producing probe.
+    # 0.0 / 0.0 is NaN, and every comparison with NaN is false, so non-public
+    # rows must not match.
     - actions: ["edge-nan-ordering"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -239,10 +227,8 @@ resourcePolicy:
         match:
           expr: '(request.resource.attr.public ? 1.0 : 0.0 / 0.0) > 0.5'
 
-    # Pins PR #279: the most common compliance shape — a retention/time-window
-    # rule. The planner folds `now() - duration(...)` to a constant instant;
-    # before the fix the adapter threw for every query of this action (each
-    # request was a 500 instead of returning the older-than-24h rows).
+    # A retention window. The planner folds `now() - duration(...)` to a
+    # constant timestamp, and rows older than 24h match.
     - actions: ["edge-retention"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -250,10 +236,8 @@ resourcePolicy:
         match:
           expr: timestamp(request.resource.attr.createdAt) < now() - duration("24h")
 
-    # Pins PR #285: LIKE escaping must cover SQL Server's `[...]` character
-    # class. The escaped pattern must keep matching a literal "[SEC]" prefix
-    # (and never match the "Secret..." trap row, whose first character is in
-    # the class {S,E,C}).
+    # LIKE escaping must cover SQL Server's `[...]` character class: match a
+    # literal "[SEC]" prefix, not the "Secret..." row.
     - actions: ["edge-bracket-title"]
       effect: EFFECT_ALLOW
       roles: ["user"]
@@ -261,10 +245,8 @@ resourcePolicy:
         match:
           expr: request.resource.attr.title.startsWith("[SEC]")
 
-    # Pins PR #286: size() thresholds >= 2^31 were truncated by an (int) cast —
-    # 4294967296 wrapped to 0 and `LENGTH(title) > 0` returned every non-empty
-    # title. check() denies every row, so the correct result set is empty.
-    # 4294967296 is a deliberately pathological regression probe.
+    # A size() threshold above the int range must not be truncated (2^32
+    # would become 0). No title is that long, so the result is empty.
     - actions: ["edge-size-huge"]
       effect: EFFECT_ALLOW
       roles: ["user"]

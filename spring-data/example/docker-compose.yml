@@ -1,18 +1,14 @@
-# Standalone Cerbos PDP for the photo-sharing example app, serving this directory's own
-# policies/. The demo-domain program next to it uses demo/docker-compose.yml instead, started by
-# demo/scripts/run-example.sh — one PDP per policy suite, and these are two suites.
+# Cerbos PDP for the photo-sharing app, serving ./policies. The demo-domain program uses
+# demo/docker-compose.yml instead.
 #
-#   docker compose up -d                                  # start the PDP
-#   CERBOS_HOST=localhost:23593 gradle bootRun            # the Spring Boot app on :8080
-#   docker compose logs cerbos                            # PlanResources decision logs
+#   docker compose up -d                                   # start the PDP
+#   CERBOS_HOST=localhost:23593 ../gradlew bootRun         # the Spring Boot app on :8080
+#   docker compose logs cerbos                             # PlanResources decision logs
 #   docker compose down
 services:
   cerbos:
-    # Pinned to conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — Compose cannot
-    # read a file, so the reference is spelled out and validate-corpus.sh asserts that BOTH halves
-    # agree. The tag alone would leave the digest free to name some other build entirely.
-    # Deliberately not `latest`: this compose runs in CI (example smoke tests), and the
-    # PDP an adapter is proved against must change only through a deliberate version bump.
+    # Must match conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST; validate-corpus.sh
+    # checks both.
     image: ghcr.io/cerbos/cerbos:0.55.0@sha256:4b9d3b58c4f11c1b8953bc798d8d086e64f276882253ab169625fddc7f432515
     container_name: cerbos-photos-example
     command:
@@ -21,12 +17,8 @@ services:
     environment:
       CERBOS_NO_TELEMETRY: "1"
       CERBOS_CONFIG: "/config/cerbos-config.yaml"
-    # Deliberately NOT the default 3592/3593 on the host, and not demo/docker-compose.yml's
-    # 13592/13593 either. 3592/3593 are Cerbos's default ports, which any other local PDP
-    # may be holding: a client that assumes the defaults would then talk to THIS one — which
-    # serves photo/album/workspace policies — or this one to that, and fail for a reason nothing
-    # in its output names. The container side of each mapping is the PDP's own listen port and
-    # stays 3592/3593.
+    # Host ports differ from the Cerbos defaults and from demo/docker-compose.yml, so a client
+    # cannot reach another local PDP by mistake.
     ports:
       - "23592:3592"
       - "23593:3593"
