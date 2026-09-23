@@ -232,7 +232,7 @@ semantics for this compatibility snapshot.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 245 reference conformance actions |
+| Oracle-tested | 259 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()` (SQL regex dialects do not guarantee RE2 semantics), ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list of strings, numbers or booleans (SQL row order is undefined), list equality over a `map()` projection, a hierarchy with an empty delimiter, two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
 | Operand types the plan does not carry | `R.attr.a + "x"` and `"x" + R.attr.a` translate. Between **two columns**, declare the string column `ValueType: cerbospgx.ValueString` to get concatenation; otherwise it fails closed rather than emit a numeric `+` — a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
@@ -302,6 +302,12 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- **Membership across types:** a literal whose type differs from a relation element's declared
+  `ValueType` no longer matches it. `"2" in R.attr.numbers` and `hasIntersection(R.attr.flags,
+  ["true"])` are false, as CEL says, and a mixed literal list keeps only the members of the
+  element's type; the same rule applies to `in` against a literal list over a declared scalar
+  column. PostgreSQL used to fail the query (`operator does not exist: double precision = text`); the
+  shared translator's SQLite and MySQL renderings (the ent module) coerced `'2'` and over-granted. An undeclared element keeps the old rendering.
 - **Breaking ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)):** `R.attr.a + R.attr.b`
   between two columns returns an error unless one is declared `ValueString`. It used to emit a
   numeric `+`, which PostgreSQL rejects at run time for text columns (`operator does not exist:

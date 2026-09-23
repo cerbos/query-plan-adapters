@@ -313,7 +313,7 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 	}
 
 	alias := b.newAlias()
-	elementCol := Column{Qualifier: alias, Name: rel.Field.Column}
+	elementCol := elementColumn(alias, rel.Field)
 
 	omitted := b.opts.NullRepresentation == NullOmitted
 	if needle.isVariable() {
@@ -335,6 +335,15 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 		return Case{Whens: []When{{Cond: IsNull{X: needleExpr, Negate: true}, Then: result}}}, nil
 	}
 	return result, nil
+}
+
+// elementColumn is a relation's element column as seen from inside its subquery.
+//
+// It keeps the element's declared type so a literal of another type is answered as CEL answers
+// it — `"2" in [2]` is false — rather than handed to an engine that coerces '2' onto a numeric
+// column, or 'true' onto a boolean one.
+func elementColumn(alias string, field *Entry) Column {
+	return Column{Qualifier: alias, Name: field.Column, Type: field.ValueType}
 }
 
 // elementMatches builds the per-element predicate for membership against a stored collection.
@@ -681,7 +690,7 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 			)
 		}
 		alias := b.newAlias()
-		body, err := membership(Column{Qualifier: alias, Name: rel.Field.Column}, list)
+		body, err := membership(elementColumn(alias, rel.Field), list)
 		if err != nil {
 			return nil, err
 		}

@@ -378,9 +378,15 @@ final class CollectionTranslator {
         List<?> valueList = values instanceof List<?> l ? l : List.of(values);
         LeafTranslator.rejectNullIntersection(valueList);
         LeafTranslator.rejectNonScalarElements("hasIntersection", valueList);
+        // The projection is built from the default `terms` rather than an override, so the
+        // projected sub-field's declared type always decides which elements can match.
+        List<?> members = leaf.typedIntersection(nestedField, valueList, List.of());
+        if (members.isEmpty()) {
+            return Queries.matchNone();
+        }
 
         Map<String, Object> matchingValue =
-                Queries.nestedQuery(esField, Queries.terms(nestedField, valueList));
+                Queries.nestedQuery(esField, Queries.terms(nestedField, members));
         Map<String, Object> missingProjection = Queries.nestedQuery(esField, Queries.notExists(nestedField));
         return Queries.boolMust(List.of(matchingValue, Queries.notQuery(missingProjection)));
     }

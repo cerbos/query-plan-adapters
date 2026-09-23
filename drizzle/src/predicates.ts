@@ -327,6 +327,15 @@ const applyRelationComparison = (operator: ComparisonOperator): SQL => {
   }
 };
 
+/** Drizzle's scalar data types, each of which holds exactly one CEL type. */
+const SCALAR_DATA_TYPES = new Set(["string", "number", "boolean"]);
+
+/** A string, number or boolean constant that a column of another of those types cannot equal. */
+const isCrossTypeScalar = (dataType: string, value: Value): boolean =>
+  SCALAR_DATA_TYPES.has(dataType) &&
+  SCALAR_DATA_TYPES.has(typeof value) &&
+  typeof value !== dataType;
+
 /** `column IN (values)`, with CEL's reading of a null element and of an explicit-null column. */
 const buildColumnMembership = (
   column: AnyColumn,
@@ -337,14 +346,29 @@ const buildColumnMembership = (
   if (values.length === 0) {
     return FALSE_CONDITION;
   }
-  const nonNullValues = values.filter((candidate) => candidate !== null);
+  const hasNullElement = values.includes(null);
+  // CEL's equality is heterogeneous: `5 in ["5"]` is false. Bound into `IN (…)`, SQL would read
+  // the literal as the column's type instead — SQLite's affinity and PostgreSQL's parameter
+  // inference turn '5' into 5, and MySQL reads a non-numeric string as 0 — so a constant the
+  // column's scalar type cannot equal is dropped before it reaches the store.
+  const nonNullValues = values.filter(
+    (candidate) =>
+      candidate !== null && !isCrossTypeScalar(column.dataType, candidate),
+  );
   if (nonNullValues.length === 0) {
-    return isNull(column);
+    if (hasNullElement) {
+      return isNull(column);
+    }
+    // Every element was of another type: definitely false for a present value, and UNKNOWN for
+    // a NULL column unless the caller sends it as an explicit null, as `col IN (…)` would be.
+    return explicitNull
+      ? FALSE_CONDITION
+      : sql`(case when ${column} is null then null else ${FALSE_CONDITION} end)`;
   }
   const membership = sql`${column} in ${nonNullValues.map((candidate) =>
     bindAgainstColumn(candidate, column),
   )}`;
-  if (nonNullValues.length === values.length) {
+  if (!hasNullElement) {
     // No null element, so nothing has made the predicate definite yet: `NOT (col IN (…))`
     // over a NULL column is UNKNOWN and drops the row, while CEL compares a null VALUE
     // against each element and gets a definite false. A null element takes the branch
@@ -449,6 +473,13 @@ export const applyComparison = (
     }
     if (mapping.transform) {
       return mapping.transform({ operator, value });
+    }
+    if (mapping.indexable) {
+      // A declared indexable column holds the whole list. Comparing it as one scalar would test
+      // the serialized list against an element — never equal, so its negation is always true.
+      throw new Error(
+        "A column declared indexable holds a list: it can only be read by constant position, membership or hasIntersection",
+      );
     }
     if (!mapping.column) {
       throw new Error("Mapping configuration requires a column or transform");

@@ -490,17 +490,20 @@ export function handleHasIntersectionOperator(
     throw new Error("Second operand of hasIntersection must be a value");
   }
 
-  const { path, relations } = resolveFieldReference(leftOperand.name, context);
+  const fieldRef = resolveFieldReference(leftOperand.name, context);
 
   if (!Array.isArray(rightOperand.value)) {
     throw new Error("hasIntersection requires an array value");
   }
 
-  if (relations && relations.length > 0) {
-    return buildMembershipFilter(context, { path, relations }, rightOperand.value);
+  if (fieldRef.relations && fieldRef.relations.length > 0) {
+    // The whole reference, not just its path: the mapped valueType is what refuses a literal of
+    // another type (`hasIntersection(numberList, ["2", 3])`), which CEL's heterogeneous equality
+    // never matches and which a store would otherwise be handed to coerce.
+    return buildMembershipFilter(context, fieldRef, rightOperand.value);
   }
 
-  return { [getLeafField(path)]: { some: rightOperand.value } };
+  return { [getLeafField(fieldRef.path)]: { some: rightOperand.value } };
 }
 
 /** `hasIntersection(collection.map(x, x.field), [literals])`. */

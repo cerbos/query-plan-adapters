@@ -201,14 +201,16 @@ coerces the query term onto the field's *mapped* type: `{"term": {"aNumber": {"v
 matches the number `5`, `"true"` matches the boolean `true`, and a numeric term matches the keyword
 `"5"`. CEL's cross-type equality is `false`. The adapter cannot see your mapping, so a comparison
 (`eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `endsWith`, `matches`,
-`field in [...]`) against an undeclared field throws `UnmappedAttributeException`
+`field in [...]`, collection membership `x in R.attr.list`, and `hasIntersection`, including over a
+`map()` projection) against an undeclared field throws `UnmappedAttributeException`
 ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). An overridden operator needs no
 declaration.
 
 With a declaration, a literal of the wrong type is answered as CEL answers it: `==` matches nothing,
 `!=` holds wherever the field is present, a string operator on a non-string field matches nothing in
-either polarity, wrong-typed elements are dropped from `field in [...]` (a list with none of the
-right type is false), and a hierarchy relation over a non-string field matches nothing. A
+either polarity, wrong-typed elements are dropped from `field in [...]` and from a `hasIntersection`
+list (a list with none of the right type is false), a value of the wrong type is never an element of
+a collection (`"2" in R.attr.aNumberList` is false), and a hierarchy relation over a non-string field matches nothing. A
 `TIMESTAMP` field needs an explicit `timestamp()` wrapper in scalar comparisons, because the index no
 longer holds the original string.
 
@@ -469,8 +471,8 @@ this compatibility snapshot. Each PDP call has a 30-second deadline, so a stalle
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 127 reference conformance actions plus regex and timestamp probes (129 actions) |
-| Fail-closed | 170 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (179 actions total) |
+| Oracle-tested | 139 reference conformance actions plus regex and timestamp probes (141 actions) |
+| Fail-closed | 172 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (181 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
 | Attribute NULL convention | Declared, in order to REFUSE. An explicitly-null value and a missing field are the same document to every query the DSL can express, so the equality family over attributes in `explicitNullAttributes` throws instead of answering narrowly (cerbos/query-plan-adapters#308) |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
@@ -482,8 +484,8 @@ those in [Unsupported shapes](#unsupported-shapes). Every fail-closed message is
 `conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
 
 `ElasticsearchTranslatorTest` asserts the same classification offline, plus the **distribution of
-refusals over the sites in the walk that raise them**. 180 of the corpus's 310 shapes are refused
-here — the 179 fail-closed actions plus `null-eq-missing` — across 29 sites, with 82 reaching the
+refusals over the sites in the walk that raise them**. 182 of the corpus's 324 shapes are refused
+here — the 181 fail-closed actions plus `null-eq-missing` — across 29 sites, with 82 reaching the
 computed-operand refusal:
 
 | Rejection site | Actions |
@@ -507,14 +509,14 @@ computed-operand refusal:
 | flat scalar collection macro | 3 |
 | hierarchy path built from a field | 2 |
 | negated hasIntersection over a collection | 2 |
-| negated membership in a collection | 2 |
+| negated membership in a collection | 3 |
 | sub-millisecond timestamp | 2 |
 | top-level regex alternation | 2 |
 | whole-list comparison | 2 |
 | empty hierarchy delimiter | 1 |
 | list-valued member | 1 |
 | literal exists-one | 1 |
-| null in a document array | 1 |
+| null in a document array | 2 |
 | regex brace syntax | 1 |
 | unanchored regex | 1 |
 
@@ -575,6 +577,9 @@ applies to every field, and quietly returns more rows.
   `UnmappedAttributeException` instead of emitting a query Elasticsearch would coerce
   ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). The positional overloads
   carry no scalar types, so they translate comparisons only through overrides.
+- **Breaking.** Collection membership (`x in R.attr.list`) and `hasIntersection`, flat or over a
+  `map()` projection, need the collection's element type in `scalarTypes` too, and drop a literal
+  of the wrong type instead of letting Elasticsearch coerce it (`"2"` matched a `double` element 2.0).
 - **Breaking.** `size()` over a field declared in neither `nestedPaths` nor `collectionFields`
   throws. `size(aString) > 0` used to emit `exists` (over-granting the empty string) and
   `size(aNumber) > 0` matched rows where CEL errors. A flat `keyword` array now needs

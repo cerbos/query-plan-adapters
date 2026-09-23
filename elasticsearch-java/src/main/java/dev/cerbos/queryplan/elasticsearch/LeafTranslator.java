@@ -97,8 +97,22 @@ final class LeafTranslator {
             }
             value = members;
         }
+        if (!variableFirst && "in".equals(normalizedOperator)
+                && !options.operatorOverrides().containsKey("in")
+                && !inhabits(declaredElementType(field, "in", operands), value)) {
+            // A value of the wrong type is never an element: CEL's `in` is heterogeneous equality
+            // against each element, and the negated form was refused above.
+            return Queries.matchNone();
+        }
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
             rejectNullIntersection(values);
+            if (!options.operatorOverrides().containsKey("hasIntersection")) {
+                List<?> members = typedIntersection(field, values, operands);
+                if (members.isEmpty()) {
+                    return Queries.matchNone();
+                }
+                value = members;
+            }
         }
         if ("in".equals(normalizedOperator) && value instanceof List<?> values
                 && values.stream().anyMatch(Objects::isNull)) {
@@ -178,6 +192,26 @@ final class LeafTranslator {
             throw bareTemporalComparison();
         }
         return values.stream().filter(element -> element == null || inhabits(type, element)).toList();
+    }
+
+    /**
+     * The elements of a {@code hasIntersection} literal list that can equal an element of the
+     * collection {@code field}. A {@code terms} query coerces each term onto the field's mapped
+     * type, so an element of the wrong type is dropped here rather than left to match; an empty
+     * result means the intersection is false. The collection's declaration is its ELEMENT type.
+     */
+    List<?> typedIntersection(String field, List<?> values, List<Operand> operands) {
+        ScalarType type = declaredElementType(field, "hasIntersection", operands);
+        return values.stream().filter(element -> inhabits(type, element)).toList();
+    }
+
+    /** {@link #declaredType(String, String)} for a collection, whose declaration is per element. */
+    private ScalarType declaredElementType(String field, String operator, List<Operand> operands) {
+        ScalarType type = declaredType(field, operator);
+        if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
+            throw bareTemporalComparison();
+        }
+        return type;
     }
 
     /**

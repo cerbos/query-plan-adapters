@@ -430,6 +430,66 @@
         }
       }
     },
+    "eq-bool-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "eq-number-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 2
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "eq-string-vs-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "exists-on-empty": {
       "kind": "CONDITIONAL",
       "query": {
@@ -445,6 +505,31 @@
         }
       }
     },
+    "exists-tag-name-vs-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "match_none": { }
+                }
+              }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "gt-bare": {
       "kind": "CONDITIONAL",
       "query": {
@@ -452,6 +537,26 @@
           "aNumber": {
             "gt": 1
           }
+        }
+      }
+    },
+    "hasint-bool-list-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -495,6 +600,59 @@
                 ]
               }
             }
+          ]
+        }
+      }
+    },
+    "hasint-map-vs-number": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "nested": {
+                "path": "tags",
+                "query": {
+                  "terms": {
+                    "tags.name": [
+                      "public"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "bool": {
+                "must_not": [
+                  {
+                    "nested": {
+                      "path": "tags",
+                      "query": {
+                        "bool": {
+                          "must_not": [
+                            {
+                              "exists": {
+                                "field": "tags.name"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "hasint-number-list-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aNumberList": [
+            3
           ]
         }
       }
@@ -675,6 +833,26 @@
         }
       }
     },
+    "in-bool-list-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "in-empty": {
       "kind": "ALWAYS_DENIED"
     },
@@ -725,6 +903,36 @@
         }
       }
     },
+    "in-number-list": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aNumberList": [
+            2
+          ]
+        }
+      }
+    },
+    "in-number-list-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "minimum_should_match": 1,
+          "should": [
+            {
+              "match_none": { }
+            },
+            {
+              "term": {
+                "aNumber": {
+                  "value": 5
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "in-numbers": {
       "kind": "CONDITIONAL",
       "query": {
@@ -733,6 +941,16 @@
             2,
             3,
             5
+          ]
+        }
+      }
+    },
+    "in-scalar-number-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "terms": {
+          "aNumber": [
+            2
           ]
         }
       }
@@ -901,6 +1119,27 @@
                     }
                   }
                 ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ne-number-vs-string": {
+      "kind": "CONDITIONAL",
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "exists": {
+                "field": "aNumber"
+              }
+            },
+            {
+              "range": {
+                "aNumber": {
+                  "gt": 3
+                }
               }
             }
           ]

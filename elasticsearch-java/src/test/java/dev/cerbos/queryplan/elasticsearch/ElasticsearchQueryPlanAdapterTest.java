@@ -593,6 +593,40 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
+     * The {@code map()} projection of a {@code hasIntersection} lowers to a {@code terms} query on
+     * the projected sub-field of the nested path, built from the default lowering rather than an
+     * override — so the sub-field's declared type always decides which literal elements can match,
+     * and an undeclared sub-field is refused like any other compared field
+     * (cerbos/query-plan-adapters#496). The flat-collection forms are corpus actions
+     * ({@code hasint-number-list-vs-string}, {@code in-number-list-vs-string}); the corpus has no
+     * nested sub-field whose values a cross-type literal could be coerced onto, and the
+     * declaration is a caller argument it cannot vary.
+     */
+    @Test
+    void aMapProjectedIntersectionNeedsTheSubFieldsTypeAndDropsTheWrongOnes() {
+        Operand projection = expressionOperand("map",
+                variableOperand("request.resource.attr.tagObjects"),
+                lambdaOperand("t", variableOperand("t.name")));
+        Operand mixed = expressionOperand("hasIntersection", projection,
+                valueOperand(list(string("public"), number(5))));
+
+        Map<String, Object> missingProjection = nested("tagObjects",
+                mustNot(exists("tagObjects.name")));
+        assertEquals(Map.of("bool", Map.of("must", List.of(
+                        nested("tagObjects", Map.of("terms",
+                                Map.of("tagObjects.name", List.of("public")))),
+                        mustNot(missingProjection)))),
+                translate(mixed));
+        assertEquals(Map.of("match_none", Map.of()), translate(expressionOperand("hasIntersection",
+                projection, valueOperand(list(number(5))))));
+
+        IllegalArgumentException ex = refusal(mixed, OPTIONS.withScalarTypes(Map.of()));
+        assertInstanceOf(UnmappedAttributeException.class, ex);
+        assertTrue(ex.getMessage().startsWith("Field 'tagObjects.name' has no declared scalar type: "
+                + "hasIntersection"), ex.getMessage());
+    }
+
+    /**
      * Every refusal is one of three types, so a caller can route without matching on the message:
      * a shape the Query DSL cannot express, a variable the caller did not declare, or a plan that
      * violates the wire contract. All three are {@link IllegalArgumentException}, which stays the

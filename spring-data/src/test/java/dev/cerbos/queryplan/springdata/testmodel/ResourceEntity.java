@@ -80,6 +80,15 @@ public class ResourceEntity {
     @OneToMany(mappedBy = "resource", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<TagEntity> tags = new ArrayList<>();
 
+    // The corpus's homogeneous number and boolean lists, one related row per element (see
+    // NumberListElementEntity for why not an @ElementCollection). Seeded only by the
+    // adversarial suite, for the position-blind membership actions.
+    @OneToMany(mappedBy = "resource", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<NumberListElementEntity> aNumberList = new ArrayList<>();
+
+    @OneToMany(mappedBy = "resource", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<BoolListElementEntity> aBoolList = new ArrayList<>();
+
     @ManyToMany
     @JoinTable(name = "resource_category",
             joinColumns = @JoinColumn(name = "resource_id"),
@@ -144,6 +153,19 @@ public class ResourceEntity {
     public void setNested(NestedEmbeddable nested) { this.nested = nested; }
     public AdversarialParentEntity getParent() { return parent; }
     public void setParent(AdversarialParentEntity parent) { this.parent = parent; }
+
+    public List<NumberListElementEntity> getaNumberList() { return aNumberList; }
+    public List<BoolListElementEntity> getaBoolList() { return aBoolList; }
+
+    public ResourceEntity addNumberListElement(Double element) {
+        aNumberList.add(new NumberListElementEntity(element, this));
+        return this;
+    }
+
+    public ResourceEntity addBoolListElement(Boolean element) {
+        aBoolList.add(new BoolListElementEntity(element, this));
+        return this;
+    }
 
     public ResourceEntity addTag(String tagId, String tagName) {
         TagEntity t = new TagEntity(tagId, tagName, this);

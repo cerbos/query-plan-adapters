@@ -989,7 +989,7 @@ class TestAdversarialConformance:
 
         # Deliberate tripwires: a corpus edit must bump these in the same
         # change, so a new hostile action cannot join (or vanish) silently.
-        assert len(MANIFEST_ACTIONS) == 310
+        assert len(MANIFEST_ACTIONS) == 324
         assert len(SEEDS) == 29
         # Each of these carries a pinned message, so a shape gained or lost has
         # to be re-triaged here rather than joining the throw suite unnoticed.
@@ -1109,6 +1109,11 @@ class TestAdversarialConformance:
         # executes on PostgreSQL any more, and one joining it should be looked at.
         assert DECLARED_COLLECTION_ACTIONS == [
             "cr-size-frac-ge",
+            "hasint-bool-list-vs-string",
+            "hasint-number-list-vs-string",
+            "in-bool-list-vs-string",
+            "in-number-list",
+            "in-number-list-vs-string",
             "index-bool-list",
             "index-bool-list-not-eq",
             "index-bool-list-vs-number",
@@ -1120,6 +1125,8 @@ class TestAdversarialConformance:
             "index-scalar-list-not-eq",
             "index-scalar-list-null",
             "not-empty",
+            "not-null-in-number-list",
+            "null-in-number-list",
             "size-ge-one",
             "size-threshold",
             "vf-size",

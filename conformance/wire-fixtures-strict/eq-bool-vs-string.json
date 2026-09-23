@@ -1,0 +1,40 @@
+{
+  "action": "eq-bool-vs-string",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "or",
+        "operands": [
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "eq",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,13 +1,15 @@
-"""Declared collection storage: CEL ``size()`` and constant indexing over one column.
+"""Declared collection storage: CEL ``size()``, constant indexing and literal membership.
 
 A collection attribute has no portable translation until the caller says how it is stored. The
 plan names ``R.attr.tags`` and nothing else, and the right SQL for ``size(R.attr.tags)`` differs
 for a JSON document, a PostgreSQL array and a related table -- so the adapter never infers it. A
 relation in particular has no positional order at all, which is why ``R.attr.tags[0]`` cannot be
 read from one. ``CollectionColumn`` is the declaration, and it is read only where a collection's
-own storage decides the answer: the operand of ``size()`` and the collection an ``index`` reads.
-Every other operator keeps resolving the attribute through ``attr_map``, so a caller can keep a
-relation marker there for its collection macros and declare the ordered column beside it.
+own storage decides the answer: the operand of ``size()``, the collection an ``index`` reads, and
+-- for an attribute ``attr_map`` does not map -- the collection a literal ``in`` or
+``hasIntersection`` searches. Every other operator keeps resolving the attribute through
+``attr_map``, so a caller can keep a relation marker there for its collection macros and membership
+and declare the ordered column beside it.
 
 The semantics are the drizzle adapter's (cerbos/query-plan-adapters#225), which is what makes the
 two storage names the same strings in both:
@@ -21,6 +23,9 @@ two storage names the same strings in both:
   JSON boolean. SQLite and MySQL store a JSON true as 1, so reading the element back as SQL and
   comparing it with the literal would make ``[true][0] == 1`` true; the element's JSON type is
   checked first (the corpus's ``index-bool-list-vs-number`` and ``index-number-list-vs-bool``).
+  Membership keeps them the same way: ``"2" in [2]`` and ``"true" in [true]`` are false, and a
+  ``hasIntersection`` literal list may mix types, each element matching only its own
+  (``in-number-list-vs-string``, ``hasint-number-list-vs-string`` and their boolean mirrors).
 - ``size()`` of an empty collection is 0 and of an absent one is UNKNOWN, so ``size(x) == 0``
   selects the empty rows and never the missing ones.
 
@@ -124,6 +129,39 @@ def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> A
     raise ValueError(INDEXED_VALUE_REFUSAL)
 
 
+#: The refusal for a membership in a declared collection whose other side is not a scalar literal.
+MEMBERSHIP_REFUSAL = (
+    "Membership in a declared collection supports only scalar literal elements"
+)
+
+
+def collection_membership(declared: CollectionColumn, values: Any) -> Any:
+    """Whether a declared collection holds any of ``values``, keeping JSON's types.
+
+    ``x in collection`` is one value and ``hasIntersection(collection, [...])`` a list of them.
+    An SQL NULL collection, or a JSON value that is not an array, is UNKNOWN, as it is for
+    ``size()``: CEL raises for a missing attribute, so a negated membership must deny it too.
+    An empty ``values`` list is FALSE for every present collection.
+    """
+    matches = []
+    for value in values:
+        if value is None:
+            matches.append(_MemberIsNull())
+        elif isinstance(value, bool):
+            matches.append(_MemberEqualsBool(literal(value, Boolean)))
+        elif isinstance(value, (int, float)):
+            if not math.isfinite(value):
+                raise ValueError(
+                    "Membership in a declared collection requires a finite numeric literal"
+                )
+            matches.append(_MemberEqualsNumber(literal(value)))
+        elif isinstance(value, str):
+            matches.append(_MemberEqualsString(literal(value)))
+        else:
+            raise ValueError(MEMBERSHIP_REFUSAL)
+    return _CollectionContains(_document(declared), *matches)
+
+
 def _document(declared: CollectionColumn) -> Any:
     if declared.storage == "pgArray":
         return _PgArrayDocument(declared.column)
@@ -181,7 +219,49 @@ class _ElementEqualsString(FunctionElement):
     inherit_cache = True
 
 
+class _CollectionContains(FunctionElement):
+    """Whether any element satisfies one of the ``_Member*`` tests that follow the document."""
+
+    name = "cerbos_collection_contains"
+    type = Boolean()
+    inherit_cache = True
+
+
+# The per-value tests `_CollectionContains` ORs together. Each reads the one element the
+# enclosing EXISTS is iterating, under the alias below, so it renders only inside that construct.
+_ELEMENT = "cerbos_element"
+
+
+class _MemberIsNull(FunctionElement):
+    name = "cerbos_member_is_null"
+    type = Boolean()
+    inherit_cache = True
+
+
+class _MemberEqualsBool(FunctionElement):
+    name = "cerbos_member_equals_bool"
+    type = Boolean()
+    inherit_cache = True
+
+
+class _MemberEqualsNumber(FunctionElement):
+    name = "cerbos_member_equals_number"
+    type = Boolean()
+    inherit_cache = True
+
+
+class _MemberEqualsString(FunctionElement):
+    name = "cerbos_member_equals_string"
+    type = Boolean()
+    inherit_cache = True
+
+
 _CONSTRUCTS = (
+    _CollectionContains,
+    _MemberIsNull,
+    _MemberEqualsBool,
+    _MemberEqualsNumber,
+    _MemberEqualsString,
     _JsonDocument,
     _PgArrayDocument,
     _CollectionSize,
@@ -311,6 +391,44 @@ def _sqlite_equals_string(element, compiler, **kw):
     )
 
 
+@compiles(_CollectionContains, "sqlite")
+def _sqlite_contains(element, compiler, **kw):
+    document, *matches = _args(element, compiler, **kw)
+    # json_each() over a correlated column; its `type` column tells a JSON true from a JSON 1
+    # and a JSON "2" from a JSON 2, which its `value` column (1, 1, '2', 2) cannot.
+    condition = " OR ".join(f"({match})" for match in matches) or "0"
+    return (
+        f"CASE WHEN json_type({document}) = 'array' THEN EXISTS "
+        f"(SELECT 1 FROM json_each({document}) AS {_ELEMENT} WHERE {condition}) END"
+    )
+
+
+@compiles(_MemberIsNull, "sqlite")
+def _sqlite_member_is_null(element, compiler, **kw):
+    return f"{_ELEMENT}.type = 'null'"
+
+
+@compiles(_MemberEqualsBool, "sqlite")
+def _sqlite_member_equals_bool(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return f"{_ELEMENT}.type IN ('true', 'false') AND {_ELEMENT}.value = {value}"
+
+
+@compiles(_MemberEqualsNumber, "sqlite")
+def _sqlite_member_equals_number(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return (
+        f"CASE WHEN {_ELEMENT}.type IN ('integer', 'real') "
+        f"THEN CAST({_ELEMENT}.value AS REAL) = CAST({value} AS REAL) ELSE 0 END"
+    )
+
+
+@compiles(_MemberEqualsString, "sqlite")
+def _sqlite_member_equals_string(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return f"{_ELEMENT}.type = 'text' AND {_ELEMENT}.value = {value}"
+
+
 # -- PostgreSQL ------------------------------------------------------------------------------
 
 # Element types whose SQL value is the value the application sends to Cerbos. Floating-point
@@ -407,3 +525,42 @@ def _postgresql_equals_string(element, compiler, **kw):
         lambda item, value: f"{item} = to_jsonb(CAST({value} AS TEXT))",
         **kw,
     )
+
+
+@compiles(_CollectionContains, "postgresql")
+def _postgresql_contains(element, compiler, **kw):
+    document, *matches = _args(element, compiler, **kw)
+    condition = " OR ".join(f"({match})" for match in matches) or "false"
+    return (
+        f"CASE WHEN jsonb_typeof({document}) = 'array' THEN EXISTS "
+        f"(SELECT 1 FROM jsonb_array_elements({document}) AS {_ELEMENT} "
+        f"WHERE {condition}) END"
+    )
+
+
+@compiles(_MemberIsNull, "postgresql")
+def _postgresql_member_is_null(element, compiler, **kw):
+    return f"jsonb_typeof({_ELEMENT}.value) = 'null'"
+
+
+@compiles(_MemberEqualsBool, "postgresql")
+def _postgresql_member_equals_bool(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return f"{_ELEMENT}.value = to_jsonb(CAST({value} AS BOOLEAN))"
+
+
+@compiles(_MemberEqualsNumber, "postgresql")
+def _postgresql_member_equals_number(element, compiler, **kw):
+    # A CASE for the reason `_postgresql_equals_number` gives: casting a string element raises.
+    (value,) = _args(element, compiler, **kw)
+    return (
+        f"CASE WHEN jsonb_typeof({_ELEMENT}.value) = 'number' "
+        f"THEN CAST({_ELEMENT}.value #>> '{{}}' AS FLOAT(53)) = CAST({value} AS FLOAT(53)) "
+        "ELSE false END"
+    )
+
+
+@compiles(_MemberEqualsString, "postgresql")
+def _postgresql_member_equals_string(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return f"{_ELEMENT}.value = to_jsonb(CAST({value} AS TEXT))"

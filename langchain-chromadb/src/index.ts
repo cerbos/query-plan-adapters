@@ -134,7 +134,31 @@ function isPlanComparison(operator: string): boolean {
 /** `{ field: { $op: literal } }`, once the literal has passed the comparison's validation. */
 function emit(field: string, operator: string, value: unknown): Where {
   const { chroma, literal } = COMPARISONS.get(operator)!;
-  return { [field]: { [chroma]: literal(value, operator) } } as Where;
+  const validated = literal(value, operator);
+  if (Array.isArray(validated)) {
+    // Chroma rejects a `$in`/`$nin` list whose values are not all one type, so a mixed CEL list
+    // (`x in ["5", 2]`) is split into one list per scalar type. That is exact rather than a
+    // coercion because Chroma's comparisons are type-exact, as CEL's heterogeneous equality is:
+    // `"5"` never matches a stored 5, and `$nin: ["5"]` holds for every stored number. So
+    // membership is the disjunction of the per-type memberships, and `nin` their conjunction.
+    const groups = splitByType(validated);
+    if (groups.length > 1) {
+      const clauses = groups.map((group) => ({ [field]: { [chroma]: group } }));
+      return (operator === "in" ? { $or: clauses } : { $and: clauses }) as Where;
+    }
+  }
+  return { [field]: { [chroma]: validated } } as Where;
+}
+
+/** A literal list partitioned by scalar type, each partition in first-appearance order. */
+function splitByType(values: ChromaLiteral[]): ChromaLiteral[][] {
+  const groups = new Map<string, ChromaLiteral[]>();
+  for (const value of values) {
+    const group = groups.get(typeof value);
+    if (group) group.push(value);
+    else groups.set(typeof value, [value]);
+  }
+  return [...groups.values()];
 }
 
 function unsupported(operator: string): UnsupportedOperatorError {
@@ -208,13 +232,6 @@ function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
     throw new UnsupportedOperatorError(
       operator,
       `${operator} requires a list containing only finite numbers, strings, or booleans`,
-    );
-  }
-  const firstType = typeof value[0];
-  if (!value.every((item) => typeof item === firstType)) {
-    throw new UnsupportedOperatorError(
-      operator,
-      `${operator} requires a list whose values have one scalar type`,
     );
   }
   return value;

@@ -213,6 +213,15 @@ const DB_DECIDED_DEFAULT = [
   "root-not-bool",
   "type-number-string",
   "type-string-number",
+  // A literal the field's stored type cannot equal (#496's scalar half). Convex compares values
+  // across types by its total type order and never coerces, so `aNumber == "5"`,
+  // `aBool == "true"` and `aString == 0` are false and `aNumber != "5"` is true on every
+  // document that carries the field — CEL's heterogeneous equality, answered by the engine.
+  "eq-bool-vs-string",
+  "eq-number-vs-string",
+  "eq-string-vs-number",
+  "in-scalar-number-vs-string",
+  "ne-number-vs-string",
 ].sort();
 
 /**
@@ -544,10 +553,10 @@ describe("adversarial conformance corpus", () => {
         ].filter(Boolean).length !== 1,
     );
 
-    expect(allActions.size).toBe(310);
+    expect(allActions.size).toBe(324);
     expect(CONVEX_UNSUPPORTED).toHaveLength(26);
     expect(CONVEX_SUPPORTED_EXPECTED).toHaveLength(7);
-    expect(ORACLE_ACTIONS).toHaveLength(278);
+    expect(ORACLE_ACTIONS).toHaveLength(292);
     expect(THROWING_ACTIONS).toHaveLength(30);
     expect(misclassified).toEqual([]);
   });
@@ -671,7 +680,7 @@ describe("adversarial conformance corpus", () => {
       // The pushdown leg only needs to re-execute actions whose routing changes.
       moved: pushdown.db.filter((action) => !base.db.includes(action)),
     }).toEqual({
-      total: 278,
+      total: 292,
       defaultDb: DB_DECIDED_DEFAULT,
       // Exactly two corpus actions split: `buildFilters` only splits a root `and`, and
       // rel-hop-and-root (#375) and compose-variable (#487) are the hostile shapes rooted there
@@ -679,10 +688,10 @@ describe("adversarial conformance corpus", () => {
       // and `aOptionalString` are `nullable` under each.
       defaultSplit: SPLIT_ACTIONS,
       defaultUnconditional: UNCONDITIONAL_ACTIONS,
-      defaultPostCount: 233,
+      defaultPostCount: 242,
       pushdownDb: DB_DECIDED_PUSHDOWN,
       pushdownSplit: SPLIT_ACTIONS,
-      pushdownPostCount: 222,
+      pushdownPostCount: 231,
       moved: PUSHDOWN_ONLY_ACTIONS,
     });
   });

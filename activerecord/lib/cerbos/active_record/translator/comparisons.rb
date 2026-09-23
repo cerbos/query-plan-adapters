@@ -64,11 +64,14 @@ module Cerbos
           when Numeric then :number
           when true, false then :boolean
           else
-            type = column_type(value)
-            if STRING_COLUMN_TYPES.include?(type) then :string
-            elsif NUMERIC_COLUMN_TYPES.include?(type) then :number
-            elsif type == :boolean then :boolean
-            end
+            kind_of_column_type(column_type(value))
+          end
+        end
+
+        def kind_of_column_type(type)
+          if STRING_COLUMN_TYPES.include?(type) then :string
+          elsif NUMERIC_COLUMN_TYPES.include?(type) then :number
+          elsif type == :boolean then :boolean
           end
         end
 

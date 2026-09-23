@@ -1,0 +1,40 @@
+{
+  "action": "ne-number-vs-string",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "and",
+        "operands": [
+          {
+            "expression": {
+              "operator": "ne",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "gt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 3
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -64,6 +64,8 @@ const (
 	labelTable       = "adversarial_label"
 	parentTable      = "adversarial_parent"
 	innerTable       = "adversarial_inner"
+	numberElemTable  = "adversarial_number_elem"
+	boolElemTable    = "adversarial_bool_elem"
 )
 
 // -- dialect targets ---------------------------------------------------------------------------
@@ -145,6 +147,16 @@ CREATE TABLE adversarial_inner (
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
+CREATE TABLE adversarial_number_elem (
+	pk           integer PRIMARY KEY AUTOINCREMENT,
+	value        real,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_bool_elem (
+	pk           integer PRIMARY KEY AUTOINCREMENT,
+	value        integer,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
 `
 
 // The PostgreSQL schema uses native boolean and timestamptz columns, so it exercises the typed
@@ -199,6 +211,16 @@ CREATE TABLE adversarial_inner (
 	a_number           bigint  NOT NULL,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
+);
+CREATE TABLE adversarial_number_elem (
+	pk           bigserial PRIMARY KEY,
+	value        double precision,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_bool_elem (
+	pk           bigserial PRIMARY KEY,
+	value        boolean,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 `
 
@@ -275,6 +297,16 @@ CREATE TABLE adversarial_inner (
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	parent_id          varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
+CREATE TABLE adversarial_number_elem (
+	pk           bigint AUTO_INCREMENT PRIMARY KEY,
+	value        double,
+	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+);
+CREATE TABLE adversarial_bool_elem (
+	pk           bigint AUTO_INCREMENT PRIMARY KEY,
+	value        boolean,
+	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+);
 `
 
 func openMySQL(t *testing.T) *sql.DB {
@@ -345,10 +377,13 @@ func buildMapper() cerbosent.Mapper {
 	tags := &cerbosent.Relation{
 		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &cerbosent.Entry{Column: "name"},
+		Field: &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
 		Fields: map[string]cerbosent.Entry{
-			"id":   {Column: "tag_id"},
-			"name": {Column: "name"},
+			"id": {Column: "tag_id"},
+			// Declared, like every other string column: `t.name == 0` is false in CEL, and an
+			// undeclared column hands the number to the engine, which coerces (MySQL reads each
+			// non-numeric name as 0) or fails to execute (PostgreSQL has no text = double).
+			"name": {Column: "name", ValueType: cerbosent.ValueString},
 		},
 	}
 
@@ -440,6 +475,14 @@ func buildMapper() cerbosent.Mapper {
 		"request.resource.attr.tags":       {Relation: tags},
 		"request.resource.attr.tagNames":   {Relation: &tagNames},
 		"request.resource.attr.categories": {Relation: categories},
+
+		// The two homogeneous scalar lists, one element per row of a related table, the way
+		// tagNames is stored. Declaring the element's type is what lets a literal of another
+		// type (`"2" in aNumberList`) be answered false as CEL answers it, rather than handed to
+		// an engine that coerces '2' onto a numeric column. A null element is a real null
+		// member, as the corpus spells it, so the elements take the explicit-null convention.
+		"request.resource.attr.aNumberList": {Relation: elementList(numberElemTable, cerbosent.Entry{ValueType: cerbosent.ValueNumber})},
+		"request.resource.attr.aBoolList":   {Relation: elementList(boolElemTable, cerbosent.Entry{ValueType: cerbosent.ValueBool})},
 
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
 		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
@@ -583,6 +626,15 @@ func (h *harness) seed(t *testing.T) {
 				tag.ID, nullableString(tag.Name), seed.ID)
 		}
 
+		// A relation has no row order, which is why `index` over these lists stays refused;
+		// membership and hasIntersection are position-blind and need none.
+		for _, element := range seed.ANumberList {
+			h.exec(t, numberElemTable, []string{"value", "resource_id"}, nullableFloat(element), seed.ID)
+		}
+		for _, element := range seed.ABoolList {
+			h.exec(t, boolElemTable, []string{"value", "resource_id"}, nullableBool(element), seed.ID)
+		}
+
 		for i, subName := range seed.SubCategoryNames {
 			catID, subID := categoryID(seed, i), subCategoryID(seed, i)
 			h.exec(t, categoryTable, []string{"id", "name", "resource_id"}, catID, "business", seed.ID)
@@ -629,6 +681,26 @@ func nullableFloat(v *float64) any {
 		return nil
 	}
 	return *v
+}
+
+func nullableBool(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// elementList maps a scalar list stored one element per row of table.
+// element.ValueType declares the element type; the column and the explicit-null convention are
+// the same for both lists.
+func elementList(table string, element cerbosent.Entry) *cerbosent.Relation {
+	element.Column = "value"
+	element.NullConvention = cerbosent.NullConventionExplicit
+	return &cerbosent.Relation{
+		Table:        table,
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Field: &element,
+	}
 }
 
 // -- the two sides of the differential ---------------------------------------------------------
@@ -686,12 +758,11 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"tags":       tags,
 		"tagNames":   tagNames,
 		"categories": categories,
-		// Sent verbatim, null elements included, and stored nowhere: the adapter refuses every
-		// shape over them. A positional read is `index`, which has no case in the vendored
-		// translator (a relation has no row order to read position 0 from), so the walk fails
-		// closed before any mapping is consulted and there is no column for a filter to read. The
-		// oracle still has to see them, because the degeneracy guard proves each refused action
-		// is a live, discriminating probe rather than one the PDP denies for every row.
+		// Sent verbatim, null elements included, and stored one element per row of a related
+		// table. Membership and hasIntersection over them are position-blind and compared. A
+		// positional read is `index`, which has no case in the vendored translator (a relation has
+		// no row order to read position 0 from), so those actions fail closed before any mapping
+		// is consulted; the degeneracy guard still proves each one a live, discriminating probe.
 		"aNumberList": scalarList(seed.ANumberList),
 		"aBoolList":   scalarList(seed.ABoolList),
 	}
@@ -887,7 +958,7 @@ func runConformance(t *testing.T, h *harness) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 310, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 324, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 29, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.

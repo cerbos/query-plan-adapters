@@ -307,7 +307,7 @@ class ElasticsearchTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 123, "unconditional", 7, "throwing", 180),
+                Map.of("conditional", 135, "unconditional", 7, "throwing", 182),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -645,12 +645,12 @@ class ElasticsearchTranslatorTest {
                             Map.entry("collection emptiness", 2),
                             Map.entry("conditional value as a condition", 3),
                             Map.entry("exists_one", 2),
-                            Map.entry("negated membership in a collection", 2),
+                            Map.entry("negated membership in a collection", 3),
                             Map.entry("sub-millisecond timestamp", 2),
                             Map.entry("count over a computed collection", 2),
                             Map.entry("hierarchy path built from a field", 2),
                             Map.entry("negated hasIntersection over a collection", 2),
-                            Map.entry("null in a document array", 1),
+                            Map.entry("null in a document array", 2),
                             Map.entry("null in an intersection", 4),
                             Map.entry("empty hierarchy delimiter", 1),
                             Map.entry("top-level regex alternation", 2))),

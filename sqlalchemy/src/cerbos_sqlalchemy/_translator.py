@@ -38,7 +38,9 @@ from cerbos_sqlalchemy._plan import (
 )
 from cerbos_sqlalchemy.collection_storage import (
     INDEXED_VALUE_REFUSAL,
+    MEMBERSHIP_REFUSAL,
     CollectionColumn,
+    collection_membership,
     collection_size,
     indexed_equality,
     require_index_position,
@@ -48,6 +50,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
 
 _BOOLEAN_OPERATORS = frozenset({"and", "or", "not"})
+_MEMBERSHIP_OPERATORS = frozenset({"in", "hasIntersection"})
 _ORDERING_AND_EQUALITY = frozenset({"eq", "ne", "lt", "le", "gt", "ge"})
 
 
@@ -265,6 +268,51 @@ class Translator:
             raise ValueError(f"size takes 1 operand, got {len(expression.operands)}")
         return collection_size(declared)
 
+    def _storage_only_collection(
+        self, operand: Operand
+    ) -> Union[CollectionColumn, None]:
+        """The declared storage of an attribute ``attr_map`` does not map, else None.
+
+        Membership reads a declaration only for such an attribute. One ``attr_map`` also maps
+        keeps its membership there -- typically a relation marker an override translates -- so
+        a declaration added for ``size()`` and ``index`` never changes how membership is read.
+        """
+        if (
+            isinstance(operand, Variable)
+            and operand.name in self._declared_collections
+            and operand.name not in self._attr_map
+        ):
+            return self._declared_collections[operand.name]
+        return None
+
+    def _declared_membership(self, operator: str, operands: Tuple[Operand, ...]) -> Any:
+        """``literal in collection`` or ``hasIntersection`` over a declared collection, else None.
+
+        Only a scalar literal element, or a literal list of them, is translated: an element that
+        is itself a column or an expression would have to be compared with a JSON element
+        whose type it cannot see, so it is refused rather than coerced.
+        """
+        if operator not in _MEMBERSHIP_OPERATORS or len(operands) != 2:
+            return None
+        declared = [self._storage_only_collection(operand) for operand in operands]
+        if not any(found is not None for found in declared):
+            return None
+        if operator == "in":
+            needle, collection = operands
+            if declared[1] is None or not isinstance(needle, Value):
+                raise ValueError(MEMBERSHIP_REFUSAL)
+            if isinstance(needle.value, (list, dict)):
+                raise ValueError(MEMBERSHIP_REFUSAL)
+            return collection_membership(declared[1], [needle.value])
+        # hasIntersection is symmetric, and the planner keeps the policy's operand order.
+        position = 0 if declared[0] is not None else 1
+        values = operands[1 - position]
+        if not isinstance(values, Value) or not isinstance(values.value, list):
+            raise ValueError(MEMBERSHIP_REFUSAL)
+        if any(isinstance(value, (list, dict)) for value in values.value):
+            raise ValueError(MEMBERSHIP_REFUSAL)
+        return collection_membership(declared[position], values.value)
+
     @staticmethod
     def _refuse_undeclared_index(collection: Union[Operand, None]) -> NoReturn:
         if isinstance(collection, Variable):
@@ -342,6 +390,9 @@ class Translator:
             return self._declared_collection_value(expression, declared)
         if operator == "index" and "index" not in self._overrides:
             self._refuse_undeclared_index(operands[0] if operands else None)
+        membership = self._declared_membership(operator, operands)
+        if membership is not None:
+            return membership
 
         if operator in EQUALITY_FAMILY and len(operands) == 2 and _all_leaves(operands):
             # A lambda body is evaluated as a value. Preserve the same per-attribute
@@ -413,6 +464,9 @@ class Translator:
 
         if self._reads_declared_index(operands):
             return self._indexed_comparison(operator, operands)
+        membership = self._declared_membership(operator, operands)
+        if membership is not None:
+            return membership
 
         has_nested_expression = not _all_leaves(operands)
 

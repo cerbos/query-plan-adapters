@@ -264,7 +264,7 @@ describe("corpus shapes", () => {
       conditional: CONDITIONAL_ACTIONS.length,
       unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
       throwing: throwing.length,
-    }).toEqual({ conditional: 240, unconditional: 7, throwing: 63 });
+    }).toEqual({ conditional: 254, unconditional: 7, throwing: 63 });
   });
 
   /**
@@ -296,6 +296,14 @@ describe("corpus shapes", () => {
         "index-bool-list-not-eq",
         "index-bool-list-vs-number",
         "index-number-list-vs-bool",
+        // Membership in declared indexed storage reads the same native per-dialect elements.
+        "in-number-list",
+        "in-number-list-vs-string",
+        "in-bool-list-vs-string",
+        "hasint-number-list-vs-string",
+        "hasint-bool-list-vs-string",
+        "null-in-number-list",
+        "not-null-in-number-list",
       ].includes(action)) continue;
       const expectation = RECORDED.get(action)!.expectation;
       if (expectation.kind !== PlanKind.CONDITIONAL) continue;

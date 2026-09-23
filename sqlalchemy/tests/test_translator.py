@@ -338,7 +338,7 @@ class TestCorpusShapes:
             "conditional": len(CONDITIONAL_ACTIONS),
             "unconditional": len(UNCONDITIONAL_ACTIONS),
             "throwing": len(THROWING_ACTIONS),
-        } == {"conditional": 250, "unconditional": 3, "throwing": 57}
+        } == {"conditional": 264, "unconditional": 3, "throwing": 57}
 
     def test_the_asset_declares_the_compiler_that_wrote_it(self):
         # The asset is one compiler's rendering of the adapter's expression trees, and the two
@@ -774,6 +774,33 @@ class TestDeclaredCollectionStorage:
         )
         assert rendered in statement
         assert "[" not in where_clause(statement)
+
+    def test_a_pg_array_answers_membership_through_to_jsonb(self):
+        statement, _ = render(
+            translate(
+                "hasint-number-list-vs-string",
+                collection_columns=PG_ARRAY_COLLECTION_COLUMNS,
+            ),
+            "postgresql",
+        )
+        assert (
+            "jsonb_array_elements(to_jsonb(adversarial_resource.a_number_list_array))"
+            in statement
+        )
+
+    def test_an_attr_map_entry_keeps_membership_off_the_declaration(self):
+        # Membership reads the declaration only for an attribute `attr_map` does not map, so
+        # declaring storage for `size()` and `index` never moves a relation marker's membership.
+        # The corpus maps neither number nor boolean list, so the mapped side is caller-only.
+        attr_map = {
+            **ATTR_MAP,
+            "request.resource.attr.aNumberList": AdvResource.a_number_list_json,
+        }
+        mapped, _ = render(translate("in-number-list", attr_map=attr_map), "sqlite")
+        declared, _ = render(translate("in-number-list"), "sqlite")
+
+        assert "json_each(adversarial_resource.a_number_list_json)" in declared
+        assert "json_each" not in mapped
 
     def test_two_positions_do_not_share_a_cached_statement(self):
         # The position is inline SQL rather than a bind, so it has to reach the statement

@@ -199,16 +199,16 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 57 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms (bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, a disjunction of two scalar predicates); plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, membership in a map literal (folded by the planner to its key list), and a double literal beyond int64 on a double field |
-| Fail-closed | 240 reference conformance actions — among them positional access into the number and boolean lists, which has no `Where` form — plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (251 actions total) |
+| Oracle-tested | 62 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms (bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, a disjunction of two scalar predicates); plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, membership in a map literal (folded by the planner to its key list), a double literal beyond int64 on a double field, and a literal of the wrong type against a scalar key (`aNumber == "5"`, `aString == 0`, `aBool == "true"`, `aNumber != "5"`, `aNumber in ["5", 2]`), which Chroma answers as CEL does because its comparisons are type-exact |
+| Fail-closed | 249 reference conformance actions — among them positional access into the number and boolean lists, which has no `Where` form, and membership (`x in list`, `null in list`, `hasIntersection`) in those lists, whose empty lists and null elements the pinned Chroma stack refuses to store — plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (260 actions total) |
 | Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
 | Attribute NULL convention | Also representation-independent: Chroma metadata has no null value, so a NULL column is stored as an absent key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused |
 | Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
 
 Every fail-closed shape's error message is pinned in `conformance/actions.json` and asserted here.
-The translator unit test also pins **where** each of the 252 refusals (the 251 fail-closed actions
+The translator unit test also pins **where** each of the 261 refusals (the 260 fail-closed actions
 plus `null-eq-missing`) is raised across the adapter's nine rejection sites; `binaryOperands`
-refusing a computed operand accounts for 152 of them, since arithmetic, casts, ternaries,
+refusing a computed operand accounts for 154 of them, since arithmetic, casts, ternaries,
 projections and above-cap macros all reach the wire as an operand that is neither a key nor a
 literal.
 
@@ -230,6 +230,11 @@ flat metadata on the record being matched, and every shape that would reach a se
 
 ## Behaviour changes
 
+- **Widening:** a membership list mixing scalar types (`R.attr.x in ["5", 2]`) is split into one
+  `$in` per type under an `$or` (`$nin` per type under an `$and` when negated), because Chroma
+  rejects a mixed `$in`/`$nin` list. It used to be refused with `in requires a list whose values
+  have one scalar type`. The split is exact: Chroma's comparisons are type-exact, so `"5"` never
+  matches a stored 5.
 - **Breaking (types, 0.2.0)** — `QueryPlanToChromaDBResult` is a discriminated union; code that
   constructs result objects must supply the payload for its kind. Runtime output is unchanged.
 - Refusals of a well-formed plan throw `UnsupportedOperatorError` (with `operator`) instead of a
@@ -260,7 +265,7 @@ demo/scripts/run-example.sh langchain-chromadb
 `golden/expectations.json`. Because a `Where` clause is JSON, each entry is the translator's
 `{ kind, filters? }` result verbatim, keyed by action name; a literal JSON cannot carry fails
 regeneration. A refused action has no entry (its message lives in `conformance/actions.json`) —
-that is 252 of the corpus's 310 shapes. A wire fixture in neither place fails the suite. The suite
+that is 261 of the corpus's 324 shapes. A wire fixture in neither place fails the suite. The suite
 also asserts, across every translated action, that each field is a mapped key, no `$not`/`$nor`
 is emitted, inequalities appear only on `required` fields, and fractional thresholds only on
 `numericType: "float"` fields. See "Golden expectations" in

@@ -115,9 +115,9 @@ class AdversarialConformanceTest {
      * {@code note} is corpus documentation this harness never reads; it is named so that strict
      * decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
      *
-     * <p>{@code aNumberList} and {@code aBoolList} are the one exception to "both sides": they
-     * reach {@code check()} and nothing else (see {@link #asCheckResource}). Their elements are
-     * boxed because the corpus carries null elements, and a null element is a value CEL compares.
+     * <p>{@code aNumberList} and {@code aBoolList} elements are boxed because the corpus carries
+     * null elements, and a null element is a value CEL compares; each is persisted as a related
+     * row whose column is NULL (see {@link #seed}).
      */
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
@@ -593,6 +593,10 @@ class AdversarialConformanceTest {
             for (Tag tag : s.tags()) {
                 r.addTag(tag.id(), tag.name());
             }
+            // One related row per element, a null element as a NULL column — the value the
+            // check() side sends as an explicit null element (see asCheckResource).
+            s.aNumberList().forEach(r::addNumberListElement);
+            s.aBoolList().forEach(r::addBoolListElement);
             List<CategoryEntity> cats = new ArrayList<>();
             for (String subName : s.subCategoryNames()) {
                 catSeq++;
@@ -772,12 +776,12 @@ class AdversarialConformanceTest {
                 .toList()));
         // aNumberList / aBoolList: sent verbatim, every element in place and a null element as an
         // EXPLICIT null — `[null, 2][0] == 2` is a definite false in CEL, not an error, and a6
-        // exists to witness exactly that. They are deliberately NOT persisted and Corpus.MAPPING
-        // names neither: every action that reads them is a positional read (`[0]`), which this
-        // adapter refuses in the leaf operand before the list attribute is ever resolved, so no
-        // column would be read. SpringDataTranslatorTest's noRefusalIsTheMappingComingUpShort is
-        // what keeps that true — were index() ever lowered, the refusal would turn into the
-        // mapping's "Unknown attribute" and fail there rather than pass here.
+        // exists to witness exactly that. The persisted side is one related row per element
+        // with a NULL column for the null element (seed()), mapped in Corpus.MAPPING as the
+        // scalar projection of that relation — the same convention tagNames uses. The
+        // positional reads (`[0]`) never reach it: this adapter refuses index() in the leaf
+        // operand before the list attribute is resolved. The membership actions (`in`,
+        // hasIntersection) do.
         r = r.withAttribute("aNumberList", AttributeValue.listValue(s.aNumberList().stream()
                 .map(n -> n != null ? AttributeValue.doubleValue(n) : nullAttributeValue())
                 .toList()));
@@ -1335,7 +1339,7 @@ class AdversarialConformanceTest {
                         .filter(Boolean::booleanValue).count() != 1)
                 .toList();
 
-        assertEquals(310, manifest.size(),
+        assertEquals(324, manifest.size(),
                 "corpus size changed; triage the new action(s) before bumping this pin");
         assertEquals(29, SEEDS.size(), "seed count changed");
         // Throwing-count tripwire: each of these carries a pinned message, so a shape gained or

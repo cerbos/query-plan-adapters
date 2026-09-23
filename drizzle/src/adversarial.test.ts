@@ -1586,7 +1586,7 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(310);
+    expect(MANIFEST_ACTIONS.size).toBe(324);
     expect(NULL_REPRESENTATION_OMITTED).toHaveLength(1);
     // Deliberate tripwire: every one of these carries a pinned message, so a throwing action
     // gained or lost has to be re-triaged here rather than joining the suite unnoticed.
@@ -1625,6 +1625,17 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     "index-bool-list-not-eq",
     "index-bool-list-vs-number",
     "index-number-list-vs-bool",
+    // Membership in the same lists, searched element by element through the same declared
+    // storage, so each representation has to keep the element's JSON type there too.
+    "in-number-list",
+    "in-number-list-vs-string",
+    "in-bool-list-vs-string",
+    "hasint-number-list-vs-string",
+    "hasint-bool-list-vs-string",
+    // A null ELEMENT is a value: MySQL's JSON_TABLE reads it back as SQL NULL, so the membership
+    // test matches it by IS NULL, and `null in []` stays a definite false under the negation.
+    "null-in-number-list",
+    "not-null-in-number-list",
   ])("declared indexed storage: %s matches the oracle for every representation", async (action) => {
     const oracle = await oracleAllowedIds(action);
     expectOracleShape(action, oracle);
@@ -1731,6 +1742,11 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
   // an allowlist of eq/ne/in silently misses it. Enumerating the corpus rather than naming
   // shapes means a newly added action carrying a null constant is covered automatically.
   // Indexed null ELEMENTS are values, not missing attributes; their exception is oracle-proved.
+  const INDEXED_NULL_ELEMENT_ACTIONS = new Set([
+    "index-scalar-list-null",
+    "null-in-number-list",
+    "not-null-in-number-list",
+  ]);
   test("null literals under omitted are rejected unless they compare an indexed element", async () => {
     const nullCarrying: string[] = [];
     for (const action of [...MANIFEST_ACTIONS].sort()) {
@@ -1752,9 +1768,14 @@ describe(`adversarial conformance corpus (${STORE_NAME})`, () => {
     expect(nullCarrying).toContain("in-null-elem-hasint");
     expect(nullCarrying).toContain("index-scalar-list-null");
 
+    // Guard the exemption too: each one must still reach the loop, or it exempts nothing.
+    expect(nullCarrying).toEqual(
+      expect.arrayContaining([...INDEXED_NULL_ELEMENT_ACTIONS]),
+    );
+
     const notRejected: string[] = [];
     for (const action of nullCarrying) {
-      if (action === "index-scalar-list-null") {
+      if (INDEXED_NULL_ELEMENT_ACTIONS.has(action)) {
         expect(await adapterFilteredIds(action, "omitted", MAPPER_WITHOUT_NULL_CONVENTIONS))
           .toEqual(await oracleAllowedIds(action));
         continue;

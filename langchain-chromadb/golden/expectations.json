@@ -244,6 +244,57 @@
         }
       }
     },
+    "eq-bool-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aBool": {
+              "$eq": "true"
+            }
+          },
+          {
+            "aNumber": {
+              "$eq": 5
+            }
+          }
+        ]
+      }
+    },
+    "eq-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aNumber": {
+              "$eq": "5"
+            }
+          },
+          {
+            "aNumber": {
+              "$eq": 2
+            }
+          }
+        ]
+      }
+    },
+    "eq-string-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aString": {
+              "$eq": 0
+            }
+          },
+          {
+            "aNumber": {
+              "$eq": 5
+            }
+          }
+        ]
+      }
+    },
     "gt-bare": {
       "kind": "KIND_CONDITIONAL",
       "filters": {
@@ -288,6 +339,27 @@
         }
       }
     },
+    "in-scalar-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$or": [
+          {
+            "aNumber": {
+              "$in": [
+                "5"
+              ]
+            }
+          },
+          {
+            "aNumber": {
+              "$in": [
+                2
+              ]
+            }
+          }
+        ]
+      }
+    },
     "in-single": {
       "note": "The planner folds a single-element `in` to an equality before the adapter ever sees it, so this is `$eq` rather than a one-element `$in`. Pinned because it is a shape a reader would otherwise expect to be `$in` and reach for the wrong assertion.",
       "kind": "KIND_CONDITIONAL",
@@ -322,6 +394,23 @@
           {
             "aString": {
               "$ne": "one"
+            }
+          }
+        ]
+      }
+    },
+    "ne-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "filters": {
+        "$and": [
+          {
+            "aNumber": {
+              "$ne": "5"
+            }
+          },
+          {
+            "aNumber": {
+              "$gt": 3
             }
           }
         ]

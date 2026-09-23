@@ -449,7 +449,7 @@ class SpringDataTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 241, "unconditional", 3, "throwing", 66),
+                Map.of("conditional", 255, "unconditional", 3, "throwing", 66),
                 Map.of("conditional", conditionalActions().size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));

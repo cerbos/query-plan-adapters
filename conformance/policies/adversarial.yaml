@@ -3456,3 +3456,153 @@ resourcePolicy:
       condition:
         match:
           expr: V.compose_large
+
+    # ==================== Membership in number and boolean lists ====================
+    # The index-*-list actions above read ONE position; these ask the position-blind questions a
+    # list is usually asked — `x in list` (value-first `in`) and `hasIntersection(list, [...])` —
+    # of the same two homogeneous scalar lists. A store that compares an element with the literal
+    # after coercing one onto the other's type answers them differently from CEL, whose equality is
+    # heterogeneous: `"2" == 2` and `"true" == true` are false. Elasticsearch coerces a query term
+    # onto the field's mapped type, so a `terms` query for "2" matches a double 2.0; SQLite and
+    # MySQL read a JSON true as 1 (cerbos/query-plan-adapters#496 is the scalar-field half).
+
+    # The matching-type baseline, so the cross-type probes below cannot pass by an adapter refusing
+    # every membership in these lists. Oracle a1 [2], a3 [2, 3], a4 [3, 2] and a6 [null, 2]: the
+    # position does not matter, and a5 [-2], a7 [20] and c1 [0] must not match.
+    - actions: ["in-number-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '2 in R.attr.aNumberList'
+
+    # A STRING that spells an element of a number list. CEL: false for every row. A coercing store
+    # returns a1/a3/a4/a6 — the in-number-list rows. The aNumber == 5 branch keeps the oracle live
+    # at a1 alone, as index-bool-list-vs-number does.
+    - actions: ["in-number-list-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"2" in R.attr.aNumberList || R.attr.aNumber == 5'
+
+    # The boolean mirror: "true" is not true. A coercing store returns every list holding true —
+    # a1, a4 [null, true], a5 [false, true], b4, c1 [true, false]. Oracle a1, from the aNumber branch.
+    - actions: ["in-bool-list-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '"true" in R.attr.aBoolList || R.attr.aNumber == 5'
+
+    # An intersection whose literal list holds one element of each type: "2" can never equal a
+    # number element and 3 can. Oracle a3 [2, 3] and a4 [3, 2], the rows holding 3. A coercing store
+    # adds a1 [2] and a6 [null, 2] for the "2"; an adapter that refuses a mixed list refuses a
+    # shape CEL answers definitely.
+    - actions: ["hasint-number-list-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.aNumberList, ["2", 3])'
+
+    # The boolean intersection with nothing of the right type: false for every row in CEL, where a
+    # coercing store returns every list holding true. Oracle a1, from the aNumber branch.
+    - actions: ["hasint-bool-list-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.aBoolList, ["true"]) || R.attr.aNumber == 5'
+
+    # ==================== Cross-type comparisons on scalar attributes ====================
+    # The membership block above asks the cross-type question of a LIST; these ask it of single
+    # scalar attributes and of a nested collection's sub-field. CEL's equality is heterogeneous:
+    # `5 == "5"`, `true == "true"` and `"0" == 0` are all false, and `!=` is true. A store that
+    # converts one side onto the other's type answers differently: Elasticsearch coerces a term onto
+    # the mapped type, Mongoose casts a literal to the schema type, SQLite/H2/MySQL compare '5' = 5
+    # as true, and MySQL reads a non-numeric string as 0 (cerbos/query-plan-adapters#496).
+
+    # A string spelling a number, against the number attribute. Oracle a3 and a8 (aNumber 2), from
+    # the matching branch; a converting store adds a1, whose aNumber is 5.
+    - actions: ["eq-number-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber == "5" || R.attr.aNumber == 2'
+
+    # The negation, where coercion UNDER-grants: `5 != "5"` is true, so a1 belongs to the oracle
+    # (every row with aNumber > 3), and a store that reads "5" as 5 drops it.
+    - actions: ["ne-number-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber != "5" && R.attr.aNumber > 3'
+
+    # "true" is not true. A converting store returns every row whose aBool is true; oracle a1, from
+    # the aNumber branch.
+    - actions: ["eq-bool-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aBool == "true" || R.attr.aNumber == 5'
+
+    # The other direction: a NUMBER against the string attribute. h4's aString is "0", which a store
+    # that converts the literal to text matches; MySQL goes further and reads every non-numeric
+    # string as 0, so `aString = 0` holds for most rows. Oracle a1, from the aNumber branch.
+    - actions: ["eq-string-vs-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aString == 0 || R.attr.aNumber == 5'
+
+    # A mixed literal list against the number attribute: 2 can match and "5" cannot. Oracle a3/a8;
+    # a converting store adds a1.
+    - actions: ["in-scalar-number-vs-string"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.aNumber in ["5", 2]'
+
+    # A number against a nested collection's STRING sub-field. No tag name spells 0, so CEL is false
+    # for every row, but MySQL reads each non-numeric name as 0 and matches. Oracle a1, from the
+    # aNumber branch.
+    - actions: ["exists-tag-name-vs-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'R.attr.tags.exists(t, t.name == 0) || R.attr.aNumber == 5'
+
+    # The map() projection form of the same comparison, with one member of each type: "public" can
+    # match a tag name and 0 cannot. Oracle: the rows holding a "public" tag. A store that compares
+    # names with 0 numerically adds every other named tag (MySQL), or fails to execute (H2).
+    - actions: ["hasint-map-vs-number"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", 0])'
+
+    # A null ELEMENT of a number list is a value: `null in [null, 2]` is true (a6), and `null in []`
+    # is false. MySQL's JSON_TABLE reads a JSON null element back as SQL NULL, where `= NULL` is
+    # never true. Oracle a6.
+    - actions: ["null-in-number-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: 'null in R.attr.aNumberList'
+
+    # The negation: every row but a6, empty lists included, because `null in []` is a definite false.
+    - actions: ["not-null-in-number-list"]
+      effect: EFFECT_ALLOW
+      roles: ["USER"]
+      condition:
+        match:
+          expr: '!(null in R.attr.aNumberList)'

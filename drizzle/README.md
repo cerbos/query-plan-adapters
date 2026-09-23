@@ -206,6 +206,11 @@ const mapper = {
   `[null][0] != "public"` are both true. `nullAttributeRepresentation` does not affect elements.
 - The element's JSON type is checked before comparing, because CEL equality is heterogeneous
   (`[true][0] == 1` is false) while SQLite and MySQL read a JSON `true` back as `1`.
+- Membership: without a `relation`, the column is also the collection that `x in R.attr.list`
+  and `hasIntersection(R.attr.list, [...])` search. The adapter walks its elements (`json_each` on
+  SQLite, `jsonb_array_elements` on PostgreSQL, `JSON_TABLE` on MySQL) with the same JSON-type
+  check, so `"2" in [2]` matches nothing even where the store would equate the two. A NULL or
+  non-array column is SQL UNKNOWN. Any other scalar comparison against such a column throws.
 - An entry may carry both `column` + `indexable` and a `relation`: indexing reads the column,
   collection predicates read the relation. Both must hold exactly the list you send to Cerbos,
   including null elements; do not apply custom decoding that changes the values.
@@ -313,7 +318,7 @@ The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` d
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 245 reference conformance actions |
+| Oracle-tested | 259 reference conformance actions |
 | Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()` (SQL regex dialects do not follow CEL/RE2), indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list), `string()` over a number or text column (no `CAST` target works on all three stores: MySQL rejects `TEXT`/`VARCHAR` and PostgreSQL's `CHAR` is `character(1)`), CEL's `+` over strings (`\|\|` is logical OR on MySQL, and numeric `+` coerces strings to 0), a hierarchy path built by `list()` rather than read from a column, `mod` (reached through the `int()` cast), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the prefix `LIKE` would match the path itself) (63 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `nullAttributeRepresentation: "explicit"` on its mapper entry renders definitely, so a NULL row is included where CEL's null *value* says so. Undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
@@ -380,6 +385,17 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- An `in` list or `hasIntersection` list against a string, number or boolean column now drops the
+  constants of another type before binding them, because CEL's `5 in ["5", 2]` never matches the
+  `"5"`. The store used to convert it: SQLite and PostgreSQL read `'5'` as 5, and MySQL reads a
+  non-numeric string as 0, so `aNumber in ["5", 2]` returned rows with `aNumber` 5, and
+  `hasIntersection(tags.map(t, t.name), ["public", 0])` returned every tag on MySQL. Both were
+  over-grants (`in-scalar-number-vs-string`, `hasint-map-vs-number`). A list left with no
+  constant of the column's type is false.
+- **Breaking:** membership in an `indexable` column without a `relation` used to compare the whole
+  column with the literal as one scalar, so `2 in R.attr.list` matched no row and its negation
+  matched every row. It now searches the list's elements, and any other scalar comparison against
+  such a column throws.
 - **Breaking** (Cerbos 0.55): ordered comparisons involving NaN evaluate to false, so their negation
   can allow a row. Cerbos 0.54 denied it. Use Cerbos 0.55 if policies can produce NaN in a negated
   comparison.

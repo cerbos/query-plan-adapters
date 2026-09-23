@@ -623,6 +623,23 @@ const DEGENERACY_LIVENESS_PROBES = [
   "index-bool-list-not-eq",
   "index-bool-list-vs-number",
   "index-number-list-vs-bool",
+  // Membership in the same two lists: value-first `in` is refused when its operands are mirrored
+  // and hasIntersection is not in the operator set, so the group has no compared member here
+  // either. The three `|| aNumber == 5` probes are live only through that branch.
+  "in-number-list",
+  "in-number-list-vs-string",
+  "in-bool-list-vs-string",
+  "hasint-number-list-vs-string",
+  "hasint-bool-list-vs-string",
+  // The cross-type probes over a collection, and null membership in the number list: the lambda
+  // and the map() projection are computed operands, and value-first membership is refused when
+  // mirroring it, whatever the polarity. The scalar cross-type probes are compared instead —
+  // Chroma's comparisons are type-exact, as CEL's heterogeneous equality is.
+  // exists-tag-name-vs-number is live only through its `|| aNumber == 5` branch.
+  "exists-tag-name-vs-number",
+  "hasint-map-vs-number",
+  "null-in-number-list",
+  "not-null-in-number-list",
 ] as const;
 
 // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") --------
@@ -891,11 +908,11 @@ describe("adversarial conformance corpus", () => {
       return classificationCount !== 1;
     });
 
-    expect(MANIFEST_ACTIONS.size).toBe(310);
-    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(57);
-    expect(CHROMA_UNSUPPORTED).toHaveLength(240);
+    expect(MANIFEST_ACTIONS.size).toBe(324);
+    expect(CHROMA_SUPPORTED_ACTIONS).toHaveLength(62);
+    expect(CHROMA_UNSUPPORTED).toHaveLength(249);
     expect(CHROMA_SUPPORTED_EXPECTED).toHaveLength(0);
-    expect(THROWING_ACTIONS).toHaveLength(251);
+    expect(THROWING_ACTIONS).toHaveLength(260);
     expect(misclassified).toEqual([]);
   });
 

@@ -599,6 +599,7 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   "in-null-elem-only-neg": { NOT: { aOptionalString: { equals: null } } },
   "in-null-elem-rel": { tags: { some: { name: null } } },
   "in-null-elem-rel-neg": { NOT: { tags: { some: { name: null } } } },
+  "in-number-list": { numberList: { some: { value: 2 } } },
   "in-numbers": {
     aNumber: {
       in: [2, 3, 5],
@@ -960,6 +961,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
       }
     ]
   },
+  // The negation stays total over every row but a6, empty lists included: `none` of no element
+  // rows is true, exactly as CEL answers `null in []` false.
+  "not-null-in-number-list": { NOT: { numberList: { some: { value: null } } } },
   "not-ternary-parent": {
     OR: [
       {
@@ -1003,6 +1007,9 @@ const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
   },
   "null-eq": { aOptionalString: { equals: null } },
   "null-eq-missing": { aOptionalString: { equals: null } },
+  // A null ELEMENT is a value in CEL, stored as its own element row with a NULL `value`, so
+  // membership is a `some` over that row: a6's [null, 2] and nothing else.
+  "null-in-number-list": { numberList: { some: { value: null } } },
   "null-ne": { aOptionalString: { not: null } },
   "null-not-eq": { NOT: { aOptionalString: { equals: null } } },
   "null-value-f2f": {
@@ -1892,7 +1899,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 176, kinds: 7, throwing: 127 });
+    }).toEqual({ filters: 179, kinds: 7, throwing: 138 });
   });
 });
 
