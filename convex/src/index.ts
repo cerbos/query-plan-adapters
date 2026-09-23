@@ -5,6 +5,7 @@ import {
   PlanKind,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { evaluate } from "./evaluate";
 import { isExpression } from "./operands";
 import { canPushToDb, translateExpression } from "./pushdown";
@@ -16,7 +17,7 @@ import {
   validateStructure,
 } from "./validate";
 
-export { PlanKind };
+export { PlanKind, UnsupportedQueryPlanError };
 
 export type ConvexFilter<Q, R = unknown> = (q: Q) => R;
 
@@ -185,6 +186,6 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
       return result;
     }
     default:
-      throw Error("Invalid query plan.");
+      throw new UnsupportedQueryPlanError("Invalid query plan.");
   }
 }

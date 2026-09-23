@@ -207,64 +207,83 @@ Evaluated in JavaScript (`postFilter`, needs `allowPostFilter: true`):
 
 ### What throws
 
-Translation throws, before any filter exists, when:
+Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
+filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
+
+```ts
+import { queryPlanToConvex, UnsupportedQueryPlanError } from "@cerbos/orm-convex";
+
+try {
+  const result = queryPlanToConvex({ queryPlan, mapper, allowPostFilter: true });
+} catch (error) {
+  if (error instanceof UnsupportedQueryPlanError) {
+    // The policy uses a shape this adapter cannot translate faithfully: deny, or fall back to
+    // per-document check() calls.
+  }
+  throw error;
+}
+```
+
+It is raised, before any filter exists, when:
 
 - the plan kind is unknown (`Invalid query plan.`);
 - a conditional plan lacks the `operator`/`operands` structure (`Invalid Cerbos expression structure`);
-- an operator is not implemented (`Unsupported operator: <name>`);
-- `in` is not given one field and one array value (`in operator requires one field and one array value`);
-- the plan needs a `postFilter` and `allowPostFilter` is not `true`;
-- a referenced attribute has no mapper entry (`No mapper entry for <reference>`);
-- `nullAttributeRepresentation: "omitted"` and the plan has a null comparison operand;
-- the shape is one of the fail-closed classes in the [Conformance contract](#conformance-contract):
-  `filter()`/`map()` in a boolean position; `list`, `struct`, `set-field` and `except` forms without
-  a lowering; regex outside the supported subset; a constant zero divisor whose sign JSON discards;
-  a division used as another division's denominator.
+- an operator is not implemented (`Unsupported operator: <name>`) — including the `list`, `struct`,
+  `set-field` and `except` forms without a lowering;
+- `filter()`/`map()` sits in a boolean position;
+- a `matches` pattern is outside the supported subset;
+- a constant zero divisor whose sign JSON discards, or a division used as another division's
+  denominator;
+- `nullAttributeRepresentation: "omitted"` and the plan has a null comparison operand.
+
+Two failures are deliberately a plain `Error`, because they are about the call rather than the
+policy: a referenced attribute with no mapper entry (`No mapper entry for <reference>`), and a plan
+that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 ## Conformance contract
 
-The adapter is differentially tested with 29 hostile seed documents against Cerbos PDP 0.55.0
-`checkResource` decisions, in both evaluation modes: each plan is translated, executed inside a
-Convex query function, and the returned IDs must equal the PDP's per-document decisions. The Spring
-Data adapter defines the reference semantics for this snapshot.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
+function over the corpus's 29 seed documents. Passed cases on the current PDP, 0.55.0, where the
+total is every golden case in that tier:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 294 reference conformance actions, plus `matches()`, list indexing/`get-field`, `timestamp()`, and `int()`/`double()` cast plans that the Spring Data reference adapter rejects — the post-filter reimplements CEL cast semantics exactly (whole-string parse, truncation toward zero), so the SQL divergences do not apply (298 actions total). A positional read of a number or boolean list keeps the element's JSON type, so `true` never equals `1` and a null element is a value that negation admits (the `index-number-list*` and `index-bool-list*` actions). Membership in those lists — value-first `in` and `hasIntersection` — uses the same heterogeneous equality, so `"2"` never matches `2` nor `"true"` matches `true` (the `in-number-list*`, `in-bool-list-vs-string` and `hasint-*-list-vs-string` actions). A literal of another type compared with a scalar field is answered the same way by Convex's filter engine and by the `postFilter` alike — neither coerces, so `aNumber == "5"` and `aString == 0` are false and `aNumber != "5"` is true (the `*-vs-string` / `*-vs-number` scalar probes) — and a null element of a number list is a value `in` finds (`null-in-number-list` and its negation) |
-| Fail-closed | `filter()`/`map()` used as a condition or conjunct; `list`, `struct`, and `except` constructor/operator forms without a lowering; regex patterns outside the supported RE2 subset; a constant zero divisor whose sign the JSON hop discards; and a nested division denominator whose numeric type the plan does not preserve (30 actions). All 30 throw during translation, before any filter exists; unknown operators and invalid expression structures still throw |
-| Explicit opt-in | Any plan that cannot be represented entirely as a Convex database filter requires `allowPostFilter: true` |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it returns the empty set the PDP demands when the document omits the field for a NULL value (what the harness seeds), because the field is `nullable: true` and `postFilter` raises the same missing-attribute error `check()` does. A deployment that stores explicit nulls while omitting the attribute would over-grant |
-| Attribute NULL convention | Needs no declaration: Convex stores the value the caller sent, so a stored null compares as a null value exactly as CEL does, and stays distinguishable from an absent field. Every `null-value-*` probe for the explicit convention (cerbos/query-plan-adapters#308) is aligned — including `null-value-f2f-mixed`, which Convex and Mongoose are the only two adapters to translate rather than refuse |
-| Known planner divergence | `has()` on a missing attribute is currently folded by the Cerbos planner to `ALWAYS_ALLOWED`; `checkResource` still denies documents where the attribute is missing. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 70 / 80 |
+| adversarial | 206 / 227 |
 
-Coverage includes value-first comparisons, field-to-field expressions, null and missing-attribute
-behaviour, nested lambdas, collection macros, string and arithmetic expressions, timestamps,
-hierarchy operations and chained nested fields. Every fail-closed message is pinned in
-`conformance/actions.json` and asserted. The emitted filters themselves are pinned by the
-translator unit test (see [Development](#development)), which is also the only place the
-`allowPostFilter` gate, function mappers, unmapped-reference refusal, the
-`nullAttributeRepresentation` boundary and malformed input are asserted.
+Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
+them, because the plan and `check()` disagree. On 0.55.0 there is one, `null/has/missing-attribute`
+(extended), which is why that tier's passed and refused cases add up to one fewer than its total:
+the planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies
+the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead
+of `has(R.attr.x)`.
 
-### What the differential proves, and what it does not
+Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
+documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 
-Most of the corpus is decided by `postFilter`, not by Convex. The split is pinned by the
-conformance run:
+The corpus's two NULL conventions need no option here, only the mapping and the document shape: an
+attribute the caller omits for a NULL value is absent from the document and declared
+`nullable: true`, so `postFilter` raises the same missing-attribute error `check()` does; an
+explicit-null attribute (`owner`, `coOwner`) is stored as a null value and is not `nullable`, so
+Convex's engine compares it as a value, exactly as CEL does.
 
-| Decided by | Default mapper | Pushdown mapper |
-| --- | --- | --- |
-| Convex's filter engine, alone | 42 | 53 |
-| the engine narrowing and the `postFilter` deciding (`rel-hop-and-root`, `compose-variable`) | 2 | 2 |
-| the adapter's `postFilter`, alone | 251 | 240 |
-| folded to an unconditional plan before any filter exists | 6 | 6 |
+### What the conformance run proves, and what it does not
 
-For the 251 post-filtered actions the differential compares the adapter's CEL evaluator against the
-PDP's; Convex's own comparison semantics only decide the 42. The **pushdown mapper** leg clears
-`nullable` on `owner` (always present, stored as `v.union(v.string(), v.null())`), which moves 11
-null-comparison actions (`null-eq`, `null-ne`, `null-not-eq`, `vf-null-ne`, the four
-`in-null-elem-*` and the three `null-value-*-const`) into the engine, proving `q.eq(field, null)`
-against a stored null. The other `nullable` fields (`aOptionalString`, `aDouble`, `createdAt`,
-`updatedAt`, `scope`, `mainCategory` and its two chained paths) are genuinely absent from some
-seeds, so they cannot be pushed down.
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 302 cases that pass on 0.55.0,
+the harness reports:
+
+| Decided by | Cases |
+| --- | --- |
+| Convex's filter engine, alone | 53 |
+| the engine narrowing and the `postFilter` deciding (a root `and` mixing both) | 2 |
+| the adapter's `postFilter`, alone | 241 |
+| folded to an unconditional plan before any filter exists | 6 |
+
+For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
+Convex's own comparison semantics only decide the 53, which include the null comparisons against
+the explicit-null `owner` field (`q.eq(field, null)` against a stored null).
 
 The harness runs against a self-hosted `convex-backend` container pinned in `docker-compose.yml`.
 Convex Cloud is not exercised: any difference in its filter engine, value ordering or
@@ -284,12 +303,15 @@ document — so most do not apply.
 | Subtype discrimination | **Caller-owned** | The table you pass to `ctx.db.query()`. The adapter never sees it. If one table holds several document shapes distinguished by a field, add that field to the query yourself |
 | To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced**, proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — `postFilter` evaluates a missing path as a CEL error, which denies, so an absent parent is excluded under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced**, proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | None — `postFilter` evaluates a missing path as a CEL error, which denies, so an absent parent is excluded under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ## Behaviour changes
 
 See also [CHANGELOG.md](CHANGELOG.md).
 
+- A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
+  `Error`. What it translates is unchanged, and existing `catch` blocks keep working; an unmapped
+  reference and a missing `allowPostFilter` opt-in stay a plain `Error`.
 - **Breaking (0.3.0):** `QueryPlanToConvexResult` is a discriminated union. Conditional results
   carry `path` (`db` → `filter`, `post` → `postFilter`, `split` → both); unconditional results carry
   neither. Destructuring still works; code that *constructs* a result must supply `path`.
@@ -328,38 +350,16 @@ demo/scripts/run-example.sh convex
 
 ## Development
 
-| Command | What it proves | Needs |
+| Command | What it does | Needs |
 | --- | --- | --- |
-| `npm test` | The translator unit test: the filter emitted for every corpus action (golden expectation or pinned throw), the execution-path distribution, the rules every pushed-down filter obeys, the `allowPostFilter` gate | Node only |
-| `npm run typecheck` | `src/` and the tests type-check | A deployed backend with `convex/_generated` for the harness |
-| `npm run test:adversarial` | The documents each filter returns, in a real Convex backend with `check()` as the oracle, and which half of the output selected them | Cerbos CLI, Docker (`npm run convex:up`, then deploy the functions in `convex/`), `CONVEX_URL` |
-| `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
+| `npm test` | Caller-supplied options the corpus cannot vary (function mappers, the unmapped-reference refusal, the `allowPostFilter` gate, the `nullAttributeRepresentation` boundary), the refusal type, the rules every filter handed to Convex obeys, and malformed input | Node only |
+| `npm run typecheck` | Type-checks `src/`, the tests and the backend functions | A deployed backend with `convex/_generated` for the harness |
+| `npm run convex:up` | Starts the Convex backend pinned in `docker-compose.yml` on port 3210 | Docker |
+| `npm run test:adversarial` | The documents each recorded golden plan returns in a real Convex backend equal the recorded `check()` decisions, for both pinned PDPs | `npm run convex:up`, then `npx convex deploy` and `npx convex codegen`; `CONVEX_URL` if not on 3210 |
 
-`ADAPTER_TEST_STRICT_EVALUATION=true|false` (default `false`; other values are rejected) selects
-the PDP's evaluation mode for both planning and the `check()` oracle. CI runs both. See the
-Convex job in [`.github/workflows/convex.yaml`](../.github/workflows/convex.yaml) for the full
-backend bring-up sequence.
-
-### The golden expectations
-
-`npm test` reads plans from `../conformance/wire-fixtures/` and compares them with
-`golden/expectations.json`, one entry per corpus action. Because the adapter emits a function, an
-entry records the calls that function makes against a recording `FilterBuilder`, plus `path` — the
-routing decision between `db`, `post` and `split`, pinned because an action that silently crossed
-the boundary would still pass the adversarial suite:
-
-```jsonc
-"cs-eq": {
-  "kind": "KIND_CONDITIONAL",
-  "path": "db",
-  "filter": { "op": "eq", "args": [{ "op": "field", "args": ["aString"] }, "one"] }
-},
-"null-eq":  { "kind": "KIND_CONDITIONAL", "path": "post" },
-"in-empty": { "kind": "KIND_ALWAYS_DENIED" }
-```
-
-A refused action has no entry (its message is in `conformance/actions.json`); a fixture with
-neither fails the suite, so a new corpus action cannot land silently. See "Golden expectations" in
-[conformance/README.md](../conformance/README.md),
-[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
-[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md).
+No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
+[`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the
+recorded allowed ids, and an `unsupported` case must throw `UnsupportedQueryPlanError`. See
+"The harness contract" in [conformance/README.md](../conformance/README.md), and the
+`integration-test` job in [`.github/workflows/convex.yaml`](../.github/workflows/convex.yaml) for the
+full backend bring-up sequence.
