@@ -1,4 +1,4 @@
-import type { PlanExpressionOperand } from "@cerbos/core";
+import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { is, not, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
@@ -36,20 +36,7 @@ export function indexedEquality({
   value: Scalar;
 }): SQL {
   if (indexable === "pgArray") {
-    if (!is(column, PgArray)) {
-      throw new Error('indexable: "pgArray" requires a PostgreSQL array column');
-    }
-    if (
-      !["PgText", "PgVarchar", "PgBoolean", "PgInteger", "PgSmallInt"]
-        .includes(column.baseColumn.columnType)
-    ) {
-      // Numeric/string-mode, bigint and custom decoders can change the representation of a
-      // value (including a SQL NULL element) before the application sends it to check().
-      // Floating-point arrays also admit NaN/Infinity, which to_jsonb converts to STRINGS.
-      throw new Error(
-        "Indexed PostgreSQL arrays require text, varchar, boolean, integer or smallint elements without custom decoding",
-      );
-    }
+    assertPgArrayColumn(column);
     // JSON conversion preserves null elements and addresses POSITIONS, including arrays whose
     // lower bound is not 1. A raw [index + 1] would read a different element in those arrays.
     return postgresEquality(sql`to_jsonb(${column})`, index, value);
@@ -58,11 +45,7 @@ export function indexedEquality({
     throw new Error("Unknown indexable storage shape");
   }
   if (is(column, PgColumn)) {
-    if (column.dataType !== "json") {
-      throw new Error(
-        'indexable: "json" requires a PostgreSQL JSON or JSONB column',
-      );
-    }
+    assertPgJsonColumn(column);
     return postgresEquality(sql`cast(${column} as jsonb)`, index, value);
   }
   const path = `$[${index}]`;
@@ -71,37 +54,130 @@ export function indexedEquality({
       throw new Error('indexable: "json" requires a MySQL JSON column');
     }
     const element = sql`json_extract(${column}, ${path})`;
-    // Every JSON number type MySQL reports is a CEL number: an integer beyond the signed 64-bit
-    // range (1e19) is `UNSIGNED INTEGER`, and an exact decimal is `DECIMAL`. Leaving either out
-    // made the equality FALSE for an element the PDP matches — and its negation TRUE (#472).
-    const equality =
-      typeof value === "number"
-        ? sql`(case when json_type(${element}) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(${element}) as float(53)) = cast(${value} as float(53)) else false end)`
-        : sql`${element} = cast(${JSON.stringify(value)} as json)`;
+    const equality = mysqlElementEquality(element, value);
     // MySQL autowraps scalar JSON as a singleton array for [0]. CEL does not.
     return sql`(case when json_type(${column}) = 'ARRAY' and ${element} is not null then ${equality} end)`;
   }
   if (is(column, SQLiteColumn)) {
-    if (column.dataType !== "json" && column.dataType !== "string") {
-      throw new Error('indexable: "json" requires a SQLite JSON text column');
-    }
+    assertSqliteJsonColumn(column);
     const type = sql`json_type(${column}, ${path})`;
     const element = sql`json_extract(${column}, ${path})`;
-    let equality: SQL;
-    if (value === null) {
-      equality = sql`${type} = 'null'`;
-    } else if (typeof value === "boolean") {
-      equality = sql`${type} = ${value ? "true" : "false"}`;
-    } else if (typeof value === "number") {
-      equality = sql`(case when ${type} in ('integer', 'real') then cast(${element} as real) = cast(${value} as real) else false end)`;
-    } else {
-      equality = sql`(case when ${type} = 'text' then ${element} = ${value} else false end)`;
-    }
+    const equality = sqliteElementEquality(type, element, value);
     // json_type returns the STRING 'null' for a null element and SQL NULL for a missing one.
     return sql`(case when json_type(${column}) = 'array' and ${type} is not null then ${equality} end)`;
   }
   throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
 }
+
+/**
+ * `value in list` and `hasIntersection(list, [values])` over declared ordered storage with no
+ * relation: true when ANY element equals ANY of `values` under CEL's heterogeneous equality.
+ *
+ * Every element is compared with its JSON type checked first, exactly as `indexedEquality` does,
+ * because CEL's `"2" == 2` and `"true" == true` are false while a store that reads the element
+ * back as SQL can answer them true: SQLite's affinity rules and MySQL's string-to-number
+ * conversion both equate '2' with 2, and neither store has a boolean distinct from the integer 1.
+ * A NULL or non-array column is SQL UNKNOWN, excluded under either polarity like CEL's error.
+ */
+export function indexedMembership({
+  column,
+  indexable,
+  values,
+}: {
+  column: AnyColumn;
+  indexable: Indexable;
+  values: readonly Value[];
+}): SQL {
+  const scalars = values.map((value): Scalar => {
+    if (
+      value !== null && typeof value !== "string" &&
+      typeof value !== "boolean" && typeof value !== "number"
+    ) {
+      throw new Error(
+        "Membership in declared indexed storage supports only scalar literals",
+      );
+    }
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new Error("Indexed numeric comparisons require a finite literal");
+    }
+    return value;
+  });
+  const anyOf = (equalities: SQL[]): SQL =>
+    equalities.length === 0
+      ? sql`false`
+      : sql`(${sql.join(equalities, sql` or `)})`;
+
+  if (indexable === "pgArray") {
+    assertPgArrayColumn(column);
+    return postgresMembership(sql`to_jsonb(${column})`, scalars, anyOf);
+  }
+  if (indexable !== "json") {
+    throw new Error("Unknown indexable storage shape");
+  }
+  if (is(column, PgColumn)) {
+    assertPgJsonColumn(column);
+    return postgresMembership(sql`cast(${column} as jsonb)`, scalars, anyOf);
+  }
+  if (is(column, MySqlColumn)) {
+    if (column.dataType !== "json") {
+      throw new Error('indexable: "json" requires a MySQL JSON column');
+    }
+    // JSON_TABLE's path must be a literal; `$[*]` is constant, so nothing caller-supplied is
+    // inlined. JSON_TABLE reads a JSON null element back as SQL NULL — measured on the pinned
+    // server — so a null literal is matched by IS NULL; `$[*]` yields no missing element to
+    // confuse it with, and every other comparison against that NULL leaves the row out.
+    const element = sql.raw("cerbos_element.v");
+    const match = anyOf(
+      scalars.map((value) =>
+        value === null ? sql`${element} is null` : mysqlElementEquality(element, value),
+      ),
+    );
+    return sql`(case when json_type(${column}) = 'ARRAY' then exists (select 1 from json_table(${column}, '$[*]' columns (v json path '$')) as cerbos_element where ${match}) end)`;
+  }
+  if (is(column, SQLiteColumn)) {
+    assertSqliteJsonColumn(column);
+    const match = anyOf(
+      scalars.map((value) =>
+        sqliteElementEquality(
+          sql.raw("cerbos_element.type"),
+          sql.raw("cerbos_element.value"),
+          value,
+        ),
+      ),
+    );
+    return sql`(case when json_type(${column}) = 'array' then exists (select 1 from json_each(${column}) as cerbos_element where ${match}) end)`;
+  }
+  throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
+}
+
+/**
+ * The declared ordered storage a membership test reads, when the collection has no relation to
+ * read instead. A mapping carrying both keeps reading its relation, as it always has.
+ */
+export const resolveIndexedMembership = (
+  reference: string,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): { column: AnyColumn; indexable: Indexable } | undefined => {
+  const direct = getMappingEntry(reference, mapper);
+  const resolved =
+    direct && isMappingConfig(direct) && direct.indexable
+      ? { mapping: direct, relations: [] }
+      : resolveFieldReference(reference, mapper);
+  const mapping = resolved.mapping;
+  if (!isMappingConfig(mapping) || !mapping.indexable || mapping.relation) {
+    return undefined;
+  }
+  if (
+    !mapping.column || mapping.transform ||
+    resolved.relations.some((relation) => !options.skipRelations?.has(relation))
+  ) {
+    throw new Error(
+      "Membership in declared indexed storage requires a directly addressable column without a transform",
+    );
+  }
+  return { column: mapping.column, indexable: mapping.indexable };
+};
 
 /** Resolve the opt-in column separately from a relation used for collection predicates. */
 export const resolveIndexedColumn = (
@@ -183,9 +259,80 @@ export const buildIndexedComparison = (
 
 function postgresEquality(source: SQL, index: number, value: Scalar): SQL {
   const element = sql`(${source} -> cast(${index} as integer))`;
-  const equality =
-    typeof value === "number"
-      ? sql`(case when jsonb_typeof(${element}) = 'number' then cast(${element} #>> '{}' as float(53)) = cast(${value} as float(53)) else false end)`
-      : sql`${element} = cast(${JSON.stringify(value)} as jsonb)`;
+  const equality = postgresElementEquality(element, value);
   return sql`(case when jsonb_typeof(${source}) = 'array' and ${element} is not null then ${equality} end)`;
+}
+
+function postgresMembership(
+  source: SQL,
+  values: readonly Scalar[],
+  anyOf: (equalities: SQL[]) => SQL,
+): SQL {
+  const element = sql.raw("cerbos_element.v");
+  const match = anyOf(values.map((value) => postgresElementEquality(element, value)));
+  return sql`(case when jsonb_typeof(${source}) = 'array' then exists (select 1 from jsonb_array_elements(${source}) as cerbos_element(v) where ${match}) end)`;
+}
+
+/** One jsonb element against a literal: a number by its double value, anything else as jsonb. */
+function postgresElementEquality(element: SQL, value: Scalar): SQL {
+  return typeof value === "number"
+    ? sql`(case when jsonb_typeof(${element}) = 'number' then cast(${element} #>> '{}' as float(53)) = cast(${value} as float(53)) else false end)`
+    : sql`${element} = cast(${JSON.stringify(value)} as jsonb)`;
+}
+
+/**
+ * One MySQL JSON element against a literal. Every JSON number type MySQL reports is a CEL number:
+ * an integer beyond the signed 64-bit range (1e19) is `UNSIGNED INTEGER`, and an exact decimal is
+ * `DECIMAL`. Leaving either out made the equality FALSE for an element the PDP matches — and its
+ * negation TRUE (#472). Anything else is compared as JSON, whose comparator keeps the type.
+ */
+function mysqlElementEquality(element: SQL, value: Scalar): SQL {
+  return typeof value === "number"
+    ? sql`(case when json_type(${element}) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(${element}) as float(53)) = cast(${value} as float(53)) else false end)`
+    : sql`${element} = cast(${JSON.stringify(value)} as json)`;
+}
+
+/** One SQLite JSON element, given its `json_type` and its extracted SQL value, against a literal. */
+function sqliteElementEquality(type: SQL, element: SQL, value: Scalar): SQL {
+  if (value === null) {
+    return sql`${type} = 'null'`;
+  }
+  if (typeof value === "boolean") {
+    return sql`${type} = ${value ? "true" : "false"}`;
+  }
+  if (typeof value === "number") {
+    return sql`(case when ${type} in ('integer', 'real') then cast(${element} as real) = cast(${value} as real) else false end)`;
+  }
+  return sql`(case when ${type} = 'text' then ${element} = ${value} else false end)`;
+}
+
+function assertPgArrayColumn(column: AnyColumn): void {
+  if (!is(column, PgArray)) {
+    throw new Error('indexable: "pgArray" requires a PostgreSQL array column');
+  }
+  if (
+    !["PgText", "PgVarchar", "PgBoolean", "PgInteger", "PgSmallInt"]
+      .includes(column.baseColumn.columnType)
+  ) {
+    // Numeric/string-mode, bigint and custom decoders can change the representation of a
+    // value (including a SQL NULL element) before the application sends it to check().
+    // Floating-point arrays also admit NaN/Infinity, which to_jsonb converts to STRINGS.
+    throw new Error(
+      "Indexed PostgreSQL arrays require text, varchar, boolean, integer or smallint elements without custom decoding",
+    );
+  }
+}
+
+function assertPgJsonColumn(column: PgColumn): void {
+  if (column.dataType !== "json") {
+    throw new Error(
+      'indexable: "json" requires a PostgreSQL JSON or JSONB column',
+    );
+  }
+}
+
+function assertSqliteJsonColumn(column: SQLiteColumn): void {
+  if (column.dataType !== "json" && column.dataType !== "string") {
+    throw new Error('indexable: "json" requires a SQLite JSON text column');
+  }
 }

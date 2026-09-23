@@ -1085,6 +1085,75 @@
         }
       }
     },
+    "eq-bool-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when \"adversarial_resources\".\"a_bool\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when \"adversarial_resources\".\"a_bool\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = $1)",
+          "params": [
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when `adversarial_resources`.`a_bool` is null then null else false end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            5
+          ]
+        }
+      }
+    },
+    "eq-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when \"adversarial_resources\".\"a_number\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            2
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when \"adversarial_resources\".\"a_number\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = $1)",
+          "params": [
+            2
+          ]
+        },
+        "mysql": {
+          "sql": "((case when `adversarial_resources`.`a_number` is null then null else false end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            2
+          ]
+        }
+      }
+    },
+    "eq-string-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when \"adversarial_resources\".\"a_string\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when \"adversarial_resources\".\"a_string\" is null then null else false end) or \"adversarial_resources\".\"a_number\" = $1)",
+          "params": [
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when `adversarial_resources`.`a_string` is null then null else false end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            5
+          ]
+        }
+      }
+    },
     "exists-on-empty": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1133,6 +1202,29 @@
           "params": [
             "public",
             "public"
+          ]
+        }
+      }
+    },
+    "exists-tag-name-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((case when \"adversarial_tags\".\"name\" is null then null else false end)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((case when \"adversarial_tags\".\"name\" is null then null else false end)) is null)) then null else false end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((case when \"adversarial_tags\".\"name\" is null then null else false end)) is true)) then true when exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and ((case when \"adversarial_tags\".\"name\" is null then null else false end)) is null)) then null else false end) or \"adversarial_resources\".\"a_number\" = $1)",
+          "params": [
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((case when `adversarial_tags`.`name` is null then null else false end)) is true)) then true when exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and ((case when `adversarial_tags`.`name` is null then null else false end)) is null)) then null else false end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            5
           ]
         }
       }
@@ -1228,6 +1320,32 @@
         }
       }
     },
+    "hasint-bool-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when json_type(\"adversarial_resources\".\"a_bool_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_bool_list_json\") as cerbos_element where ((case when cerbos_element.type = 'text' then cerbos_element.value = ? else false end))) end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            "true",
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when jsonb_typeof(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb))) end) or \"adversarial_resources\".\"a_number\" = $2)",
+          "params": [
+            "\"true\"",
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_bool_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v = cast(? as json))) end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            "\"true\"",
+            5
+          ]
+        }
+      }
+    },
     "hasint-map-null": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1300,6 +1418,29 @@
         }
       }
     },
+    "hasint-map-vs-number": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" in (?))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "postgresql": {
+          "sql": "(exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" in ($1))) and not exists (select 1 from \"adversarial_tags\" where (\"adversarial_tags\".\"resource_id\" = \"adversarial_resources\".\"id\" and \"adversarial_tags\".\"name\" is null)))",
+          "params": [
+            "public"
+          ]
+        },
+        "mysql": {
+          "sql": "(exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` in (?))) and not exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and `adversarial_tags`.`name` is null)))",
+          "params": [
+            "public"
+          ]
+        }
+      }
+    },
     "hasint-null-vf": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1319,6 +1460,32 @@
           "sql": "exists (select 1 from `adversarial_tags` where (`adversarial_tags`.`resource_id` = `adversarial_resources`.`id` and (`adversarial_tags`.`name` in (?) or `adversarial_tags`.`name` is null)))",
           "params": [
             "public"
+          ]
+        }
+      }
+    },
+    "hasint-number-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_number_list_json\") as cerbos_element where ((case when cerbos_element.type = 'text' then cerbos_element.value = ? else false end) or (case when cerbos_element.type in ('integer', 'real') then cast(cerbos_element.value as real) = cast(? as real) else false end))) end)",
+          "params": [
+            "2",
+            3
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb) or (case when jsonb_typeof(cerbos_element.v) = 'number' then cast(cerbos_element.v #>> '{}' as float(53)) = cast($2 as float(53)) else false end))) end)",
+          "params": [
+            "\"2\"",
+            3
+          ]
+        },
+        "mysql": {
+          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_number_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v = cast(? as json) or (case when json_type(cerbos_element.v) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(cerbos_element.v) as float(53)) = cast(? as float(53)) else false end))) end)",
+          "params": [
+            "\"2\"",
+            3
           ]
         }
       }
@@ -1658,6 +1825,32 @@
         }
       }
     },
+    "in-bool-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when json_type(\"adversarial_resources\".\"a_bool_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_bool_list_json\") as cerbos_element where ((case when cerbos_element.type = 'text' then cerbos_element.value = ? else false end))) end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            "true",
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when jsonb_typeof(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_bool_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb))) end) or \"adversarial_resources\".\"a_number\" = $2)",
+          "params": [
+            "\"true\"",
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when json_type(`adversarial_resources`.`a_bool_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_bool_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v = cast(? as json))) end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            "\"true\"",
+            5
+          ]
+        }
+      }
+    },
     "in-empty": {
       "kind": "KIND_ALWAYS_DENIED"
     },
@@ -1830,6 +2023,55 @@
         }
       }
     },
+    "in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_number_list_json\") as cerbos_element where ((case when cerbos_element.type in ('integer', 'real') then cast(cerbos_element.value as real) = cast(? as real) else false end))) end)",
+          "params": [
+            2
+          ]
+        },
+        "postgresql": {
+          "sql": "(case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) as cerbos_element(v) where ((case when jsonb_typeof(cerbos_element.v) = 'number' then cast(cerbos_element.v #>> '{}' as float(53)) = cast($1 as float(53)) else false end))) end)",
+          "params": [
+            2
+          ]
+        },
+        "mysql": {
+          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_number_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where ((case when json_type(cerbos_element.v) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(cerbos_element.v) as float(53)) = cast(? as float(53)) else false end))) end)",
+          "params": [
+            2
+          ]
+        }
+      }
+    },
+    "in-number-list-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_number_list_json\") as cerbos_element where ((case when cerbos_element.type = 'text' then cerbos_element.value = ? else false end))) end) or \"adversarial_resources\".\"a_number\" = ?)",
+          "params": [
+            "2",
+            5
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb))) end) or \"adversarial_resources\".\"a_number\" = $2)",
+          "params": [
+            "\"2\"",
+            5
+          ]
+        },
+        "mysql": {
+          "sql": "((case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_number_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v = cast(? as json))) end) or `adversarial_resources`.`a_number` = ?)",
+          "params": [
+            "\"2\"",
+            5
+          ]
+        }
+      }
+    },
     "in-numbers": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -1855,6 +2097,29 @@
             2,
             3,
             5
+          ]
+        }
+      }
+    },
+    "in-scalar-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "\"adversarial_resources\".\"a_number\" in (?)",
+          "params": [
+            2
+          ]
+        },
+        "postgresql": {
+          "sql": "\"adversarial_resources\".\"a_number\" in ($1)",
+          "params": [
+            2
+          ]
+        },
+        "mysql": {
+          "sql": "`adversarial_resources`.`a_number` in (?)",
+          "params": [
+            2
           ]
         }
       }
@@ -2922,6 +3187,29 @@
         }
       }
     },
+    "ne-number-vs-string": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "((case when \"adversarial_resources\".\"a_number\" is null then null else true end) and \"adversarial_resources\".\"a_number\" > ?)",
+          "params": [
+            3
+          ]
+        },
+        "postgresql": {
+          "sql": "((case when \"adversarial_resources\".\"a_number\" is null then null else true end) and \"adversarial_resources\".\"a_number\" > $1)",
+          "params": [
+            3
+          ]
+        },
+        "mysql": {
+          "sql": "((case when `adversarial_resources`.`a_number` is null then null else true end) and `adversarial_resources`.`a_number` > ?)",
+          "params": [
+            3
+          ]
+        }
+      }
+    },
     "neg-number": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -3164,6 +3452,25 @@
         }
       }
     },
+    "not-null-in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "not (case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_number_list_json\") as cerbos_element where (cerbos_element.type = 'null')) end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "not (case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb))) end)",
+          "params": [
+            "null"
+          ]
+        },
+        "mysql": {
+          "sql": "not (case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_number_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v is null)) end)",
+          "params": []
+        }
+      }
+    },
     "not-startswith": {
       "kind": "KIND_CONDITIONAL",
       "rendered": {
@@ -3241,6 +3548,25 @@
         },
         "mysql": {
           "sql": "`adversarial_resources`.`a_optional_string` is null",
+          "params": []
+        }
+      }
+    },
+    "null-in-number-list": {
+      "kind": "KIND_CONDITIONAL",
+      "rendered": {
+        "sqlite": {
+          "sql": "(case when json_type(\"adversarial_resources\".\"a_number_list_json\") = 'array' then exists (select 1 from json_each(\"adversarial_resources\".\"a_number_list_json\") as cerbos_element where (cerbos_element.type = 'null')) end)",
+          "params": []
+        },
+        "postgresql": {
+          "sql": "(case when jsonb_typeof(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) = 'array' then exists (select 1 from jsonb_array_elements(cast(\"adversarial_resources\".\"a_number_list_json\" as jsonb)) as cerbos_element(v) where (cerbos_element.v = cast($1 as jsonb))) end)",
+          "params": [
+            "null"
+          ]
+        },
+        "mysql": {
+          "sql": "(case when json_type(`adversarial_resources`.`a_number_list_json`) = 'ARRAY' then exists (select 1 from json_table(`adversarial_resources`.`a_number_list_json`, '$[*]' columns (v json path '$')) as cerbos_element where (cerbos_element.v is null)) end)",
           "params": []
         }
       }

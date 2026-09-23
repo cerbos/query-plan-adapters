@@ -939,12 +939,14 @@ export function buildMapper(
         field: schema.tags.name,
       },
     },
-    // Homogeneous number and boolean lists, read only by position (`index-number-list`,
-    // `index-bool-list` and their negated and cross-type siblings). No relation: nothing in the
-    // corpus asks a collection predicate of them, so the ordered column is the whole mapping. The
-    // cross-type probes are why these exist — SQLite's `json_extract` reads a JSON `true` back as
-    // 1 and MySQL's `TRUE` is the integer 1, so a comparison that drops the element's JSON type
-    // matches `[true][0] == 1` or `[1][0] == true`, both false in CEL.
+    // Homogeneous number and boolean lists, read by position (`index-number-list`,
+    // `index-bool-list` and their negated and cross-type siblings) and by membership
+    // (`in-number-list`, `hasint-*-list-vs-string` and their siblings). No relation: the ordered
+    // column is the whole mapping, so membership searches its elements too. The cross-type probes
+    // are why these exist — SQLite's `json_extract` reads a JSON `true` back as 1 and MySQL's
+    // `TRUE` is the integer 1, so a comparison that drops the element's JSON type matches
+    // `[true][0] == 1` or `[1][0] == true`, both false in CEL, and MySQL's string-to-number
+    // conversion matches `"2" in [2]`.
     "request.resource.attr.aNumberList": {
       column: schema.resources.aNumberListJson,
       indexable: "json",

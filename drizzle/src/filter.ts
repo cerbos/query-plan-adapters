@@ -8,6 +8,7 @@ import {
 } from "./collections";
 import { buildComparisonFilter } from "./comparison";
 import { buildHierarchyFilter } from "./hierarchy";
+import { indexedMembership, resolveIndexedMembership } from "./indexed";
 import { buildHasIntersectionFilter } from "./intersection";
 import {
   buildColumnExpression,
@@ -212,6 +213,12 @@ const buildMembershipFilter = (
     throw new Error(
       "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
     );
+  }
+  // `"2" in R.attr.list` over a list held in one declared JSON or array column: the column is the
+  // collection, not an element, so it is searched element by element rather than compared whole.
+  const indexed = resolveIndexedMembership(fieldOperand.name, mapper, options);
+  if (indexed) {
+    return indexedMembership({ ...indexed, values: [valueOperand.value] });
   }
   const unresolved = resolveFieldReference(fieldOperand.name, mapper);
   const resolved = isScalarCollection(

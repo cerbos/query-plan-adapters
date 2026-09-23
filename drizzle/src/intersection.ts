@@ -10,6 +10,7 @@ import {
   resolveFieldReference,
   resolveRelationDefaultField,
 } from "./mapper";
+import { indexedMembership, resolveIndexedMembership } from "./indexed";
 import {
   extractArrayValue,
   extractLambdaComponents,
@@ -184,6 +185,13 @@ export const buildHasIntersectionFilter = (
     throw new Error(
       "'hasIntersection' requires a literal list as one of its operands",
     );
+  }
+
+  if (isNameOperand(leftOperand)) {
+    const indexed = resolveIndexedMembership(leftOperand.name, mapper, options);
+    if (indexed) {
+      return indexedMembership({ ...indexed, values });
+    }
   }
 
   if (values.length === 0) {
