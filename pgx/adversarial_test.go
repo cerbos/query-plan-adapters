@@ -70,6 +70,8 @@ const (
 	labelTable       = "adversarial_label"
 	parentTable      = "adversarial_parent"
 	innerTable       = "adversarial_inner"
+	numberElemTable  = "adversarial_number_elem"
+	boolElemTable    = "adversarial_bool_elem"
 )
 
 const schemaDDL = `
@@ -128,6 +130,18 @@ CREATE TABLE adversarial_inner (
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
+
+CREATE TABLE adversarial_number_elem (
+	pk           bigserial PRIMARY KEY,
+	value        double precision,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
+
+CREATE TABLE adversarial_bool_elem (
+	pk           bigserial PRIMARY KEY,
+	value        boolean,
+	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
+);
 `
 
 // mapper wires the corpus's attribute references onto the schema above.
@@ -138,13 +152,16 @@ CREATE TABLE adversarial_inner (
 // schema exercise both conventions.
 func buildMapper() cerbospgx.Mapper {
 	tagFields := map[string]cerbospgx.Entry{
-		"id":   {Column: "tag_id"},
-		"name": {Column: "name"},
+		"id": {Column: "tag_id"},
+		// Declared, like every other string column: `t.name == 0` is false in CEL, and an
+		// undeclared column hands the number to PostgreSQL, which has no text = double precision
+		// and fails to execute.
+		"name": {Column: "name", ValueType: cerbospgx.ValueString},
 	}
 	tags := &cerbospgx.Relation{
 		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field:  &cerbospgx.Entry{Column: "name"},
+		Field:  &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
 		Fields: tagFields,
 	}
 
@@ -241,6 +258,13 @@ func buildMapper() cerbospgx.Mapper {
 
 		"request.resource.attr.categories": {Relation: categories},
 
+		// The two homogeneous scalar lists, one element per row of a related table, the way
+		// tagNames is stored. Declaring the element's type is what lets a literal of another
+		// type (`"2" in aNumberList`) be answered false as CEL answers it, rather than handed to
+		// PostgreSQL, which reads an untyped '2' as the column's type and matches it.
+		"request.resource.attr.aNumberList": {Relation: elementList(numberElemTable, cerbospgx.Entry{ValueType: cerbospgx.ValueNumber})},
+		"request.resource.attr.aBoolList":   {Relation: elementList(boolElemTable, cerbospgx.Entry{ValueType: cerbospgx.ValueBool})},
+
 		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
 		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
 
@@ -334,6 +358,18 @@ func setup(t *testing.T) *harness {
 	return &harness{pool: pool, client: client, corpus: corpus, mapper: buildMapper()}
 }
 
+// elementList maps a scalar list stored one element per row of table. element.ValueType declares
+// the element type; the column and the explicit-null convention are the same for both lists.
+func elementList(table string, element cerbospgx.Entry) *cerbospgx.Relation {
+	element.Column = "value"
+	element.NullConvention = cerbospgx.NullConventionExplicit
+	return &cerbospgx.Relation{
+		Table:        table,
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Field: &element,
+	}
+}
+
 func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus *Corpus) {
 	t.Helper()
 
@@ -388,6 +424,19 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 				`INSERT INTO adversarial_tag (tag_id, name, resource_id) VALUES ($1,$2,$3)`,
 				tag.ID, tag.Name, seed.ID)
 			require.NoError(t, err, "seeding tag %s", tag.ID)
+		}
+
+		// A relation has no row order, which is why `index` over these lists stays refused;
+		// membership and hasIntersection are position-blind and need none.
+		for _, element := range seed.ANumberList {
+			_, err := pool.Exec(ctx,
+				`INSERT INTO adversarial_number_elem (value, resource_id) VALUES ($1,$2)`, element, seed.ID)
+			require.NoError(t, err, "seeding aNumberList for %s", seed.ID)
+		}
+		for _, element := range seed.ABoolList {
+			_, err := pool.Exec(ctx,
+				`INSERT INTO adversarial_bool_elem (value, resource_id) VALUES ($1,$2)`, element, seed.ID)
+			require.NoError(t, err, "seeding aBoolList for %s", seed.ID)
 		}
 
 		for i, subName := range seed.SubCategoryNames {
@@ -470,12 +519,11 @@ func (h *harness) checkResource(seed Seed) *cerbos.Resource {
 		"tags":       tags,
 		"tagNames":   tagNames,
 		"categories": categories,
-		// Sent verbatim, null elements included, and stored nowhere: the adapter refuses every
-		// shape over them. A positional read is `index`, which has no case in the vendored
-		// translator (a relation has no row order to read position 0 from), so the walk fails
-		// closed before any mapping is consulted and there is no column for a filter to read. The
-		// oracle still has to see them, because the degeneracy guard proves each refused action
-		// is a live, discriminating probe rather than one the PDP denies for every row.
+		// Sent verbatim, null elements included, and stored one element per row of a related
+		// table. Membership and hasIntersection over them are position-blind and compared. A
+		// positional read is `index`, which has no case in the vendored translator (a relation has
+		// no row order to read position 0 from), so those actions fail closed before any mapping
+		// is consulted; the degeneracy guard still proves each one a live, discriminating probe.
 		"aNumberList": scalarList(seed.ANumberList),
 		"aBoolList":   scalarList(seed.ABoolList),
 	}
@@ -649,7 +697,7 @@ func TestAdversarialConformance(t *testing.T) {
 		}
 		// Corpus-size tripwire: bump deliberately when the corpus grows, so a new hostile shape
 		// cannot slip past this adapter unnoticed.
-		require.Len(t, seen, 310, "corpus size changed; triage the new action(s) before bumping")
+		require.Len(t, seen, 324, "corpus size changed; triage the new action(s) before bumping")
 		require.Len(t, h.corpus.Seeds.Seeds, 29, "seed count changed")
 		// Throwing-count tripwire: each of these carries a pinned message, so a shape gained or
 		// lost has to be re-triaged here rather than joining the throw suite unnoticed.

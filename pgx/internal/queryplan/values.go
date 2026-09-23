@@ -592,11 +592,19 @@ func membership(x, values value) (Expr, error) {
 		return nil, err
 	}
 
+	// CEL's equality is heterogeneous: a member whose type differs from x's declared type is
+	// unequal to it, where SQL would coerce ('2' onto a numeric column, 'true' onto a boolean
+	// one) and match. Such a member can never witness the membership, so it is dropped.
+	xKind := scalarKind(x)
 	nonNull := make([]Expr, 0, len(members))
-	hasNull := false
+	hasNull, dropped := false, false
 	for _, m := range members {
 		if m == nil {
 			hasNull = true
+			continue
+		}
+		if kind := scalarKind(m); xKind != "" && kind != "" && kind != xKind {
+			dropped = true
 			continue
 		}
 		nonNull = append(nonNull, Lit{V: m})
@@ -618,6 +626,12 @@ func membership(x, values value) (Expr, error) {
 		predicates = append(predicates, IsNull{X: xExpr})
 	}
 	if len(predicates) == 0 {
+		if _, explicit := explicitNullColumn(xExpr); dropped && !explicit {
+			// Every member had another type: false wherever x is present. A NULL x not on the
+			// explicit-null convention is a missing attribute, which CEL denies under both
+			// polarities, so it stays UNKNOWN rather than letting a negation turn it into an allow.
+			return Case{Whens: []When{{Cond: IsNull{X: xExpr, Negate: true}, Then: BoolConst{V: false}}}}, nil
+		}
 		// `x in []` is false for every row, and the planner usually folds it to ALWAYS_DENIED.
 		return BoolConst{V: false}, nil
 	}
