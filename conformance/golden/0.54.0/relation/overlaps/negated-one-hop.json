@@ -1,0 +1,79 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "d1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/overlaps/negated-one-hop",
+  "intent": "Negated hierarchy overlaps on a parent path (!hierarchy(parent.aString).overlaps(hierarchy(\"one\"))).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.aString"
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "one"
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                }
+              ],
+              "operator": "overlaps"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/overlaps/negated-one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hierarchy(R.attr.parent.aString).overlaps(hierarchy(\"one\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A missing parent or parent path is a CEL error that denies under negation; NOT(prefix match) over a NULL join column returns those rows (#430)."
+}

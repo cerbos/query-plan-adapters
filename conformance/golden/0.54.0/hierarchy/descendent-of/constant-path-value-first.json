@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/descendent-of/constant-path-value-first",
+  "intent": "hierarchy(constant).descendentOf(hierarchy(field)): the field is the ancestor.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept.eng.platform"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "descendentOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/descendent-of/constant-path-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(\"dept.eng.platform\").descendentOf(hierarchy(R.attr.scope))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Swapping operand roles emits a descendant LIKE instead of the IN list of the constant's strict prefixes."
+}

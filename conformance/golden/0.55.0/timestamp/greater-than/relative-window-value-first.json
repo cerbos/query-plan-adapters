@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a7",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/greater-than/relative-window-value-first",
+  "intent": "now() - duration(\"24h\") > timestamp(field), the constant instant on the left.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "__NOW_MINUS_24H__"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/greater-than/relative-window-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "now() - duration(\"24h\") > timestamp(R.attr.createdAt)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The planner keeps source order; reading operands positionally inverts the comparison and flips the whole set."
+}

@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a1",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "relation/ternary/to-one-chain-condition",
+  "intent": "A ternary whose condition is membership over the mainCategory chain, selecting aBool or !aBool.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "finance"
+                },
+                {
+                  "variable": "request.resource.attr.mainCategory.subNames"
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/ternary/to-one-chain-condition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(\"finance\" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A bare NOT over the chain is true for an absent parent and selects the else branch, adding parentless rows that CEL denies (#334)."
+}

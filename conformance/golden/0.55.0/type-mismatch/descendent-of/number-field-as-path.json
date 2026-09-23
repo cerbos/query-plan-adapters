@@ -1,0 +1,59 @@
+{
+  "allowed": [],
+  "degenerateReason": "hierarchy() over a number is a CEL type error that denies every seed. A store coercing the number to a path would return rows.",
+  "id": "type-mismatch/descendent-of/number-field-as-path",
+  "intent": "hierarchy() over a numeric attribute tested with descendentOf(hierarchy(\"1.2\")).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "1.2"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "descendentOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/descendent-of/number-field-as-path",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(R.attr.aNumber).descendentOf(hierarchy(\"1.2\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "hierarchy() over a number is a CEL type error; a store that renders 1.23 as the path '1.23' treats it as a descendant of 1.2."
+}

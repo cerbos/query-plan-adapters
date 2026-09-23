@@ -1,0 +1,92 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "b2",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "composition/variable/allow-and-deny-through-variables",
+  "intent": "ALLOW on V.compose_teamed (aOptionalString in P.attr.fewTeams) and DENY on V.compose_large (aNumber > 10), planned as and(not(gt), in).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 10
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                },
+                {
+                  "value": [
+                    "set",
+                    "",
+                    "%_o"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/variable/allow-and-deny-through-variables",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "V.compose_teamed"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "expr": "V.compose_large"
+        }
+      },
+      "effect": "EFFECT_DENY",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The planner expands variables; a wrong expansion or a dropped DENY lets h1/h2/h3/h5 through."
+}

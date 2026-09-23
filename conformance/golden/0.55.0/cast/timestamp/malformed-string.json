@@ -1,0 +1,82 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "cast/timestamp/malformed-string",
+  "intent": "timestamp() over a string attribute compared with a timestamp literal (timestamp(createdBy) < timestamp(\"2025-01-01T00:00:00Z\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdBy"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2025-01-01T00:00:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/timestamp/malformed-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdBy) < timestamp(\"2025-01-01T00:00:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A lexical string comparison or a lenient SQL parse disagrees with CEL on malformed values (h5 errors and denies); map the column as a real timestamp or refuse."
+}

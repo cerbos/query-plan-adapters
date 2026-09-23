@@ -1,0 +1,44 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a7",
+    "b1",
+    "b2",
+    "b6",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/bare-attribute/one-hop-boolean",
+  "intent": "A bare boolean field of the to-one parent as the whole condition (R.attr.parent.aBool).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "variable": "request.resource.attr.parent.aBool"
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/bare-attribute/one-hop-boolean",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aBool"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "A bare field needs an explicit truth test on the joined column, and the 8 parentless rows must not appear."
+}

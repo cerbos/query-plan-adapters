@@ -1,0 +1,151 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: arithmetic
+description: '+ - * / % over attributes, division by zero, NaN and infinity.'
+cases:
+- id: 'arithmetic/add/exact-fraction-equals'
+  tier: adversarial
+  intent: 'Control: an attribute plus a fraction that is exact in binary doubles (aDouble + 0.5 == 0.75).'
+  trap: 'An adapter that refuses or over-corrects fractional arithmetic must still include a2, since 0.25 + 0.5 == 0.75 exactly.'
+  condition:
+    match:
+      expr: R.attr.aDouble + 0.5 == 0.75
+- id: 'arithmetic/add/field-plus-constant'
+  tier: extended
+  intent: 'Attribute plus a double constant compared with a threshold (aNumber + 1.0 > 2.0).'
+  trap: 'Attribute numbers are CEL doubles; the sum must be evaluated in double space in the store, not with integer semantics.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber + 1.0 > 2.0'
+- id: 'arithmetic/add/inexact-fraction-equals'
+  tier: adversarial
+  intent: Equality over an attribute plus a fraction that is inexact in IEEE doubles (aDouble + 0.7 == 0.1).
+  trap: 'Solving to aDouble == -0.6 returns a1, but -0.6 + 0.7 is 0.09999999999999998; the sum must be evaluated in the store.'
+  condition:
+    match:
+      expr: R.attr.aDouble + 0.7 == 0.1
+  degenerate:
+    oracle: empty
+    reason: 'aDouble + 0.7 == 0.1 holds for no double in IEEE arithmetic; a1 holds -0.6, exactly what solving the equation yields, and -0.6 + 0.7 is 0.09999999999999998. The not-equals mirror carries the discriminating oracle.'
+- id: 'arithmetic/add/inexact-fraction-not-equals'
+  tier: adversarial
+  intent: 'Not-equals over an attribute plus a fraction that is inexact in IEEE doubles (aDouble + 0.7 != 0.1).'
+  trap: 'Solving to aDouble != -0.6, or exact-decimal store arithmetic, wrongly excludes a1.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble + 0.7 != 0.1'
+- id: 'arithmetic/add/on-both-sides'
+  tier: extended
+  intent: 'Arithmetic over the same attribute on both sides of a comparison (aNumber + 1.0 > aNumber * 2.0).'
+  trap: 'A translator that accepts only a bare column on one side, or solves one side against a constant, mistranslates or drops it.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber + 1.0 > R.attr.aNumber * 2.0'
+- id: 'arithmetic/add/self-division-plus-constant-greater-than'
+  tier: adversarial
+  intent: 'Addition over a division that can be NaN (aNumber / aNumber + 1.0 > 1.0).'
+  trap: 'Control: CEL carries NaN through the addition and a NULL lowering yields NULL, and both exclude a7 under an ordering; the not-equals sibling discriminates.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aNumber + 1.0 > 1.0'
+- id: 'arithmetic/add/self-division-plus-constant-not-equals'
+  tier: adversarial
+  intent: 'Addition over a division that can be NaN, compared != 2.0 (aNumber / aNumber + 1.0 != 2.0).'
+  trap: 'NaN + 1.0 != 2.0 is true, so a7 is the only allowed row; a NULLIF guard makes the sum NULL and returns nothing.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aNumber + 1.0 != 2.0'
+- id: 'arithmetic/add/value-first'
+  tier: adversarial
+  intent: 'Constant on the left, arithmetic on the right (2.0 < aNumber + 1.0).'
+  trap: A translator that assumes the field is on the left flips the inequality.
+  condition:
+    match:
+      expr: 2.0 < R.attr.aNumber + 1.0
+- id: 'arithmetic/divide/field-by-field'
+  tier: adversarial
+  intent: 'One attribute divided by another, compared > 0.0.'
+  trap: A missing divisor (a3) must deny and a negative one (a1) must not flip the comparison; multiplying through by the divisor gets both wrong.
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aDouble > 0.0'
+- id: 'arithmetic/divide/fractional-quotient'
+  tier: adversarial
+  intent: Attribute divided by a constant compared for equality (aNumber / 2.0 == 1.0).
+  trap: Integer division makes 3 / 2 equal 1 and wrongly includes a6; the quotient must stay a double.
+  condition:
+    match:
+      expr: R.attr.aNumber / 2.0 == 1.0
+- id: 'arithmetic/divide/fractional-threshold'
+  tier: adversarial
+  intent: 'Division compared with a fractional threshold (aNumber / 2.0 >= 1.5).'
+  trap: Truncation to integer anywhere in the division or comparison moves rows across the 1.5 boundary.
+  condition:
+    match:
+      expr: 'R.attr.aNumber / 2.0 >= 1.5'
+- id: 'arithmetic/divide/negated-self-division-equals'
+  tier: adversarial
+  intent: 'Negated equality !(aNumber / aNumber == 1.0), where the zero row yields NaN.'
+  trap: 'Same NaN witness as the not-equals form, so special-casing != is not enough; a NULL lowering keeps a7 UNKNOWN under both polarities.'
+  condition:
+    match:
+      expr: '!(R.attr.aNumber / R.attr.aNumber == 1.0)'
+- id: 'arithmetic/divide/negative-zero-divisor'
+  tier: adversarial
+  intent: 'An attribute divided by the literal -0.0, compared > 0.0.'
+  trap: 'Dividing by -0.0 gives -Infinity for positive numerators, +Infinity for negative ones and NaN for 0; dropping the sign or guarding the zero to NULL flips or empties the result (a2/a5/b3).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / -0.0 > 0.0'
+- id: 'arithmetic/divide/nested-division-divisor'
+  tier: adversarial
+  intent: 'Division whose divisor is itself a division of two attributes (aNumber / (aDouble / aNumber) > 0).'
+  trap: 'A zero inner divisor gives an infinity in CEL''s IEEE arithmetic; SQL raises division by zero or returns NULL, flipping the row. The finite companion to the NaN divisor the planner cannot serialise.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / (R.attr.aDouble / R.attr.aNumber) > 0'
+- id: 'arithmetic/divide/self-division-greater-than'
+  tier: adversarial
+  intent: 'An attribute divided by itself compared > 0.5, where the zero row (a7) makes 0/0.'
+  trap: '0/0 is NaN and orders false in CEL; a NULLIF guard also excludes a7, so this control cannot tell them apart (the not-equals sibling can).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aNumber > 0.5'
+- id: 'arithmetic/divide/self-division-not-equals'
+  tier: adversarial
+  intent: 'An attribute divided by itself compared != 1.0, where the zero row yields NaN.'
+  trap: 'NaN != 1.0 is true in CEL so a7 is allowed; a NULLIF guard yields NULL and wrongly excludes it.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aNumber != 1.0'
+- id: 'arithmetic/modulo/negative-dividend'
+  tier: extended
+  intent: 'Integer modulo compared with 1 (int(aNumber) % 2 == 1).'
+  trap: 'CEL truncates toward zero so -5 % 2 is -1 and denies; a floored modulo yields 1 and over-grants a5. int() is needed because % has no double overload.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) % 2 == 1'
+- id: 'arithmetic/multiply/inexact-fraction-equals'
+  tier: adversarial
+  intent: 'Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3).'
+  trap: '3 * 0.1 is not 0.3 in IEEE doubles; exact-decimal store arithmetic (MySQL) or an algebraic solve returns the aNumber = 3 seeds.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber * 0.1 == 0.3'
+  degenerate:
+    oracle: empty
+    reason: '3 * 0.1 is not 0.3 in IEEE double, so the equation holds for no seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds.'
+- id: 'arithmetic/multiply/negative-multiplier'
+  tier: adversarial
+  intent: 'Attribute times a negative constant under an inequality (aNumber * -2.0 < 3.0).'
+  trap: 'Solving for the attribute must flip the inequality under a negative multiplier; getting it wrong includes the negative seeds (a2, a5, b3).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber * -2.0 < 3.0'
+- id: 'arithmetic/subtract/field-minus-constant'
+  tier: extended
+  intent: 'Attribute minus a double constant compared with zero (aNumber - 3.0 <= 0.0).'
+  trap: Subtraction is not commutative; swapped operands or a naive algebraic solve select the wrong rows.
+  condition:
+    match:
+      expr: 'R.attr.aNumber - 3.0 <= 0.0'

@@ -1,0 +1,32 @@
+{
+  "allowed": [],
+  "degenerateReason": "Every element of P.attr.missingStructs lacks name, so every comparison is a missing-field error: the planner folds the plan to always-denied.",
+  "id": "principal/exists/list-of-structs-missing-field",
+  "intent": "exists() over principal structs that all lack the name field.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/list-of-structs-missing-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.missingStructs.exists(t, t.name == R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Every comparison is a missing-field error; reading the absent field as null or empty string emits a matching filter instead of always-denied."
+}

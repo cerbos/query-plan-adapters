@@ -1,0 +1,62 @@
+{
+  "allowed": [],
+  "degenerateReason": "A string never equals a map literal, so CEL denies every seed.",
+  "id": "type-mismatch/equals/string-field-against-map-literal",
+  "intent": "Equality between a string attribute and a map literal (aString == {\"a\": 1}).",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "a"
+                      },
+                      {
+                        "value": 1
+                      }
+                    ],
+                    "operator": "set-field"
+                  }
+                }
+              ],
+              "operator": "struct"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/equals/string-field-against-map-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString == {\"a\": 1}"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A string never equals a map in CEL; serialising the map to JSON text, or letting the store coerce it, returns rows."
+}

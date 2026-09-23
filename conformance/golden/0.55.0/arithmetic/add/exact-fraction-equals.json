@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a2"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/exact-fraction-equals",
+  "intent": "Control: an attribute plus a fraction that is exact in binary doubles (aDouble + 0.5 == 0.75).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": 0.5
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 0.75
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/exact-fraction-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble + 0.5 == 0.75"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An adapter that refuses or over-corrects fractional arithmetic must still include a2, since 0.25 + 0.5 == 0.75 exactly."
+}

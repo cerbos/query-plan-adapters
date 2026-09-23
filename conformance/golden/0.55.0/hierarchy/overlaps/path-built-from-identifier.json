@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/overlaps/path-built-from-identifier",
+  "intent": "hierarchy(principal attribute, ':').overlaps(hierarchy([\"projects\", R.id])): a path built by a list from the resource id.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "projects:f1"
+                },
+                {
+                  "value": ":"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "projects"
+                      },
+                      {
+                        "variable": "request.resource.id"
+                      }
+                    ],
+                    "operator": "list"
+                  }
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "overlaps"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/overlaps/path-built-from-identifier",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(P.attr.context, \":\").overlaps(hierarchy([\"projects\", R.id]))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The path is constructed, not read from a column; an adapter that assumes a hierarchy operand is a single column, or ignores R.id, mistranslates it (oracle {f1})."
+}

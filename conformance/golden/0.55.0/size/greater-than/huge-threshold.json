@@ -1,0 +1,52 @@
+{
+  "allowed": [],
+  "degenerateReason": "No string's length exceeds 2^32. An unguarded int narrowing that wraps the threshold to 0 would return every non-empty aString; the less-than sibling is the other half.",
+  "id": "size/greater-than/huge-threshold",
+  "intent": "size() of a string compared > 4294967296 (2^32), outside 32-bit int range.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 4294967296
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-than/huge-threshold",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) > 4294967296"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A narrowing int cast wraps 2^32 to 0 and returns every non-empty string; the comparison is false for every row."
+}

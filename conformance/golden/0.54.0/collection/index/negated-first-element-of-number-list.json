@@ -1,0 +1,69 @@
+{
+  "allowed": [
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "b4",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/negated-first-element-of-number-list",
+  "intent": "!(aNumberList[0] == 2): the negated first-element comparison over a number list.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumberList"
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "index"
+                  }
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/negated-first-element-of-number-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.aNumberList[0] == 2)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Empty lists error and must deny, while a null first element (a6 [null, 2]) is a value and must allow; a SQL NULL reading gets both wrong."
+}

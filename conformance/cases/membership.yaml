@@ -1,0 +1,57 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: membership
+description: 'The `in` operator against literal lists, attribute lists and maps.'
+cases:
+- id: 'membership/in/empty-list'
+  tier: adversarial
+  intent: String attribute tested for membership in an empty literal list.
+  trap: Nothing is in the empty list; an emitted IN () may be invalid SQL or match everything instead of nothing.
+  condition:
+    match:
+      expr: 'R.attr.aString in []'
+  degenerate:
+    oracle: empty
+    reason: 'Nothing is a member of the empty list, so the planner folds the plan to ALWAYS_DENIED. An adapter emitting an empty IN list that the store matches against nothing agrees by accident, which is why it stays compared.'
+- id: 'membership/in/field-in-resource-list'
+  tier: extended
+  intent: Membership of one resource attribute in a resource list attribute (owner in tagNames).
+  trap: 'Both operands are columns, so it cannot be an IN over parameters; a null owner in a list with a null element (e1) is true, without one false.'
+  condition:
+    match:
+      expr: R.attr.owner in R.attr.tagNames
+- id: 'membership/in/literal-in-resource-number-list'
+  tier: core
+  intent: '2 in aNumberList: a literal''s membership in a number list attribute.'
+  trap: 'The literal is on the left; mirroring it into field-in-literal-list tests the wrong thing, and near values ([-2], [20], [0]) must not match.'
+  condition:
+    match:
+      expr: 2 in R.attr.aNumberList
+- id: 'membership/in/map-literal-keys'
+  tier: adversarial
+  intent: 'A string attribute in a map literal, which tests the map''s keys.'
+  trap: 'Matching the map''s values instead of its keys; the values are numbers so a value match cannot pass by accident, and c1 ("One") is the case trap.'
+  condition:
+    match:
+      expr: 'R.attr.aString in {"one": 1, "same": 2}'
+- id: 'membership/in/negated-field-in-resource-list'
+  tier: adversarial
+  intent: Negated membership of one resource attribute in a resource list attribute.
+  trap: 'A null owner with no null element (a4/a8) must be allowed and e1 (null in [null]) denied, which a plain NOT EXISTS or NOT IN gets wrong.'
+  condition:
+    match:
+      expr: '!(R.attr.owner in R.attr.tagNames)'
+- id: 'membership/in/number-literal-list'
+  tier: core
+  intent: A numeric attribute in a list of integer literals.
+  trap: Binding the list elements as strings instead of numbers; otherwise none beyond mapping the attribute to the right column.
+  condition:
+    match:
+      expr: 'R.attr.aNumber in [2, 3, 5]'
+- id: 'membership/in/single-element-list'
+  tier: core
+  intent: 'String attribute tested for membership in a one-element literal list.'
+  trap: 'The planner may normalise a one-element in to equality; the adapter must accept either shape and never emit a malformed IN.'
+  condition:
+    match:
+      expr: 'R.attr.aString in ["one"]'

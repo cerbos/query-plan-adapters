@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/first-element-of-string-list",
+  "intent": "The first element of a resource string list compared with a literal (tagNames[0] == \"public\").",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": "public"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/first-element-of-string-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames[0] == \"public\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Row order is undefined in SQL, so most adapters must refuse; rewriting the index as any-element over-grants b6 ([null, \"public\"]), and empty lists are out of range and deny."
+}

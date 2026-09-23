@@ -1,0 +1,221 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: relation
+description: 'The real to-one relation (parent, parent.inner) and the mainCategory join chain.'
+cases:
+- id: 'relation/all/to-one-chain'
+  tier: adversarial
+  intent: all() over mainCategory.subCategories where most rows have no mainCategory.
+  trap: 'CEL denies a missing path, but an unguarded join makes all() vacuously true for parentless rows and over-grants them (#309).'
+  condition:
+    match:
+      expr: 'R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
+- id: 'relation/and/one-hop-and-root-attribute'
+  tier: extended
+  intent: 'A root predicate AND a parent predicate (aBool == true && parent.aString.contains("re")).'
+  trap: 'Dropping or mis-scoping the root conjunct returns b6 (whose root aBool is false) beside d1.'
+  condition:
+    match:
+      expr: 'R.attr.aBool == true && R.attr.parent.aString.contains("re")'
+- id: 'relation/and/one-hop-range'
+  tier: extended
+  intent: 'Two comparisons on the same parent field (parent.aNumber > 2 && parent.aNumber < 12).'
+  trap: Both predicates must share one join; a separate join or EXISTS per conjunct lets two different parent rows satisfy each half.
+  condition:
+    match:
+      expr: 'R.attr.parent.aNumber > 2 && R.attr.parent.aNumber < 12'
+- id: 'relation/bare-attribute/negated-one-hop-boolean'
+  tier: adversarial
+  intent: 'Negation of a bare boolean on the to-one parent (!R.attr.parent.aBool).'
+  trap: 'A LEFT JOIN that does not require the parent makes NOT true for the 8 parentless rows, which CEL denies; only the negation exposes this.'
+  condition:
+    match:
+      expr: '!R.attr.parent.aBool'
+- id: 'relation/bare-attribute/one-hop-boolean'
+  tier: core
+  intent: 'A bare boolean field of the to-one parent as the whole condition (R.attr.parent.aBool).'
+  trap: 'A bare field needs an explicit truth test on the joined column, and the 8 parentless rows must not appear.'
+  condition:
+    match:
+      expr: R.attr.parent.aBool
+- id: 'relation/contains/negated-one-hop'
+  tier: adversarial
+  intent: 'Negated contains() on a parent field (!parent.aString.contains("done")).'
+  trap: 'NOT LIKE over a missing parent or parent string must stay UNKNOWN and deny; a negation that is true for absent parents over-grants (#430).'
+  condition:
+    match:
+      expr: '!R.attr.parent.aString.contains("done")'
+- id: 'relation/contains/one-hop'
+  tier: core
+  intent: 'Substring test on a parent field (parent.aString.contains("done")).'
+  trap: 'No metacharacter or case trap, only the join: reading the root''s aString gives a2/a3 instead of a1/a4.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aString.contains("done")'
+- id: 'relation/equals/negated-one-hop'
+  tier: adversarial
+  intent: 'Negated equality on a parent field (!(parent.aString == "One")).'
+  trap: 'A parentless row, or a missing parent aString, is a CEL error that denies; a not-equals over a LEFT JOIN, or a $ne that matches absent keys, returns them (#430).'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aString == "One")'
+- id: 'relation/equals/one-hop-number'
+  tier: core
+  intent: 'Numeric equality on a field of the to-one parent (parent.aNumber == 2).'
+  trap: 'Reading the root''s aNumber instead of the joined parent''s returns different rows.'
+  condition:
+    match:
+      expr: R.attr.parent.aNumber == 2
+- id: 'relation/equals/one-hop-string'
+  tier: core
+  intent: 'String equality on a field of the to-one parent (parent.aString == "One").'
+  trap: 'A case-insensitive collation on the joined table adds e1 (parent holds "one"); parentless rows must deny.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aString == "One"'
+- id: 'relation/equals/two-hops-boolean'
+  tier: extended
+  intent: Boolean equality two levels out (parent.inner.aBool == true).
+  trap: 'Alias scoping and correlated-subquery nesting break at two hops; rows missing either level (14, for two reasons) must deny.'
+  condition:
+    match:
+      expr: R.attr.parent.inner.aBool == true
+- id: 'relation/exists/negated-to-one-chain'
+  tier: adversarial
+  intent: Negated exists() over mainCategory.subCategories where most rows have no mainCategory.
+  trap: 'An unguarded NOT EXISTS is true for parentless rows, which CEL denies as a missing path (#309).'
+  condition:
+    match:
+      expr: '!R.attr.mainCategory.subCategories.exists(s, s.name == "finance")'
+- id: 'relation/exists/to-one-chain'
+  tier: extended
+  intent: 'exists() over mainCategory.subCategories, a to-one object followed by a collection.'
+  trap: 'One nested object to check() is two hops in the store; the subquery must join through the intermediate hop, never off the root.'
+  condition:
+    match:
+      expr: 'R.attr.mainCategory.subCategories.exists(s, s.name == "finance")'
+- id: 'relation/greater-or-equal/one-hop'
+  tier: core
+  intent: 'parent.aNumber >= 2 through the to-one parent.'
+  trap: 'The threshold sits on a boundary value so >= and > differ; reading the root''s column instead of the parent''s disagrees everywhere.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aNumber >= 2'
+- id: 'relation/greater-than/one-hop'
+  tier: core
+  intent: 'parent.aNumber > 2 through the to-one parent.'
+  trap: 'None beyond joining the parent and reading its column, not the root''s; parentless rows must deny.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aNumber > 2'
+- id: 'relation/has-intersection/negated-empty-list-on-to-one-chain'
+  tier: adversarial
+  intent: Negated hasIntersection of the mainCategory.subNames chain with an empty principal list.
+  trap: 'Folding hasIntersection(x, []) to false makes the negation true for every row, over-granting rows with no mainCategory, where CEL errors on the missing hop.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.mainCategory.subNames, P.attr.emptyTeams)'
+- id: 'relation/has-intersection/negated-to-one-chain'
+  tier: adversarial
+  intent: Negated hasIntersection over the chained string list mainCategory.subNames.
+  trap: 'hasIntersection reaches the chain through a different translator branch than in; without the absent-parent guard the negation over-grants parentless rows (#315).'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+- id: 'relation/in/negated-to-one-chain'
+  tier: adversarial
+  intent: 'Negated membership !("finance" in mainCategory.subNames) where most rows have no mainCategory.'
+  trap: 'An unguarded NOT EXISTS adds the parentless rows; the absent-parent guard belongs in the shared relation-scope code, not in each macro (#315).'
+  condition:
+    match:
+      expr: '!("finance" in R.attr.mainCategory.subNames)'
+- id: 'relation/in/to-one-chain'
+  tier: extended
+  intent: 'A literal''s membership in the string list mainCategory.subNames.'
+  trap: 'The membership subquery must join through the intermediate to-one hop and map to the element''s name, not the root.'
+  condition:
+    match:
+      expr: '"finance" in R.attr.mainCategory.subNames'
+- id: 'relation/less-or-equal/one-hop'
+  tier: core
+  intent: 'parent.aNumber <= 2 through the to-one parent.'
+  trap: 'The threshold sits on a boundary value so <= and < differ (a1/a7); reading the root''s column instead of the parent''s disagrees everywhere.'
+  condition:
+    match:
+      expr: R.attr.parent.aNumber <= 2
+- id: 'relation/less-than/one-hop'
+  tier: core
+  intent: 'parent.aNumber < 2 through the to-one parent.'
+  trap: 'The threshold sits on a boundary value so < and <= differ; reading the root''s column instead of the parent''s disagrees everywhere.'
+  condition:
+    match:
+      expr: R.attr.parent.aNumber < 2
+- id: 'relation/not-equals/one-hop-null-literal'
+  tier: adversarial
+  intent: 'parent.aOptionalString != null through the to-one parent.'
+  trap: 'Both a missing parent (8 rows) and a missing parent attribute (a4/a7/c1) must deny; an unguarded LEFT JOIN or a two-valued IS NOT NULL mishandles one of them.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aOptionalString != null'
+- id: 'relation/or/two-hops-or-collection-exists'
+  tier: adversarial
+  intent: 'A two-level parent predicate OR an exists() over categories.'
+  trap: 'CEL''s OR absorbs the missing-path error, so rows with no inner level but a matching category (a6/a8/c1) are allowed; an inner join on either side under-grants them.'
+  condition:
+    match:
+      expr: 'R.attr.parent.inner.aBool == true || R.attr.categories.exists(c, c.name == "business")'
+- id: 'relation/overlaps/negated-one-hop'
+  tier: adversarial
+  intent: 'Negated hierarchy overlaps on a parent path (!hierarchy(parent.aString).overlaps(hierarchy("one"))).'
+  trap: 'A missing parent or parent path is a CEL error that denies under negation; NOT(prefix match) over a NULL join column returns those rows (#430).'
+  condition:
+    match:
+      expr: '!hierarchy(R.attr.parent.aString).overlaps(hierarchy("one"))'
+- id: 'relation/size/negated-non-empty-to-one-chain'
+  tier: adversarial
+  intent: '!(size(mainCategory.subCategories) > 0), which the planner emits verbatim rather than as == 0.'
+  trap: 'Guarding only the == 0 spelling misses this; an unguarded negated count readmits parentless rows, so the guard must sit on the count itself (#316).'
+  condition:
+    match:
+      expr: '!(size(R.attr.mainCategory.subCategories) > 0)'
+  degenerate:
+    oracle: empty
+    reason: 'Every seed that holds a mainCategory holds exactly one subCategory, so the negated count is false for it, and every seed without one is a missing-path error. A two-valued absent-parent guard would readmit the parentless rows under the negation.'
+- id: 'relation/size/non-empty-to-one-chain'
+  tier: extended
+  intent: 'size(mainCategory.subCategories) > 0, a count over a to-one-then-collection chain.'
+  trap: The count must join through the intermediate hop; counting off the root or the wrong hop miscounts.
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) > 0'
+- id: 'relation/size/non-negative-to-one-chain'
+  tier: adversarial
+  intent: 'size(mainCategory.subCategories) >= 0, true exactly for rows that have a mainCategory.'
+  trap: 'Folding a >= 0 count to always-true, or leaving the chain unguarded, returns all 22 rows instead of the four with a mainCategory (#309).'
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) >= 0'
+- id: 'relation/size/zero-to-one-chain'
+  tier: adversarial
+  intent: size(mainCategory.subCategories) == 0 where most rows have no mainCategory.
+  trap: 'An unguarded chain counts 0 for parentless rows and over-grants them; CEL denies the missing path (#309).'
+  condition:
+    match:
+      expr: size(R.attr.mainCategory.subCategories) == 0
+  degenerate:
+    oracle: empty
+    reason: 'No seed holds a mainCategory with zero subCategories, and every seed without one is a missing-path error. The non-negative size sibling carries the discriminating oracle for the same chain.'
+- id: 'relation/starts-with/two-hops'
+  tier: extended
+  intent: 'Prefix match two levels out (parent.inner.aString.startsWith("100")).'
+  trap: 'Reading the wrong depth gives a disjoint answer: the right level is e1, one level short is a1/a4, the root is a2/a3.'
+  condition:
+    match:
+      expr: 'R.attr.parent.inner.aString.startsWith("100")'
+- id: 'relation/ternary/to-one-chain-condition'
+  tier: adversarial
+  intent: 'A ternary whose condition is membership over the mainCategory chain, selecting aBool or !aBool.'
+  trap: 'A bare NOT over the chain is true for an absent parent and selects the else branch, adding parentless rows that CEL denies (#334).'
+  condition:
+    match:
+      expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'

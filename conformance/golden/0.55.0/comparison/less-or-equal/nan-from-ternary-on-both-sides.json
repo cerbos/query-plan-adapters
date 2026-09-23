@@ -1,0 +1,101 @@
+{
+  "allowed": [],
+  "degenerateReason": "The true arm compares 1.0 <= 0.5 and the false arm orders against NaN: both are false for every seed. A total-order comparison ranks NaN above every number and would return every aBool=false seed.",
+  "id": "comparison/less-or-equal/nan-from-ternary-on-both-sides",
+  "intent": "Ternary <= ternary, where the right side yields NaN in its false arm.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 1
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 2
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": 0.5
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 0
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-or-equal/nan-from-ternary-on-both-sides",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Nothing mirrors, so le(0.5, NaN) must be false; a total-order comparison ranks NaN above every number and returns every aBool=false seed."
+}

@@ -1,0 +1,40 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: identifier
+description: The resource id (R.id) as a filterable attribute.
+cases:
+- id: identifier/equals/concatenation
+  tier: extended
+  intent: 'An optional string attribute compared == "prefix:" + R.id.'
+  trap: 'String + must become concatenation, not numeric +; rows missing aOptionalString must deny.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString == "prefix:" + R.id'
+- id: 'identifier/equals/concatenation-value-first'
+  tier: adversarial
+  intent: 'A principal attribute (folded to a constant) compared == "projects:" + R.id.'
+  trap: The constant is on the left against a concatenation built from the key; operand inversion or numeric + returns the wrong rows.
+  condition:
+    match:
+      expr: 'P.attr.context == "projects:" + R.id'
+- id: 'identifier/equals/field-to-field'
+  tier: extended
+  intent: A resource attribute compared == the resource id.
+  trap: Resolving R.id to the wrong column or treating it as a literal returns the wrong rows (the oracle is f1 alone).
+  condition:
+    match:
+      expr: R.attr.aString == R.id
+- id: identifier/equals/literal
+  tier: core
+  intent: The resource id (R.id) compared == a string literal.
+  trap: 'R.id is not under request.resource.attr; an adapter that only strips that prefix misses it or maps it to the wrong column (primary key, ObjectId, document id).'
+  condition:
+    match:
+      expr: 'R.id == "f1"'
+- id: 'identifier/not-equals/field-to-field'
+  tier: extended
+  intent: 'A resource attribute compared != the resource id.'
+  trap: 'The oracle is 21 of 22 rows, so resolving the key to the wrong column shows up in the row count.'
+  condition:
+    match:
+      expr: 'R.attr.aString != R.id'

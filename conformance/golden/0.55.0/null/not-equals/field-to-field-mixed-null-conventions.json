@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2"
+  ],
+  "degenerateReason": null,
+  "id": "null/not-equals/field-to-field-mixed-null-conventions",
+  "intent": "Inequality between an explicit-null attribute (owner) and a missing-when-null attribute (scope).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "variable": "request.resource.attr.scope"
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/not-equals/field-to-field-mixed-null-conventions",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.owner != R.attr.scope"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "No single predicate is right: treating it as definite over-grants (20 rows instead of 18) and a plain comparison under-grants, so every adapter must refuse it (#308)."
+}

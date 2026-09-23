@@ -1,0 +1,107 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/nested-three-levels",
+  "intent": "exists nested three levels deep: categories, subCategories, labels with name == \"gold\".",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.categories"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "c.subCategories"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "s.labels"
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "variable": "l.name"
+                                              },
+                                              {
+                                                "value": "gold"
+                                              }
+                                            ],
+                                            "operator": "eq"
+                                          }
+                                        },
+                                        {
+                                          "variable": "l"
+                                        }
+                                      ],
+                                      "operator": "lambda"
+                                    }
+                                  }
+                                ],
+                                "operator": "exists"
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "variable": "c"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/nested-three-levels",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == \"gold\")))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "An unnamed label (a6) errors and must deny through every level, and matching is case-sensitive (c1's \"Gold\" must not match)."
+}

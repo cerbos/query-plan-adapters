@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/literal-in-resource-number-list",
+  "intent": "2 in aNumberList: a literal's membership in a number list attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 2
+          },
+          {
+            "variable": "request.resource.attr.aNumberList"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/literal-in-resource-number-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "2 in R.attr.aNumberList"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "The literal is on the left; mirroring it into field-in-literal-list tests the wrong thing, and near values ([-2], [20], [0]) must not match."
+}

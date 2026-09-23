@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/element-in-literal-list",
+  "intent": "exists() over a resource string list whose body tests the element's membership in a literal list.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "tagName"
+                      },
+                      {
+                        "value": [
+                          "public",
+                          "other"
+                        ]
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                },
+                {
+                  "variable": "tagName"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/element-in-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.tagNames.exists(tagName, tagName in [\"public\", \"other\"]))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The literal list is folded inside the lambda; the lambda variable must stay bound to the element, not resolve outside the lambda."
+}

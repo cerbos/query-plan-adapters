@@ -1,0 +1,58 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "principal/in/short-list",
+  "intent": "An optional resource attribute in a 3-value principal list, which takes the small-list plan (aOptionalString in P.attr.fewTeams).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "value": [
+              "set",
+              "",
+              "%_o"
+            ]
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/in/short-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aOptionalString in P.attr.fewTeams"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "As with the long list, a missing needle must deny (#411), and the \"\" and \"%_o\" elements punish coercing missing to '' and LIKE metacharacter leaks."
+}

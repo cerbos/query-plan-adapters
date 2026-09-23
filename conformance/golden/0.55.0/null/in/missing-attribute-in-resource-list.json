@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a9",
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/missing-attribute-in-resource-list",
+  "intent": "An optional attribute tested for membership in a resource list attribute (R.attr.aOptionalString in R.attr.tagNames).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/missing-attribute-in-resource-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aOptionalString in R.attr.tagNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An omitted attribute is a CEL error that denies, not an explicit null; mapping it to NULL and matching tagNames' null elements over-grants."
+}

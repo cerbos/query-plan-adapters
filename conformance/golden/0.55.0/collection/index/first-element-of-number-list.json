@@ -1,0 +1,58 @@
+{
+  "allowed": [
+    "a1",
+    "a3"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/first-element-of-number-list",
+  "intent": "The first element of a number list compared with a literal (aNumberList[0] == 2).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumberList"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/first-element-of-number-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumberList[0] == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "A position-blind membership test (term query, $contains) also matches [3, 2]; losing the number type or reading empty lists as NULL matches the wrong rows."
+}

@@ -1,0 +1,150 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: comparison
+description: 'Equality and ordering between an attribute and a literal, or between two attributes.'
+cases:
+- id: 'comparison/equals/field-to-field'
+  tier: extended
+  intent: Equality between two resource attributes (aString == aOptionalString).
+  trap: 'Both operands are columns, so a translator expecting a literal fails; a missing optional attribute must deny rather than match.'
+  condition:
+    match:
+      expr: R.attr.aString == R.attr.aOptionalString
+- id: 'comparison/equals/nested-map-member'
+  tier: extended
+  intent: 'Equality on a member of a map-valued attribute (obj.inner == "one").'
+  trap: 'The dotted path must resolve to the nested member''s column, not a flat attribute named obj.inner.'
+  condition:
+    match:
+      expr: 'R.attr.obj.inner == "one"'
+- id: 'comparison/equals/whole-list-literal'
+  tier: adversarial
+  intent: 'Whole-list equality between a list attribute and a one-element list literal (tagNames == ["public"]).'
+  trap: 'CEL compares the entire ordered list; degrading to membership ("public" in tagNames) over-grants rows holding other elements too.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames == ["public"]'
+- id: 'comparison/greater-or-equal/fractional-threshold'
+  tier: adversarial
+  intent: 'Numeric attribute compared >= a fractional literal (aNumber >= 1.5).'
+  trap: 'Truncating the double threshold to an integer, or comparing against an integer-typed store field, moves the boundary.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber >= 1.5'
+- id: 'comparison/greater-or-equal/value-first'
+  tier: adversarial
+  intent: 'Literal on the left of >= against a numeric attribute (2 >= aNumber).'
+  trap: 'Treating the literal as the column side emits aNumber >= 2 instead of aNumber <= 2.'
+  condition:
+    match:
+      expr: '2 >= R.attr.aNumber'
+- id: 'comparison/greater-than/double-below-int64-range'
+  tier: adversarial
+  intent: 'A double attribute compared > -1e19, a literal beyond the int64 range; every present aDouble is allowed.'
+  trap: 'Saturating the literal to Long.MIN_VALUE drops g1 (-9.5e18), an under-grant.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble > -1e19'
+- id: 'comparison/greater-than/field-against-literal'
+  tier: core
+  intent: 'Greater-than on a numeric attribute (aNumber > 1).'
+  trap: 'None beyond mapping the operator; its oracle overlaps less-or-equal''s, so confusing gt and le cannot pass.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber > 1'
+- id: 'comparison/greater-than/infinity-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding +Infinity or -Infinity (1.0/0.0, -1.0/0.0) compared > 0.5.'
+  trap: 'Infinities order normally; treating every non-finite value like NaN, or refusing division by zero blindly, gets the +Infinity arm wrong.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5) && now() == now()'
+- id: 'comparison/greater-than/nan-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding 1.0 or NaN (0.0/0.0) compared > 0.5, with now() == now() preventing a plan-time fold.'
+  trap: 'CEL orders nothing against NaN; a total-order comparison such as Double.compare ranks NaN above every number and makes the NaN arm true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+- id: 'comparison/less-or-equal/field-against-literal'
+  tier: core
+  intent: 'Less-or-equal on a numeric attribute (aNumber <= 2).'
+  trap: 'None beyond mapping the operator; its oracle is not the complement of greater-than, so swapping operators fails.'
+  condition:
+    match:
+      expr: R.attr.aNumber <= 2
+- id: 'comparison/less-or-equal/nan-from-ternary-on-both-sides'
+  tier: adversarial
+  intent: 'Ternary <= ternary, where the right side yields NaN in its false arm.'
+  trap: 'Nothing mirrors, so le(0.5, NaN) must be false; a total-order comparison ranks NaN above every number and returns every aBool=false seed.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
+  degenerate:
+    oracle: empty
+    reason: 'The true arm compares 1.0 <= 0.5 and the false arm orders against NaN: both are false for every seed. A total-order comparison ranks NaN above every number and would return every aBool=false seed.'
+- id: 'comparison/less-or-equal/negated-nan-from-ternary-on-both-sides'
+  tier: adversarial
+  intent: 'Negated ternary <= ternary where one arm yields NaN (0.0/0.0), with now() == now() keeping the arithmetic unfolded.'
+  trap: 'Ordering against NaN is false, so the negation allows the NaN arm and the finite arm (1 <= 2) denies; SQL gives NULL or an error for 0/0 and NOT(NULL) drops the row.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
+  plannerDivergence:
+    issue: 'Cerbos 0.54 check() errors on an ordering against NaN, which 0.55 evaluates to false'
+    pdp:
+    - 0.54.0
+    reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
+
+- id: 'comparison/less-or-equal/value-first'
+  tier: adversarial
+  intent: Literal on the left of <= against a numeric attribute (3 <= aNumber).
+  trap: 'The planner keeps source order; a translator that assumes field-first emits aNumber <= 3 and inverts the comparison.'
+  condition:
+    match:
+      expr: 3 <= R.attr.aNumber
+- id: 'comparison/less-than/double-below-int64-range'
+  tier: adversarial
+  intent: 'A double attribute compared < -1e19, a literal beyond the int64 range.'
+  trap: 'Narrowing the literal through int64 saturates to Long.MIN_VALUE, so g1 (-9.5e18) falls in the gap and is returned though CEL denies it.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble < -1e19'
+  degenerate:
+    oracle: empty
+    reason: 'No seed lies below -1e19 (g1, at -9.5e18, is the closest). A translator that narrows the literal to the int64 minimum would return g1; the greater-than mirror carries the discriminating oracle.'
+- id: 'comparison/less-than/nan-from-ternary-value-first'
+  tier: adversarial
+  intent: The literal 0.5 on the left compared < a ternary yielding 1.0 or NaN.
+  trap: 'Mirroring puts NaN on the normalised left; operand inversion or NaN-as-largest ordering makes the NaN arm true.'
+  condition:
+    match:
+      expr: '(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()'
+- id: 'comparison/less-than/negative-literal'
+  tier: adversarial
+  intent: 'Numeric attribute compared less-than a negative literal (aNumber < -1).'
+  trap: 'Mishandling the unary minus in the planned literal (dropping the sign, or reading it as subtraction) compares against the wrong value.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber < -1'
+- id: 'comparison/less-than/value-first'
+  tier: adversarial
+  intent: Ordering with the literal on the left (1 < aNumber).
+  trap: 'Operand inversion, this repository''s canonical bug (#258, #259): swapping sides without flipping the operator yields a disjoint set.'
+  condition:
+    match:
+      expr: 1 < R.attr.aNumber
+- id: 'comparison/not-equals/value-first'
+  tier: adversarial
+  intent: 'String literal on the left of != against a string attribute ("one" != aString).'
+  trap: 'A field-first assumption mistakes the literal for a column; != must also exclude rows where the attribute is missing, which CEL denies.'
+  condition:
+    match:
+      expr: '"one" != R.attr.aString'
+- id: 'comparison/not-equals/whole-list-literal'
+  tier: adversarial
+  intent: 'Whole-list inequality between a list attribute and a one-element list literal (tagNames != ["public"]).'
+  trap: 'Negating a per-member comparison drops rows that hold "public" beside other elements, and Chroma''s $ne matches absent keys.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames != ["public"]'

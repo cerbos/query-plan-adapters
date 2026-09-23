@@ -1,0 +1,59 @@
+{
+  "allowed": [
+    "a1",
+    "b4",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/first-element-of-boolean-list",
+  "intent": "The first element of a boolean list compared with true (aBoolList[0] == true).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBoolList"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": true
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/first-element-of-boolean-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBoolList[0] == true"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "A position-blind match also finds true in second position (a5 [false, true]); a store reading true as 1 loses the boolean type."
+}

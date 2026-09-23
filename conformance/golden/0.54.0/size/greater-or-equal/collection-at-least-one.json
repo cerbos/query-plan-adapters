@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "size/greater-or-equal/collection-at-least-one",
+  "intent": "A non-empty collection spelled size(tags) >= 1.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-or-equal/collection-at-least-one",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.tags) >= 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "An emptiness fast path keyed only on > 0 must give >= 1 the same meaning; an off-by-one threshold admits empty lists."
+}

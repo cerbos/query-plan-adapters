@@ -1,0 +1,98 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a9",
+    "b1",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/nested-in-then-branch",
+  "intent": "A ternary whose then-branch is another ternary, compared with a literal.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": ""
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "value": 0
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                },
+                {
+                  "value": -1
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/nested-in-then-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? (R.attr.aString == \"\" ? 0 : R.attr.aNumber) : -1) >= 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Guards must compose through both levels; flattening loses the inner condition, and the empty-string seed must land in the inner else."
+}

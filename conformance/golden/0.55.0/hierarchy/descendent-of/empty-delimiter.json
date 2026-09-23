@@ -1,0 +1,71 @@
+{
+  "allowed": [
+    "a3",
+    "a4",
+    "a5",
+    "b5",
+    "c2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/descendent-of/empty-delimiter",
+  "intent": "descendentOf with an empty-string delimiter, which splits one segment per character.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                },
+                {
+                  "value": ""
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept.eng"
+                },
+                {
+                  "value": ""
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "descendentOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/descendent-of/empty-delimiter",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(R.attr.scope, \"\").descendentOf(hierarchy(\"dept.eng\", \"\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Defaulting the delimiter to \".\" drops a5; LIKE prefix + delimiter + '%' with an empty delimiter also matches the path itself (a2), never its own descendant."
+}

@@ -1,0 +1,82 @@
+{
+  "allowed": [
+    "a4",
+    "a6",
+    "a7",
+    "a9",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/scalar-list-negated-body",
+  "intent": "exists() over a string list with a negated equality body (tagNames.exists(tagName, !(tagName == \"public\"))).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "tagName"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "variable": "tagName"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/scalar-list-negated-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.exists(tagName, !(tagName == \"public\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A null element satisfies !(null == \"public\") in CEL but SQL NOT(NULL = 'public') is UNKNOWN; a flat-array must_not also excludes mixed arrays CEL allows (#430)."
+}

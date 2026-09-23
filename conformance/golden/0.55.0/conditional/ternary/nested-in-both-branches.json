@@ -1,0 +1,127 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/nested-in-both-branches",
+  "intent": "A ternary whose both branches are ternaries, compared with a threshold.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": ""
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "value": 0
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            },
+                            {
+                              "value": 0
+                            }
+                          ],
+                          "operator": "lt"
+                        }
+                      },
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/nested-in-both-branches",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? (R.attr.aString == \"\" ? 0.0 : R.attr.aNumber) : (R.attr.aNumber < 0.0 ? -1.0 : 5.0)) > 1.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Each nested condition must select its branch independently; flattening into one AND/OR loses which branch applies, and a missing condition must not fall through."
+}

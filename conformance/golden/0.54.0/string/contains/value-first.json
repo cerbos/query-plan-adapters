@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a1",
+    "a7",
+    "a8",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "string/contains/value-first",
+  "intent": "A literal haystack with the attribute as needle (\"literal\".contains(aString)).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "s100Xdone-tail\\one-end"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/contains/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"s100Xdone-tail\\\\one-end\".contains(R.attr.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Swapping into column LIKE '%literal%' inverts the test; the column needle must have %, _ and \\ escaped (a2 \"100%_done\", a7 \"tail\\\"), and the empty string matches."
+}

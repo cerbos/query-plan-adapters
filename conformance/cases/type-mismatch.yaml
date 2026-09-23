@@ -1,0 +1,289 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: 'type-mismatch'
+description: 'Operands of different CEL types, which CEL answers with an error (deny).'
+cases:
+- id: 'type-mismatch/contains/number-field-needle'
+  tier: adversarial
+  intent: contains() on a string attribute with a numeric attribute as the needle (R.attr.aString.contains(R.attr.aNumber)).
+  trap: 'A non-string needle is a CEL error; concatenating the number into a LIKE pattern coerces it to text and returns rows.'
+  condition:
+    match:
+      expr: R.attr.aString.contains(R.attr.aNumber)
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/contains/number-field-receiver'
+  tier: adversarial
+  intent: 'contains() called on a numeric attribute (R.attr.aNumber.contains("2")).'
+  trap: 'A string function on a non-string receiver is a CEL error; LIKE ''%2%'' over the number coerced to text returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber.contains("2")'
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/descendent-of/number-field-as-path'
+  tier: adversarial
+  intent: 'hierarchy() over a numeric attribute tested with descendentOf(hierarchy("1.2")).'
+  trap: 'hierarchy() over a number is a CEL type error; a store that renders 1.23 as the path ''1.23'' treats it as a descendant of 1.2.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.aNumber).descendentOf(hierarchy("1.2"))'
+  degenerate:
+    oracle: empty
+    reason: hierarchy() over a number is a CEL type error that denies every seed. A store coercing the number to a path would return rows.
+- id: 'type-mismatch/ends-with/number-field-needle'
+  tier: adversarial
+  intent: endsWith() on a string attribute with a numeric attribute as the suffix (R.attr.aString.endsWith(R.attr.aNumber)).
+  trap: 'A non-string needle is a CEL error; building the LIKE pattern from the number coerces it to text and returns rows.'
+  condition:
+    match:
+      expr: R.attr.aString.endsWith(R.attr.aNumber)
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/ends-with/number-field-receiver'
+  tier: adversarial
+  intent: 'endsWith() called on a numeric attribute (R.attr.aNumber.endsWith("2")).'
+  trap: 'A string function on a non-string receiver is a CEL error; LIKE ''%2'' over the number coerced to text returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber.endsWith("2")'
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/equals/boolean-field-against-string-literal'
+  tier: adversarial
+  intent: 'aBool == "true" OR aNumber == 5: a boolean attribute compared with the string "true".'
+  trap: 'false in CEL; SQLite and MySQL store a boolean as 1, and a coercing store returns every aBool-true row.'
+  condition:
+    match:
+      expr: 'R.attr.aBool == "true" || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/boolean-list-element-against-number-literal'
+  tier: adversarial
+  intent: 'aBoolList[0] == 1 OR aNumber == 5: a boolean list element compared with a number.'
+  trap: 'false in CEL, but SQLite and MySQL store JSON true as 1 and would return b4 and c1.'
+  condition:
+    match:
+      expr: 'R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/number-field-against-string-literal'
+  tier: adversarial
+  intent: 'aNumber == "5" OR aNumber == 2: a number attribute compared with a numeric string.'
+  trap: '5 == "5" is false in CEL; Elasticsearch, Mongoose, SQLite, H2 and MySQL may coerce and add a1.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber == "5" || R.attr.aNumber == 2'
+- id: 'type-mismatch/equals/number-field-against-string-principal'
+  tier: adversarial
+  intent: A numeric attribute compared == a string principal attribute (R.attr.aNumber == P.attr.context).
+  trap: 'CEL denies mixed-type equality; a store that casts the string to a number, or the number to text, returns rows.'
+  condition:
+    match:
+      expr: R.attr.aNumber == P.attr.context
+  degenerate:
+    oracle: empty
+    reason: 'Heterogeneous operands: CEL has no cross-type equality and denies every seed. A store''s implicit coercion would compare them and return rows.'
+- id: 'type-mismatch/equals/number-list-element-against-boolean-literal'
+  tier: adversarial
+  intent: 'aNumberList[0] == true OR aNumber == 5: a number list element compared with a boolean.'
+  trap: 'false in CEL, but a store reading 1 as true would return b4 [1].'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList[0] == true || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/string-field-against-map-literal'
+  tier: adversarial
+  intent: 'Equality between a string attribute and a map literal (aString == {"a": 1}).'
+  trap: 'A string never equals a map in CEL; serialising the map to JSON text, or letting the store coerce it, returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString == {"a": 1}'
+  degenerate:
+    oracle: empty
+    reason: 'A string never equals a map literal, so CEL denies every seed.'
+- id: 'type-mismatch/equals/string-field-against-map-literal-with-null-value'
+  tier: adversarial
+  intent: 'Equality between a string attribute and a map literal whose value is null (aString == {"a": null}).'
+  trap: 'A string never equals a map; flattening the null entry into an IS NULL test, or serialising the map, returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString == {"a": null}'
+  degenerate:
+    oracle: empty
+    reason: 'A string never equals a map literal, null-valued entry or not, so CEL denies every seed.'
+- id: 'type-mismatch/equals/string-field-against-number-field'
+  tier: adversarial
+  intent: Equality between a string attribute and a numeric attribute (R.attr.aString == R.attr.aNumber).
+  trap: 'A column-to-column comparison lets the store coerce one side and match rows such as ''0'' = 0, where CEL denies.'
+  condition:
+    match:
+      expr: R.attr.aString == R.attr.aNumber
+  degenerate:
+    oracle: empty
+    reason: 'Heterogeneous operands: CEL has no cross-type equality and denies every seed. A store''s implicit coercion would compare them and return rows.'
+- id: 'type-mismatch/equals/string-field-against-number-literal'
+  tier: adversarial
+  intent: 'aString == 0 OR aNumber == 5: a string attribute compared with a number.'
+  trap: 'false in CEL; text conversion matches h4 ("0") and MySQL reads every non-numeric string as 0, matching most rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString == 0 || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/string-field-against-number-principal'
+  tier: adversarial
+  intent: A string attribute compared == a numeric principal attribute (R.attr.aString == P.attr.zero).
+  trap: 'CEL has no cross-type equality and denies; a store that coerces ''0'' to 0, or 0 to ''0'', returns rows.'
+  condition:
+    match:
+      expr: R.attr.aString == P.attr.zero
+  degenerate:
+    oracle: empty
+    reason: 'Heterogeneous operands: CEL has no cross-type equality and denies every seed. A store''s implicit coercion would compare them and return rows.'
+- id: 'type-mismatch/exists/element-field-against-number-literal'
+  tier: adversarial
+  intent: 'tags.exists(t, t.name == 0) OR aNumber == 5: a related tag''s string name compared with a number inside exists().'
+  trap: 'false in CEL, but MySQL reads non-numeric tag names as 0 and matches every tagged row.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == 0) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/mapped-names-against-mixed-literal-list'
+  tier: adversarial
+  intent: 'hasIntersection(tags.map(t, t.name), ["public", 0]): projected tag names against a literal list mixing a string and a number.'
+  trap: '"public" matches and 0 cannot in CEL; MySQL coerces names to 0 and adds every other tagged row, and H2 fails to execute.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", 0])'
+- id: 'type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list'
+  tier: adversarial
+  intent: 'hasIntersection(aBoolList, ["true"]) OR aNumber == 5: a boolean list against a string-only literal list.'
+  trap: 'No element has the right type, so CEL answers false; a coercing store matches every list holding true.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.aBoolList, ["true"]) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list'
+  tier: adversarial
+  intent: 'hasIntersection(aNumberList, ["2", 3]): a number list against a literal list mixing a string and a number.'
+  trap: '"2" never matches in CEL while 3 can; a coercing store adds a1/a6 through the string.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.aNumberList, ["2", 3])'
+- id: 'type-mismatch/has-intersection/resource-string-list-against-map-element'
+  tier: adversarial
+  intent: 'hasIntersection of a string list attribute with a literal list whose only element is a map (hasIntersection(tagNames, [{"a": 1}])).'
+  trap: No string equals a map; binding the map as a serialised string or a coerced value matches rows.
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tagNames, [{"a": 1}])'
+  degenerate:
+    oracle: empty
+    reason: 'The literal''s only element is a map, which no string in tagNames equals, so CEL denies every seed.'
+- id: 'type-mismatch/in/list-literal-in-resource-string-list'
+  tier: adversarial
+  intent: 'Membership of a one-element list literal in a string list attribute (["public"] in tagNames).'
+  trap: 'The needle is a list and tagNames holds strings; unwrapping it into "public" in tagNames over-grants.'
+  condition:
+    match:
+      expr: '["public"] in R.attr.tagNames'
+  degenerate:
+    oracle: empty
+    reason: 'The needle is a list and tagNames holds only strings, so CEL denies every seed.'
+- id: 'type-mismatch/in/number-field-in-mixed-literal-list'
+  tier: adversarial
+  intent: 'aNumber in ["5", 2]: a number attribute against a literal list mixing a string and a number.'
+  trap: '2 can match but "5" cannot in CEL; a coercing store adds a1 through the string.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber in ["5", 2]'
+- id: 'type-mismatch/in/string-field-in-list-of-lists'
+  tier: adversarial
+  intent: 'Membership of a string attribute in a literal list of one-element lists (aString in [["one"], ["same"]]).'
+  trap: 'The haystack holds only lists, so no string is a member; flattening it into IN (''one'', ''same'') over-grants.'
+  condition:
+    match:
+      expr: 'R.attr.aString in [["one"], ["same"]]'
+  degenerate:
+    oracle: empty
+    reason: 'The haystack holds only lists and aString is a string, so CEL denies every seed.'
+- id: 'type-mismatch/in/string-literal-in-resource-boolean-list'
+  tier: adversarial
+  intent: '"true" in aBoolList OR aNumber == 5: the string "true" tested against a boolean list.'
+  trap: '"true" is not true in CEL; a coercing store returns every list holding true.'
+  condition:
+    match:
+      expr: '"true" in R.attr.aBoolList || R.attr.aNumber == 5'
+- id: 'type-mismatch/in/string-literal-in-resource-number-list'
+  tier: adversarial
+  intent: '"2" in aNumberList OR aNumber == 5: a numeric string tested against a number list.'
+  trap: '"2" == 2 is false in CEL; a coercing store (Elasticsearch, SQLite/MySQL JSON) returns a1/a3/a4/a6.'
+  condition:
+    match:
+      expr: '"2" in R.attr.aNumberList || R.attr.aNumber == 5'
+- id: 'type-mismatch/less-than/negated-nan-against-string-field'
+  tier: adversarial
+  intent: 'Negated < between a ternary number and a string attribute, where one arm yields NaN (!((aBool ? 1.0 : 0.0/0.0) < aString)).'
+  trap: 'NaN ordering is false even against a string, so the negation allows the NaN arm while the finite number-vs-string arm is a type error; coercing types or rejecting 0/0 gets one arm wrong.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
+  plannerDivergence:
+    issue: 'Cerbos 0.54 check() errors on an ordering against NaN, which 0.55 evaluates to false'
+    pdp:
+    - 0.54.0
+    reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
+
+- id: 'type-mismatch/not-equals/number-field-against-string-literal'
+  tier: adversarial
+  intent: 'aNumber != "5" AND aNumber > 3: a number attribute compared not-equal with a numeric string.'
+  trap: '5 != "5" is true in CEL, so a coercing store under-grants by dropping a1.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber != "5" && R.attr.aNumber > 3'
+- id: 'type-mismatch/not-equals/string-field-against-map-literal'
+  tier: adversarial
+  intent: 'Inequality between a string attribute and a map literal (aString != {"a": 1}).'
+  trap: 'A string is never equal to a map, so != holds for every row; a store that errors or compares by coercion drops rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString != {"a": 1}'
+  degenerate:
+    oracle: total
+    reason: 'A string is never equal to a map literal, so != holds for every seed. A store that errors or compares by coercion would drop rows.'
+- id: 'type-mismatch/size/boolean-field'
+  tier: adversarial
+  intent: 'size() of a boolean attribute (size(R.attr.aBool) > 0).'
+  trap: 'size() is not defined on bool, so CEL denies; measuring the stored value (LENGTH of ''true'', array length) returns rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.aBool) > 0'
+  degenerate:
+    oracle: empty
+    reason: 'size() is not defined on bool, so every seed is a CEL error and denies. A store that measures the stored value would return rows.'
+- id: 'type-mismatch/size/number-field'
+  tier: adversarial
+  intent: 'size() of a numeric attribute (size(R.attr.aNumber) > 0).'
+  trap: 'size() is not defined on numbers, so CEL denies; LENGTH(CAST(number AS TEXT)) or similar returns rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.aNumber) > 0'
+  degenerate:
+    oracle: empty
+    reason: 'size() is not defined on numbers, so every seed is a CEL error and denies. A store that measures the stored value would return rows.'
+- id: 'type-mismatch/starts-with/number-field-needle'
+  tier: adversarial
+  intent: startsWith() on a string attribute with a numeric attribute as the prefix (R.attr.aString.startsWith(R.attr.aNumber)).
+  trap: 'A non-string needle is a CEL error; building the LIKE pattern from the number coerces it to text and returns rows.'
+  condition:
+    match:
+      expr: R.attr.aString.startsWith(R.attr.aNumber)
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/starts-with/number-field-receiver'
+  tier: adversarial
+  intent: 'startsWith() called on a numeric attribute (R.attr.aNumber.startsWith("2")).'
+  trap: 'A string function on a non-string receiver is a CEL error; LIKE ''2%'' over the number coerced to text returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber.startsWith("2")'
+  degenerate:
+    oracle: empty
+    reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'

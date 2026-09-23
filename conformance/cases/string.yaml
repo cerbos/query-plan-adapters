@@ -1,0 +1,180 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: string
+description: 'contains / startsWith / endsWith, LIKE metacharacters, case sensitivity, concatenation.'
+cases:
+- id: 'string/concatenate/field-to-field'
+  tier: adversarial
+  intent: 'Concatenation of two string attributes compared with a literal (aString + aOptionalString == "oneset").'
+  trap: 'Nothing in the plan says + is concatenation: PostgreSQL errors, SQLite returns nothing and MySQL coerces both sides to 0 and over-grants; c1 ("One" + "Set") also tests case.'
+  condition:
+    match:
+      expr: 'R.attr.aString + R.attr.aOptionalString == "oneset"'
+- id: 'string/concatenate/negated-unsatisfiable-equals'
+  tier: adversarial
+  intent: 'Negated equality of a concatenated optional string with a literal it can never equal (!((aOptionalString + "!") == "nope")).'
+  trap: 'Folding the negation to true over-grants rows missing aOptionalString, which CEL denies; SQL || also means logical OR on MySQL (#414 follow-up).'
+  condition:
+    match:
+      expr: '!((R.attr.aOptionalString + "!") == "nope")'
+- id: 'string/concatenate/unsatisfiable-not-equals'
+  tier: adversarial
+  intent: 'Inequality of a concatenated optional string with a literal it can never equal ((aOptionalString + "!") != "nope").'
+  trap: 'Treating != as always true, or letting a NULL concatenation compare unequal, over-grants rows missing aOptionalString, which CEL denies.'
+  condition:
+    match:
+      expr: '(R.attr.aOptionalString + "!") != "nope"'
+- id: 'string/contains/case-sensitive'
+  tier: adversarial
+  intent: 'contains with a lower-case needle and a seed that differs only in case.'
+  trap: 'SQLite''s LIKE is ASCII-case-insensitive regardless of collation, so a LIKE-based contains matches "One".'
+  condition:
+    match:
+      expr: 'R.attr.aString.contains("one")'
+- id: 'string/contains/field-to-field'
+  tier: adversarial
+  intent: contains whose needle is another string attribute (aString.contains(aOptionalString)).
+  trap: 'The needle is a column, so its LIKE metacharacters must be escaped per row at query time, and a missing needle must deny.'
+  condition:
+    match:
+      expr: R.attr.aString.contains(R.attr.aOptionalString)
+- id: 'string/contains/glob-wildcards-in-needle'
+  tier: adversarial
+  intent: 'contains with a needle holding the glob wildcards * and ?.'
+  trap: 'A wildcard or glob lowering that does not escape * and ? matches near misses (h2, h3) instead of only h1.'
+  condition:
+    match:
+      expr: 'R.attr.aString.contains("*?b")'
+- id: 'string/contains/negated-field-to-field'
+  tier: adversarial
+  intent: Negated contains whose needle is another resource attribute (aOptionalString).
+  trap: 'A bare NOT LIKE leaks rows whose needle is missing, and unescaped needle metacharacters (one_two, %_o) under-grant.'
+  condition:
+    match:
+      expr: '!R.attr.aString.contains(R.attr.aOptionalString)'
+- id: 'string/contains/underscore-in-needle'
+  tier: adversarial
+  intent: 'contains with a needle containing a literal underscore ("a_b").'
+  trap: 'An unescaped _ in LIKE matches any single character, so "axb" wrongly matches.'
+  condition:
+    match:
+      expr: 'R.attr.aString.contains("a_b")'
+- id: 'string/contains/value-first'
+  tier: adversarial
+  intent: 'A literal haystack with the attribute as needle ("literal".contains(aString)).'
+  trap: 'Swapping into column LIKE ''%literal%'' inverts the test; the column needle must have %, _ and \ escaped (a2 "100%_done", a7 "tail\"), and the empty string matches.'
+  condition:
+    match:
+      expr: '"s100Xdone-tail\\one-end".contains(R.attr.aString)'
+- id: 'string/ends-with/backslash-in-needle'
+  tier: adversarial
+  intent: endsWith with a needle that is a single backslash.
+  trap: Backslash is the default LIKE escape on PostgreSQL and MySQL but literal on SQLite; left unescaped it ends the pattern in an escape (PostgreSQL rejects it) or escapes the next character.
+  condition:
+    match:
+      expr: 'R.attr.aString.endsWith("\\")'
+- id: 'string/ends-with/case-sensitive'
+  tier: adversarial
+  intent: 'endsWith with a lower-case needle and a seed that differs only in case.'
+  trap: 'LIKE ''%one'' is case-insensitive on SQLite and under case-insensitive collations, so it matches "One".'
+  condition:
+    match:
+      expr: 'R.attr.aString.endsWith("one")'
+- id: 'string/ends-with/field-to-field'
+  tier: adversarial
+  intent: endsWith whose suffix is another string attribute (aString.endsWith(aOptionalString)).
+  trap: 'The needle is a column, so %, _ and \ must be escaped at query time, not translation time, and a missing needle must deny.'
+  condition:
+    match:
+      expr: R.attr.aString.endsWith(R.attr.aOptionalString)
+- id: 'string/ends-with/glob-wildcards-in-needle'
+  tier: adversarial
+  intent: 'endsWith with a suffix holding the glob wildcards * and ?.'
+  trap: 'A wildcard or glob lowering that does not escape * and ? matches near misses (h2, h3) instead of only h1.'
+  condition:
+    match:
+      expr: 'R.attr.aString.endsWith("*?b")'
+- id: 'string/ends-with/value-first'
+  tier: adversarial
+  intent: 'A literal tested for ending with the attribute ("prefix-xaXby".endsWith(aString)).'
+  trap: 'Swapping into a column-suffix LIKE inverts the test, and an unescaped column needle lets a4 "xa_by" match through the _ wildcard.'
+  condition:
+    match:
+      expr: '"prefix-xaXby".endsWith(R.attr.aString)'
+- id: 'string/equals/case-sensitive'
+  tier: adversarial
+  intent: 'String equality against a lower-case literal, with seeds differing only in case or by an invisible soft hyphen.'
+  trap: 'CEL equality is byte-exact; a case-insensitive collation, or a case-sensitive but not byte-exact one such as utf8mb4_0900_as_cs, matches "One" or "o­ne" (#474).'
+  condition:
+    match:
+      expr: 'R.attr.aString == "one"'
+- id: 'string/equals/empty-string'
+  tier: adversarial
+  intent: String equality against the empty string literal.
+  trap: 'Conflating "" with NULL or a missing attribute, or dropping an empty literal as falsy, matches missing attributes or nothing at all.'
+  condition:
+    match:
+      expr: 'R.attr.aString == ""'
+- id: 'string/equals/non-ascii-literal'
+  tier: adversarial
+  intent: 'String equality against a literal with an accented letter and an astral-plane emoji ("héllo🚀").'
+  trap: 'Lossy encoding or a non-utf8mb4 column mangles multi-byte and astral characters, so the literal matches nothing or the wrong row.'
+  condition:
+    match:
+      expr: 'R.attr.aString == "héllo🚀"'
+- id: 'string/starts-with/bracket-in-needle'
+  tier: adversarial
+  intent: 'startsWith with a needle containing square brackets ("[SEC]").'
+  trap: 'T-SQL LIKE treats [...] as a character class even with ESCAPE, so an unescaped [ lets "[SEC]" match "Secret".'
+  condition:
+    match:
+      expr: 'R.attr.aString.startsWith("[SEC]")'
+- id: 'string/starts-with/case-sensitive'
+  tier: adversarial
+  intent: 'startsWith with a lower-case needle and a seed that differs only in case.'
+  trap: 'LIKE ''one%'' is case-insensitive on SQLite and under case-insensitive collations, so it matches "One".'
+  condition:
+    match:
+      expr: 'R.attr.aString.startsWith("one")'
+- id: 'string/starts-with/concatenated-literal-needle'
+  tier: adversarial
+  intent: 'startsWith whose needle is a literal concatenation the planner folds to "100%".'
+  trap: 'The folded needle ends in %, which must be escaped in a LIKE prefix match or every string starting with "100" matches.'
+  condition:
+    match:
+      expr: 'R.attr.aString.startsWith("100" + "%")'
+- id: 'string/starts-with/field-to-field'
+  tier: adversarial
+  intent: startsWith whose prefix is another string attribute (aString.startsWith(aOptionalString)).
+  trap: 'The needle is a column, so %, _ and \ must be escaped at query time, not translation time, and a missing needle must deny.'
+  condition:
+    match:
+      expr: R.attr.aString.startsWith(R.attr.aOptionalString)
+- id: 'string/starts-with/negated-field-to-field'
+  tier: adversarial
+  intent: Negated startsWith whose prefix is another resource attribute (aOptionalString).
+  trap: 'A bare NOT LIKE leaks missing-needle rows and unescaped % or _ under-grants; its oracle differs from the contains sibling so the operators cannot be confused.'
+  condition:
+    match:
+      expr: '!R.attr.aString.startsWith(R.attr.aOptionalString)'
+- id: 'string/starts-with/percent-in-needle'
+  tier: adversarial
+  intent: 'startsWith with a needle containing a literal % ("100%").'
+  trap: 'A LIKE translation that does not escape % turns it into a wildcard and matches rows the PDP denies.'
+  condition:
+    match:
+      expr: 'R.attr.aString.startsWith("100%")'
+- id: 'string/starts-with/value-first'
+  tier: adversarial
+  intent: 'A literal tested for starting with the attribute ("xaXby-tail".startsWith(aString)).'
+  trap: 'Swapping into a column-prefix LIKE inverts the test, and an unescaped column needle lets a4 "xa_by" match through the _ wildcard.'
+  condition:
+    match:
+      expr: '"xaXby-tail".startsWith(R.attr.aString)'
+- id: 'string/starts-with/value-first-concatenated-literal'
+  tier: adversarial
+  intent: startsWith whose receiver is a concatenation of two literals and whose argument is the attribute.
+  trap: 'Folded or not, the concatenation is the haystack; turning it into a column LIKE, or not escaping the column needle, returns the wrong rows.'
+  condition:
+    match:
+      expr: '("xaX" + "by-tail").startsWith(R.attr.aString)'

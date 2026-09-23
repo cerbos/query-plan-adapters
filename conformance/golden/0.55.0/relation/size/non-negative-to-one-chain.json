@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/size/non-negative-to-one-chain",
+  "intent": "size(mainCategory.subCategories) >= 0, true exactly for rows that have a mainCategory.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subCategories"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/non-negative-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.mainCategory.subCategories) >= 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Folding a >= 0 count to always-true, or leaving the chain unguarded, returns all 22 rows instead of the four with a mainCategory (#309)."
+}

@@ -1,0 +1,92 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a6",
+    "a8",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/or/two-hops-or-collection-exists",
+  "intent": "A two-level parent predicate OR an exists() over categories.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aBool"
+                },
+                {
+                  "value": true
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.categories"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.name"
+                            },
+                            {
+                              "value": "business"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "variable": "c"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/or/two-hops-or-collection-exists",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.inner.aBool == true || R.attr.categories.exists(c, c.name == \"business\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL's OR absorbs the missing-path error, so rows with no inner level but a matching category (a6/a8/c1) are allowed; an inner join on either side under-grants them."
+}

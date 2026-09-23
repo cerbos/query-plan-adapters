@@ -1,0 +1,88 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: cast
+description: 'int(), double(), string(), timestamp() conversions.'
+cases:
+- id: 'cast/double/malformed-string'
+  tier: adversarial
+  intent: double() over a string attribute compared with a threshold.
+  trap: 'CEL requires the whole string to be a number; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  condition:
+    match:
+      expr: 'double(R.attr.aString) > 50.0'
+  degenerate:
+    oracle: empty
+    reason: 'No seed''s aString converts to a number, so double(R.attr.aString) is a conversion error for every seed and denies.'
+- id: 'cast/double/negated-malformed-string'
+  tier: adversarial
+  intent: '!(double(aString) > 50.0): a string-to-double conversion under negation.'
+  trap: 'CEL requires the whole string to parse; SQL casts accept a numeric prefix or yield 0, over-granting malformed strings under negation.'
+  condition:
+    match:
+      expr: '!(double(R.attr.aString) > 50.0)'
+- id: 'cast/int/malformed-string'
+  tier: adversarial
+  intent: 'int() over a string attribute compared with a threshold (int(aString) > 50).'
+  trap: 'CEL requires the whole string to be an integer; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  condition:
+    match:
+      expr: 'int(R.attr.aString) > 50'
+  degenerate:
+    oracle: empty
+    reason: 'No seed''s aString converts to an integer, so int(R.attr.aString) is a conversion error for every seed and denies.'
+- id: 'cast/int/negated-malformed-string'
+  tier: adversarial
+  intent: '!(int(aString) > 50): a string-to-int conversion under negation.'
+  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix or yields 0, so the negation turns those errors into matches.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aString) > 50)'
+- id: 'cast/int/negative-fraction'
+  tier: adversarial
+  intent: int() over a double attribute compared with zero.
+  trap: 'CEL int() truncates toward zero while PostgreSQL and MySQL CAST round; a1 (-0.6) must be allowed because int(-0.6) is 0.'
+  condition:
+    match:
+      expr: int(R.attr.aDouble) == 0
+- id: 'cast/string/from-boolean'
+  tier: adversarial
+  intent: 'string() over a boolean attribute compared with "true".'
+  trap: 'CEL renders "true"/"false", but SQLite and MySQL store 1/0, so a bare CAST yields "1" and matches nothing there.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool) == "true"'
+- id: 'cast/string/from-double'
+  tier: extended
+  intent: 'string() over a double attribute compared with a literal (string(aDouble) == "-0.6").'
+  trap: 'The store''s number-to-text rendering must match CEL''s formatting, and each store spells the cast differently; a1 is the only witness.'
+  condition:
+    match:
+      expr: 'string(R.attr.aDouble) == "-0.6"'
+- id: 'cast/string/negated-explicit-null'
+  tier: adversarial
+  intent: '!(string(owner) == "set"): string() over an explicit-null attribute, under negation.'
+  trap: 'string(null) errors in CEL, so explicit-null rows deny too; casting NULL to text and negating over-grants them.'
+  condition:
+    match:
+      expr: '!(string(R.attr.owner) == "set")'
+- id: 'cast/string/negated-missing-attribute'
+  tier: adversarial
+  intent: '!(string(aOptionalString) == "set"): string() over an attribute missing on some rows, under negation.'
+  trap: 'string() of a missing attribute errors and denies even under negation; casting NULL and negating the comparison over-grants those rows.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aOptionalString) == "set")'
+- id: 'cast/timestamp/malformed-string'
+  tier: adversarial
+  intent: 'timestamp() over a string attribute compared with a timestamp literal (timestamp(createdBy) < timestamp("2025-01-01T00:00:00Z")).'
+  trap: A lexical string comparison or a lenient SQL parse disagrees with CEL on malformed values (h5 errors and denies); map the column as a real timestamp or refuse.
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdBy) < timestamp("2025-01-01T00:00:00Z")'
+- id: 'cast/timestamp/negated-malformed-string'
+  tier: adversarial
+  intent: '!(timestamp(createdBy) < timestamp("2025-01-01T00:00:00Z")): parsing a string attribute as a timestamp under negation.'
+  trap: 'A string that is not a timestamp (h5) is a conversion error that denies under negation; a lenient parse or a NULL-yielding cast negated to true over-grants it.'
+  condition:
+    match:
+      expr: '!(timestamp(R.attr.createdBy) < timestamp("2025-01-01T00:00:00Z"))'

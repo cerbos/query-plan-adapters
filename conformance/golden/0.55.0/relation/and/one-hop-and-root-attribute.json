@@ -1,0 +1,67 @@
+{
+  "allowed": [
+    "d1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/and/one-hop-and-root-attribute",
+  "intent": "A root predicate AND a parent predicate (aBool == true && parent.aString.contains(\"re\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": true
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                },
+                {
+                  "value": "re"
+                }
+              ],
+              "operator": "contains"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/and/one-hop-and-root-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBool == true && R.attr.parent.aString.contains(\"re\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dropping or mis-scoping the root conjunct returns b6 (whose root aBool is false) beside d1."
+}

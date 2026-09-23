@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/equals/literal-instant-non-utc-offset",
+  "intent": "timestamp(field) == the same instant written with a +02:00 offset.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2024-06-01T02:00:00+02:00"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/equals/literal-instant-non-utc-offset",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) == timestamp(\"2024-06-01T02:00:00+02:00\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL compares instants, so a4 must still match; a string comparison against the offset spelling drops it."
+}

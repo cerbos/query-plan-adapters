@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/ancestor-of/constant-path",
+  "intent": "hierarchy(field).ancestorOf(hierarchy(constant)): the field must be a strict ancestor of the constant path.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept.eng.platform"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "ancestorOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/ancestor-of/constant-path",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(R.attr.scope).ancestorOf(hierarchy(\"dept.eng.platform\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Must become an IN list of the constant's strict prefixes (dept, dept.eng); a string-prefix test matches non-path prefixes like dept.engineering or includes the equal path."
+}

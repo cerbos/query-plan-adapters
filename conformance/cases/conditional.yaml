@@ -1,0 +1,103 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: conditional
+description: 'The ternary operator, as a value and as a condition.'
+cases:
+- id: 'conditional/ternary/as-whole-exists-body'
+  tier: extended
+  intent: 'A ternary as the whole body of an exists() lambda, selecting a resource boolean or its negation.'
+  trap: 'Translators that handle a ternary only as a comparison operand mis-scope or reject it as a boolean lambda body.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == "public" ? R.attr.aBool : !R.attr.aBool)'
+- id: 'conditional/ternary/boolean-branches'
+  tier: extended
+  intent: 'A boolean-valued ternary whose branches are predicates, with no wrapping comparison.'
+  trap: 'The ternary is the whole condition (a three-operand node at the root); translators expecting two operands mishandle it.'
+  condition:
+    match:
+      expr: 'R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0'
+- id: 'conditional/ternary/compared-to-literal'
+  tier: extended
+  intent: 'A ternary selecting a numeric attribute or a constant, compared with a literal ((aBool ? aNumber : 0) > 1).'
+  trap: 'The planner emits if(cond, then, else); the comparison must be pushed into guarded branches, and a missing condition must deny both arms.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aNumber : 0) > 1'
+- id: 'conditional/ternary/expression-condition'
+  tier: extended
+  intent: A ternary whose condition is a startsWith expression rather than a bare boolean column.
+  trap: 'The guard is itself a translated predicate; assuming a bare bool column, or negating it wrongly for the else branch, misroutes rows.'
+  condition:
+    match:
+      expr: '(R.attr.aString.startsWith("100") ? R.attr.aNumber : -1) >= 0'
+- id: 'conditional/ternary/inside-all'
+  tier: extended
+  intent: A ternary over an outer attribute inside an all() body.
+  trap: 'all() lowers to a negated exists, so the conditional must survive negation inside the element scope; empty collections must stay true.'
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, (R.attr.aBool ? t.name : "zz") != "private")'
+- id: 'conditional/ternary/inside-exists'
+  tier: extended
+  intent: 'A ternary over an outer attribute inside an exists() body, selecting the element field or a constant.'
+  trap: The conditional must be evaluated per row inside the element subquery; stores that allow conditionals only at the top level cannot place it.
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
+- id: 'conditional/ternary/missing-attribute-condition'
+  tier: adversarial
+  intent: A ternary whose condition compares an attribute that is missing on some rows.
+  trap: A missing condition attribute is a CEL error that denies both branches; writing the else guard as NOT(cond) lets SQL NULL through.
+  condition:
+    match:
+      expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+- id: conditional/ternary/negated
+  tier: adversarial
+  intent: 'A ternary comparison under negation (!((aBool ? aNumber : 0) > 1)).'
+  trap: 'NOT over the guarded-branch rewrite must not flip the guards themselves, and rows with a missing condition must stay denied.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool ? R.attr.aNumber : 0) > 1)'
+- id: 'conditional/ternary/negated-branch-on-relation'
+  tier: adversarial
+  intent: 'Negated equality over a ternary whose else-branch reads an optional attribute through the parent relation.'
+  trap: 'Only the selected branch matters: a selected missing parent or attribute is an error and denies, an unselected one must not; NOT over a naive rewrite admits the error rows.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool ? "one" : R.attr.parent.aOptionalString) == "set")'
+- id: 'conditional/ternary/negated-missing-attribute-condition'
+  tier: adversarial
+  intent: Negated comparison over a ternary whose condition reads an attribute that is missing on some rows.
+  trap: A missing condition is a CEL error that denies; SQL NOT over FALSE instead of UNKNOWN leaks those rows.
+  condition:
+    match:
+      expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
+- id: 'conditional/ternary/nested-in-both-branches'
+  tier: extended
+  intent: 'A ternary whose both branches are ternaries, compared with a threshold.'
+  trap: 'Each nested condition must select its branch independently; flattening into one AND/OR loses which branch applies, and a missing condition must not fall through.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0.0 : R.attr.aNumber) : (R.attr.aNumber < 0.0 ? -1.0 : 5.0)) > 1.0'
+- id: 'conditional/ternary/nested-in-then-branch'
+  tier: extended
+  intent: 'A ternary whose then-branch is another ternary, compared with a literal.'
+  trap: 'Guards must compose through both levels; flattening loses the inner condition, and the empty-string seed must land in the inner else.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+- id: 'conditional/ternary/on-both-sides'
+  tier: extended
+  intent: Ternaries on both sides of a comparison.
+  trap: 'A translator that supports a conditional on one side only, or distributes it assuming a constant on the other side, mistranslates it.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aNumber : 0.0) > (R.attr.aString == "" ? 1.0 : 2.0)'
+- id: 'conditional/ternary/value-first'
+  tier: adversarial
+  intent: 'A constant on the left of a comparison wrapping a ternary (0 < (aBool ? aNumber : -1)).'
+  trap: 'Operand inversion combined with the ternary rewrite: assuming the ternary is on the left flips the comparison in every branch.'
+  condition:
+    match:
+      expr: '0 < (R.attr.aBool ? R.attr.aNumber : -1)'

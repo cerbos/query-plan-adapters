@@ -1,0 +1,140 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: size
+description: 'size() of strings and collections, including thresholds no integer can meet.'
+cases:
+- id: 'size/equals/filtered-collection'
+  tier: extended
+  intent: 'Size of a filtered collection compared with a literal (size(tags.filter(t, t.name == "public")) == 1).'
+  trap: The lambda must become the WHERE of the COUNT subquery; counting every element or ignoring the filter changes the result.
+  condition:
+    match:
+      expr: 'size(R.attr.tags.filter(t, t.name == "public")) == 1'
+- id: 'size/equals/negated-collection-zero'
+  tier: adversarial
+  intent: 'Negation over an emptiness check on a collection (!(size(tags) == 0)).'
+  trap: 'size == 0 lowers to NOT EXISTS; negating that must still exclude rows whose collection is missing rather than treat them as non-empty.'
+  condition:
+    match:
+      expr: '!(size(R.attr.tags) == 0)'
+- id: 'size/equals/negated-fractional-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) == dyn(1.5), OR''d with aNumber > 10.'
+  trap: 'The arm folds to constant FALSE for present strings; NOT flips a bare FALSE to TRUE for missing rows too, readmitting a2/a4/a8, which CEL denies.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+- id: 'size/greater-or-equal/collection-at-least-one'
+  tier: core
+  intent: 'A non-empty collection spelled size(tags) >= 1.'
+  trap: 'An emptiness fast path keyed only on > 0 must give >= 1 the same meaning; an off-by-one threshold admits empty lists.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) >= 1'
+- id: 'size/greater-or-equal/fractional-threshold'
+  tier: adversarial
+  intent: 'size() of a resource list compared >= a fractional literal (1.5).'
+  trap: 'COUNT is integral, so >= 1.5 must round up to >= 2; truncating to 1 over-grants single-element rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) >= 1.5'
+- id: 'size/greater-or-equal/fractional-threshold-on-relation'
+  tier: adversarial
+  intent: 'size() of a list reached through the mainCategory chain compared >= 1.5.'
+  trap: 'The threshold must round up to >= 2; truncating to >= 1 returns a1/a6/a8/c1. Empty by design: it tests rounding, not the absent-parent guard.'
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) >= 1.5'
+  degenerate:
+    oracle: empty
+    reason: 'No seed holds a mainCategory with two or more subCategories, so a count of 1.5 or more holds for none, and every seed without one is a missing-path error. The less-or-equal sibling carries the discriminating oracle for the same chain.'
+- id: 'size/greater-than/collection-above-one'
+  tier: extended
+  intent: 'Collection size compared with a non-zero threshold (size(tags) > 1).'
+  trap: 'Only emptiness maps to some/none; a threshold above zero needs a correlated COUNT, and degrading it to non-empty over-grants.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) > 1'
+- id: 'size/greater-than/huge-threshold'
+  tier: adversarial
+  intent: 'size() of a string compared > 4294967296 (2^32), outside 32-bit int range.'
+  trap: 'A narrowing int cast wraps 2^32 to 0 and returns every non-empty string; the comparison is false for every row.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) > 4294967296'
+  degenerate:
+    oracle: empty
+    reason: 'No string''s length exceeds 2^32. An unguarded int narrowing that wraps the threshold to 0 would return every non-empty aString; the less-than sibling is the other half.'
+- id: 'size/greater-than/negated-huge-negative-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) > -5000000000, OR''d with aNumber > 10.'
+  trap: 'The arm holds for every present string, so an IS NOT NULL fold negates to IS NULL and readmits missing-attribute rows, which CEL denies.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) > -5000000000) || R.attr.aNumber > 10'
+- id: 'size/greater-than/negated-huge-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) > 5000000000, OR''d with aNumber > 10.'
+  trap: 'The arm is always false for present strings; folding it to a bare FALSE lets NOT readmit missing-attribute rows, which CEL denies.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) > 5000000000) || R.attr.aNumber > 10'
+- id: 'size/greater-than/string-length'
+  tier: extended
+  intent: 'Length of a string attribute compared with a threshold (size(aString) > 4).'
+  trap: 'size() on a string is a length, not a collection count, and stores count code points, UTF-16 units or bytes differently (the astral seed sits on one side of the threshold).'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) > 4'
+- id: 'size/greater-than/string-non-empty'
+  tier: adversarial
+  intent: 'size() of a string attribute compared > 0.'
+  trap: 'The size(x) > 0 spelling must not take a collection-emptiness fast path; aString is a scalar and only a8 ("") is denied.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) > 0'
+- id: 'size/less-or-equal/fractional-threshold-on-relation'
+  tier: adversarial
+  intent: size() of a list reached through the mainCategory chain compared <= 1.5.
+  trap: '<= 1.5 rounds down to <= 1, which a zero count also satisfies, so an unguarded chain admits parentless rows (all 22 instead of a1/a6/a8/c1).'
+  condition:
+    match:
+      expr: size(R.attr.mainCategory.subCategories) <= 1.5
+- id: 'size/less-than/huge-threshold'
+  tier: adversarial
+  intent: 'size() of a string compared < 4294967296 (2^32), outside 32-bit int range.'
+  trap: 'A narrowing int cast wraps 2^32 to 0 and returns nothing; the comparison is true for every present string, the empty one included.'
+  condition:
+    match:
+      expr: size(R.attr.aString) < 4294967296
+  degenerate:
+    oracle: total
+    reason: 'Every seed carries a non-null aString shorter than 2^32. An unguarded int narrowing that wraps the threshold to 0 would return nothing; the greater-than sibling is the other half.'
+- id: 'size/less-than/negated-huge-negative-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) < -5000000000, OR''d with aNumber > 10.'
+  trap: 'The arm is always false for present strings; folding it to a bare FALSE lets NOT readmit missing-attribute rows, which CEL denies.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) < -5000000000) || R.attr.aNumber > 10'
+- id: 'size/less-than/negated-huge-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) < 5000000000, OR''d with aNumber > 10 to keep the oracle discriminating.'
+  trap: 'Folding the always-true arm to IS NOT NULL negates to IS NULL and readmits missing-attribute rows (a2/a4/a8), where size() errors and denies under both polarities.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+- id: 'size/less-than/value-first'
+  tier: adversarial
+  intent: size() of a related collection on the right of an ordering (0 < size(tags)).
+  trap: 'Operand inversion: rendering size(tags) < 0 returns nothing instead of the 13 rows with at least one tag.'
+  condition:
+    match:
+      expr: 0 < size(R.attr.tags)
+- id: 'size/not-equals/negated-fractional-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'Negated size(optional string) != dyn(1.5), OR''d with aNumber > 10; dyn() makes the int/double comparison plannable.'
+  trap: 'No integral length equals 1.5, so the arm folds to true for present strings and an IS NOT NULL fold negates to IS NULL, readmitting missing rows. Not unreachable: only size(x) != 1.5 without dyn() is a type error.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aOptionalString) != dyn(1.5)) || R.attr.aNumber > 10'

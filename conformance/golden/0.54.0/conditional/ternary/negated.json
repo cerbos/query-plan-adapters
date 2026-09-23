@@ -1,0 +1,78 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a5",
+    "a7",
+    "b2",
+    "b3",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/negated",
+  "intent": "A ternary comparison under negation (!((aBool ? aNumber : 0) > 1)).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aBool ? R.attr.aNumber : 0) > 1)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "NOT over the guarded-branch rewrite must not flip the guards themselves, and rows with a missing condition must stay denied."
+}

@@ -1,0 +1,52 @@
+{
+  "allowed": [],
+  "degenerateReason": "No seed holds a mainCategory with two or more subCategories, so a count of 1.5 or more holds for none, and every seed without one is a missing-path error. The less-or-equal sibling carries the discriminating oracle for the same chain.",
+  "id": "size/greater-or-equal/fractional-threshold-on-relation",
+  "intent": "size() of a list reached through the mainCategory chain compared >= 1.5.",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subCategories"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1.5
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-or-equal/fractional-threshold-on-relation",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.mainCategory.subCategories) >= 1.5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The threshold must round up to >= 2; truncating to >= 1 returns a1/a6/a8/c1. Empty by design: it tests rounding, not the absent-parent guard."
+}

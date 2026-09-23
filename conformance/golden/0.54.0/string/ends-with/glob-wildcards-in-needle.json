@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h1"
+  ],
+  "degenerateReason": null,
+  "id": "string/ends-with/glob-wildcards-in-needle",
+  "intent": "endsWith with a suffix holding the glob wildcards * and ?.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "*?b"
+          }
+        ],
+        "operator": "endsWith"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/ends-with/glob-wildcards-in-needle",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.endsWith(\"*?b\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A wildcard or glob lowering that does not escape * and ? matches near misses (h2, h3) instead of only h1."
+}
