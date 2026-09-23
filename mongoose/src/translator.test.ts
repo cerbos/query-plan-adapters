@@ -7555,7 +7555,7 @@ describe("corpus shapes", () => {
       filters: filters.length,
       kinds: kinds.length,
       throwing: throwing.length,
-    }).toEqual({ filters: 220, kinds: 7, throwing: 97 });
+    }).toEqual({ filters: 220, kinds: 7, throwing: 103 });
   });
 
   // The mapping-hazard contract in README.md rests on one structural fact: this adapter builds no

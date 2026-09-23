@@ -214,7 +214,7 @@ class ElasticsearchTranslatorTest {
 
         // Update these tripwires only after replaying new actions against the oracle.
         assertEquals(
-                Map.of("conditional", 135, "unconditional", 7, "throwing", 182),
+                Map.of("conditional", 135, "unconditional", 7, "throwing", 188),
                 Map.of("conditional", actionsOfKind("CONDITIONAL").size(),
                         "unconditional", unconditionalActions().size(),
                         "throwing", THROWING.size()));
@@ -485,7 +485,7 @@ class ElasticsearchTranslatorTest {
                             Map.entry("constant receiver", 4),
                             Map.entry("negated exists over a collection", 4),
                             Map.entry("positive all over a collection", 4),
-                            Map.entry("count over an undeclared collection", 6),
+                            Map.entry("count over an undeclared collection", 12),
                             Map.entry("collection emptiness", 2),
                             Map.entry("conditional value as a condition", 3),
                             Map.entry("exists_one", 2),

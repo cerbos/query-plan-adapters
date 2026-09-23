@@ -1,0 +1,54 @@
+{
+  "action": "size-huge-lt-not",
+  "resourceKind": "adversarial",
+  "filter": {
+    "kind": "KIND_CONDITIONAL",
+    "condition": {
+      "expression": {
+        "operator": "or",
+        "operands": [
+          {
+            "expression": {
+              "operator": "not",
+              "operands": [
+                {
+                  "expression": {
+                    "operator": "lt",
+                    "operands": [
+                      {
+                        "expression": {
+                          "operator": "size",
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aOptionalString"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "value": 5000000000
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "expression": {
+              "operator": "gt",
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 10
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

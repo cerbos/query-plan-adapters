@@ -1530,6 +1530,20 @@
         "mysql": "(select (coalesce(sum(case when t1_0.name='public' then 1 else 0 end),0)+nullif(coalesce(max(case when t1_0.name='public' then 0 when not(t1_0.name='public') then 0 else 1 end),0),1)) from tags t1_0 where re1_0.id=t1_0.resource_id)=1"
       }
     },
+    "size-frac-eq-not": {
+      "where": {
+        "h2": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
+      }
+    },
+    "size-frac-ne-not": {
+      "where": {
+        "h2": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
+      }
+    },
     "size-ge-one": {
       "where": {
         "h2": "exists(select 1 from tags t1_0 where 1=1 and re1_0.id=t1_0.resource_id)",
@@ -1539,16 +1553,44 @@
     },
     "size-huge-gt": {
       "where": {
-        "h2": "1<>1",
-        "postgresql": "1<>1",
-        "mysql": "1<>1"
+        "h2": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null",
+        "postgresql": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null",
+        "mysql": "1<>1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null"
+      }
+    },
+    "size-huge-gt-not": {
+      "where": {
+        "h2": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
       }
     },
     "size-huge-lt": {
       "where": {
-        "h2": "re1_0.a_string is not null",
-        "postgresql": "re1_0.a_string is not null",
-        "mysql": "re1_0.a_string is not null"
+        "h2": "1=1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null",
+        "postgresql": "1=1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null",
+        "mysql": "1=1 and not(re1_0.a_string is null) or re1_0.a_string is null and 1=null"
+      }
+    },
+    "size-huge-lt-not": {
+      "where": {
+        "h2": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
+      }
+    },
+    "size-huge-neg-gt-not": {
+      "where": {
+        "h2": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1=1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
+      }
+    },
+    "size-huge-neg-lt-not": {
+      "where": {
+        "h2": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "postgresql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10",
+        "mysql": "not((1<>1 and not(re1_0.a_optional_string is null) or re1_0.a_optional_string is null and 1=null)) or re1_0.a_number>10"
       }
     },
     "size-threshold": {

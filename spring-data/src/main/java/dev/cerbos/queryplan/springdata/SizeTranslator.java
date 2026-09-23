@@ -161,31 +161,41 @@ final class SizeTranslator {
         if (!String.class.equals(path.getJavaType())) {
             return tri.unknown();
         }
-        // An always-true arm is still IS NOT NULL: a NULL column is a missing attribute,
-        // which CEL denies.
+        // A decided arm must stay UNKNOWN for a NULL column (a missing attribute, which CEL
+        // denies under both polarities): IS NOT NULL and a bare FALSE both flip under NOT.
         if (threshold.decided() != null) {
-            return threshold.decided() ? cb.isNotNull(path) : cb.disjunction();
+            return presentStringFold(path, threshold.decided());
         }
         // cb.length is an Integer expression, and narrowing an out-of-range threshold would
         // wrap (4294967296 becomes 0). No string length leaves int range, so those fold here.
         if (threshold.value() > Integer.MAX_VALUE) {
             return switch (threshold.op()) {
-                case "eq", "gt", "ge" -> cb.disjunction();
-                case "lt", "le", "ne" -> cb.isNotNull(path);
+                case "eq", "gt", "ge" -> presentStringFold(path, false);
+                case "lt", "le", "ne" -> presentStringFold(path, true);
                 default -> throw Refusals.malformed(
                         "Unsupported size comparison operator: " + threshold.op());
             };
         }
         if (threshold.value() < Integer.MIN_VALUE) {
             return switch (threshold.op()) {
-                case "gt", "ge", "ne" -> cb.isNotNull(path);
-                case "eq", "lt", "le" -> cb.disjunction();
+                case "gt", "ge", "ne" -> presentStringFold(path, true);
+                case "eq", "lt", "le" -> presentStringFold(path, false);
                 default -> throw Refusals.malformed(
                         "Unsupported size comparison operator: " + threshold.op());
             };
         }
         return compareCount(cb.length(path.as(String.class)), threshold.op(),
                 (int) threshold.value());
+    }
+
+    /**
+     * A {@code size(string)} comparison decided for every present string: {@code holds}, but
+     * UNKNOWN when the column is NULL, so NOT of the fold still excludes the NULL rows. The
+     * corpus's {@code size-huge-*-not} and {@code size-frac-*-not} actions pin both halves.
+     */
+    private Predicate presentStringFold(Path<?> path, boolean holds) {
+        return tri.baseUnlessUnknown(holds ? cb.conjunction() : cb.disjunction(),
+                () -> cb.isNull(path));
     }
 
     /**

@@ -373,7 +373,7 @@ implementation defines the reference semantics that the other adapters follow.
 
 | Classification | Coverage |
 | --- | --- |
-| Oracle-tested | 256 of the 311 reference conformance actions |
+| Oracle-tested | 262 of the 317 reference conformance actions |
 | Fail-closed corpus shapes | Regex `matches()`, ordered list indexing/`get-field`, `timestamp()` over an ambiguous string column, `int()`/`double()` casts, `filter()`/`map()` used as a condition, arithmetic composed on a division whose denominator may be zero, `string()` over any column but a boolean one (a boolean's text is decided in Java instead), CEL's `+` over strings (against a constant and between two columns), `mod`, a positional read of a list of any element type, list equality over a `map()` projection, and a hierarchy with an empty delimiter (66 actions) |
 | Representation-dependent | `null-eq-missing` — rejected under `NullAttributeRepresentation.OMITTED`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
 | Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `AttributeMapping.field(path, NullAttributeRepresentation.EXPLICIT)` includes NULL rows where CEL's null value says it should; undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
