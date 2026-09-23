@@ -7,12 +7,18 @@ on:
     paths:
       - "conformance/**"
       - ".github/workflows/conformance.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   push:
     branches:
       - main
     paths:
       - "conformance/**"
       - ".github/workflows/conformance.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
 
 # A newer push to the same pull request makes this run's result moot, so cancel it rather than
 # let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.

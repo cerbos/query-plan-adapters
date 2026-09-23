@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/drizzle.yaml"
       - ".github/workflows/drizzle-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
