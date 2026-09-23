@@ -103,8 +103,19 @@ class RepositorySurfaceTest {
     }
 
     /**
-     * Four rows, of which "r1" matches the collection filters through TWO elements — the row a
-     * join-based translation would return twice.
+     * Four rows, of which "r1" matches BOTH collection filters through TWO elements each — the row
+     * a join-based translation would return twice. Its elements are chosen from the literal lists
+     * of the two actions {@link #aMultiElementMatchDoesNotDuplicateTheEntity} replays
+     * ({@code conformance/policies/adversarial.yaml}):
+     * <ul>
+     *   <li>{@code p-hasintersection-map}: {@code hasIntersection(R.attr.tags.map(t, t.name),
+     *       ["public", "héllo🚀", "100%_x"])} — r1's tag entities are named "public" and
+     *       "100%_x";</li>
+     *   <li>{@code vf-hasint}: {@code hasIntersection(["public", "other"], R.attr.tagNames)} —
+     *       r1's tagNames are "public" and "other".</li>
+     * </ul>
+     * That test re-counts the matching elements itself, so a policy edit that leaves r1 with
+     * only one match fails there rather than turning it vacuous.
      */
     private static void seed() {
         EntityManager em = emf.createEntityManager();
@@ -115,8 +126,8 @@ class RepositorySurfaceTest {
 
         ResourceEntity r1 = row("r1", true, "one", 1, alice);
         r1.addTag("r1-t1", "public");
-        r1.addTag("r1-t2", "private");
-        r1.setTagNames(new ArrayList<>(List.of("public", "private")));
+        r1.addTag("r1-t2", "100%_x");
+        r1.setTagNames(new ArrayList<>(List.of("public", "other")));
 
         ResourceEntity r2 = row("r2", false, "two", 2, null);
         r2.addTag("r2-t1", "public");
@@ -273,31 +284,63 @@ class RepositorySurfaceTest {
     }
 
     /**
-     * "r1" matches both collection filters through TWO elements. This pins the correlated-EXISTS
-     * translation strategy: a regression to a root join would return it once per matching element,
-     * {@code findAll} would yield more entities than there are matches, and {@code getTotalElements}
-     * would disagree with the de-duplicated content — breaking page math. Both collection shapes a
-     * caller can map are covered, because the hazard is the join, not the mapping.
+     * "r1" matches both collection filters through TWO elements (see {@link #seed()}). This pins
+     * the correlated-EXISTS translation strategy: a regression to a root join would produce one
+     * SQL row per matching element. {@code findAll} alone cannot see that — Hibernate 6
+     * de-duplicates root-entity results in memory, so the content still lists r1 once — but the
+     * COUNT query is a plain {@code count(root)} over the same join and counts r1 twice, and a
+     * page's {@code LIMIT} applies to the duplicated SQL rows, so an exactly-full page comes back
+     * one entity short. The discriminating assertions are therefore {@code count(spec)} and the
+     * content and total of a page sized to the match count: on a larger, partial page Spring Data
+     * derives the total from the content size and never fires the COUNT, and nothing is cut off,
+     * so it would pass whatever the join did.
+     * Both collection shapes a caller can map are covered, because the hazard is the join, not
+     * the mapping.
+     *
+     * <p>The first assertion is the anti-vacuity guard: it joins r1 to its elements and counts
+     * how many fall in the action's literal list, which is exactly how many times a join-based
+     * translation would return r1. Fewer than two and a join could not duplicate anything, so
+     * nothing below would be tested.
      */
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"p-hasintersection-map", "vf-hasint"})
     void aMultiElementMatchDoesNotDuplicateTheEntity(String action) {
+        // The policy's literal lists (conformance/policies/adversarial.yaml) and the element the
+        // mapping above resolves each action's collection to.
+        String elementJpql = switch (action) {
+            case "p-hasintersection-map" -> "select count(t) from ResourceEntity r join r.tags t "
+                    + "where r.id = 'r1' and t.name in ('public', 'héllo🚀', '100%_x')";
+            case "vf-hasint" -> "select count(t) from ResourceEntity r join r.tagNames t "
+                    + "where r.id = 'r1' and t in ('public', 'other')";
+            default -> throw new IllegalArgumentException(action);
+        };
         EntityManager em = emf.createEntityManager();
         try {
+            long matchingElements = em.createQuery(elementJpql, Long.class).getSingleResult();
+            assertTrue(matchingElements >= 2,
+                    "r1 must match " + action + " through at least two elements, else a join could "
+                            + "not duplicate it and nothing here is a duplication test; it has "
+                            + matchingElements);
+
             SimpleJpaRepository<ResourceEntity, String> repository = repository(em);
             Specification<ResourceEntity> spec = specFor(action);
 
             List<ResourceEntity> found = repository.findAll(spec);
-            assertTrue(found.stream().anyMatch(r -> "r1".equals(r.getId())),
-                    "the two-element row must match, else nothing here is a duplication test");
+            assertEquals(1, found.stream().filter(r -> "r1".equals(r.getId())).count(),
+                    "the two-element row must come back exactly once");
             assertEquals(Set.copyOf(sortedIds(found)).size(), found.size(),
                     "an entity with several matching collection elements must come back once");
 
+            assertEquals(found.size(), repository.count(spec),
+                    "count(spec) must count entities, not matching collection rows");
+
+            // Page size == the matching count, so the page is exactly full and Spring Data must
+            // fire the separate COUNT query to compute the total.
             Page<ResourceEntity> page =
-                    repository.findAll(spec, PageRequest.of(0, 10, Sort.by("id")));
+                    repository.findAll(spec, PageRequest.of(0, found.size(), Sort.by("id")));
             assertEquals(sortedIds(found), idsInOrder(page.getContent()));
             assertEquals(found.size(), page.getTotalElements(),
-                    "the count query must count entities, not matching collection rows");
+                    "the pagination COUNT query must count entities, not matching collection rows");
         } finally {
             em.close();
         }
