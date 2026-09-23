@@ -10,7 +10,7 @@
 
   It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`, because `CAST(col AS TEXT)` gives `"1"` on SQLite and MySQL.
 
-- Support for Ruby 4.0
+- Support for Ruby 4.0 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))
 
 ### Changed
 
@@ -48,6 +48,6 @@
 
 ### Removed
 
-- Support for Ruby 3.2
+- Support for Ruby 3.2 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))
 
 [Unreleased]: https://github.com/cerbos/query-plan-adapters/commits/main/activerecord
