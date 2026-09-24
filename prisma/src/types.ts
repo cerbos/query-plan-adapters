@@ -8,6 +8,7 @@ import { enterLambdaScope, lookupMapping, resolveFieldReference } from "./mappin
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import type { MapperConfig } from "./index";
 import { isInvalidPattern } from "./regex";
+import { constantFoldExpression } from "./rewrite";
 import { COMPARISON_OPERATORS, isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 
@@ -72,6 +73,7 @@ export function settleTypeMismatches(
 
   const cast =
     unwrapBooleanComparison(expr) ??
+    distributeTernary(expr, context) ??
     rewriteCastComparison(expr, context, positive) ??
     rewriteConcatenation(expr, context) ??
     splitDivision(expr, context);
@@ -135,6 +137,56 @@ function scopedContext(
 }
 
 // -- casts ---------------------------------------------------------------------------------------
+
+/**
+ * `cmp(c ? a : b, x)` as `(c && cmp(a, x)) || (!c && cmp(b, x))`, when that lets a branch settle.
+ * A ternary evaluates only the branch it selects, so the comparison distributes over it; the
+ * expansion is exact only when `c` itself cannot be an error, so `c` must be a boolean column that
+ * is never missing. Any other ternary is left to the translator's own lowering.
+ */
+function distributeTernary(
+  expr: OperatorOperand,
+  context: TranslationContext
+): PlanExpressionOperand | undefined {
+  if (!COMPARISON_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
+  const index = expr.operands.findIndex(
+    (operand) => isOperatorOperand(operand) && operand.operator === "if" && operand.operands.length === 3
+  );
+  if (index === -1) return undefined;
+  const [condition, whenTrue, whenFalse] = (expr.operands[index] as OperatorOperand).operands as [
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+  ];
+  if (!isNamedOperand(condition)) return undefined;
+  const fieldRef = resolveFieldReference(condition.name, context);
+  if (scalarType(fieldRef) !== "boolean" || mayBeMissing(fieldRef) || fieldRef.relations?.length) {
+    return undefined;
+  }
+  // A relation reached in a branch would be required around the whole expansion under an
+  // enclosing negation (see negateRequiringHops), where CEL never evaluates the unselected branch.
+  const reachesRelation = (operand: PlanExpressionOperand): boolean =>
+    isNamedOperand(operand)
+      ? (resolveFieldReference(operand.name, context).relations?.length ?? 0) > 0
+      : isOperatorOperand(operand) && operand.operands.some(reachesRelation);
+  if (expr.operands.some(reachesRelation)) return undefined;
+  const branch = (value: PlanExpressionOperand): PlanExpressionOperand =>
+    constantFoldExpression({
+      operator: expr.operator,
+      operands: expr.operands.map((operand, i) => (i === index ? value : operand)),
+    });
+  const [onTrue, onFalse] = [branch(whenTrue), branch(whenFalse)];
+  const settles = (leaf: PlanExpressionOperand) =>
+    isValueOperand(leaf) || (isOperatorOperand(leaf) && leafOutcomes(leaf, context) !== undefined);
+  if (!settles(onTrue) && !settles(onFalse)) return undefined;
+  return {
+    operator: "or",
+    operands: [
+      { operator: "and", operands: [condition, onTrue] },
+      { operator: "and", operands: [{ operator: "not", operands: [condition] }, onFalse] },
+    ],
+  };
+}
 
 /** Operators whose value is a boolean (or an error), never anything else. */
 const BOOLEAN_OPERATORS = new Set([
@@ -461,6 +513,16 @@ function leafOutcomes(
 
   if (COMPARISON_OPERATORS.has(operator) && operands.length === 2) {
     const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+    // NaN equals nothing and orders against nothing — not even a string, on the current PDP.
+    const nan = [left, right].find((o) => isValueOperand(o) && Number.isNaN(o.value));
+    if (nan !== undefined) {
+      const other = nan === left ? right : left;
+      const missing = isNamedOperand(other)
+        ? mayBeMissing(resolveFieldReference(other.name, context))
+        : !isValueOperand(other);
+      if (!isNamedOperand(other) && !isValueOperand(other)) return undefined;
+      return { [operator === "ne" ? "true" : "false"]: true, error: missing };
+    }
     const nullComparison = omittedNullComparison(operator, left, right, context);
     if (nullComparison !== undefined) return nullComparison;
     const size = [left, right].find(

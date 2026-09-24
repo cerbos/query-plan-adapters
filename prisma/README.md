@@ -388,7 +388,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 63 / 80 |
-| adversarial | 180 / 227 |
+| adversarial | 181 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -451,6 +451,9 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A comparison against NaN settles (`==` and orderings false, `!=` true, as the current PDP
+  evaluates them even against a string), and a comparison over `c ? a : b` with `c` a boolean
+  column that is never missing distributes over the branches when one of them then settles.
 - `hierarchy(x, "")` translates: Cerbos splits on an empty delimiter per code point, so a
   descendant of `C` is `startsWith(C + "_")`, and the empty path is an ancestor of every other.
 - `matches()` translates for the RE2 patterns a combination of LIKE filters decides exactly (see
