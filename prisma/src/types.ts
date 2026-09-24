@@ -26,6 +26,7 @@ type Outcomes = { true?: boolean; false?: boolean; error?: boolean };
 const ORDERING_OPERATORS = new Set(["lt", "le", "gt", "ge"]);
 const STRING_OPERATORS = new Set(["contains", "startsWith", "endsWith"]);
 const HIERARCHY_OPERATORS = new Set(["overlaps", "ancestorOf", "descendentOf"]);
+const LIST_OPERATORS = new Set(["filter", "map", "except"]);
 
 /**
  * Replaces every leaf whose outcome the mapped value types settle with the constant that decides
@@ -132,8 +133,14 @@ function leafOutcomes(
   context: TranslationContext
 ): Outcomes | undefined {
   const { operator, operands } = expr;
+  // A list where a boolean is required: CEL's logical operators raise a no-overload error on it,
+  // and a condition that is not a boolean denies.
+  if (LIST_OPERATORS.has(operator)) return { error: true };
+
   if (COMPARISON_OPERATORS.has(operator) && operands.length === 2) {
     const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const nullComparison = omittedNullComparison(operator, left, right, context);
+    if (nullComparison !== undefined) return nullComparison;
     const size = [left, right].find(
       (o): o is OperatorOperand => isOperatorOperand(o) && o.operator === "size"
     );
@@ -214,6 +221,29 @@ function leafOutcomes(
   }
 
   return undefined;
+}
+
+/**
+ * `x == null` / `x != null` over a column the caller omits when NULL: a present value is never
+ * null, and an absent one is a missing-attribute error, so neither outcome can select the NULL
+ * rows an `IS NULL` would.
+ */
+function omittedNullComparison(
+  operator: string,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  context: TranslationContext
+): Outcomes | undefined {
+  if (operator !== "eq" && operator !== "ne") return undefined;
+  const [field, literal] = isNamedOperand(left) ? [left, right] : [right, left];
+  if (!isNamedOperand(field) || !isValueOperand(literal) || literal.value !== null) {
+    return undefined;
+  }
+  const fieldRef = resolveFieldReference(field.name, context);
+  if (fieldRef.relations && fieldRef.relations.length > 0) return undefined;
+  const convention = fieldRef.nullAttributeRepresentation ?? context.nullRepresentation;
+  if (convention !== "omitted") return undefined;
+  return { [operator === "eq" ? "false" : "true"]: true, error: true };
 }
 
 /**

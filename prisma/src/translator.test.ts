@@ -127,34 +127,36 @@ describe("nullAttributeRepresentation", () => {
     });
   });
 
-  test("omitted: the same plan is refused rather than translated", () => {
+  test("omitted: the same plan denies every row rather than selecting the NULL ones", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // IS NULL filter would return exactly those rows (#302).
-    expect(() =>
+    // IS NULL filter would return exactly those rows (#302); a present value is never null.
+    expect(
       translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
-    ).toThrow(UnsupportedQueryPlanError);
+    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
   });
 
   test("a per-attribute declaration overrides the call-level option, in both directions", () => {
-    // Declared omitted, called explicit: refused (#308).
-    expect(() => translate(MISSING)).toThrow("missing-attribute error");
+    // Declared omitted, called explicit: no IS NULL filter (#308).
+    expect(translate(MISSING)).toEqual({ kind: PlanKind.ALWAYS_DENIED });
     // Declared explicit (`owner`), called omitted: translated.
     expect(
       translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" }).kind
     ).toBe(PlanKind.CONDITIONAL);
-    // Strip the declaration and the same call is refused.
-    expect(() =>
+    // Strip the declaration and the same call is denied outright.
+    expect(
       translate("null/equals/null-literal", {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       })
-    ).toThrow("missing-attribute error");
+    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
   });
 
   // The rejection must key off the null OPERAND, not a list of operators: `hasIntersection(tagNames,
   // ["public", null])` carries one in its value list. Enumerating the goldens rather than naming
   // shapes covers a newly added case carrying a null constant automatically.
-  test("every plan carrying a null literal is refused under call-level omitted", () => {
+  // A plan whose null comparison settles (`x == null` is false or an error, so every row is
+  // denied) passes too: ALWAYS_DENIED selects no NULL row.
+  test("no plan carrying a null literal selects NULL rows under call-level omitted", () => {
     const carrying = readGoldens(CURRENT).filter((golden) => carriesNullLiteral(golden.plan));
     const ids = carrying.map((golden) => golden.id);
     expect(ids).toContain(MISSING);
@@ -162,13 +164,13 @@ describe("nullAttributeRepresentation", () => {
 
     const notRejected = carrying.flatMap((golden) => {
       try {
-        queryPlanToPrisma({
+        const result = queryPlanToPrisma({
           queryPlan: planOf(golden),
           mapper: UNDECLARED,
           model: MODEL,
           nullAttributeRepresentation: "omitted",
         });
-        return [golden.id];
+        return result.kind === PlanKind.ALWAYS_DENIED ? [] : [golden.id];
       } catch (error) {
         // A positional read of a list compares an element, not an optionally absent field; the
         // index operator has no Prisma filter form under either representation.
@@ -211,7 +213,9 @@ describe("reentrant function mappers", () => {
 test("an unplannable nested map does not register nullable fields on the outer lambda", () => {
   // CEL cannot reach this branch: Cerbos 0.54.0 rejects
   // R.attr.tags.all(t, R.attr.tags.map(x, x.name)) with
-  // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract.
+  // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract. A list
+  // where a boolean is required is a CEL error, so the body settles to false (all() holds only
+  // over no tags) before any lambda scope is entered.
   const condition: PlanExpressionOperand = {
     operator: "all",
     operands: [
@@ -241,7 +245,7 @@ test("an unplannable nested map does not register nullable fields on the outer l
   });
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
-    filters: { tags: { every: { tags: { some: { some: { select: { name: true } } } } } } },
+    filters: { tags: { none: {} } },
   });
 });
 

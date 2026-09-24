@@ -185,14 +185,16 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The default is `"explicit"` (`IS NULL`). If you omit attributes for NULL columns, set `"omitted"`:
-the adapter then rejects every null comparison operand rather than emit a filter that returns
-denied rows.
+the adapter then never emits a filter that selects the NULL rows. A comparison that can only deny
+under that convention is settled without one: `x == null` is FALSE for a present value and an
+error for an absent one, so outside any `!` it denies every row, and `!(x != null)` likewise. Every
+other null comparison operand is rejected.
 
 ```ts
 queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-The rejection covers every null operand, including `x != null`, which is aligned under both
+The rejection covers every other null operand, including `x != null`, which is aligned under both
 conventions: Prisma negates by wrapping in `{ NOT: … }`, so a leaf cannot tell whether an enclosing
 `not` will flip it back. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
@@ -337,8 +339,8 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   related collection column.
 - **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
   fractional addition (not reversible in IEEE-754).
-- **Other malformed or non-boolean shapes:** the two-list `except` function, `filter()` or `map()`
-  as a standalone condition, `all()` over a multi-hop chain, an empty hierarchy delimiter,
+- **Other malformed shapes:** the two-list `except` function compared or counted, `all()` over a
+  multi-hop chain, an empty hierarchy delimiter,
   sub-millisecond `now()` thresholds, non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
 
@@ -381,7 +383,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 50 / 80 |
-| adversarial | 148 / 227 |
+| adversarial | 153 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -444,6 +446,10 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A list-valued `filter()`, `map()` or `except()` where a boolean is required is a CEL error, and
+  settles as one: a whole condition that is one returns `ALWAYS_DENIED` rather than throwing. Under
+  `nullAttributeRepresentation: "omitted"`, `x == null` outside any `!` (and `!(x != null)`)
+  settles the same way instead of being refused.
 - `size()` of a `valueType: "string"` column translates for any threshold, as `LIKE` patterns of
   `_` (`size(x) > 4` is `startsWith: "_____"`). A threshold of 2^32 or more, which no store can
   hold, needs no pattern; one past 1024 characters short of that is refused. Fractional and

@@ -101,10 +101,6 @@
       "status": "unsupported",
       "reason": "Same as collection/exists/nested-over-same-collection, reached through all(): the inner some-filter would have to compare its id and name with the enclosing element's, and Prisma field references stay within one model"
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
-    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
@@ -140,14 +136,6 @@
     "collection/exists/outer-collection-inside-lambda": {
       "status": "unsupported",
       "reason": "Embeds a size(...) == 1 count threshold; same limitation as size/greater-than/collection-above-one"
-    },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() as a conjunct returns a list, not a boolean; dropping it would leave the other conjunct to over-grant, so the whole plan is refused."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() returns a list, not a boolean; only size(filter(...)) or exists() has a Prisma filter form."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -193,10 +181,6 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() returns a list, not a boolean; it has a Prisma filter form only inside hasIntersection()."
-    },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared — there is no Prisma filter that compares a relation projection to a literal list"
@@ -240,10 +224,6 @@
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Same cross-model correlated comparison limitation as membership/in/field-in-resource-list, under negation"
-    },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
     },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",
