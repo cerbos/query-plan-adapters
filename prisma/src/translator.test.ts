@@ -52,7 +52,7 @@ describe("the refusal type", () => {
   test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", () => {
     let raised: unknown;
     try {
-      translate("regex/matches/digit-class");
+      translate("collection/index/first-element-of-string-list");
     } catch (error) {
       raised = error;
     }
@@ -84,9 +84,13 @@ describe("declared scalar types", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { aString: { equals: 0 } },
     });
-    expect(() => translate("type-mismatch/equals/string-field-against-number-principal")).toThrow(
-      "eq value type does not match mapped string field",
-    );
+    // Declared, the type settles the comparison: CEL's heterogeneous equality answers a string
+    // column against a number false for every present value, so nothing is bound for a store to
+    // coerce. `NOT LIKE '%'` is that false, kept UNKNOWN on a NULL, which is a missing attribute.
+    expect(translate("type-mismatch/equals/string-field-against-number-principal")).toEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { NOT: { aString: { startsWith: "" } } },
+    });
   });
 });
 
@@ -117,6 +121,7 @@ describe("nullAttributeRepresentation", () => {
   // the adapter has to be told. The corpus mapping declares it per attribute; these vary the
   // call-level option and the declaration, which the corpus cannot.
   const MISSING = "null/equals/null-literal-on-missing-attribute";
+  const NEVER = { kind: PlanKind.CONDITIONAL, filters: { NOT: { aOptionalString: { startsWith: "" } } } };
 
   test("explicit (the default): == null is an IS NULL filter", () => {
     expect(translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
@@ -125,34 +130,38 @@ describe("nullAttributeRepresentation", () => {
     });
   });
 
-  test("omitted: the same plan is refused rather than translated", () => {
+  test("omitted: the same plan selects no row rather than the NULL ones", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // IS NULL filter would return exactly those rows (#302).
-    expect(() =>
+    // IS NULL filter would return exactly those rows (#302); a present value is never null, so
+    // `== null` is FALSE for it — `NOT LIKE '%'`, which stays UNKNOWN on the NULL rows.
+    expect(
       translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
-    ).toThrow(UnsupportedQueryPlanError);
+    ).toEqual(NEVER);
   });
 
   test("a per-attribute declaration overrides the call-level option, in both directions", () => {
-    // Declared omitted, called explicit: refused (#308).
-    expect(() => translate(MISSING)).toThrow("missing-attribute error");
+    // Declared omitted, called explicit: no IS NULL filter (#308).
+    expect(translate(MISSING)).toEqual(NEVER);
     // Declared explicit (`owner`), called omitted: translated.
     expect(
       translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" }).kind
     ).toBe(PlanKind.CONDITIONAL);
-    // Strip the declaration and the same call is refused.
-    expect(() =>
+    // Strip the declaration and the same call selects no row.
+    expect(
       translate("null/equals/null-literal", {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       })
-    ).toThrow("missing-attribute error");
+    ).toEqual(NEVER);
   });
 
   // The rejection must key off the null OPERAND, not a list of operators: `hasIntersection(tagNames,
   // ["public", null])` carries one in its value list. Enumerating the goldens rather than naming
   // shapes covers a newly added case carrying a null constant automatically.
-  test("every plan carrying a null literal is refused under call-level omitted", () => {
+  // A plan whose null comparison settles passes too: `x == null` is FALSE for a present value and
+  // an error for a missing one, rendered with presence tests that are UNKNOWN on NULL. Any
+  // NULL-selecting filter needs an IS NULL leaf, i.e. a null literal in the emitted where-input.
+  test("no plan carrying a null literal emits an IS NULL filter under call-level omitted", () => {
     const carrying = readGoldens(CURRENT).filter((golden) => carriesNullLiteral(golden.plan));
     const ids = carrying.map((golden) => golden.id);
     expect(ids).toContain(MISSING);
@@ -160,13 +169,15 @@ describe("nullAttributeRepresentation", () => {
 
     const notRejected = carrying.flatMap((golden) => {
       try {
-        queryPlanToPrisma({
+        const result = queryPlanToPrisma({
           queryPlan: planOf(golden),
           mapper: UNDECLARED,
           model: MODEL,
           nullAttributeRepresentation: "omitted",
         });
-        return [golden.id];
+        return result.kind === PlanKind.CONDITIONAL && JSON.stringify(result.filters).includes("null")
+          ? [golden.id]
+          : [];
       } catch (error) {
         // A positional read of a list compares an element, not an optionally absent field; the
         // index operator has no Prisma filter form under either representation.
@@ -209,7 +220,9 @@ describe("reentrant function mappers", () => {
 test("an unplannable nested map does not register nullable fields on the outer lambda", () => {
   // CEL cannot reach this branch: Cerbos 0.54.0 rejects
   // R.attr.tags.all(t, R.attr.tags.map(x, x.name)) with
-  // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract.
+  // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract. A list
+  // where a boolean is required is a CEL error, so the body settles to false (all() holds only
+  // over no tags) before any lambda scope is entered.
   const condition: PlanExpressionOperand = {
     operator: "all",
     operands: [
@@ -239,7 +252,7 @@ test("an unplannable nested map does not register nullable fields on the outer l
   });
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
-    filters: { tags: { every: { tags: { some: { some: { select: { name: true } } } } } } },
+    filters: { tags: { none: {} } },
   });
 });
 
@@ -255,13 +268,13 @@ describe("timestamp literals", () => {
       model: MODEL,
     });
 
-  test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why the two relative-window cases are `unsupported` in the
-    // ledger. A tidy millisecond substitution in the loader would translate cleanly and quietly
-    // contradict it.
-    expect(() => translate("timestamp/less-than/relative-window")).toThrow(
-      "Timestamp value exceeds millisecond precision"
-    );
+  test("a nanosecond instant — what the PDP actually folds — compares against the next millisecond", () => {
+    // A DateTime attribute is a whole millisecond, so `a < T` for a T between two milliseconds is
+    // `a < ceil(T)`. The corpus loader substitutes a nanosecond instant for the same reason.
+    expect(at("2026-08-11T09:13:39.123456789Z")).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { createdAt: { lt: "2026-08-11T09:13:39.124Z" } },
+    });
   });
 
   test("the same plan at millisecond precision translates", () => {
@@ -285,7 +298,6 @@ describe("timestamp literals", () => {
     ["a date with no time part", "2024-01-01"],
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
-    ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
     ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC 3339|millisecond|instant range/);
@@ -676,8 +688,8 @@ describe("plans the planner cannot produce", () => {
     ).toThrow(message);
   });
 
-  test("a constant-false predicate the planner should have folded", () => {
-    expect(() =>
+  test("a condition that folds to constant false is always denied", () => {
+    expect(
       queryPlanToPrisma({
         queryPlan: plan({
           operator: "if",
@@ -685,8 +697,55 @@ describe("plans the planner cannot produce", () => {
         }),
         mapper: MAPPER,
       })
-    ).toThrow(
-      "A constant-false conditional predicate must be folded by the Cerbos planner"
-    );
+    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
+  });
+});
+
+// -- KIND 3: corpus gaps --------------------------------------------------------------------------
+//
+// Policy-reachable shapes the corpus does not discriminate yet. Each is a bridge until a case with
+// a discriminating seed lands (https://github.com/cerbos/query-plan-adapters/issues/509), and is
+// deleted then.
+
+describe("corpus gaps", () => {
+  const chainAll = {
+    operator: "all",
+    operands: [
+      { name: "request.resource.attr.mainCategory.subCategories" },
+      {
+        operator: "lambda",
+        operands: [
+          { operator: "eq", operands: [{ name: "s.name" }, { value: "finance" }] },
+          { name: "s" },
+        ],
+      },
+    ],
+  };
+  const translateCondition = (condition: unknown) =>
+    queryPlanToPrisma({
+      queryPlan: {
+        kind: PlanKind.CONDITIONAL,
+        condition,
+        cerbosCallId: "",
+        requestId: "",
+        validationErrors: [],
+        metadata: undefined,
+      } as PlanResourcesResponse,
+      mapper: MAPPER,
+      model: MODEL,
+    });
+
+  test("Corpus gap. A negated all() over a chain needs its false witness at the end of the chain", () => {
+    // Every seeded category holds exactly one subcategory, so the corpus cannot tell this from
+    // `categories: { some: { NOT: { subCategories: { some: P } } } }` — which admits a category
+    // with NO subcategories, where CEL's all() is vacuously true and its negation false.
+    expect(translateCondition({ operator: "not", operands: [chainAll] })).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: {
+        categories: {
+          some: { subCategories: { some: { NOT: { name: { equals: "finance" } } } } },
+        },
+      },
+    });
   });
 });

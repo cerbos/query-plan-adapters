@@ -30,9 +30,10 @@ import {
 import type { OperatorOperand } from "./plan";
 import { negateRequiringHops, referencesChainedRelation } from "./relations";
 import { containsCollectionOperator } from "./rewrite";
+import { handleMatchesOperator } from "./regex";
 import { handleStringOperator } from "./strings";
 import { handleBooleanTernaryOperator, tryHandleTernaryComparison } from "./ternary";
-import { normalizeRfc3339Milliseconds } from "./timestamp";
+import { normalizeRfc3339Milliseconds, parseRfc3339Instant } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
 
 /**
@@ -94,6 +95,8 @@ export function buildPrismaFilterFromCerbosExpression(
     case "startsWith":
     case "endsWith":
       return handleStringOperator(operator, operands, context);
+    case "matches":
+      return handleMatchesOperator(operands, context);
     case "hasIntersection":
       return handleHasIntersectionOperator(operands, context);
     case "lambda":
@@ -209,10 +212,14 @@ export function buildNegatedFilter(
 /**
  * Resolves a plan operand into a column reference or a constant. A nested expression that is
  * neither a timestamp nor foldable arithmetic resolves to the filter it translates to.
+ *
+ * A timestamp literal between two milliseconds is refused unless `allowSubMillisecond` is set, by
+ * a caller that compares it against a column and applies roundSubMillisecond.
  */
 export function resolveOperand(
   operand: PlanExpressionOperand,
-  context: TranslationContext
+  context: TranslationContext,
+  allowSubMillisecond = false
 ): ResolvedOperand {
   if (isNamedOperand(operand)) {
     return resolveFieldReference(operand.name, context);
@@ -222,8 +229,10 @@ export function resolveOperand(
   }
   if (isOperatorOperand(operand)) {
     if (operand.operator === "timestamp") {
-      return resolveTimestampOperand(operand, context);
+      return resolveTimestampOperand(operand, context, allowSubMillisecond);
     }
+    const identity = resolveIdentityCast(operand, context);
+    if (identity !== undefined) return identity;
     const folded = tryFoldValueExpression(operand, context);
     if (folded !== null) return { value: folded };
     return { value: buildPrismaFilterFromCerbosExpression(operand, context) };
@@ -231,9 +240,36 @@ export function resolveOperand(
   throw new UnsupportedQueryPlanError("Operand must have name, value, or be an expression");
 }
 
-function resolveTimestampOperand(
+/**
+ * `string(column)` over a string column and `double(column)` over a number column convert nothing:
+ * the column itself, except that the cast of a null VALUE is an error. The reference is resolved
+ * as one whose NULL is missing, so no comparison against it can select a NULL row.
+ */
+function resolveIdentityCast(
   expression: OperatorOperand,
   context: TranslationContext
+): ResolvedOperand | undefined {
+  const target = IDENTITY_CASTS[expression.operator];
+  const [operand] = expression.operands;
+  if (
+    target === undefined ||
+    expression.operands.length !== 1 ||
+    operand === undefined ||
+    !isNamedOperand(operand)
+  ) {
+    return undefined;
+  }
+  const fieldRef = resolveFieldReference(operand.name, context);
+  if (fieldRef.valueType !== target) return undefined;
+  return { ...fieldRef, nullAttributeRepresentation: "omitted" };
+}
+
+const IDENTITY_CASTS: Record<string, string> = { string: "string", double: "number" };
+
+function resolveTimestampOperand(
+  expression: OperatorOperand,
+  context: TranslationContext,
+  allowSubMillisecond: boolean
 ): ResolvedOperand {
   if (expression.operands.length !== 1) {
     throw new UnsupportedQueryPlanError("timestamp() requires exactly one operand");
@@ -256,7 +292,11 @@ function resolveTimestampOperand(
   if (!isValueOperand(operand) || typeof operand.value !== "string") {
     throw new UnsupportedQueryPlanError("timestamp() requires a field reference or RFC 3339 string");
   }
-  return { value: normalizeRfc3339Milliseconds(operand.value) };
+  if (!allowSubMillisecond) {
+    return { value: normalizeRfc3339Milliseconds(operand.value) };
+  }
+  const { iso, subMillisecond } = parseRfc3339Instant(operand.value);
+  return subMillisecond ? { value: iso, subMillisecond } : { value: iso };
 }
 
 /** The value of arithmetic over two constant operands, or null when it cannot be folded. */

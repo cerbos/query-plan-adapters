@@ -1,53 +1,17 @@
 {
   "adapter": "prisma",
   "cases": {
-    "arithmetic/add/exact-fraction-equals": {
-      "status": "unsupported",
-      "reason": "An exact corpus witness does not make the general column-addition predicate expressible; Prisma has no column arithmetic"
-    },
-    "arithmetic/add/inexact-fraction-equals": {
-      "status": "unsupported",
-      "reason": "Prisma filters cannot express column arithmetic, and algebraically solving fractional IEEE-754 addition is not reversible for every row"
-    },
-    "arithmetic/add/inexact-fraction-not-equals": {
-      "status": "unsupported",
-      "reason": "Same fractional column-arithmetic limitation as arithmetic/add/inexact-fraction-equals"
-    },
     "arithmetic/add/on-both-sides": {
       "status": "unsupported",
       "reason": "Arithmetic on both sides of a comparison cannot be solved to a plain column filter; Prisma filters cannot express column arithmetic"
-    },
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "Arithmetic composed on a column division is doubly inexpressible: Prisma has no column arithmetic, and the algebraic solve has no reciprocal for a denominator that may be zero"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "Same composed column-division limitation as arithmetic/add/self-division-plus-constant-greater-than, reached through an inequality"
     },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express"
     },
-    "arithmetic/divide/negated-self-division-equals": {
-      "status": "unsupported",
-      "reason": "Same column-division limitation as arithmetic/divide/self-division-greater-than, reached through a negated equality"
-    },
-    "arithmetic/divide/negative-zero-divisor": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no column arithmetic, so the division must be solved algebraically into a plain column predicate — and a zero denominator has no reciprocal to solve with; the adapter throws rather than guessing the sign of the resulting infinity"
-    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: div."
-    },
-    "arithmetic/divide/self-division-greater-than": {
-      "status": "unsupported",
-      "reason": "Division by a column cannot be solved to a plain column filter"
-    },
-    "arithmetic/divide/self-division-not-equals": {
-      "status": "unsupported",
-      "reason": "Same column-division limitation as arithmetic/divide/self-division-greater-than, reached through an inequality"
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
@@ -69,26 +33,6 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator, so int()'s truncation toward zero over a numeric column cannot be expressed."
-    },
-    "cast/string/from-boolean": {
-      "status": "unsupported",
-      "reason": "Same missing cast as cast/string/from-double, and the one where lowering it would be wrong rather than merely absent: SQLite and MySQL store a boolean as 1/0, so CAST(a_bool AS TEXT) never equals CEL's \"true\" and the filter would return nothing"
-    },
-    "cast/string/from-double": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast: a where clause compares a column against a value, and there is no form that applies string() to the column first. The rendering would also have to be provider-specific — CAST(x AS TEXT) formats a double differently across the providers one Prisma client targets"
-    },
-    "cast/string/negated-explicit-null": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, a String column: a Prisma DateTime filter needs a column mapped with valueType \"dateTime\", and comparing the ISO string lexically would not reproduce CEL's parse-or-error semantics."
@@ -101,17 +45,9 @@
       "status": "unsupported",
       "reason": "Same as collection/exists/nested-over-same-collection, reached through all(): the inner some-filter would have to compare its id and name with the enclosing element's, and Prisma field references stay within one model"
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
-    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
-    },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
     },
     "collection/exists-one/several-matches": {
       "status": "unsupported",
@@ -140,14 +76,6 @@
     "collection/exists/outer-collection-inside-lambda": {
       "status": "unsupported",
       "reason": "Embeds a size(...) == 1 count threshold; same limitation as size/greater-than/collection-above-one"
-    },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() as a conjunct returns a list, not a boolean; dropping it would leave the other conjunct to over-grant, so the whole plan is refused."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() returns a list, not a boolean; only size(filter(...)) or exists() has a Prisma filter form."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -193,10 +121,6 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() returns a list, not a boolean; it has a Prisma filter form only inside hasIntersection()."
-    },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared — there is no Prisma filter that compares a relation projection to a literal list"
@@ -212,10 +136,6 @@
     "hierarchy/descendent-of/bracket-in-path": {
       "status": "unsupported",
       "reason": "Hierarchy prefixes containing [ cannot be matched literally: Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even when one is declared"
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the adapter lowers descendentOf as `startsWith(prefix + delimiter)`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is parsed, before that filter is built"
     },
     "hierarchy/descendent-of/like-metacharacters-in-path": {
       "status": "unsupported",
@@ -241,10 +161,6 @@
       "status": "unsupported",
       "reason": "Same cross-model correlated comparison limitation as membership/in/field-in-resource-list, under negation"
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
-    },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",
       "reason": "Same exists_one counting limitation"
@@ -257,109 +173,17 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column."
     },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single Prisma filter is both, so the adapter refuses mixed conventions across one comparison."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: First operand of exists must be a collection reference."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: First operand of exists must be a collection reference."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
-    },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
-    },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no regular-expression operator."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
     "regex/matches/lucene-reserved-characters-in-class": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
     },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no regular-expression operator."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "relation/all/to-one-chain": {
-      "status": "unsupported",
-      "reason": "every() applies to a single relation; a multi-hop chain would need the universal to be evaluated against the flattened tail while still requiring the intermediate hop, which nested every/some cannot express — the adapter throws"
-    },
-    "relation/size/non-negative-to-one-chain": {
-      "status": "unsupported",
-      "reason": "Prisma where-filters express only empty/non-empty via none/some, so a >= 0 relation-count threshold — which is TRUE exactly when the to-one parent exists — has no equivalent; same limitation as size/greater-than/collection-above-one"
-    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
-    },
-    "size/equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
@@ -373,49 +197,9 @@
       "status": "unsupported",
       "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)"
     },
-    "size/greater-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter, so a giant size threshold remains inexpressible"
-    },
-    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/greater-than/string-length": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter"
-    },
-    "size/greater-than/string-non-empty": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter, and the adapter lowers size() only over a NAMED relation (none/some for emptiness); aString is a scalar column with no relation mapping, so the emptiness spelling is refused one step before the threshold is examined — the same gap as size/greater-than/string-length, reached through the `> 0` form a collection fast path would otherwise claim"
-    },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still an arbitrary count threshold none/some cannot express"
-    },
-    "size/less-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold"
-    },
-    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/less-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "The same missing form reached from the other direction: here BOTH operands of the `+` are columns, so there is no constant to invert off either side and nothing to solve the comparison back into a plain column filter"
     },
     "string/contains/field-to-field": {
       "status": "unsupported",
@@ -457,141 +241,13 @@
       "status": "unsupported",
       "reason": "Prisma DateTime values retain instants but discard RFC-3339 lexical spelling; raw field equality cannot reproduce CEL string equality, so both operands require timestamp wrappers."
     },
-    "timestamp/greater-than/relative-window-value-first": {
-      "status": "unsupported",
-      "reason": "Same sub-millisecond now() limitation in value-first form"
-    },
-    "timestamp/less-than/relative-window": {
-      "status": "unsupported",
-      "reason": "The planner emits a sub-millisecond now() literal that Prisma DateTime cannot represent without changing the CEL instant"
-    },
-    "type-mismatch/contains/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/contains/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/descendent-of/number-field-as-path": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/ends-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/ends-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/equals/boolean-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "aBool is mapped with valueType boolean, CEL answers `aBool == \"true\"` false, and SQLite and MySQL store a boolean as the integer 1 and would coerce the string, adding every aBool-true row. The scalar comparison refuses the string literal against the mapped valueType before a filter exists; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-boolean-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its boolean element meets the number literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
     },
-    "type-mismatch/equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "aNumber is mapped with valueType number, and CEL's heterogeneous equality answers `aNumber == \"5\"` false for every row. Prisma has no filter form for a comparison that is false by type: binding \"5\" against the Int column hands it to Prisma's validator or to a store that coerces (SQLite and MySQL compare '5' = 5 as true, which would add a1), so the scalar comparison refuses the literal against the mapped valueType before a filter exists. The throw propagates out of the `or`, so the aNumber == 2 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/equals/number-field-against-string-principal": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-number-field": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/equals/string-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "aString is mapped with valueType string, CEL answers `aString == 0` false, and MySQL reads a non-numeric string as 0 when comparing it to a number, while h4's \"0\" matches on any store that coerces. The scalar comparison refuses the number literal against the mapped valueType before a filter exists; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/equals/string-field-against-number-principal": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/exists/element-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "The lambda body becomes a filter inside the tags relation's `some`, and its field `name` is mapped with valueType string; CEL answers `t.name == 0` false for every tag. The element comparison refuses the number literal against the mapped valueType before a filter exists rather than bind it for a store to coerce; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a map() projection lowers to the tags relation's `some` with `name in [...]`, and the walk checks every literal against the projected field's valueType string. Dropping 0 and keeping \"public\" would agree with CEL, but the walk does not partition a mixed list; it refuses the whole list rather than bind 0 against a string column"
-    },
-    "type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list": {
-      "status": "unsupported",
-      "reason": "Same membership walk as type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list: the only literal is a string against a list mapped with valueType boolean, which CEL answers false for every element and SQLite and MySQL would coerce, so the walk refuses it before a filter exists. The throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a relation-backed list lowers to the same membership walk as `in`, which checks every literal against the mapped valueType and refuses the whole list on the first mismatch. Dropping \"2\" and keeping 3 would agree with CEL, which answers the string false against every number, but the walk does not partition a mixed list; it refuses rather than bind \"2\" against a number column"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of hasIntersection must be a value."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
-    },
-    "type-mismatch/in/number-field-in-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "Membership of a scalar Int column in a literal list lowers to Prisma's `in`, and the walk checks every literal against the mapped valueType number. Dropping \"5\" and keeping 2 would agree with CEL, which answers the string false against every number, but the walk does not partition a mixed list; it refuses the whole list rather than bind \"5\" for SQLite or MySQL to coerce"
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
-    },
-    "type-mismatch/in/string-literal-in-resource-boolean-list": {
-      "status": "unsupported",
-      "reason": "The boolean mirror of type-mismatch/in/string-literal-in-resource-number-list: the list is mapped with valueType boolean, CEL answers \"true\" == true false, and SQLite and MySQL store a boolean as the integer 1, so the membership walk refuses the string literal before a filter exists rather than binding it for the store to coerce. The throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/in/string-literal-in-resource-number-list": {
-      "status": "unsupported",
-      "reason": "The list is mapped as a relation whose valueType is number, and CEL's heterogeneous equality answers a string member false against every number element. Prisma has no filter form for a comparison that is false by type: binding \"2\" against the element column hands it to Prisma's validator or to a store that coerces (SQLite and MySQL compare '2' = 2 as true), so the membership walk refuses the literal before a filter exists. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/less-than/negated-nan-against-string-field": {
-      "status": "unsupported",
-      "reason": "The finite ternary branch compares a numeric value with a mapped string field; Prisma scalar filters cannot encode the CEL type-error result required for that branch and the adapter rejects the mismatched operand type."
-    },
-    "type-mismatch/not-equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "The `!=` mirror of type-mismatch/equals/number-field-against-string-literal: CEL answers `aNumber != \"5\"` TRUE for every row, and a store that coerced '5' = 5 would drop a1, an under-grant rather than an over-grant but a wrong filter all the same. The same valueType check refuses the string literal before a filter exists, taking the well-typed aNumber > 3 conjunct with it"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/size/boolean-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a relation mapping."
-    },
-    "type-mismatch/size/number-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a relation mapping."
-    },
-    "type-mismatch/starts-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/starts-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
     }
   }
 }

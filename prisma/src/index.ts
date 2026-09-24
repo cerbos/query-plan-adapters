@@ -4,9 +4,11 @@ import type { PlanResourcesResponse } from "@cerbos/core";
 import { rejectConstantFalse } from "./fields";
 import { assertStructuralNulls } from "./mapping";
 import type { TranslationContext } from "./mapping";
-import { isOperatorOperand, isValueOperand } from "./plan";
+import { isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
+import { expandLiteralCollections } from "./literals";
+import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
 
 export { PlanKind, UnsupportedQueryPlanError };
@@ -114,7 +116,7 @@ export type Mapper =
  *   `null == null`, so `IS NULL` selects exactly the rows `check()` allows.
  * - `"omitted"` — a NULL column sends no attribute at all. CEL then raises a missing-attribute
  *   error, which Cerbos treats as a deny, so a filter that *selects* NULL rows returns rows the
- *   PDP denies. Null comparison operands are rejected instead of translated.
+ *   PDP denies. A null comparison operand is never translated into a NULL-selecting filter.
  *
  * See https://github.com/cerbos/query-plan-adapters/issues/302.
  */
@@ -168,27 +170,25 @@ export function queryPlanToPrisma({
     case PlanKind.CONDITIONAL: {
       assertStructuralNulls(queryPlan.condition, context);
       const condition = constantFoldExpression(
-        hoistOuterScopeReferences(queryPlan.condition, [])
+        settleTypeMismatches(
+          hoistOuterScopeReferences(
+            expandLiteralCollections(queryPlan.condition),
+            []
+          ),
+          context
+        )
       );
       if (isValueOperand(condition)) {
-        // Real PDP plans fold constant conditions to ALWAYS_ALLOWED/ALWAYS_DENIED before
-        // they reach the adapter; this can only surface with hand-crafted plans.
+        // The planner folds a condition that is constant on its own, but not one the mapped
+        // column types decide (`R.attr.aNumber == "5"` is false for every row): that surfaces
+        // here, and is answered as the planner would have answered it.
         if (condition.value === true) {
           return { kind: PlanKind.CONDITIONAL, filters: {} };
         }
+        if (condition.value === false) {
+          return { kind: PlanKind.ALWAYS_DENIED };
+        }
         rejectConstantFalse();
-      }
-      // A `map()` at the ROOT of the condition returns a list, not a boolean. Translating it
-      // produces a projection filter that is not a valid Prisma `where` clause — the shape
-      // must be refused HERE rather than left for findMany to reject at query time, because
-      // a projection that happened to coerce would be a silently-wrong filter. (`filter()`
-      // as a condition is already rejected inside handleCollectionOperator with its own
-      // message; nested inside a comparison or size() both remain translatable.)
-      if (isOperatorOperand(condition) && condition.operator === "map") {
-        throw new UnsupportedQueryPlanError(
-          "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
-            "only comparisons or size() over its result have a boolean meaning"
-        );
       }
       return {
         kind: PlanKind.CONDITIONAL,

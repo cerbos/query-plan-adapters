@@ -52,6 +52,11 @@ export type ResolvedFieldReference = {
 
 export type ResolvedValue = {
   value: any;
+  /**
+   * The value is a timestamp literal between two milliseconds, bound as the next millisecond: a
+   * comparison against it must go through roundSubMillisecond.
+   */
+  subMillisecond?: boolean;
 };
 
 export type ResolvedOperand = ResolvedFieldReference | ResolvedValue;
@@ -183,6 +188,7 @@ export function resolveFieldReference(
 
   // Walk the remaining segments through nested relation mappings; the first segment that is
   // not a relation names the leaf column.
+  let leafConfig: MapperConfig | undefined;
   if (fields) {
     let currentMapper: Record<string, MapperConfig> = fields;
     let currentParts = remainingParts;
@@ -197,6 +203,7 @@ export function resolveFieldReference(
         if (leafPart) {
           field = nextConfig?.field || leafPart;
         }
+        if (currentParts.length === 1) leafConfig = nextConfig;
         break;
       }
       relations.push(toRelationConfig(nextConfig.relation));
@@ -209,8 +216,9 @@ export function resolveFieldReference(
   return {
     path: field ? [field] : remainingParts,
     relations,
-    valueType: activeConfig.valueType,
-    nullable: activeConfig.nullable,
+    // A column reached through a relation is typed by its own entry in `relation.fields`.
+    valueType: leafConfig?.valueType ?? activeConfig.valueType,
+    nullable: leafConfig ? leafConfig.nullable : activeConfig.nullable,
     nullAttributeRepresentation: activeConfig.nullAttributeRepresentation,
   };
 }
@@ -258,6 +266,9 @@ export function enterLambdaScope(
       if (projection) {
         return {
           field: projection,
+          valueType:
+            lookupMapping(fullMapper, collectionPath)?.valueType ??
+            lookupElementFields(fullMapper, collectionPath)?.[projection]?.valueType,
           // A projected list carries null values, unlike missing fields on object elements.
           nullAttributeRepresentation: "explicit",
         };
