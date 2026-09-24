@@ -16,5 +16,3 @@ These five are the only triage labels. The per-adapter **scope** labels are a se
 orthogonal axis and their roster lives in
 [`issue-tracker.md`](issue-tracker.md#scope-labels) — one label per adapter directory, plus
 `conformance`. An issue normally carries one label from this table and one or more from that one.
-
-Edit the right-hand column to match whatever vocabulary you actually use.
