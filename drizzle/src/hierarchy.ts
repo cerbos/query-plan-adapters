@@ -127,17 +127,6 @@ const resolveHierarchy = (
     ) {
       throw new UnsupportedQueryPlanError("Hierarchy delimiter must be a string value");
     }
-    if (delimiterOperand.value === "") {
-      // Cerbos splits a path on an empty delimiter into one segment per CHARACTER, so the
-      // relation becomes a strict string-prefix test. The descendant lowering below is
-      // `LIKE prefix || delimiter || '%'`, which with an empty delimiter matches the path
-      // ITSELF (never its own descendant) as well as every string extension of it — the
-      // corpus's hierarchy/descendent-of/empty-delimiter over-granted a2 that way — so the shape is refused rather
-      // than emitted with the wrong boundary.
-      throw new UnsupportedQueryPlanError(
-        "Hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself",
-      );
-    }
     delimiter = delimiterOperand.value;
   }
 
@@ -149,7 +138,9 @@ const resolveHierarchy = (
     }
     return {
       kind: "constant",
-      segments: pathOperand.value.split(delimiter),
+      // Go's strings.Split on an empty separator yields one segment per character (code point),
+      // and none at all for an empty string.
+      segments: delimiter === "" ? [...pathOperand.value] : pathOperand.value.split(delimiter),
       delimiter,
     };
   }
@@ -301,6 +292,54 @@ const buildSegmentedHierarchyFilter = (
 const constantSegments = (hierarchy: ConstantHierarchy): Segment[] =>
   hierarchy.segments.map((value) => ({ kind: "constant", value }));
 
+/**
+ * A column hierarchy split on an EMPTY delimiter — one segment per character — against a constant
+ * whose segments are single characters. Segment-wise comparison is then plain string-prefix logic
+ * over the constant's characters `S`: the column is an ancestor when it is one of `S`'s strict
+ * prefixes (the empty string included: zero segments), a descendant when it starts with `S` and is
+ * longer, and they overlap when either is a prefix of the other.
+ */
+const buildCharacterHierarchyFilter = (
+  operator: HierarchyOperator,
+  field: FieldHierarchy,
+  constant: ConstantHierarchy,
+  fieldIsLeft: boolean,
+  options: BuildFilterOptions,
+): SQL => {
+  const fieldColumn = isColumn(field.resolved.mapping)
+    ? field.resolved.mapping
+    : isMappingConfig(field.resolved.mapping)
+      ? field.resolved.mapping.column
+      : undefined;
+  if (fieldColumn && fieldColumn.dataType !== "string") return sql`null`;
+  const expr = buildColumnExpression(field.resolved.mapping, field.reference);
+  const characters = constant.segments;
+  const path = characters.join("");
+  const length = characterLength([fieldColumn]);
+  const prefixes = (upTo: number): SQL[] =>
+    Array.from({ length: upTo + 1 }, (_, size) => sql`${characters.slice(0, size).join("")}`);
+  const isPrefixOf = (includeWhole: boolean): SQL =>
+    characters.length === 0 && !includeWhole
+      ? FALSE_CONDITION
+      : sql`${expr} in ${prefixes(includeWhole ? characters.length : characters.length - 1)}`;
+  const startsWithPath = buildStringMatchCondition(
+    "startsWith",
+    columnExpression(expr),
+    constantExpression(sql`${path}`),
+    length,
+  );
+  const fieldIsAncestor =
+    (operator === "ancestorOf" && fieldIsLeft) ||
+    (operator === "descendentOf" && !fieldIsLeft);
+  const filter =
+    operator === "overlaps"
+      ? or(isPrefixOf(true), startsWithPath)!
+      : fieldIsAncestor
+        ? isPrefixOf(false)
+        : sql`(${startsWithPath} and ${length(expr)} > ${characters.length})`;
+  return wrapRelationChain(field.resolved.relations, filter, field.reference, options);
+};
+
 export const buildHierarchyFilter = (
   operator: HierarchyOperator,
   operands: PlanExpressionOperand[],
@@ -329,6 +368,21 @@ export const buildHierarchyFilter = (
       left.kind === "segmented" ? left.segments : constantSegments(left),
       right.kind === "segmented" ? right.segments : constantSegments(right),
     );
+  }
+  const field = left.kind === "field" ? left : right.kind === "field" ? right : undefined;
+  const constant = left.kind === "constant" ? left : right.kind === "constant" ? right : undefined;
+  if (field?.delimiter === "" || constant?.delimiter === "") {
+    if (
+      field === undefined || constant === undefined ||
+      field.delimiter !== "" ||
+      constant.segments.some((segment) => [...segment].length !== 1)
+    ) {
+      throw new UnsupportedQueryPlanError(
+        "An empty hierarchy delimiter splits a path per character; it is supported only for a " +
+          "column path split that way against a constant whose segments are single characters",
+      );
+    }
+    return buildCharacterHierarchyFilter(operator, field, constant, field === left, options);
   }
   if (left.kind === "field" && right.kind === "constant") {
     return buildFieldHierarchyFilter(operator, left, right, true, options);

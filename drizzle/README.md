@@ -375,7 +375,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 211 / 227 |
+| adversarial | 212 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -508,8 +508,11 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 - **Breaking:** `hasIntersection` normalizes operand order, so the value-first spelling translates
   instead of becoming `FALSE`; an operand pair with no literal list now throws
   ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
-- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) throws. Its old
-  filter matched the path itself (`hierarchy/descendent-of/empty-delimiter` returned a denied row).
+- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) no longer emits
+  its old filter, which matched the path itself (`hierarchy/descendent-of/empty-delimiter` returned
+  a denied row). A column split that way against a constant whose segments are single characters
+  now translates as string-prefix logic over characters, as Cerbos splits per character; any other
+  empty-delimiter shape throws.
 - **Breaking:** bare temporal field comparisons, whole-list equality, list-valued membership
   needles, and nested division where an inner zero divisor could be evaluated before the outer
   guard now throw before returning SQL. They previously emitted incorrect filters or failed in the

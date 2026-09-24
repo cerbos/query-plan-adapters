@@ -654,6 +654,46 @@ describe("RE2 patterns lowered without a regex engine", () => {
   );
 });
 
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Only descendentOf is carried by a case for
+// a hierarchy split on an empty delimiter. Delete each test when a case carrying it lands.
+describe("a hierarchy split per character", () => {
+  const characterHierarchy = (operator: string): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator,
+        operands: [
+          {
+            operator: "hierarchy",
+            operands: [{ name: "request.resource.attr.scope" }, { value: "" }],
+          },
+          { operator: "hierarchy", operands: [{ value: "ab" }, { value: "" }] },
+        ],
+      } as unknown as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    }) as PlanResourcesResponse;
+  const paramsOf = (operator: string): unknown[] => {
+    const result = queryPlanToDrizzle({
+      queryPlan: characterHierarchy(operator),
+      mapper: MAPPERS.postgresql,
+    });
+    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    return render("postgresql", result.filter).params;
+  };
+
+  // Go's strings.Split("", "") is zero segments, which is every longer path's ancestor.
+  test("Corpus gap. ancestorOf is one of the strict prefixes, the empty string included", () => {
+    expect(paramsOf("ancestorOf")).toEqual(["", "a"]);
+  });
+
+  test("Corpus gap. overlaps is any prefix, or an extension", () => {
+    expect(paramsOf("overlaps")).toEqual(["", "a", "ab", "ab", "ab"]);
+  });
+});
+
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function: malformed by construction, so there is no golden to
   // read. A shape CEL *can* express belongs in the corpus instead.

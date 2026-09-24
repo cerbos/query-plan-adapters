@@ -57,10 +57,6 @@
       "status": "unsupported",
       "reason": "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value."
     },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the adapter lowers descendentOf as `LIKE prefix || delimiter || '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is parsed, before that LIKE is built."
-    },
     "null/equals/null-literal-on-missing-attribute": {
       "status": "unsupported",
       "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
