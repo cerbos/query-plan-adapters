@@ -1,6 +1,10 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { is } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { PgColumn } from "drizzle-orm/pg-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
@@ -14,6 +18,11 @@ import type { LeafComparisonOperator } from "./arithmetic";
 import { parseCelDoubleString } from "./conversion";
 import { buildFilterFromExpression } from "./filter";
 import { buildIndexedComparison } from "./indexed";
+import {
+  exceedsMillisecondPrecision,
+  formatRfc3339Nanoseconds,
+  parseRfc3339Nanoseconds,
+} from "./timestamp";
 import {
   buildColumnExpression,
   columnForOperand,
@@ -296,6 +305,108 @@ const buildMixedTypeComparison = (
 };
 
 /**
+ * The fractional-second digits every value of a timestamp column carries at most, read off its
+ * Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (the server's default is 6), a MySQL
+ * `datetime` / `timestamp`'s `fsp` (MySQL's default is 0). A SQLite text column holds whatever
+ * string the application wrote, so it is held to the millisecond contract the README states.
+ */
+const timestampColumnDigits = (column: AnyColumn): number | undefined => {
+  const declared = column as AnyColumn & { precision?: number; fsp?: number };
+  if (is(column, PgColumn) && column.columnType.startsWith("PgTimestamp")) {
+    return declared.precision ?? 6;
+  }
+  if (
+    is(column, MySqlColumn) &&
+    (column.columnType.startsWith("MySqlDateTime") || column.columnType.startsWith("MySqlTimestamp"))
+  ) {
+    return declared.fsp ?? 0;
+  }
+  if (is(column, SQLiteColumn) && column.dataType === "string") return 3;
+  return undefined;
+};
+
+/**
+ * A typed timestamp column compared with a literal finer than the adapter binds — in practice the
+ * planner's `now()`, which it folds at nanosecond precision.
+ *
+ * Rounding the literal would compare a different instant. But every value the column holds lies on
+ * its precision grid `g`, and between two grid points there is no value to disagree about, so each
+ * ordering has an exact equivalent against a grid point: `c < T` is `c < ceil(T)`, `c <= T` is
+ * `c <= floor(T)`, `c > T` is `c > floor(T)` and `c >= T` is `c >= ceil(T)`. An off-grid `T` equals
+ * no value, so `==` is false and `!=` true for every present row; a NULL column stays UNKNOWN, as
+ * everywhere else a timestamp is compared. With the column's grid unknown, the shape is refused.
+ */
+const buildOffGridTimestampComparison = (
+  context: ComparisonContext,
+  operator: LeafComparisonOperator,
+  field: { name: string },
+  literal: string,
+): SQL => {
+  const { mapper, options, negated } = context;
+  const resolved = resolveFieldReference(field.name, mapper);
+  const column = isMappingConfig(resolved.mapping) ? resolved.mapping.column : undefined;
+  const digits = column === undefined ? undefined : timestampColumnDigits(column);
+  if (digits === undefined || digits > 9) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot compare '${field.name}' with a timestamp finer than a millisecond (${literal}): ` +
+        "the column's precision is not declared on a PostgreSQL timestamp, a MySQL datetime or " +
+        "timestamp, or a SQLite text column, so no grid point is known to compare against instead",
+    );
+  }
+  const instant = parseRfc3339Nanoseconds(literal);
+  const grid = 10n ** BigInt(9 - digits);
+  const remainder = ((instant % grid) + grid) % grid;
+  const floor = instant - remainder;
+  const ceil = remainder === 0n ? floor : floor + grid;
+  const expr = buildColumnExpression(resolved.mapping, field.name);
+  const bound = (nanoseconds: bigint): SQL =>
+    sql`${formatRfc3339Nanoseconds(nanoseconds, digits)}`;
+  const comparison =
+    remainder === 0n
+      ? applyComparisonWithExpression(operator, expr, bound(floor))
+      : operator === "lt"
+        ? sql`${expr} < ${bound(ceil)}`
+        : operator === "le"
+          ? sql`${expr} <= ${bound(floor)}`
+          : operator === "gt"
+            ? sql`${expr} > ${bound(floor)}`
+            : operator === "ge"
+              ? sql`${expr} >= ${bound(ceil)}`
+              : sql`(case when ${expr} is null then null else ${constantCondition(operator === "ne")} end)`;
+  return withPolarity(
+    wrapRelationChain(resolved.relations, comparison, field.name, options),
+    negated,
+  );
+};
+
+/** `timestamp(<field typed "timestamp">)`, as the field it converts. */
+const timestampField = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): { name: string } | undefined => {
+  if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  if (operand.operands.length !== 1 || inner === undefined || !isNameOperand(inner)) {
+    return undefined;
+  }
+  const { mapping } = resolveFieldReference(inner.name, mapper);
+  return isMappingConfig(mapping) && mapping.valueType === "timestamp" ? inner : undefined;
+};
+
+/** `timestamp("<literal>")` whose literal has non-zero digits below the millisecond. */
+const subMillisecondTimestampLiteral = (operand: PlanExpressionOperand): string | undefined => {
+  if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  return operand.operands.length === 1 &&
+    inner !== undefined &&
+    isValueOperand(inner) &&
+    typeof inner.value === "string" &&
+    exceedsMillisecondPrecision(inner.value)
+    ? inner.value
+    : undefined;
+};
+
+/**
  * `string(x) == "lit"` / `!=` over a number column, lowered without a CAST (which would render the
  * number in the store's format, not CEL's — see `UNSUPPORTED_CONVERSIONS` in `values.ts`).
  *
@@ -526,6 +637,22 @@ export const buildComparisonFilter = (
   ) {
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value",
+    );
+  }
+
+  const leftTimestamp = timestampField(left, mapper);
+  const rightTimestampLiteral = subMillisecondTimestampLiteral(right);
+  if (leftTimestamp && rightTimestampLiteral !== undefined) {
+    return buildOffGridTimestampComparison(context, operator, leftTimestamp, rightTimestampLiteral);
+  }
+  const rightTimestamp = timestampField(right, mapper);
+  const leftTimestampLiteral = subMillisecondTimestampLiteral(left);
+  if (rightTimestamp && leftTimestampLiteral !== undefined) {
+    return buildOffGridTimestampComparison(
+      context,
+      MIRRORED_OPERATORS[operator],
+      rightTimestamp,
+      leftTimestampLiteral,
     );
   }
 

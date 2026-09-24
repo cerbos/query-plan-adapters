@@ -56,3 +56,41 @@ export const normalizeRfc3339Milliseconds = (value: string): string => {
   }
   return new Date(milliseconds).toISOString().replace(".000Z", "Z");
 };
+
+const NANOS_PER_MILLI = 1_000_000n;
+
+/** The digits after the third fractional digit of an RFC-3339 literal, if any is non-zero. */
+export const exceedsMillisecondPrecision = (value: string): boolean => {
+  const fraction = RFC3339_MILLISECOND_TIMESTAMP.exec(value)?.[4] ?? "";
+  return [...fraction.slice(3)].some((digit) => digit !== "0");
+};
+
+/**
+ * An RFC-3339 literal as nanoseconds since the epoch — CEL's own instant resolution — validated
+ * exactly as `normalizeRfc3339Milliseconds` validates it.
+ */
+export const parseRfc3339Nanoseconds = (value: string): bigint => {
+  const match = RFC3339_MILLISECOND_TIMESTAMP.exec(value);
+  const fraction = match?.[4];
+  if (fraction === undefined) {
+    return BigInt(Date.parse(normalizeRfc3339Milliseconds(value))) * NANOS_PER_MILLI;
+  }
+  const digits = fraction.padEnd(9, "0");
+  const millisecondLiteral = value.replace(`.${fraction}`, `.${digits.slice(0, 3)}`);
+  const milliseconds = Date.parse(normalizeRfc3339Milliseconds(millisecondLiteral));
+  return BigInt(milliseconds) * NANOS_PER_MILLI + BigInt(digits.slice(3));
+};
+
+/**
+ * The instant `nanoseconds` as a UTC RFC-3339 literal carrying `digits` fractional digits, which
+ * must hold everything below them as zero. At millisecond precision or coarser it is exactly the
+ * canonical string `normalizeRfc3339Milliseconds` produces.
+ */
+export const formatRfc3339Nanoseconds = (nanoseconds: bigint, digits: number): string => {
+  const remainder = ((nanoseconds % NANOS_PER_MILLI) + NANOS_PER_MILLI) % NANOS_PER_MILLI;
+  const milliseconds = (nanoseconds - remainder) / NANOS_PER_MILLI;
+  const iso = new Date(Number(milliseconds)).toISOString();
+  if (digits <= 3) return iso.replace(".000Z", "Z");
+  const fraction = `${iso.slice(20, 23)}${remainder.toString().padStart(6, "0")}`;
+  return `${iso.slice(0, 19)}.${fraction.slice(0, digits)}Z`;
+};

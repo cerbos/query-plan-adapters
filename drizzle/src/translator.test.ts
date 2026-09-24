@@ -415,6 +415,22 @@ describe("nullAttributeRepresentation", () => {
   });
 });
 
+const timestampPlan = (operator: string, instant: string): PlanResourcesResponse =>
+  ({
+    kind: PlanKind.CONDITIONAL,
+    condition: {
+      operator,
+      operands: [
+        { operator: "timestamp", operands: [{ name: "request.resource.attr.createdAt" }] },
+        { operator: "timestamp", operands: [{ value: instant }] },
+      ],
+    } as unknown as PlanExpressionOperand,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  }) as PlanResourcesResponse;
+
 describe("timestamp literals", () => {
   // `timestamp/less-than/relative-window` compares against the literal the planner folds
   // `now() - duration("24h")` into, so the instant is the one value a reader chooses: this walks
@@ -422,11 +438,43 @@ describe("timestamp literals", () => {
   const WINDOW = "timestamp/less-than/relative-window";
   const at = (now: string) => filterFor("postgresql", WINDOW, { now });
 
-  test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    expect(() => at("2026-08-11T09:13:39.123456789Z")).toThrow(UnsupportedQueryPlanError);
-    expect(() => at("2026-08-11T09:13:39.123456789Z")).toThrow(
-      "Timestamp value exceeds millisecond precision",
-    );
+  // No seed sits within a grid step of `now()`, so which side of the literal the bound grid point
+  // falls on is invisible to the harness: a floor where a ceiling belongs returns the same rows.
+  test.each([
+    ["postgresql", "2026-08-11T09:13:39.123457Z"],
+    ["mysql", "2026-08-11T09:13:39.123457Z"],
+    ["sqlite", "2026-08-11T09:13:39.124Z"],
+  ] as const)(
+    "a nanosecond instant — what the PDP actually folds — bounds `<` by the next grid point (%s)",
+    (store, bound) => {
+      const filter = filterFor(store, WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
+      expect(render(store, filter).params).toEqual([bound]);
+    },
+  );
+
+  test.each([
+    ["lt", "<", "2026-08-11T09:13:39.123457Z"],
+    ["le", "<=", "2026-08-11T09:13:39.123456Z"],
+    ["gt", ">", "2026-08-11T09:13:39.123456Z"],
+    ["ge", ">=", "2026-08-11T09:13:39.123457Z"],
+  ])("`%s` against an off-grid instant compares with the grid point on its side", (operator, symbol, bound) => {
+    const filter = queryPlanToDrizzle({
+      queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
+      mapper: MAPPERS.postgresql,
+    });
+    if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    const rendered = render("postgresql", filter.filter);
+    expect(rendered.sql).toContain(` ${symbol} $1`);
+    expect(rendered.params).toEqual([bound]);
+  });
+
+  test.each(["eq", "ne"])("`%s` against an off-grid instant binds no instant at all", (operator) => {
+    const filter = queryPlanToDrizzle({
+      queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
+      mapper: MAPPERS.postgresql,
+    });
+    if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    expect(render("postgresql", filter.filter).params).toEqual([]);
   });
 
   test("the same plan at millisecond precision translates", () => {
@@ -447,7 +495,6 @@ describe("timestamp literals", () => {
     ["a date with no time part", "2024-01-01"],
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
-    ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
     ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC-3339|millisecond|instant range/);

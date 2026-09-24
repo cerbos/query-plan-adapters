@@ -172,10 +172,17 @@ Attributes compared through CEL's `timestamp()` must opt in:
 "request.resource.attr.createdAt": { column: resources.createdAt, valueType: "timestamp" },
 ```
 
-Constants must be strict RFC 3339, within years 0001–9999, and exactly representable at millisecond
-precision (digits after the third fractional digit must be zero). They are normalized to UTC. Your
-column and database must keep the same precision. Sub-millisecond `now()` thresholds and
-`timestamp()` over an untyped string throw.
+Constants must be strict RFC 3339 and within years 0001–9999. They are normalized to UTC. A
+constant exactly representable at millisecond precision is compared as it is; your column and
+database must keep at least that precision.
+
+A finer constant — in practice `now()`, which the planner folds at nanosecond precision — is
+compared with the nearest point of the column's own precision grid on the correct side (`c < T`
+becomes `c < ceil(T)`, `c <= T` becomes `c <= floor(T)`, and so on; `==` is false for every present
+row). That is exact because the column holds no value between two grid points. The grid is read
+from the Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (default 6), a MySQL `datetime`
+or `timestamp`'s `fsp` (default 0), and milliseconds for a SQLite text column. Any other column
+type throws for such a constant, as does `timestamp()` over an untyped string.
 
 ## Indexed collection columns
 
@@ -345,8 +352,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 64 / 80 |
-| adversarial | 190 / 227 |
+| extended | 65 / 80 |
+| adversarial | 191 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -404,6 +411,9 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A timestamp constant finer than a millisecond — the planner's `now()` — now translates against a
+  PostgreSQL, MySQL or SQLite-text timestamp column, compared with a grid point of the column's
+  declared precision (see [Timestamps](#timestamps)), instead of throwing.
 - A hierarchy built from segments — `hierarchy(["projects", R.id])` — now translates against a
   constant hierarchy or another built one: its length is known, so `ancestorOf`, `descendentOf` and
   `overlaps` become equalities between the segments of the shared prefix. A NULL column segment is

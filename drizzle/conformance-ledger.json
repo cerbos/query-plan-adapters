@@ -177,14 +177,6 @@
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."
     },
-    "timestamp/greater-than/relative-window-value-first": {
-      "status": "unsupported",
-      "reason": "Same sub-millisecond now() limitation in value-first form."
-    },
-    "timestamp/less-than/relative-window": {
-      "status": "unsupported",
-      "reason": "The planner emits a sub-millisecond now() literal that the documented Drizzle timestamp contract cannot represent without changing the CEL instant."
-    },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "Unsupported value-expression operator: struct."
