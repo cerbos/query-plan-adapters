@@ -1,10 +1,6 @@
 {
   "adapter": "spring-data",
   "cases": {
-    "arithmetic/modulo/negative-dividend": {
-      "status": "unsupported",
-      "reason": "CEL `%` is integer-only while attribute values are doubles, so a satisfiable policy has to cast with int() first — and int() has no faithful SQL lowering, CAST rounding where CEL truncates toward zero. The same limitation refuses cast/int/negative-fraction"
-    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, so double() over a string column is refused rather than lowered to CAST."

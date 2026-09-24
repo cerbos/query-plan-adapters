@@ -59,8 +59,9 @@ final class ArithmeticTranslator {
      * <p>Everything is computed in double space because attribute values are always CEL
      * doubles at check time, and the wire plan does not distinguish int from double.
      *
-     * <p>{@code mod} is refused: a bare {@code attr % n} is a CEL error, and
-     * {@code int(attr) % n} needs {@code int()}, which has no faithful SQL lowering.
+     * <p>{@code mod} lowers only over {@code int()} of an Integer column and integral constants
+     * ({@link #modulo}): a bare {@code attr % n} is a CEL error, and {@code int()} over any other
+     * column has no faithful SQL lowering.
      *
      * <p>An {@link OperatorFunction} override is consulted when one side is a constant; it
      * receives the arithmetic expression and the constant as a {@link Double}. Expression
@@ -404,14 +405,7 @@ final class ArithmeticTranslator {
                 PlanResourcesFilter.Expression expr = operand.getExpression();
                 String op = expr.getOperator();
                 if ("mod".equals(op)) {
-                    // A bare `attr % n` is a CEL error; `int(attr) % n` needs int(), which
-                    // has no faithful SQL lowering.
-                    throw Refusals.unsupported(
-                            "mod is not supported in comparisons: CEL % is integer-only "
-                                    + "while attribute values are always doubles at check "
-                                    + "time, so a satisfiable policy must cast with int() "
-                                    + "first — and int() has no faithful SQL lowering, "
-                                    + "because CAST rounds where CEL truncates toward zero");
+                    return modulo(expr, scope);
                 }
                 if (ARITHMETIC_OPS.contains(op) && !"div".equals(op)
                         && containsZeroCapableDivision(expr, scope)) {
@@ -449,6 +443,69 @@ final class ArithmeticTranslator {
                     "Unexpected operand type in arithmetic comparison: "
                             + operand.getNodeCase());
         }
+    }
+
+    /**
+     * {@code int(a) % int(b)}. CEL {@code %} is integer-only while attribute values are doubles,
+     * so a satisfiable policy casts with {@code int()} first. That cast has no faithful SQL
+     * lowering in general (CAST rounds where CEL truncates toward zero), but over an
+     * {@link Integer} column it is the identity, and SQL {@code MOD} truncates as CEL does, so
+     * {@code -5 % 2} is {@code -1} in both. Each operand must be {@code int()} of an Integer
+     * column or an integral constant. A zero divisor is a CEL error: a constant one makes the
+     * comparison UNKNOWN, and a column one goes through {@code NULLIF}.
+     */
+    @SuppressWarnings("unchecked")
+    private NumericOperand modulo(PlanResourcesFilter.Expression expr, Scope scope) {
+        if (expr.getOperandsCount() != 2) {
+            throw Refusals.malformed("mod requires exactly 2 operands");
+        }
+        Object dividend = intOperand(expr.getOperands(0), scope);
+        Object divisor = intOperand(expr.getOperands(1), scope);
+        if (dividend instanceof Integer n && divisor instanceof Integer d) {
+            // The planner folds this itself; a zero divisor stays a CEL error.
+            return d == 0 ? new NumericOperand.Sql(cb.nullLiteral(Double.class))
+                    : new NumericOperand.Constant(n % d);
+        }
+        if (divisor instanceof Integer d && d == 0) {
+            return new NumericOperand.Sql(cb.nullLiteral(Double.class));
+        }
+        Expression<Integer> mod = divisor instanceof Integer d
+                ? cb.mod((Expression<Integer>) dividend, d)
+                : dividend instanceof Integer n
+                        ? cb.mod(n, cb.nullif((Expression<Integer>) divisor, 0))
+                        : cb.mod((Expression<Integer>) dividend,
+                                cb.nullif((Expression<Integer>) divisor, 0));
+        return new NumericOperand.Sql(toIeeeDouble(mod));
+    }
+
+    /** An {@code Integer} constant, or the {@code Integer} column under {@code int()}. */
+    private Object intOperand(Operand operand, Scope scope) {
+        if (operand.getNodeCase() == Operand.NodeCase.VALUE
+                && operand.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
+            double v = operand.getValue().getNumberValue();
+            if (v == Math.rint(v) && v >= Integer.MIN_VALUE && v <= Integer.MAX_VALUE) {
+                return (int) v;
+            }
+        }
+        if (operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "int".equals(operand.getExpression().getOperator())
+                && operand.getExpression().getOperandsCount() == 1
+                && operand.getExpression().getOperands(0).getNodeCase()
+                        == Operand.NodeCase.VARIABLE) {
+            Expression<?> path = scope.path(operand.getExpression().getOperands(0).getVariable());
+            if (Integer.class.equals(path.getJavaType())) {
+                return path;
+            }
+        }
+        // A bare `attr % n` is a CEL error; `int(attr) % n` over any other column needs an
+        // int() SQL cannot reproduce.
+        throw Refusals.unsupported(
+                "mod is not supported in comparisons unless each operand is int() of an Integer"
+                        + " column or an integral constant: CEL % is integer-only while"
+                        + " attribute values are always doubles at check time, so a"
+                        + " satisfiable policy must cast with int() first — and int() over"
+                        + " any other column has no faithful SQL lowering, because CAST"
+                        + " rounds where CEL truncates toward zero");
     }
 
     /**

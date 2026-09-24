@@ -183,7 +183,7 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod`, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod` outside `int()` of an `Integer` column, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
 | `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
@@ -347,6 +347,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `exists_one` | Correlated strict count `= 1`, NULL-poisoned |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
 | Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
+| `int(R.attr.n) % k` (`n` an `Integer` column) | `MOD(n, k)`, which truncates toward zero as CEL does (`-5 % 2` is `-1`); a zero divisor is UNKNOWN |
 | Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; a zero column divisor split out and compared as CEL's NaN / ±Infinity (see [Gotchas](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities)) |
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
 | String `+` in comparisons (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`) | `cb.concat` when a string constant or `String` column sits under the `add`, any other leaf refused; UNKNOWN when a concatenated column is NULL |
@@ -364,7 +365,7 @@ consulted.
 
 | Construct | Example CEL | Overridable | Notes |
 |---|---|---|---|
-| `mod` | `R.attr.aNumber % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so `check()` denies every row; SQL `MOD` would fabricate matches |
+| `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
 | Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
 | List indexing | `R.attr.tags[0] == "x"` | no | JPA collections are unordered |
 | Type casts (`int()`, `double()`, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
@@ -386,11 +387,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 60 / 80 |
+| extended | 61 / 80 |
 | adversarial | 188 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 58 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 57 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -616,6 +617,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `int(R.attr.n) % k` over an `Integer` column now translates to `MOD` instead of throwing.
 - Arithmetic composed on a division by a column (`a / a + 1.0 != 2.0`) now translates when its
   other leaves are constants, instead of throwing: a zero divisor gives CEL's NaN or infinity.
 - String concatenation with a column (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`,
