@@ -1,18 +1,11 @@
 # Copyright 2021-2026 Zenauth Ltd.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The shared ``../conformance/`` corpus as this adapter's suites read it.
+"""The shared ``../conformance/`` corpus, schema and mapping for both corpus suites.
 
-``test_adversarial_conformance.py`` replays the recorded plans against real stores;
-``test_translator.py`` asks the same mapping the questions a store cannot answer. Both need
-the one mapping -- the schema, ``ATTR_MAP``, ``OPERATOR_OVERRIDES``, the collection storage
-and the NULL conventions -- so it lives here rather than in either suite.
-
-The code in this file is duplicated across adapters **on purpose** -- adapters share data,
-not code, so that every adapter stays standalone. See
-`ADR 0007 <../../docs/adr/0007-adapters-share-data-not-code.md>`_.
-
-Test-only: it lives under ``tests/`` and never reaches the published package.
+Both suites must use the same mapping: the harness replays recorded plans against real
+stores, and the translator unit test asks what a store cannot. Each adapter keeps its own
+copy of this file on purpose (ADR 0007). Test-only.
 """
 
 import glob
@@ -95,15 +88,11 @@ _NOW_MINUS_24H = "__NOW_MINUS_24H__"
 
 
 def now_minus_24h() -> str:
-    """``now() - duration("24h")`` as the PDP folds it: RFC 3339 at nanosecond precision.
-
-    The precision is the point. The planner folds the literal with Go's nanosecond clock, and
-    a ``DateTime`` column holds microseconds, which is why this adapter refuses those plans.
-    A clock that happened to land on a whole microsecond would hide that, so the last digit
-    is forced non-zero.
-    """
+    """``now() - duration("24h")`` as the PDP folds it: RFC 3339 in nanoseconds."""
     ns = time.time_ns() - 24 * 3600 * 10**9
     seconds, fraction = divmod(ns, 10**9)
+    # Sub-microsecond precision is why this adapter refuses these plans. Force it, so a clock
+    # landing on a whole microsecond cannot hide that.
     if fraction % 1000 == 0:
         fraction += 1
     stamp = datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -131,42 +120,34 @@ def _response_dict(case: dict[str, Any], planned_at: str | None) -> dict[str, An
 def plan_from_golden(
     case: dict[str, Any], planned_at: str | None = None
 ) -> PlanResourcesResponse:
-    """The recorded plan as the HTTP SDK hands it to a caller.
-
-    The golden ``plan`` is the PDP's ``filter`` object as the HTTP API returns it, so the
-    decoding is the one ``cerbos.sdk.client.CerbosClient`` performs.
-    """
+    """The recorded plan, decoded as the HTTP SDK client decodes it."""
     return PlanResourcesResponse.from_dict(_response_dict(case, planned_at))
 
 
 def grpc_plan_from_golden(
     case: dict[str, Any], planned_at: str | None = None
 ) -> response_pb2.PlanResourcesResponse:
-    """The same plan re-encoded as the gRPC client's protobuf response.
-
-    JSON has already lost what the two transports disagree about (the sign of a ``-0``), so
-    this exercises the protobuf decoding arm without standing in for a real gRPC frame.
-    """
+    """The same plan as the gRPC client's protobuf response."""
+    # Tests the protobuf decoding path only. JSON has already lost a `-0`'s sign, so this
+    # is not a real gRPC frame.
     return ParseDict(
         _response_dict(case, planned_at), response_pb2.PlanResourcesResponse()
     )
 
 
-# ---------------------------------------------------------------------------
-# Schema: dedicated tables so hostile seeds (NULL element columns, duplicate
-# names, LIKE metacharacters) are all representable.
-# ---------------------------------------------------------------------------
+# -- schema -----------------------------------------------------------------
+# Dedicated tables, so hostile seeds (NULL elements, duplicate names, LIKE
+# metacharacters) are all representable.
 
 AdvBase = declarative_base()
 
-# The ordered copies of the resource's collections, for `collection_columns` (#227). JSON text on
-# SQLite and JSONB on PostgreSQL; `none_as_null` so an absent collection is SQL NULL rather than
-# the JSON document `null`.
+# Ordered copies of the collections for `collection_columns` (#227). `none_as_null` makes an
+# absent collection SQL NULL, not the JSON document `null`.
 _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
     JSONB(none_as_null=True), "postgresql"
 )
-# The same collections as native PostgreSQL arrays. Only the PostgreSQL leg declares them; on
-# SQLite, which has no array type, the variant falls back to JSON text nothing reads.
+# The same collections as PostgreSQL arrays, used only by the PostgreSQL leg. SQLite has no
+# array type, so there the variant is unused JSON.
 _COLLECTION_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(String), "postgresql")
 _NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql")
 _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
@@ -191,9 +172,8 @@ class AdvResource(AdvBase):
     tags_array = Column(_COLLECTION_ARRAY, nullable=True)
     tag_names_array = Column(_COLLECTION_ARRAY, nullable=True)
     main_sub_categories_array = Column(_COLLECTION_ARRAY, nullable=True)
-    # The corpus's two scalar lists of numbers and booleans, which exist to prove an element's
-    # JSON type survives the comparison (conformance/README.md, "Number and boolean list
-    # elements"). No relation backs them: the declared column is their only storage.
+    # Number and boolean lists prove an element's JSON type survives comparison.
+    # No relation backs them; the column is their only storage.
     a_number_list_json = Column(_COLLECTION_JSON, nullable=True)
     a_bool_list_json = Column(_COLLECTION_JSON, nullable=True)
     a_number_list_array = Column(_NUMBER_ARRAY, nullable=True)
@@ -235,12 +215,8 @@ class AdvLabel(AdvBase):
     )
 
 
-# The corpus's one REAL to-one relation (conformance/seeds.json `parentSeedId`).
-# `parent` and `parent.inner` are separate rows reached through a join, unlike
-# `obj.inner`, which is a flat column wearing a dotted name. A resource owns its
-# own parent chain — the unique foreign key is what makes it to-ONE — so a filter
-# that returned the parent instead of the child could not agree with the recorded
-# decisions by accident.
+# The corpus's one real to-one relation (ADR 0005). Unlike `obj.inner`, `parent` and
+# `parent.inner` are separate rows. The unique foreign key makes it to-one.
 class AdvParent(AdvBase):
     __tablename__ = "adversarial_parent"
 
@@ -267,14 +243,11 @@ class AdvInner(AdvBase):
     )
 
 
-# ---------------------------------------------------------------------------
-# Relation markers + operator overrides: the adapter's attribute map points
-# relation-valued attributes at marker objects; the overrides translate the
-# collection macros over them into correlated subqueries. Three-valued logic:
-# CEL's exists/all absorb an erroring element only through a true/false
-# witness; exists_one/map/filter never do. An erroring element is a row whose
-# lambda body evaluates to SQL UNKNOWN (NULL), detected with `body IS NULL`.
-# ---------------------------------------------------------------------------
+# -- relation markers and operator overrides --------------------------------
+# ATTR_MAP points relation attributes at markers; the overrides turn collection
+# macros over them into correlated subqueries. An element whose body is SQL NULL
+# is a CEL error: exists/all absorb it only given a true/false witness, and
+# exists_one/map/filter never do.
 
 
 class _Relation:
@@ -290,30 +263,15 @@ class _Relation:
     ):
         self.description = description
         self.correlation = correlation
-        # Entities the subquery must correlate against explicitly: SQLAlchemy's
-        # auto-correlation only reaches the immediate enclosing SELECT, so an
-        # outer-resource reference inside a depth-2 lambda subquery would
-        # otherwise pull the resource table into the inner FROM as a cartesian
-        # product (silently comparing against EVERY resource row).
+        # Auto-correlation only reaches the immediate enclosing SELECT. Without
+        # explicit targets, a nested subquery would cross-join every resource row.
         self.correlate_targets = correlate_targets
-        # For plain `in` membership over a chained string list (relation/in/to-one-chain).
+        # The column compared by `in` over a string list (relation/in/to-one-chain).
         self.member_field = member_field
-        # Correlation for the INTERMEDIATE hops alone, when the collection is
-        # reached through an optional to-one parent. CEL cannot dot through a
-        # list, so `mainCategory.subCategories` reaches its tail through a to-one
-        # parent: absent, the application sends no `mainCategory` attribute and
-        # CEL raises a missing-path error, which denies. A subquery rooted at the
-        # resource row cannot see that — an absent parent and a childless parent
-        # both return nothing — so `all` reads TRUE, `!exists` reads TRUE and the
-        # count reads 0, each admitting rows the PDP denies
-        # (cerbos/query-plan-adapters#309). Requiring the hop separately restores
-        # the distinction. The requirement itself is `cerbos_sqlalchemy.
-        # require_hops`; what stays in the MAPPING is only which predicates the
-        # hops are, because the SQLAlchemy adapter has no relation model of its
-        # own: collection semantics are entirely caller-supplied through operator
-        # overrides, so the caller owns the invariant that its subquery sees
-        # exactly the rows the application serialised into the resource
-        # attributes.
+        # Predicates for the intermediate to-one hops. An absent parent is a CEL
+        # error (deny), but a plain subquery sees it as empty, so `all` and
+        # `!exists` would over-grant (#309). `require_hops` uses these to tell
+        # the two apart.
         self.hop_correlation = hop_correlation or []
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
@@ -323,9 +281,8 @@ class _Relation:
 TAGS = _Relation(
     "tags",
     [AdvTag.resource_id == AdvResource.id],
-    # The root resource may be any number of lambda scopes up
-    # (collection/exists/outer-collection-inside-lambda plans a tags exists INSIDE the
-    # categories lambda).
+    # The resource may be several lambdas up: collection/exists/outer-collection-inside-lambda
+    # nests tags in categories.
     correlate_targets=[AdvResource],
 )
 TAG_NAMES = _Relation(
@@ -339,10 +296,8 @@ CATEGORIES = _Relation(
     [AdvCategory.resource_id == AdvResource.id],
     correlate_targets=[AdvResource],
 )
-# c.subCategories: correlates to the *category* the enclosing lambda is scoped
-# to, never to the root resource — but its lambda body may still reference
-# outer resource columns (collection/exists/nested-with-outer-attribute), so both
-# entities correlate.
+# Correlates to the enclosing category, but the body may read resource columns
+# (collection/exists/nested-with-outer-attribute), so the resource correlates too.
 SUB_OF_CATEGORY = _Relation(
     "c.subCategories",
     [AdvSubCategory.category_id == AdvCategory.id],
@@ -353,9 +308,8 @@ LABELS_OF_SUB = _Relation(
     [AdvLabel.sub_category_id == AdvSubCategory.id],
     correlate_targets=[AdvSubCategory, AdvCategory, AdvResource],
 )
-# mainCategory.subCategories: the same two-hop chain flattened from the root —
-# the subquery must join THROUGH the intermediate category hop (which stays in
-# the subquery FROM; only the root resource correlates).
+# The same two-hop chain from the root. The category hop stays in the subquery's
+# FROM; only the resource correlates.
 MAIN_SUB = _Relation(
     "mainCategory.subCategories",
     [
@@ -396,17 +350,9 @@ def _count_subquery(rel: _Relation, *conds: Any):
 
 
 def _require_hops(rel: _Relation, expr: Any):
-    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists.
-
-    The invariant lives in the library as ``cerbos_sqlalchemy.require_hops``; this
-    is only the unpacking of the harness's ``_Relation`` marker into its arguments.
-    The harness using the shipped helper rather than a private copy is what proves
-    the helper: every chained corpus case over ``mainCategory`` is compared with the
-    PDP's recorded decisions through this call.
-    The ``size()`` chains are the exception: ``mainCategory.subCategories`` is
-    declared in :data:`COLLECTION_COLUMNS`, and a NULL column is what makes an
-    absent parent UNKNOWN there.
-    """
+    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists."""
+    # Calls the shipped helper, so the chained corpus cases test it. `size()` chains
+    # skip it: a NULL declared column already yields UNKNOWN.
     return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
 
@@ -419,8 +365,7 @@ def _require_relation(op: str, coll: Any) -> _Relation:
 
 
 def _exists_fn(coll: Any, body: Any):
-    # CEL exists: true on any true witness (absorbing errors), error if any
-    # element errors without one, false otherwise (incl. empty).
+    # True on any true witness, else NULL if any element errors, else false.
     rel = _require_relation("exists", coll)
     return _require_hops(
         rel,
@@ -433,8 +378,7 @@ def _exists_fn(coll: Any, body: Any):
 
 
 def _all_fn(coll: Any, body: Any):
-    # CEL all: false on any false witness (absorbing errors), error if any
-    # element errors without one, true otherwise (incl. empty).
+    # False on any false witness, else NULL if any element errors, else true.
     rel = _require_relation("all", coll)
     return _require_hops(
         rel,
@@ -447,8 +391,7 @@ def _all_fn(coll: Any, body: Any):
 
 
 def _exists_one_fn(coll: Any, body: Any):
-    # CEL exists_one never absorbs an erroring element, even next to a true
-    # witness; otherwise it's an exact count-of-matches == 1.
+    # Any erroring element makes it NULL, even beside a true witness.
     rel = _require_relation("exists_one", coll)
     return _require_hops(
         rel,
@@ -460,7 +403,7 @@ def _exists_one_fn(coll: Any, body: Any):
 
 
 def _filter_fn(coll: Any, body: Any):
-    # Deferred: consumed by the `size` override (size(filter(...)) shape).
+    # Deferred: consumed by the `size` override.
     return ("filter", _require_relation("filter", coll), body)
 
 
@@ -471,13 +414,11 @@ def _map_fn(coll: Any, projected: Any):
 
 def _size_fn(target: Any, _: Any):
     if isinstance(target, _Relation):
-        # size() counts elements without evaluating them, so NULL element
-        # columns still count — no error guard needed. An absent to-one parent
-        # still has to count as UNKNOWN rather than 0 (#309).
+        # size() never evaluates elements, so no error guard. An absent parent
+        # must still be UNKNOWN, not 0 (#309).
         return _require_hops(target, _count_subquery(target))
     if isinstance(target, tuple) and target[0] == "filter":
-        # CEL filter never absorbs an erroring element: any UNKNOWN body row
-        # poisons the whole count.
+        # filter never absorbs errors: any NULL body makes the count NULL.
         _, rel, body = target
         return _require_hops(
             rel,
@@ -505,8 +446,7 @@ def _has_intersection_fn(mapped: Any, values: Any):
             _exists_where(mapped, _scalar_membership(mapped.member_field, values)),
         )
 
-    # hasIntersection(map(coll, x), list): map errors on any erroring element
-    # (no absorption), so the error guard comes FIRST.
+    # map never absorbs errors, so the error check comes first.
     if not (isinstance(mapped, tuple) and mapped[0] == "map"):
         raise UnsupportedPlanError(
             f"hasIntersection over unsupported operand: {mapped!r}"
@@ -523,9 +463,8 @@ def _has_intersection_fn(mapped: Any, values: Any):
 
 
 def _scalar_membership(column: Any, values: Any):
-    # The adapter's own lowering, not a copy of it: it keeps a null member as
-    # `IS NULL` and drops a member the column's type cannot equal, which a
-    # store would otherwise convert ('5' = 5 on SQLite) where CEL says false.
+    # Reuse the adapter's lowering: it drops members of the wrong type, which
+    # SQLite would otherwise coerce ('5' = 5).
     return OPERATOR_FNS["in"](column, values)
 
 
@@ -553,9 +492,7 @@ def _relation_membership(relation: _Relation, value: Any):
 
 def _in_fn(column: Any, value: Any):
     if isinstance(column, _Relation):
-        # `value in R.attr.<chain>`: membership against the relation's member
-        # column; rows with an empty chain are simply excluded (CEL
-        # missing-attribute error → deny).
+        # Rows with an empty chain are excluded, matching CEL's missing-attribute deny.
         return _relation_membership(column, value)
     if isinstance(value, _Relation):
         return _relation_membership(value, column)
@@ -563,8 +500,7 @@ def _in_fn(column: Any, value: Any):
 
 
 OPERATOR_OVERRIDES = {
-    # The lambda's first (resolved) operand is its body predicate; the iterator
-    # variable resolves through the attribute map and is discarded.
+    # Keep the body; the iterator variable is already resolved via ATTR_MAP.
     "lambda": lambda body, _var: body,
     "exists": _exists_fn,
     "all": _all_fn,
@@ -576,16 +512,10 @@ OPERATOR_OVERRIDES = {
     "in": _in_fn,
 }
 
-# How the collections are STORED, read by `size()` and `index` alone (#227). The three with a
-# relation keep their marker in ATTR_MAP too, because every collection macro still reads the
-# relation: a declaration answers only the questions a collection's own storage decides. The
-# harness stores exactly the list `check()` is sent, so the ordered copy and the relation cannot
-# disagree about a row.
-#
-# `mainCategory.subCategories` is the one that proves "absent is not empty": a resource with no
-# category sends no `mainCategory` at all, so its column is NULL and `size() >= 0` must still
-# exclude it (`relation/size/non-negative-to-one-chain`). `tags` proves the other half, since
-# every seed carries the attribute and 14 carry it empty.
+# Collection storage, read only by `size()` and `index` (#227). Collections with a relation
+# keep their ATTR_MAP marker too, since the macros still use the relation.
+# `mainCategory.subCategories` is NULL when absent, so `size() >= 0` must exclude it
+# (relation/size/non-negative-to-one-chain); `tags` covers the empty-but-present case.
 COLLECTION_COLUMNS = {
     "request.resource.attr.tags": CollectionColumn(AdvResource.tags_json, "json"),
     "request.resource.attr.tagNames": CollectionColumn(
@@ -602,9 +532,7 @@ COLLECTION_COLUMNS = {
     ),
 }
 
-#: The same five, declared as PostgreSQL arrays. The corpus classifies each action against one
-#: mapping, so the translator unit test and the SQLite harness use :data:`COLLECTION_COLUMNS`;
-#: this one is executed by the PostgreSQL leg of the harness alone.
+#: The same five as PostgreSQL arrays. Only the harness's PostgreSQL leg uses this.
 PG_ARRAY_COLLECTION_COLUMNS = {
     "request.resource.attr.tags": CollectionColumn(AdvResource.tags_array, "pgArray"),
     "request.resource.attr.tagNames": CollectionColumn(
@@ -623,15 +551,9 @@ PG_ARRAY_COLLECTION_COLUMNS = {
 
 
 def reads_declared_collection(case: dict[str, Any]) -> bool:
-    """Whether a golden case's plan reads a declared collection's storage.
-
-    That is ``size()`` or ``index`` over any declared collection, and ``in`` or
-    ``hasIntersection`` over one :data:`ATTR_MAP` does not map -- the attributes whose membership
-    the adapter answers from the declaration rather than from a relation override.
-
-    Read off the recorded plan rather than listed, so a case added to the corpus over one of
-    these attributes joins the PostgreSQL leg without anyone remembering to add it.
-    """
+    """Whether a golden case's plan reads a declared collection's storage."""
+    # `size()`/`index` over a declared collection, or `in`/`hasIntersection` over one not in
+    # ATTR_MAP. Read off the plan, so a new corpus case joins the PostgreSQL leg unasked.
 
     def walk(node: Any) -> bool:
         if not isinstance(node, dict):
@@ -657,12 +579,9 @@ def reads_declared_collection(case: dict[str, Any]) -> bool:
     return walk((case["plan"] or {}).get("condition", {}))
 
 
-# `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map,
-# under the OTHER null convention: `resources.json` sends a real null attribute for
-# them rather than omitting it. Declaring that here is what makes the equality family
-# definite for these two attributes (cerbos/query-plan-adapters#308).
-# `aOptionalString` itself is omitted when NULL, so `== null` against it is a CEL
-# missing-attribute error, not a match, and is declared that way (#302).
+# `owner` and `coOwner` reuse columns under the other null convention: the corpus
+# sends an explicit null instead of omitting the attribute (#308). `aOptionalString`
+# is omitted when NULL, so `== null` against it is a CEL error, not a match (#302).
 ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.aOptionalString": "omitted",
     "tagName": "explicit",
@@ -672,16 +591,9 @@ ATTRIBUTE_NULL_REPRESENTATION = {
 
 
 def _parent_scalar(column):
-    """One scalar of the to-one `parent`, as a correlated scalar subquery.
-
-    The resource owns at most one parent row (``resource_id`` is UNIQUE), so this
-    yields that row's value, or SQL NULL when the resource has no parent at all.
-    NULL is precisely what the check side means: an absent level sends no
-    attribute, CEL raises a missing-path error, and the PDP denies. Because
-    ``NOT NULL`` is still NULL, the row stays excluded under both polarities
-    without the explicit ``require_hops`` guard the COLLECTION chains need
-    (cerbos/query-plan-adapters#375).
-    """
+    """One scalar of the to-one `parent`, as a correlated scalar subquery."""
+    # A missing parent gives NULL, which stays excluded under negation too, so no
+    # `require_hops` guard is needed (#375).
     return (
         select(column)
         .where(AdvParent.resource_id == AdvResource.id)
@@ -691,12 +603,7 @@ def _parent_scalar(column):
 
 
 def _inner_scalar(column):
-    """The same, one level further out: `parent.inner`.
-
-    Nesting the parent's own lookup inside the correlation is what keeps the two
-    levels distinct — reading off the parent, or off the resource, gives a
-    different row set for every action in the group.
-    """
+    """The same for `parent.inner`, looked up through the parent."""
     return (
         select(column)
         .where(
@@ -712,9 +619,7 @@ def _inner_scalar(column):
 
 
 ATTR_MAP = {
-    # The primary key, reached as `request.resource.id` rather than through `attr` (the
-    # `identifier/*` cases). An adapter that resolves references by stripping a
-    # `request.resource.attr.` prefix never sees this name.
+    # Not under `attr` (the `identifier/*` cases).
     "request.resource.id": AdvResource.id,
     "request.resource.attr.aBool": AdvResource.a_bool,
     "request.resource.attr.aString": AdvResource.a_string,
@@ -727,15 +632,9 @@ ATTR_MAP = {
     "request.resource.attr.scope": AdvResource.scope,
     "request.resource.attr.createdAt": AdvResource.created_at,
     "request.resource.attr.updatedAt": AdvResource.updated_at,
-    # obj.inner is not a real nested column — mirrors aString, the same trick
-    # the spring-data and prisma reference harnesses use for the
-    # comparison/equals/nested-map-member case.
+    # Not a real nested column; aliases aString for comparison/equals/nested-map-member.
     "request.resource.attr.obj.inner": AdvResource.a_string,
-    # The corpus's one REAL to-one chain (the `relation/*` cases). This adapter has no
-    # relation model, so the caller supplies the hop as a correlated scalar
-    # subquery — and that spelling needs no separate hop guard: an absent parent
-    # makes the subquery SQL NULL, which is CEL's missing-path error, and NOT NULL
-    # is still NULL, so the row stays excluded under BOTH polarities.
+    # The real to-one chain (`relation/*` cases), as correlated scalar subqueries.
     "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
     "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
     "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
@@ -756,10 +655,7 @@ ATTR_MAP = {
     "t.name": AdvTag.name,
     "request.resource.attr.categories": CATEGORIES,
     "c": CATEGORIES,
-    # The category's own name, read inside the categories lambda. Only
-    # relation/or/two-hops-or-collection-exists reaches it — every other categories probe
-    # dots straight through to subCategories — so it is mapped here rather than alongside
-    # them.
+    # Only relation/or/two-hops-or-collection-exists reads the category's own name.
     "c.name": AdvCategory.name,
     "c.subCategories": SUB_OF_CATEGORY,
     "s": SUB_OF_CATEGORY,
@@ -782,12 +678,8 @@ def dialect(name: str):
 
 
 def render(query, dialect_name: str) -> tuple[str, dict[str, Any]]:
-    """Compile ``query`` for one dialect, as ``(statement, parameters)``.
-
-    The WHOLE ``Select`` is compiled, never the bare ``WHERE`` clause, because correlation is
-    only observable inside the enclosing SELECT. Whitespace is collapsed because SQLAlchemy's
-    compiler breaks clauses across lines, and every value is a bind parameter.
-    """
+    """Compile ``query`` for one dialect, as ``(statement, parameters)``."""
+    # Compile the whole Select, not the WHERE clause: correlation only shows inside it.
     compiled = query.compile(
         dialect=dialect(dialect_name), compile_kwargs={"render_postcompile": True}
     )
