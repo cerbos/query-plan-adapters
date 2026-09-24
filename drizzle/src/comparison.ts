@@ -737,8 +737,11 @@ export const buildComparisonFilter = (
   const rightType = scalarType(right, mapper);
   // A map literal equals no string, number or boolean — but a JSON column may hold a map equal to
   // it, so the heterogeneous answer is only given against a scalar column.
+  const isMapLiteral = (operand: PlanExpressionOperand): boolean =>
+    isValueOperand(operand) && operand.value !== null && typeof operand.value === "object" &&
+    !Array.isArray(operand.value);
   if (
-    [leftType, rightType].includes("object") &&
+    [left, right].some(isMapLiteral) &&
     ![leftType, rightType].some((type) => type && SCALAR_TYPES.has(type))
   ) {
     throw new UnsupportedQueryPlanError(
