@@ -195,17 +195,21 @@ final class Corpus {
                     AttributeMapping.field("aOptionalString", NullAttributeRepresentation.EXPLICIT)),
             Map.entry("request.resource.attr.coOwner",
                     AttributeMapping.field("scope", NullAttributeRepresentation.EXPLICIT)),
-            // Tag names as a scalar list. A NULL name is a null list element.
-            Map.entry("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name")),
+            // Tag names as a scalar list. A NULL name is a null list element. Each list declares
+            // the member field holding the element's index, so positional reads translate.
+            Map.entry("request.resource.attr.tagNames",
+                    AttributeMapping.relation("tags", "name").withPositionField("position")),
             // Scalar lists, one related row per element; a NULL element column is a null element.
             Map.entry("request.resource.attr.aNumberList",
-                    AttributeMapping.relation("aNumberList", "element")),
+                    AttributeMapping.relation("aNumberList", "element")
+                            .withPositionField("position")),
             Map.entry("request.resource.attr.aBoolList",
-                    AttributeMapping.relation("aBoolList", "element")),
+                    AttributeMapping.relation("aBoolList", "element")
+                            .withPositionField("position")),
             Map.entry("request.resource.attr.tags", AttributeMapping.relation("tags", Map.of(
                     "id", AttributeMapping.field("id"),
                     "name", AttributeMapping.field("name")
-            ))),
+            )).withPositionField("position")),
             Map.entry("request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
                     "name", AttributeMapping.field("name"),
                     "subCategories", AttributeMapping.relation("subCategories", Map.of(

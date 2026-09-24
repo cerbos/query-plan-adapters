@@ -68,6 +68,15 @@ final class LeafTranslator {
     }
 
     /**
+     * Whether {@code cerbosVar} is a Field declared {@link NullAttributeRepresentation#OMITTED}.
+     */
+    boolean isDeclaredOmitted(String cerbosVar, Scope scope) {
+        return scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar
+                && scalar.mapping() instanceof AttributeMapping.Field field
+                && field.nullAttributeRepresentation() == NullAttributeRepresentation.OMITTED;
+    }
+
+    /**
      * Equality for operands sent as explicit nulls. In CEL {@code null == "x"} is false,
      * {@code null != "x"} is true and two nulls are equal, while SQL answers UNKNOWN to all
      * three.

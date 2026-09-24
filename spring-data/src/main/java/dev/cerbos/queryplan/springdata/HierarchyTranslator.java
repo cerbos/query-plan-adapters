@@ -48,6 +48,10 @@ final class HierarchyTranslator {
 
     Predicate handleOverlaps(List<Operand> operands, Scope scope) {
         Hierarchy[] both = extractHierarchyOperands("overlaps", operands, scope);
+        Predicate perCharacter = perCharacterRelation("overlaps", both[0], both[1], false);
+        if (perCharacter != null) {
+            return perCharacter;
+        }
         Predicate result = overlaps(both[0], both[1]);
         List<Path<?>> fields = new ArrayList<>();
         for (Hierarchy hierarchy : both) {
@@ -128,6 +132,10 @@ final class HierarchyTranslator {
         // ancestorOf(A, B): A is a strict prefix of B. descendentOf(A, B): B is a strict prefix of A.
         Hierarchy ancestor = isAncestor ? both[0] : both[1];
         Hierarchy descendant = isAncestor ? both[1] : both[0];
+        Predicate perCharacter = perCharacterRelation(opName, ancestor, descendant, true);
+        if (perCharacter != null) {
+            return perCharacter;
+        }
 
         if (ancestor instanceof Hierarchy.Constant a && descendant instanceof Hierarchy.FieldRef d) {
             String prefix = String.join(d.delimiter(), a.segments()) + d.delimiter();
@@ -157,6 +165,66 @@ final class HierarchyTranslator {
         throw Refusals.unsupported(opName + ": unsupported hierarchy operand combination");
     }
 
+    /**
+     * A relation between a column and a constant split on an empty delimiter, which Go's
+     * {@code strings.Split} turns into one segment per character ({@code ""} into none). A
+     * segment prefix is then a string prefix, so with {@code c} the constant:
+     * <ul>
+     *   <li>the column is a strict descendant of {@code c}: {@code LIKE c || '_%'};</li>
+     *   <li>a strict ancestor: one of the strict character prefixes of {@code c}, {@code ''}
+     *       included;</li>
+     *   <li>overlapping ({@code strict} false): one of the character prefixes of {@code c}, or
+     *       {@code LIKE c || '%'}.</li>
+     * </ul>
+     * Returns {@code null} when neither side uses an empty delimiter. Anything else pairing one
+     * with an empty delimiter is refused. A NULL or non-string column is a CEL error, so the
+     * relation is UNKNOWN for it.
+     *
+     * @param first the ancestor when {@code strict}
+     */
+    private Predicate perCharacterRelation(String opName, Hierarchy first, Hierarchy second,
+                                           boolean strict) {
+        if (!isPerCharacter(first) && !isPerCharacter(second)) {
+            return null;
+        }
+        boolean fieldFirst = first instanceof Hierarchy.FieldRef;
+        Hierarchy field = fieldFirst ? first : second;
+        Hierarchy other = fieldFirst ? second : first;
+        if (!isPerCharacter(first) || !isPerCharacter(second)
+                || !(field instanceof Hierarchy.FieldRef)
+                || !(other instanceof Hierarchy.Constant)) {
+            throw Refusals.unsupported(opName + ": a hierarchy with an empty delimiter is only"
+                    + " supported between a column and a constant that both split per character");
+        }
+        Path<?> path = ((Hierarchy.FieldRef) field).path();
+        List<String> characters = ((Hierarchy.Constant) other).segments();
+        if (!String.class.equals(path.getJavaType())) {
+            return tri.unknown();
+        }
+        String constant = String.join("", characters);
+        List<String> prefixes = new ArrayList<>();
+        for (int i = 0; i < characters.size() + (strict ? 0 : 1); i++) {
+            prefixes.add(String.join("", characters.subList(0, i)));
+        }
+        if (strict && !fieldFirst) {
+            // The column descends from the constant: strictly longer, with it as a prefix.
+            return cb.like(path.as(String.class), PlanValues.escapeLike(constant) + "_%", '\\');
+        }
+        Predicate ancestorOrEqual = prefixes.isEmpty()
+                ? tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path))
+                : path.in(prefixes);
+        if (strict) {
+            return ancestorOrEqual;
+        }
+        return cb.or(ancestorOrEqual,
+                cb.like(path.as(String.class), PlanValues.escapeLike(constant) + "%", '\\'));
+    }
+
+    private static boolean isPerCharacter(Hierarchy h) {
+        return h instanceof Hierarchy.Constant c && c.delimiter().isEmpty()
+                || h instanceof Hierarchy.FieldRef f && f.delimiter().isEmpty();
+    }
+
     private Hierarchy[] extractHierarchyOperands(String opName, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
             throw Refusals.malformed(opName + " requires exactly 2 operands");
@@ -181,17 +249,10 @@ final class HierarchyTranslator {
                 throw Refusals.unsupported("hierarchy delimiter must be a value");
             }
             String delimiter = String.valueOf(PlanValues.protoValueToJava(delimOp.getValue()));
-            if (delimiter.isEmpty()) {
-                // An empty delimiter splits per character, but the descendant LIKE
-                // (prefix + delimiter + '%') would then also match the path itself.
-                throw Refusals.unsupported(
-                        "hierarchy delimiter must be a non-empty string: an empty delimiter splits "
-                                + "the path per character, and the prefix LIKE this adapter emits "
-                                + "would also match the path itself");
-            }
             if (strOp.getNodeCase() == Operand.NodeCase.VALUE) {
                 String raw = String.valueOf(PlanValues.protoValueToJava(strOp.getValue()));
-                return new Hierarchy.Constant(splitLiteral(raw, delimiter), delimiter);
+                return new Hierarchy.Constant(delimiter.isEmpty()
+                        ? splitCharacters(raw) : splitLiteral(raw, delimiter), delimiter);
             }
             if (strOp.getNodeCase() == Operand.NodeCase.VARIABLE) {
                 return new Hierarchy.FieldRef(scope.path(strOp.getVariable()), delimiter);
@@ -317,6 +378,11 @@ final class HierarchyTranslator {
             prefixes.add(current);
         }
         return prefixes;
+    }
+
+    /** Go's {@code strings.Split(raw, "")}: one segment per character, none for {@code ""}. */
+    private static List<String> splitCharacters(String raw) {
+        return raw.codePoints().mapToObj(Character::toString).toList();
     }
 
     // Like split(Pattern.quote(delimiter), -1): literal, keeps trailing empty segments. The

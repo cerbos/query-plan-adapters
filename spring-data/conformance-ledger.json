@@ -1,18 +1,6 @@
 {
   "adapter": "spring-data",
   "cases": {
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "CEL carries a NaN or signed infinity through the arithmetic composed on top of a division, and SQL has no value that does — the NULLIF divide-by-zero guard turns the whole sum into NULL. The reference's non-finite rewrite only reaches a division that IS the comparison operand, so a division nested inside further arithmetic fails closed rather than emitting the under-granting filter"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "Same nested-division limitation as arithmetic/add/self-division-plus-constant-greater-than. This is the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it"
-    },
-    "arithmetic/modulo/negative-dividend": {
-      "status": "unsupported",
-      "reason": "CEL `%` is integer-only while attribute values are doubles, so a satisfiable policy has to cast with int() first — and int() has no faithful SQL lowering, CAST rounding where CEL truncates toward zero. The same limitation refuses cast/int/negative-fraction"
-    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, so double() over a string column is refused rather than lowered to CAST."
@@ -20,30 +8,6 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
-    },
-    "cast/int/malformed-string": {
-      "status": "unsupported",
-      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, so int() over a string column is refused rather than lowered to CAST."
-    },
-    "cast/int/negated-malformed-string": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
-    },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "int() over a double truncates toward zero in CEL, while PostgreSQL and MySQL CAST round to nearest, so the cast is refused rather than lowered to CAST."
-    },
-    "cast/string/from-double": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no cast expression: a predicate compares a path against a literal or another path. The reference's one string() form is over a BOOLEAN column, whose CEL text is exactly \"true\" or \"false\" and is compared in Java; over any other column type string() is refused in the leaf operand, because a number's text form is what the dialects render on their own terms and nothing in the Criteria API reproduces CEL's"
-    },
-    "cast/string/negated-explicit-null": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL string conversion expression that preserves conversion errors under negation."
-    },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL string conversion expression that preserves conversion errors under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -55,15 +19,7 @@
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
-    },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
-    },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except() returns a list, not a boolean, so in boolean position it has no Criteria meaning and is refused; it translates only under size() or compared with a list of at most one element."
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -73,205 +29,13 @@
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a bare filter() in boolean position is refused."
     },
-    "collection/index/first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list of booleans: the same missing index() form as collection/index/first-element-of-number-list, refused in the leaf operand before aBoolList is resolved"
-    },
-    "collection/index/first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list of numbers. The reference lowers a list attribute only as a JPA collection, a joined table whose rows carry no order a plan can name, so the leaf resolver has no index() form and refuses the operand before the list attribute is resolved. The element's type never comes into it, and neither does the mapping: the corpus maps aNumberList as a related table of element rows, which the membership actions (membership/in/literal-in-resource-number-list, type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list) read and this refusal never reaches"
-    },
-    "collection/index/first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "A positional read of a to-many relation (tags[0].name) has no Criteria form: the relation has no order the adapter can index."
-    },
-    "collection/index/first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/first-element-of-string-list-equals-null": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
-    "collection/index/negated-first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "The collection/index/first-element-of-boolean-list read under negation, refused in the same leaf operand below the not"
-    },
-    "collection/index/negated-first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "The collection/index/first-element-of-number-list read under negation. The refusal is raised in the leaf operand, below the not, so the negated form throws the same error rather than a NOT around a filter that could readmit a6's null element or an empty list's index error"
-    },
-    "collection/index/negated-first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/negated-out-of-bounds": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
-      "reason": "map() translates only as the collection operand of hasIntersection; used as the whole condition it is a list, not a boolean, and is refused."
-    },
-    "collection/map/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "map() translates only as the collection operand of hasIntersection, where the projection becomes the inner select of an EXISTS. Comparing the ordered projection itself to a literal list has no Criteria form"
-    },
-    "comparison/equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "eq comparison against a list of 1 element constant is not supported for attribute request.resource.attr.tagNames. Whole-list equality is not translatable to a scalar column comparison; map the attribute as a Relation and use in/hasIntersection, or compare elements individually."
-    },
-    "comparison/not-equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "ne comparison against a list of 1 element constant is not supported for attribute request.resource.attr.tagNames. Whole-list equality is not translatable to a scalar column comparison; map the attribute as a Relation and use in/hasIntersection, or compare elements individually."
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the reference lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is resolved, before that LIKE is built"
-    },
-    "identifier/equals/concatenation": {
-      "status": "unsupported",
-      "reason": "The comparison is a_optional_string against a concatenation of a constant with the primary key. The reference lowers CEL's `+` as arithmetic, which requires numeric operands; CEL's string overload has no arithmetic meaning and is refused rather than rendered as a numeric addition"
-    },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared NullAttributeRepresentation.OMITTED in the mapping (resources.json omits it when NULL), so `== null` is a CEL missing-attribute error that denies every row while IS NULL would return the NULL rows; the adapter refuses a null operand against an OMITTED attribute (#302)."
-    },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side is declared EXPLICIT (a NULL column is a null value, so the comparison needs a definite answer) and the other OMITTED (a NULL column is a missing attribute, so it needs UNKNOWN); no single Criteria predicate gives both, so the adapter refuses the comparison (#308)."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "exists first operand must be a variable"
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "exists first operand must be a variable"
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Unsupported size(filter(...)) expression"
-    },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "Unsupported in operand combination: VARIABLE 'request.resource.attr.aOptionalString' / EXPRESSION map()"
-    },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "relation/not-equals/one-hop-null-literal": {
-      "status": "unsupported",
-      "reason": "parent.aOptionalString is declared NullAttributeRepresentation.OMITTED in the mapping (resources.json omits it when NULL), and the adapter refuses every null operand against an OMITTED attribute, `!= null` included: a missing attribute is a CEL error that denies under both polarities, which a plain IS NOT NULL does not preserve under negation (#302)."
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "The same arithmetic-only lowering of `+`, reached with both operands columns instead of one being a constant. The reference refuses every string `+`, so it needs no type information to reject the two-column form"
+      "reason": "map() returns a list, not a boolean; it translates as the collection of hasIntersection, in list equality and in membership, and used as the whole condition it is refused."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
-    },
-    "type-mismatch/equals/boolean-list-element-against-number-literal": {
-      "status": "unsupported",
-      "reason": "The first disjunct is the collection/index/first-element-of-boolean-list read, refused in its leaf operand before the element's type is compared with the literal 1. The whole condition throws: keeping only the aNumber == 5 branch would agree with this oracle solely because CEL answers the cross-type branch false for every row"
-    },
-    "type-mismatch/equals/number-list-element-against-boolean-literal": {
-      "status": "unsupported",
-      "reason": "The first disjunct is the collection/index/first-element-of-number-list read, refused in its leaf operand before the element's type is compared with the literal true. The whole condition throws rather than keeping only the aNumber == 5 branch"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of eq"
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of eq"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "Unsupported hasIntersection operand shape: VARIABLE 'request.resource.attr.tagNames' / EXPRESSION list(). Supported shapes are hasIntersection(collection-attribute, [values...]) and hasIntersection(map(collection, lambda), [values...])."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "Unsupported in operand combination: VARIABLE 'request.resource.attr.aString' / EXPRESSION list()"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of ne"
     }
   }
 }
