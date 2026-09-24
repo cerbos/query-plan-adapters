@@ -25,13 +25,14 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
+| MongoDB driver / Mongoid | Ruby | Not released yet | [mongodb-ruby](mongodb-ruby/) |
 
 Each adapter's README starts with an install step and a quick-start snippet.
 
 > [!WARNING]
-> **The ActiveRecord adapter is a work-in-progress prototype.** It is unreleased, has not been used
-> in production, and its interface may change without deprecation. Do not rely on it to enforce
-> access control in a live system yet.
+> **The ActiveRecord and MongoDB Ruby adapters are work-in-progress prototypes.** They are
+> unreleased, have not been used in production, and their interfaces may change without
+> deprecation. Do not rely on them to enforce access control in a live system yet.
 
 ## The shape of every integration
 

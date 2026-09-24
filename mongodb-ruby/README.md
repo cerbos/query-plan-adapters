@@ -91,7 +91,7 @@ Measured against a real MongoDB with typed fields:
 The helper wraps each top-level condition in `Mongoid::RawValue`, Mongoid's own opt-out from
 that conversion, so the criteria's selector is the adapter's filter verbatim (Mongoid still drops
 a repeated clause from `$and`/`$or`/`$nor`, which changes nothing). Both are asserted for every
-corpus action. Mongoid is not a dependency of the gem: only `cerbos/mongodb/mongoid` loads it, and
+corpus case. Mongoid is not a dependency of the gem: only `cerbos/mongodb/mongoid` loads it, and
 it is tested against Mongoid 9. Mongoid treats `id` as an alias of `_id`, so map a plan variable to
 `"_id"` rather than to `"id"`.
 
@@ -158,60 +158,71 @@ Anything else raises `Cerbos::MongoDB::UnsupportedError`. Every error is a `Cerb
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions, in both
-evaluation modes, using the shared hostile corpus's 27 seed documents executed with the Ruby driver
-against **real MongoDB 7.0 and 8.0 servers**. The Spring Data adapter defines the reference
-semantics.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
+queries over the corpus's 29 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
+and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
+current PDP, 0.55.0, identical on both servers and through both, where the total is every golden
+case in that tier:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 199 reference conformance actions plus the 4 reference-unsupported shapes MongoDB can express — regular expressions, positional reads (`$arrayElemAt`/`$getField`), RFC 3339 timestamps, and a field-to-field comparison under mixed null conventions (203 actions) |
-| Fail-closed | 89 reference actions plus the 7 reference-unsupported shapes this adapter does not promote (96 actions) |
-| Representation-dependent | `null-eq-missing` — refused under `:omitted`. Under the default it already returns the empty set the PDP demands, because `nullable: true` declares that a stored null is a missing attribute |
-| Through Mongoid | The same 203 actions, run through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models (embedded relations included), match the oracle too |
-| Known planner divergence | `has()` on a missing attribute is folded by the planner to `ALWAYS_ALLOWED` while `checkResource` denies. Use `R.attr.x != null` instead of `has(R.attr.x)` until the planner is fixed |
+| core | 26 / 26 |
+| extended | 53 / 80 |
+| adversarial | 148 / 227 |
 
-The fail-closed set is exact-one cardinality, aggregation expressions or outer-document references
+Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
+pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute`. The planner folds
+`has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
+missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
+`has(R.attr.x)`. Every other case that does not pass is refused with a `Cerbos::MongoDB::Error`;
+none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
+with its reason.
+
+The refused set is exact-one cardinality, aggregation expressions or outer-document references
 inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), CEL's `int()`/`double()`
 (`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division by
 anything but a non-zero constant (`$divide` by zero aborts the query), `+` between two fields
 (nothing tells `$add` from `$concat`), negations over nullable fields or collection macros (a
 filter has no UNKNOWN), regular expressions outside the common subset, whole-list comparisons and
-list equality over a `map()` projection. Every refusal's message is pinned in
-`conformance/actions.json` and asserted by both the conformance run and the translator unit test.
+list equality over a `map()` projection.
 
-It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/) and differs in one place:
-the driver sends a filter to the server untouched, so a comparison between two conditionals
-(`p-ternary-vs-ternary`) translates here, where Mongoose's `$expr` caster fails to build it.
+It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/), and its ledger is the
+same but for one case: the driver sends a filter to the server untouched, so a comparison between
+two conditionals (`conditional/ternary/on-both-sides`) translates here, where Mongoose's `$expr`
+caster fails to build it.
+
+The harness uses the `nullable: true` mapper flag for the attributes whose NULL the corpus sends
+as a *missing* attribute, so `== null` against them selects nothing, as CEL's missing-attribute
+error demands. The call-wide `null_attribute_representation: :omitted` has no case spelling, since
+the harness uses one mapping, so the contract suite covers it.
 
 ### How it is tested
 
 ```bash
-./scripts/test.sh                                         # everything (needs Docker)
-./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb   # offline
-ADAPTER_TEST_STRICT_EVALUATION=true ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE \
-  ./scripts/test.sh spec/adversarial_conformance_spec.rb
+./scripts/test.sh                                                        # everything (needs Docker)
+./scripts/test.sh spec/adapter_contract_spec.rb spec/mongoid_spec.rb     # offline
+ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE ./scripts/test.sh spec/conformance_spec.rb
 ```
 
-- `spec/adversarial_conformance_spec.rb` plans every corpus action against a real PDP, runs the
-  filter against a real MongoDB server (`MONGO_IMAGE`, or `MONGO_NEXT_IMAGE`) and compares the ids
-  with per-document `check()` decisions. `scripts/test.sh` starts both in Docker, pinned by tag and
-  digest, on ports Docker chooses.
-- `spec/translator_spec.rb` is the translator unit test: it replays `conformance/wire-fixtures/`
-  offline and pins every emitted filter in `golden/expectations.json` — the translator's return
-  value verbatim, with a `Time` written as `{"$date": "<ISO 8601>"}`. Regenerate with
-  `./scripts/golden-update.sh` and review the diff; CI never regenerates.
+No suite starts a PDP.
+
+- `spec/conformance_spec.rb` is the conformance harness. It replays every golden plan for both
+  pinned PDPs against a real MongoDB server (`MONGO_IMAGE`, or `MONGO_NEXT_IMAGE`), through the
+  driver and through Mongoid, and compares the ids with the recorded `check()` decisions.
+  `scripts/test.sh` starts the server in Docker, pinned by tag and digest, on a port Docker chooses.
 - `spec/mongoid_spec.rb` asserts, offline, that the Mongoid criteria's selector is the emitted
-  filter for every corpus action, and that a bare `where` is not.
+  filter for every corpus case, and that a bare `where` is not.
 - `spec/adapter_contract_spec.rb` covers what the corpus cannot vary: `value_parser`, callable
-  mappers, mapper validation, the per-call null representation and the plan shapes accepted.
+  mappers, mapper validation, the per-call null representation, the plan
+  shapes accepted, and that no source file
+  reaches a second collection.
 
 ## Mapping hazards
 
 This adapter **builds no subquery**: a relation is a path inside the same document, so the filter
 reads exactly the document the application stored. It emits no `$lookup`, `$graphLookup` or
-`$unionWith`, and the conformance suite asserts that against both the source and every emitted
-filter.
+`$unionWith`, and the contract suite asserts that against the source.
 
 | Hazard | Position |
 | --- | --- |

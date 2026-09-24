@@ -50,8 +50,8 @@ GEM_FILE="${EXAMPLE_DIR}/cerbos-mongodb.gem"
 
 # 3. The example must not ship inside the artifact it exercises. RubyGems needs this checked
 #    deliberately: a careless `spec.files = Dir["**/*"]` would sweep example/ into the gem.
-if tar -xOf "${GEM_FILE}" data.tar.gz | tar -tzf - | grep -q -E '^(example|spec|golden)/'; then
-  echo "cerbos-mongodb.gem carries example/, spec/ or golden/ — the gem must ship lib/ only" >&2
+if tar -xOf "${GEM_FILE}" data.tar.gz | tar -tzf - | grep -q -E '^(example|spec|scripts)/|^conformance-ledger\.json$'; then
+  echo "cerbos-mongodb.gem carries example/, spec/, scripts/ or the ledger — the gem must ship lib/ only" >&2
   exit 1
 fi
 

@@ -22,7 +22,7 @@ module Cerbos
     # This helper wraps each top-level field's condition in +Mongoid::RawValue+, Mongoid's own
     # opt-out from that conversion, and recurses only through +$and+, +$or+ and +$nor+, which is
     # the path Mongoid's selector takes. The criteria's selector is then the adapter's filter
-    # verbatim; the suites assert that for every corpus action.
+    # verbatim; the suites assert that for every corpus case.
     #
     # Field aliases still apply: Mongoid stores a query on +id+ as +_id+, so map a plan variable
     # to the stored field name (+"_id"+), which is what the adapter expects anyway.

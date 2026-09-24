@@ -9,9 +9,18 @@ on:
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/mongodb-ruby.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   push:
     tags:
       - mongodb-ruby/v*
+
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: mongodb-ruby-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -23,7 +32,7 @@ permissions:
 jobs:
   test:
     strategy:
-      # The adversarial suite shares this matrix, so the default fail-fast would let an unrelated
+      # The conformance harness shares this matrix, so the default fail-fast would let an unrelated
       # Ruby leg cancel a baseline leg mid-corpus and report it as neither a pass nor a failure.
       fail-fast: false
       matrix:
@@ -36,7 +45,7 @@ jobs:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE
         ruby-version: ["3.2", "3.3", "3.4"]
-        # The server dimension only discriminates the adversarial suite, which is gated to the
+        # The server dimension only discriminates the conformance harness, which is gated to the
         # baseline Ruby leg, so off that leg the second server would run byte-identical work.
         exclude:
           - mongodb-image-file: MONGO_NEXT_IMAGE
@@ -58,26 +67,22 @@ jobs:
           bundler-cache: true
           working-directory: mongodb-ruby
 
-      # Offline: the translator unit test replays conformance/wire-fixtures/ and the contract
-      # suite builds its own plans. scripts/test.sh starts NO PDP and NO MongoDB for them, which
-      # is the assertion that neither suite quietly grew a dependency on one.
-      - name: Run the translator unit test, the adapter contract suite and the Mongoid selector suite
-        run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb spec/mongoid_spec.rb
+      # Offline: the contract suite builds its own plans and the Mongoid selector suite reads the
+      # recorded goldens. scripts/test.sh starts NO MongoDB for them, which is the assertion that
+      # neither suite quietly grew a dependency on one.
+      - name: Run the adapter contract suite and the Mongoid selector suite
+        run: ./scripts/test.sh spec/adapter_contract_spec.rb spec/mongoid_spec.rb
 
       # In the SAME job as the tests above, not a job of its own. Gated to the baseline Ruby leg,
       # because the corpus discriminates the translator and the store, not the Ruby runtime; the
-      # store dimension gets its own run through the matrix above. scripts/test.sh starts the
-      # pinned PDP (conformance/CERBOS_VERSION + CERBOS_IMAGE_DIGEST) and a real MongoDB server
-      # from the file this leg names, each on a port Docker chooses, and replays the whole corpus
-      # against them under both evaluation modes.
-      - name: Run the adversarial differential suite against a real MongoDB
+      # store dimension gets its own run through the matrix above. No PDP: scripts/test.sh starts
+      # only a real MongoDB server from the file this leg names, on a port Docker chooses, and the
+      # harness replays both pinned PDPs' recorded goldens against it.
+      - name: Run the conformance harness against a real MongoDB
         if: matrix.ruby-version == '3.4'
         env:
           ADAPTER_TEST_MONGO_IMAGE_FILE: ${{ matrix.mongodb-image-file }}
-        run: |
-          for strict in false true; do
-            ADAPTER_TEST_STRICT_EVALUATION="$strict" ./scripts/test.sh spec/adversarial_conformance_spec.rb
-          done
+        run: ./scripts/test.sh spec/conformance_spec.rb
 
       - name: Lint
         if: matrix.ruby-version == '3.4' && matrix.mongodb-image-file == 'MONGO_IMAGE'

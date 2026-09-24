@@ -3,10 +3,10 @@
 # The corpus seeds as MongoDB documents, written with the official driver and no ODM, so what is
 # stored is exactly what this file builds: no schema casts a value on the way in.
 #
-# Only the adversarial harness opens a connection. The translator unit test and the contract
-# suite never call `collection`, and scripts/test.sh starts no server for them.
-module AdversarialStore
-  COLLECTION = "adversarial_resources"
+# Only the conformance harness opens a connection. The unit suites never call `collection`, and
+# scripts/test.sh starts no server for them.
+module ConformanceStore
+  COLLECTION = "conformance_resources"
 
   module_function
 
@@ -31,17 +31,17 @@ module AdversarialStore
   end
 
   def document(seed)
-    created_at = ConformanceCorpus.created_at(seed)
-    updated_at = ConformanceCorpus.updated_at(seed)
+    created_at = ConformanceCorpus.derived(seed, "createdAt")
+    updated_at = ConformanceCorpus.derived(seed, "updatedAt")
     {
       "resourceId" => seed.fetch("id"),
       "aBool" => seed.fetch("aBool"),
       "aString" => seed.fetch("aString"),
       "aNumber" => seed.fetch("aNumber"),
-      "aDouble" => ConformanceCorpus.a_double(seed)&.to_f,
+      "aDouble" => ConformanceCorpus.derived(seed, "aDouble")&.to_f,
       "aOptionalString" => seed.fetch("aOptionalString"),
-      "createdBy" => ConformanceCorpus.created_by(seed),
-      "scope" => ConformanceCorpus.scope(seed),
+      "createdBy" => ConformanceCorpus.derived(seed, "createdBy"),
+      "scope" => ConformanceCorpus.derived(seed, "scope"),
       "createdAt" => created_at && Time.iso8601(created_at).utc,
       "updatedAt" => updated_at && Time.iso8601(updated_at).utc,
       "tags" => seed.fetch("tags").map { |tag| {"id" => tag.fetch("id"), "name" => tag.fetch("name")} },
@@ -49,7 +49,7 @@ module AdversarialStore
         {
           "name" => "business",
           "subCategories" => [
-            {"name" => name, "labels" => ConformanceCorpus.labels(seed).map { |label| {"name" => label} }}
+            {"name" => name, "labels" => ConformanceCorpus.derived(seed, "labels").map { |label| {"name" => label} }}
           ]
         }
       },
@@ -62,7 +62,7 @@ module AdversarialStore
 
   # The to-one chain as embedded subdocuments (ADR 0005). Every document owns a FRESH copy of
   # the named seed's scalars, so a filter that read the parent instead of the child cannot agree
-  # with the oracle by accident. A seed with no parent stores `parent: null`, a missing path to
+  # with the recorded decisions by accident. A seed with no parent stores `parent: null`, a missing path to
   # a filter exactly as the absent attribute is to check().
   def stored_parent(seed)
     parent = ConformanceCorpus.parent_seed_of(seed)

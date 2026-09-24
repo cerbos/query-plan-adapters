@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
-# The mapper both corpus suites translate with: the translator unit test pins the filter this
-# adapter emits for it, and the adversarial harness proves that same filter returns the documents
-# the PDP allows. Two copies that drifted would leave the pinned filters describing a mapping no
-# harness ever executes, so there is one.
+# The one mapper every corpus case is translated through (conformance/README.md: one mapping,
+# no per-case options). The conformance harness runs it against a real MongoDB, and
+# spec/mongoid_spec.rb reuses it offline, so there is one copy.
 #
-# The stored document shape it describes is spec/support/adversarial_store.rb.
+# The stored document shape it describes is spec/support/conformance_store.rb.
 module CorpusMapper
   LABELS = {relation: {name: "labels", type: :many, fields: {"name" => {field: "name", nullable: true}}}}.freeze
 
@@ -26,7 +25,7 @@ module CorpusMapper
   MAPPER = {
     # The primary key, reached as `request.resource.id` rather than through `attr`. It maps to
     # `resourceId`, the string field the harness carries the corpus id in, not to `_id`: three of
-    # the id-* actions compare the key with a STRING field, so a single mapping cannot be an
+    # the `identifier/*` cases compare the key with a STRING field, so a single mapping cannot be an
     # ObjectId and satisfy them. An ObjectId `value_parser` is pinned in the contract suite.
     "request.resource.id" => {field: "resourceId"},
     "request.resource.attr.aBool" => {field: "aBool"},
@@ -39,14 +38,14 @@ module CorpusMapper
     "request.resource.attr.createdAt" => {field: "createdAt", value_type: :date_time, nullable: true},
     "request.resource.attr.updatedAt" => {field: "updatedAt", value_type: :date_time, nullable: true},
     "request.resource.attr.owner" => {field: "aOptionalString"},
-    # `coOwner` aliases the `scope` field under the explicit-null convention: the oracle sends a
+    # `coOwner` aliases the `scope` field under the explicit-null convention: check() is sent a
     # real null attribute for it. The driver stores an explicit null and MongoDB compares it as
     # a value, so no `nullable` flag applies — the flag means the opposite.
     "request.resource.attr.coOwner" => {field: "scope"},
     # obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
     # opposite: a real two-level to-one chain. The two are kept side by side on purpose.
     "request.resource.attr.obj.inner" => {field: "aString"},
-    # The corpus's one REAL to-one chain (the rel-* actions), stored as an embedded subdocument
+    # The corpus's one REAL to-one chain (the `relation/*` cases), stored as an embedded subdocument
     # per level. `type: :one` flattens the path AND declares the level absent-able, which is
     # what makes the adapter require it outside any $nor.
     "request.resource.attr.parent" => {relation: {name: "parent", type: :one, fields: RELATION_LEVEL_FIELDS}},

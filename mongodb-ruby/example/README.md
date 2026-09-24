@@ -8,7 +8,7 @@ This is the adapter's instance of the shared **demo domain**. It proves *plumbin
 published gem installs, that `require "cerbos/mongodb"` resolves from it, and that the filter it
 returns composes with the driver calls a consumer reaches for (`find`, `$and` with the
 application's own predicate, `sort`/`skip`/`limit`) against a **real MongoDB server**. It proves
-nothing about *semantics*; that is `../spec/adversarial_conformance_spec.rb` against
+nothing about *semantics*; that is `../spec/conformance_spec.rb` against
 [`../../conformance/`](../../conformance/).
 
 Read [`../../demo/README.md`](../../demo/README.md) first. The rows, the principals, the policy and
@@ -33,6 +33,6 @@ baseline CI leg tests against — on a port Docker picks, and removes it afterwa
 
 `run.sh` runs `gem build` and `gem unpack`, and the `Gemfile` resolves `cerbos-mongodb` from
 `vendor/` ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)), so a `lib/`
-file missing from the gemspec's `files` allowlist fails here. It also asserts the gem ships neither
-`example/`, `spec/` nor `golden/`. There is deliberately no `Gemfile.lock`: the adapter is rebuilt
-on every run, and resolving the rest fresh is what lets a new driver release reach this job.
+file missing from the gemspec's `files` allowlist fails here. It also asserts the gem ships none of
+`example/`, `spec/`, `scripts/` or `conformance-ledger.json`. There is deliberately no
+`Gemfile.lock`: the adapter is rebuilt on every run, and resolving the rest fresh is what lets a new driver release reach this job.
