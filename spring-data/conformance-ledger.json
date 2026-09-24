@@ -19,7 +19,7 @@
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except() returns a list, not a boolean, so in boolean position it has no Criteria meaning and is refused; it translates only under size() or compared with a list of at most one element."
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -31,7 +31,7 @@
     },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
-      "reason": "map() translates only as the collection operand of hasIntersection; used as the whole condition it is a list, not a boolean, and is refused."
+      "reason": "map() returns a list, not a boolean; it translates as the collection of hasIntersection, in list equality and in membership, and used as the whole condition it is refused."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
