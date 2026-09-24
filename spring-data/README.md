@@ -339,6 +339,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `contains` / `startsWith` / `endsWith` | `cb.like` with `\`, `%`, `_`, `[` escaped; also the constant-receiver form (`"a,b".contains(R.attr.x)`) |
 | Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
 | Field-to-field comparisons | `cb.equal(pathA, pathB)` and friends, including inside lambdas |
+| `R.attr.coll == ["x"]`, `== []`, and `!=` over a relation | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare |
 | `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
 | `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
 | `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined |
@@ -372,7 +373,7 @@ consulted.
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
-| `eq`/`ne` against a list constant | `R.attr.tags == ["a", "b"]` | no | Map as a relation and use `in`/`hasIntersection` |
+| `eq`/`ne` against a list constant of two or more elements, or against a `Field` | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; use `in`/`hasIntersection`, or `size()` with `exists()` |
 | `except` | `size(R.attr.tags.except(["archived"])) > 0` | no | Rewrite as `R.attr.tags.exists(x, !(x in ["archived"]))` |
 
 ## Conformance contract
@@ -388,10 +389,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 61 / 80 |
-| adversarial | 188 / 227 |
+| adversarial | 190 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 57 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 55 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -617,6 +618,8 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `==`/`!=` between a relation and a list constant of at most one element now translates instead of
+  throwing.
 - `int(R.attr.n) % k` over an `Integer` column now translates to `MOD` instead of throwing.
 - Arithmetic composed on a division by a column (`a / a + 1.0 != 2.0`) now translates when its
   other leaves are constants, instead of throwing: a zero divisor gives CEL's NaN or infinity.

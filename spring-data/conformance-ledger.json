@@ -101,14 +101,6 @@
       "status": "unsupported",
       "reason": "map() translates only as the collection operand of hasIntersection, where the projection becomes the inner select of an EXISTS. Comparing the ordered projection itself to a literal list has no Criteria form"
     },
-    "comparison/equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "eq comparison against a list of 1 element constant is not supported for attribute request.resource.attr.tagNames. Whole-list equality is not translatable to a scalar column comparison; map the attribute as a Relation and use in/hasIntersection, or compare elements individually."
-    },
-    "comparison/not-equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "ne comparison against a list of 1 element constant is not supported for attribute request.resource.attr.tagNames. Whole-list equality is not translatable to a scalar column comparison; map the attribute as a Relation and use in/hasIntersection, or compare elements individually."
-    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the reference lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is resolved, before that LIKE is built"

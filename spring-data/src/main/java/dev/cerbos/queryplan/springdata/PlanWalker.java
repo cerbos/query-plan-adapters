@@ -12,6 +12,8 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
+import com.google.protobuf.Value;
+
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -120,7 +122,73 @@ final class PlanWalker {
             case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
             case "ancestorOf" -> hierarchy.handleAncestorDescendant(operands, scope, true);
             case "descendentOf" -> hierarchy.handleAncestorDescendant(operands, scope, false);
+            case "eq", "ne" -> {
+                Operand rewritten = wholeListEquality(op, operands, scope);
+                yield rewritten != null
+                        ? traverse(rewritten, scope)
+                        : comparisons.translate(op, operands, scope);
+            }
             default -> comparisons.translate(op, operands, scope);
         };
+    }
+
+    /** A lambda variable no plan names, for the element of a rewritten list equality. */
+    private static final String LIST_ELEMENT = "__cerbos_list_element";
+
+    /**
+     * {@code coll == [v]} or {@code coll == []} over a relation, rewritten as
+     * {@code size(coll) == 1 && coll.exists(e, e == v)} or {@code size(coll) == 0}, and
+     * {@code !=} as its negation. CEL list equality is ordered, but a list of at most one
+     * element has no order to compare, so the rewrite is exact. Returns {@code null} for any
+     * other shape, including a longer list, which a JPA collection cannot order.
+     */
+    private static Operand wholeListEquality(String op, List<Operand> operands, Scope scope) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        Operand variable = operands.get(0);
+        Operand literal = operands.get(1);
+        if (variable.getNodeCase() == Operand.NodeCase.VALUE) {
+            variable = operands.get(1);
+            literal = operands.get(0);
+        }
+        if (variable.getNodeCase() != Operand.NodeCase.VARIABLE
+                || literal.getNodeCase() != Operand.NodeCase.VALUE
+                || literal.getValue().getKindCase() != Value.KindCase.LIST_VALUE
+                || literal.getValue().getListValue().getValuesCount() > 1) {
+            return null;
+        }
+        try {
+            if (!(scope.resolve(variable.getVariable()) instanceof Scope.ResolvedRelation)) {
+                return null;
+            }
+        } catch (IllegalArgumentException unmapped) {
+            // Left to the comparison, which reports the list constant.
+            return null;
+        }
+        List<Value> elements = literal.getValue().getListValue().getValuesList();
+        Operand size = expression("size", variable);
+        Operand equality = expression("eq", size, number(elements.size()));
+        if (!elements.isEmpty()) {
+            Operand element = Operand.newBuilder().setVariable(LIST_ELEMENT).build();
+            Operand body = expression("eq", element,
+                    Operand.newBuilder().setValue(elements.get(0)).build());
+            equality = expression("and", equality,
+                    expression("exists", variable, expression("lambda", body, element)));
+        }
+        return "ne".equals(op) ? expression("not", equality) : equality;
+    }
+
+    private static Operand expression(String operator, Operand... operands) {
+        PlanResourcesFilter.Expression.Builder e =
+                PlanResourcesFilter.Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            e.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(e).build();
+    }
+
+    private static Operand number(double value) {
+        return Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(value)).build();
     }
 }
