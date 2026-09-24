@@ -7,7 +7,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { ARITHMETIC_OPERATORS, resolveConstantNumber } from "./arithmetic";
-import { buildFilteredCount } from "./collections";
+import { buildExceptCount, buildFilteredCount } from "./collections";
 import { buildFilterFromExpression } from "./filter";
 import { resolveIndexedColumn } from "./indexed";
 import {
@@ -360,6 +360,9 @@ const buildSizeExpression = (
 ): SQL => {
   if (isOperatorCall(operand, "filter")) {
     return buildFilteredCount(operand, mapper, options);
+  }
+  if (isOperatorCall(operand, "except") && isExpressionOperand(operand)) {
+    return buildExceptCount(operand, mapper, options);
   }
   if (!isNameOperand(operand)) {
     throw new UnsupportedQueryPlanError(

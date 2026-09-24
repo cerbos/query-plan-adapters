@@ -234,11 +234,55 @@ const isCompositeValue = (value: Value): value is Value[] | { [key: string]: Val
 const columnOfMapping = (mapping: BaseMapperEntry): AnyColumn | undefined =>
   isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
 
+/**
+ * `x in [e1, e2, …]` where the list is built at evaluation — a constructor whose elements are not
+ * all constants. CEL builds the whole list first, so any element that is a missing attribute (a
+ * NULL column on the omitted convention, or an expression NULL on it) makes the membership an
+ * error, even where another element equals `x`; otherwise it is CEL's equality against each.
+ */
+const buildListConstructorMembership = (
+  element: PlanExpressionOperand,
+  members: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (members.length === 0) return FALSE_CONDITION;
+  const errors = members.flatMap((member): SQL[] => {
+    if (isValueOperand(member)) return [];
+    if (
+      isNameOperand(member) &&
+      mappingNullRepresentation(resolveFieldReference(member.name, mapper).mapping) === "explicit"
+    ) {
+      return [];
+    }
+    return [sql`${resolveScalarOperand(member, mapper, options).expr} is null`];
+  });
+  const equalities = members.map((member) =>
+    buildComparisonFilter("eq", element, member, mapper, options, false),
+  );
+  const membership = or(...equalities)!;
+  return errors.length === 0
+    ? membership
+    : sql`(case when ${sql.join(errors, sql` or `)} then null else ${membership} end)`;
+};
+
 const buildMembershipFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
   options: BuildFilterOptions,
 ): SQL => {
+  const [elementOperand, collectionOperand] = operands;
+  if (
+    operands.length === 2 && elementOperand !== undefined &&
+    collectionOperand !== undefined && isOperatorCall(collectionOperand, "list")
+  ) {
+    return buildListConstructorMembership(
+      elementOperand,
+      collectionOperand.operands,
+      mapper,
+      options,
+    );
+  }
   if (operands.every(isNameOperand)) {
     return buildVariableMembershipFilter(operands, mapper, options);
   }

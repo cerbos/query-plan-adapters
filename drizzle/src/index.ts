@@ -1,6 +1,7 @@
 import { PlanKind } from "@cerbos/core";
 
 import { UnsupportedQueryPlanError } from "./errors";
+import { unrollKnownValueMaps } from "./collections";
 import { buildFilterFromExpression, rejectNullConstructors } from "./filter";
 import { foldConstantConstructors } from "./operands";
 import type {
@@ -51,7 +52,7 @@ export function queryPlanToDrizzle({
       return {
         kind: PlanKind.CONDITIONAL,
         filter: buildFilterFromExpression(
-          foldConstantConstructors(queryPlan.condition),
+          foldConstantConstructors(unrollKnownValueMaps(queryPlan.condition)),
           mapper,
           options,
         ),

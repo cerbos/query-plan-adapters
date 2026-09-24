@@ -37,10 +37,6 @@
       "status": "unsupported",
       "reason": "Unsupported value-expression operator: except."
     },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "'size' operator requires a field reference or filter expression."
-    },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
       "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
@@ -65,21 +61,9 @@
       "status": "unsupported",
       "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single SQL predicate is both, so the adapter refuses mixed conventions across one comparison."
     },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "'size' operator requires a field reference or filter expression."
-    },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
       "reason": "Collection operand must be a field reference."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "Comparison operator missing value operand."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",

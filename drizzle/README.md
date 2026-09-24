@@ -157,7 +157,13 @@ See [Mapping hazards](#mapping-hazards).
   Over a literal list (a principal attribute the planner folded) each element is substituted into
   the lambda: `exists` and `all` become an `OR` / `AND` of the results, and `exists_one` a count of
   the TRUE ones that is NULL if any element's condition is UNKNOWN, since CEL's `exists_one`
-  absorbs no error.
+  absorbs no error. `size(filter(...))` over a literal list counts the same way, and `map()` over a
+  literal list is unrolled into the list of its substituted bodies.
+- `size(a.except(b))` is `size(a.filter(t, !(t in b)))`, as Cerbos keeps each element `b` does not
+  contain. `b` must be constant unless `a` is a non-empty literal list, because an erroring `b` makes
+  `except()` raise even when `a` is empty.
+- `x in [e1, e2]` with elements built at evaluation is CEL's equality against each, and an error if
+  any element is a missing attribute.
 - `filter()` is supported inside `size(filter(...))`. On its own — like `map()`, or `except()` with
   a list argument — it returns a list, not a boolean, which CEL evaluates to an error: it becomes
   an UNKNOWN condition, denied under both polarities and absorbed by `||` / `&&` as CEL absorbs
@@ -374,8 +380,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 73 / 80 |
-| adversarial | 212 / 227 |
+| extended | 76 / 80 |
+| adversarial | 213 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
