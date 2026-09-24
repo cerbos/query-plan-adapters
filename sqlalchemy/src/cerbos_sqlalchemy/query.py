@@ -1,12 +1,7 @@
 # Copyright 2021-2026 Zenauth Ltd.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``get_query``: the public entry point, its types, and the validation of its arguments.
-
-The translation itself lives in private modules: ``_plan`` decodes the wire, ``_operators``
-holds every default operator lowering, ``_null_conventions`` the NULL-column conventions, and
-``_translator`` walks the condition tree.
-"""
+"""``get_query``: the public entry point, its types and argument validation."""
 
 from collections.abc import Callable
 from typing import Any, ClassVar, Protocol, TypeVar, overload
@@ -31,7 +26,7 @@ from cerbos_sqlalchemy._null_conventions import (
     validate_representations,
 )
 
-# Re-exported: `cerbos_sqlalchemy.query.OPERATOR_FNS` is the read-only map of default handlers.
+# Re-exported as the public read-only map of default handlers.
 from cerbos_sqlalchemy._operators import OPERATOR_FNS  # noqa: F401
 from cerbos_sqlalchemy._plan import (
     Expr,
@@ -42,7 +37,7 @@ from cerbos_sqlalchemy._plan import (
     parse_operand,
 )
 from cerbos_sqlalchemy._translator import Translator, require_boolean
-from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - historically importable here
+from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported for callers
     INDEXED_VALUE_REFUSAL,
     CollectionColumn,
     collection_size,
@@ -60,12 +55,9 @@ except ImportError:  # SQLAlchemy 1.4 predates the class-based declarative base.
 
 
 class _MappedClass(Protocol):
-    """What `get_query` actually needs of an ORM model: a mapped `__table__`.
+    """An ORM model with a mapped ``__table__``.
 
-    Structural rather than nominal because the two declarative styles share no
-    base class. Bounding the overload's TypeVar on it keeps unmapped classes out
-    — unbounded, `Type[_ORMModel]` would admit any class at all, which is looser
-    than the union it replaced.
+    A protocol because the two declarative styles share no base class.
     """
 
     __table__: ClassVar[FromClause]
@@ -73,14 +65,13 @@ class _MappedClass(Protocol):
 
 _ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 
-# A 2.0-style model's metaclass (`DeclarativeAttributeIntercept`) is *not* a
-# `DeclarativeMeta`, so the legacy member alone does not admit it.
+# A 2.0-style model's metaclass is not a DeclarativeMeta, hence DeclarativeBase.
 GenericTable = Table | DeclarativeMeta | type[DeclarativeBase]
 GenericColumn = Column | InstrumentedAttribute
 GenericExpression = BinaryExpression | ColumnOperators
 OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
-# We support both the legacy HTTP and gRPC clients, so therefore we need to accept both input types
+# Accept both the HTTP and gRPC clients' kinds.
 _DENY_KINDS = frozenset(
     [
         PlanResourcesFilterKind.ALWAYS_DENIED,
@@ -94,15 +85,14 @@ _ALLOW_KINDS = frozenset(
     ]
 )
 
-# Boolean/ternary traversal is built in and cannot itself be overridden.
+# Built-in traversal that overrides cannot replace.
 _UNOVERRIDABLE_OPERATORS = frozenset({"and", "or", "not", "if"})
 
 
 class _UnhandledRelationError(UnsupportedPlanError, TypeError):
-    """A plan reaching a relation marker no operator override consumes.
+    """Raised when a relation marker is not consumed by any operator override.
 
-    Also a ``TypeError``, which is what this refusal raised before
-    :class:`UnsupportedPlanError` existed.
+    Also a ``TypeError``, which this refusal raised before ``UnsupportedPlanError``.
     """
 
 
@@ -131,7 +121,7 @@ def _plan_condition(
 
 def _table_name(t: GenericTable) -> str:
     try:
-        # ORM model — both declarative styles carry the mapped `Table` here
+        # ORM model
         return t.__table__.name
     except AttributeError:
         # Core `Table` type
@@ -144,17 +134,11 @@ def _variables_outside_overrides(
     declared: frozenset[str],
     override_owned: bool = False,
 ) -> frozenset[str]:
-    """Find variables that still require an ordinary table mapping.
+    """Find variables that still need an ordinary table mapping.
 
-    An override owns its complete operand subtree: it may turn foreign columns
-    or relation markers into a correlated subquery instead of a flat JOIN.
-    Variables outside such a subtree retain the normal fail-closed
-    ``table_mapping`` requirement. Boolean/ternary traversal is built in and
-    cannot itself be overridden, so merely declaring those keys owns nothing.
-
-    A collection read through its ``collection_columns`` declaration needs no
-    ``attr_map`` entry at all -- the declared column is validated on its own --
-    so that operand is skipped whoever owns the subtree.
+    An override owns its whole operand subtree, which may use correlated
+    subqueries instead of joins. A declared collection operand is skipped because
+    its column is validated separately.
     """
     if isinstance(operand, Value):
         return frozenset()
@@ -184,13 +168,10 @@ def _require_table_mapping(
     condition: Operand,
     declared_collections: dict[str, CollectionColumn],
 ) -> None:
-    """Refuse a column on a table that is neither the queried one nor joined in.
+    """Refuse a column on a table that is neither queried nor joined in.
 
-    Inspect columns that the normal translator owns. Override-owned operands
-    may legitimately be relation markers or columns translated into
-    correlated subqueries, but an unrelated override must never disable the
-    ordinary cross-table mapping requirement. Omitting ``operator_override_fns``
-    validates every ``attr_map`` entry.
+    Only columns outside override-owned subtrees are checked, so an unrelated
+    override cannot switch the check off. With no overrides, every entry is checked.
     """
     if overrides is None:
         attributes = list(attr_map.items())
@@ -203,8 +184,7 @@ def _require_table_mapping(
             for variable in variables
             if variable in attr_map
         ]
-    # A declared collection column has to be addressable exactly as a mapped one does: on the
-    # queried table, or on one `table_mapping` joins.
+    # Declared collection columns must also be on the queried or a joined table.
     attributes += [
         (attribute, declared.column)
         for attribute, declared in declared_collections.items()
@@ -214,14 +194,8 @@ def _require_table_mapping(
     for variable, column in attributes:
         column_table = getattr(column, "table", None)
         if column_table is None:
-            # A self-contained SQL expression — canonically a correlated scalar
-            # subquery — is how a caller reaches a scalar through a to-ONE hop
-            # without a join (cerbos/query-plan-adapters#375). It carries its own
-            # correlation, so it needs no `table_mapping`, and an absent hop makes
-            # it SQL NULL: CEL's missing-path error, excluded under BOTH polarities
-            # because NOT NULL is still NULL. Only a value that is neither a column
-            # nor an expression — a bare relation marker used outside an override —
-            # is a mapping error.
+            # A self-contained expression, e.g. a correlated scalar subquery, needs
+            # no join. A missing hop makes it NULL, which stays excluded. See #375.
             if isinstance(column, ColumnElement):
                 continue
             raise _UnhandledRelationError(
@@ -246,8 +220,8 @@ def _require_table_mapping(
         )
 
 
-# An ORM model class carries its row type; a Core `Table` does not. Overloading on
-# that distinction lets callers infer the model rather than annotate the result.
+# Overloads let an ORM model's row type be inferred. `Select[...]` is quoted because
+# it is not subscriptable on early SQLAlchemy 1.4.
 @overload
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
@@ -261,10 +235,7 @@ def get_query(
 ) -> "Select[tuple[_ORMModel]]": ...
 
 
-# Everything else `GenericTable` admits — a Core `Table`, and a legacy model
-# under 1.4, whose stubs do not declare `__table__` so it cannot match the bound
-# above. Row type unknown, but the call is still accepted: without this arm the
-# overloads would be narrower than the union they replaced.
+# Core `Table`, and 1.4 legacy models whose stubs lack `__table__`.
 @overload
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
@@ -290,57 +261,43 @@ def get_query(
 ) -> "Select[Any]":
     """Translate a Cerbos query plan into a SQLAlchemy ``Select``.
 
-    ``null_attribute_representation`` declares how the caller represents a NULL
-    column when building the attributes it sends to ``check()``. The planner
-    emits the same ``eq(attr, null)`` node either way, so the plan cannot reveal
-    which convention is in use and the adapter has to be told.
+    Args:
+        query_plan: A plan response from the HTTP or gRPC Cerbos client.
+        table: The ORM model or Core ``Table`` to select from.
+        attr_map: Maps each plan attribute reference, e.g. ``request.resource.attr.x``,
+            to a column or SQL expression.
+        table_mapping: ``(table, join_predicate)`` pairs for every other table the
+            mapped columns live on.
+        operator_override_fns: Per-call handlers that replace the default lowering
+            of an operator. An overridden operator owns its operand subtree.
+        null_attribute_representation: How a NULL column is sent to ``check()``.
+            The plan is the same either way, so the caller must say. ``"explicit"``
+            (default) sends a ``null`` attribute, so ``IS NULL`` matches.
+            ``"omitted"`` sends no attribute, which CEL denies, so null comparison
+            operands are rejected rather than translated.
+        attribute_null_representation: The same, per attribute, overriding the
+            call-level value. Use it when a policy mixes conventions. An
+            ``"explicit"`` attribute renders ``eq``, ``ne`` and ``in`` so they are
+            never SQL UNKNOWN. Undeclared attributes are rendered as NOT NULL.
+            See #302 and #308.
+        collection_columns: How collection attributes are stored. Used for
+            ``size()`` and constant ``index`` reads, where it beats ``attr_map``
+            and overrides, and for literal ``in``/``hasIntersection`` on attributes
+            absent from ``attr_map``. Only ``==``/``!=`` against a scalar literal
+            is translated for an index. SQLite and PostgreSQL only. See #227.
 
-    - ``"explicit"`` (default) -- a NULL column is sent as an explicit ``null``
-      attribute. CEL compares ``null == null``, so ``IS NULL`` selects exactly
-      the rows ``check()`` allows.
-    - ``"omitted"`` -- a NULL column sends no attribute at all. CEL then raises a
-      missing-attribute error, which Cerbos treats as a deny, so a filter that
-      *selects* NULL rows returns rows the PDP denies. Null comparison operands
-      are rejected instead of translated.
+    Returns:
+        A ``Select`` over ``table`` filtered to the rows the plan allows.
 
-    ``attribute_null_representation`` declares the same thing PER ATTRIBUTE,
-    keyed by the references ``attr_map`` uses. It overrides
-    ``null_attribute_representation`` for the attributes it names and asserts
-    that their columns can be NULL; an attribute it does not name is treated as
-    NOT NULL when rendering a comparison, which is the historical translation.
-
-    It exists because one policy suite can legitimately mix the two conventions
-    -- the same column can be mapped twice, sent as an explicit null under one
-    attribute name and omitted under another -- which a single call-level
-    option cannot express. Declaring an attribute ``"explicit"`` makes the
-    equality family (``eq``, ``ne``, ``in``) render so it can never be SQL
-    UNKNOWN: CEL holds a null VALUE under that convention, so ``null != "x"``
-    is TRUE and ``null == "x"`` is FALSE, both definite, while UNKNOWN excludes
-    the row under BOTH polarities. Ordering and string operators are left
-    alone, because a null receiver raises a no-overload error in CEL, which
-    denies exactly as UNKNOWN does.
-
-    See https://github.com/cerbos/query-plan-adapters/issues/302 and
-    https://github.com/cerbos/query-plan-adapters/issues/308.
-
-    ``collection_columns`` declares how a collection attribute is STORED, keyed
-    by the same references: a ``CollectionColumn`` naming the column and its
-    storage, ``"json"`` or ``"pgArray"``. It is read in exactly two places --
-    the operand of ``size()`` and the collection an ``index`` reads -- and in
-    both it takes precedence over ``attr_map`` and over any operator override,
-    because it is the more specific declaration. For an attribute ``attr_map``
-    does not map it also answers literal membership: ``literal in x`` and
-    ``hasIntersection(x, [literals])``, each literal matching only an element
-    of its own JSON type. Everywhere else the attribute still resolves through
-    ``attr_map``, so a relation marker there keeps serving the collection
-    macros and membership. An index is translated only as a direct
-    ``==``/``!=`` against a scalar literal at a constant non-negative position;
-    anything else over a declared collection is refused. The SQL renders on
-    SQLite and PostgreSQL. See ``cerbos_sqlalchemy.collection_storage`` and
-    https://github.com/cerbos/query-plan-adapters/issues/227.
+    Raises:
+        UnsupportedPlanError: If the plan contains a shape the adapter cannot
+            translate faithfully. A subclass of ``ValueError``.
+        ValueError: If an option value is invalid.
+        KeyError: If the plan references an attribute missing from ``attr_map``.
+        TypeError: If a mapped column's table is not joined via ``table_mapping``,
+            or a ``collection_columns`` value is not a ``CollectionColumn``.
     """
-    # A None entry means no override on every traversal path. Keep None and an
-    # explicitly supplied empty mapping distinct for attribute validation below.
+    # Drop None entries, but keep None distinct from {} for _require_table_mapping.
     overrides = (
         None
         if operator_override_fns is None
@@ -362,8 +319,7 @@ def get_query(
         return select(table)
 
     condition = _plan_condition(query_plan)
-    # Always: the call-level option is only the fallback now, and an attribute
-    # can declare "omitted" while the call declares "explicit".
+    # Always run: an attribute can declare "omitted" under an "explicit" call.
     assert_no_null_comparison_operands(
         condition, null_conventions, null_attribute_representation
     )
@@ -375,7 +331,6 @@ def get_query(
     translator = Translator(
         attr_map, overrides or {}, null_conventions, declared_collections
     )
-    # The root of the plan must translate to a boolean SQL expression.
     where = require_boolean(translator.predicate(condition), "condition")
     query = select(table).where(where)
 

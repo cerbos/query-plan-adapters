@@ -155,16 +155,11 @@ def _reads_variable(operand: Operand, variable_name: str) -> bool:
 def assert_no_same_collection_correlation(
     operand: Operand, enclosing: tuple[tuple[str, str], ...] = ()
 ) -> None:
-    """Refuse a macro nested over the collection an enclosing macro iterates, when its body
-    reads the enclosing element.
+    """Refuse a nested macro over the same collection whose body reads the outer element.
 
-    ``attr_map`` binds a lambda variable's fields to columns by name, and an operator override
-    receives the collection's marker and a translated body — never the scope. Both macros'
-    subqueries therefore range over the one unaliased table, and a body comparing the inner
-    element with the outer one renders as a column compared with itself: SQL resolves both to
-    the innermost row, which denies what CEL allows and, under negation, allows what it denies
-    (cerbos/query-plan-adapters#509). There is no mapping a caller can supply that gives the
-    inner scope its own alias, so the shape is refused before any SQL is built.
+    ``attr_map`` gives both lambda scopes the same unaliased table, so the inner
+    subquery would compare each row with itself. That denies what CEL allows and,
+    under negation, allows what it denies. See #509.
     """
     if not isinstance(operand, Expr):
         return
