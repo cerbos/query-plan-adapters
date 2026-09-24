@@ -152,11 +152,13 @@ export const MAPPER: Record<string, MapperConfig> = {
   // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
   "request.resource.attr.owner": {
     field: "aOptionalString",
+    valueType: "string",
     nullable: true,
     nullAttributeRepresentation: "explicit",
   },
   "request.resource.attr.coOwner": {
     field: "scope",
+    valueType: "string",
     nullable: true,
     nullAttributeRepresentation: "explicit",
   },

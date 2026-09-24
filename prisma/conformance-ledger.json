@@ -69,26 +69,6 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator, so int()'s truncation toward zero over a numeric column cannot be expressed."
-    },
-    "cast/string/from-boolean": {
-      "status": "unsupported",
-      "reason": "Same missing cast as cast/string/from-double, and the one where lowering it would be wrong rather than merely absent: SQLite and MySQL store a boolean as 1/0, so CAST(a_bool AS TEXT) never equals CEL's \"true\" and the filter would return nothing"
-    },
-    "cast/string/from-double": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast: a where clause compares a column against a value, and there is no form that applies string() to the column first. The rendering would also have to be provider-specific — CAST(x AS TEXT) formats a double differently across the providers one Prisma client targets"
-    },
-    "cast/string/negated-explicit-null": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, a String column: a Prisma DateTime filter needs a column mapped with valueType \"dateTime\", and comparing the ISO string lexically would not reproduce CEL's parse-or-error semantics."

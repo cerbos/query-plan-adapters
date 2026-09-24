@@ -69,6 +69,9 @@ export function settleTypeMismatches(
       return settleLambdaBody(expr, context, positive);
   }
 
+  const cast = rewriteCastComparison(expr, context, positive);
+  if (cast !== undefined) return settleTypeMismatches(cast, context, positive);
+
   const outcomes = leafOutcomes(expr, context);
   if (outcomes === undefined) return rewriteLiteralLists(expr, context);
   if (positive && !outcomes.true) return { value: false };
@@ -124,6 +127,113 @@ function scopedContext(
     nullableFields: new Set(),
     unknownFilters: [],
   });
+}
+
+// -- casts ---------------------------------------------------------------------------------------
+
+/**
+ * `string(column) == "lit"` and `int(column) == k` (and their `!=` forms), solved for the column
+ * the cast wraps: a Prisma filter has no cast, but these conversions are invertible.
+ *
+ * - `string(b)` of a boolean is `"true"` or `"false"`.
+ * - `string(d)` of a number is cel-go's shortest `%g` rendering, so exactly one double prints as a
+ *   given literal — or none does, and the comparison is settled like any type mismatch.
+ * - `int(d)` truncates toward zero, and raises an error outside (-2^63, 2^63). A threshold is a
+ *   half-open interval that would need that bound spelled out, which an `Int` column rejects, so
+ *   only `==` outside a `!` and `!=` under one are translated: the interval `==` solves to already
+ *   excludes every value that overflows, and the error then decides the row as the constant does.
+ *
+ * A column the caller sends as an explicit null is left alone: the cast of a null VALUE is an
+ * error, where the comparison it would be rewritten to is definite.
+ */
+function rewriteCastComparison(
+  expr: OperatorOperand,
+  context: TranslationContext,
+  positive: boolean
+): PlanExpressionOperand | undefined {
+  const { operator } = expr;
+  if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
+  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [cast, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
+  if (
+    !isOperatorOperand(cast) ||
+    cast.operands.length !== 1 ||
+    !isValueOperand(literal) ||
+    literal.value === null
+  ) {
+    return undefined;
+  }
+  const column = cast.operands[0]!;
+  if (!isNamedOperand(column)) return undefined;
+  const fieldRef = resolveFieldReference(column.name, context);
+  if (fieldRef.relations?.length || fieldRef.nullAttributeRepresentation === "explicit") {
+    return undefined;
+  }
+  const type = scalarType(fieldRef);
+  const value = literal.value;
+  const compare = (op: string, v: Value): PlanExpressionOperand => ({
+    operator: op,
+    operands: [column, { value: v }],
+  });
+  const equality = (v: Value): PlanExpressionOperand => compare(operator, v);
+  // No value of the column prints as the literal: the comparison is settled by its type alone.
+  const unmatched: PlanExpressionOperand = {
+    operator,
+    operands: [column, { operator: "struct", operands: [] }],
+  };
+
+  if (cast.operator === "string" && typeof value === "string") {
+    if (type === "boolean") {
+      return value === "true" || value === "false" ? equality(value === "true") : unmatched;
+    }
+    if (type === "number") {
+      const parsed = Number(value);
+      return value.trim() !== "" && formatCelDouble(parsed) === value
+        ? equality(parsed)
+        : unmatched;
+    }
+    return undefined;
+  }
+
+  if (cast.operator === "int" && type === "number" && typeof value === "number") {
+    if ((operator === "eq") !== positive) return undefined;
+    if (!Number.isInteger(value)) return unmatched;
+    const range: PlanExpressionOperand = {
+      operator: "and",
+      operands:
+        value > 0
+          ? [compare("ge", value), compare("lt", value + 1)]
+          : value < 0
+            ? [compare("gt", value - 1), compare("le", value)]
+            : [compare("gt", -1), compare("lt", 1)],
+    };
+    return operator === "eq" ? range : { operator: "not", operands: [range] };
+  }
+  return undefined;
+}
+
+/**
+ * CEL's string() of a double: cel-go's `fmt.Sprintf("%g", d)`, the shortest digits that
+ * round-trip, in exponent form below 1e-4 or from 1e+06.
+ */
+export function formatCelDouble(x: number): string {
+  if (Number.isNaN(x)) return "NaN";
+  if (x === Infinity) return "+Inf";
+  if (x === -Infinity) return "-Inf";
+  if (x === 0) return Object.is(x, -0) ? "-0" : "0";
+  const sign = x < 0 ? "-" : "";
+  const [mantissa, exponentText] = Math.abs(x).toExponential().split("e") as [string, string];
+  const digits = mantissa.replace(".", "");
+  const exponent = Number(exponentText);
+  if (exponent < -4 || exponent >= 6) {
+    const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
+    const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+    return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
+  }
+  const point = exponent + 1;
+  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 // -- the leaves ----------------------------------------------------------------------------------

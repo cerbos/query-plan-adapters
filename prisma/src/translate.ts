@@ -228,12 +228,40 @@ export function resolveOperand(
     if (operand.operator === "timestamp") {
       return resolveTimestampOperand(operand, context, allowSubMillisecond);
     }
+    const identity = resolveIdentityCast(operand, context);
+    if (identity !== undefined) return identity;
     const folded = tryFoldValueExpression(operand, context);
     if (folded !== null) return { value: folded };
     return { value: buildPrismaFilterFromCerbosExpression(operand, context) };
   }
   throw new UnsupportedQueryPlanError("Operand must have name, value, or be an expression");
 }
+
+/**
+ * `string(column)` over a string column and `double(column)` over a number column convert nothing:
+ * the column itself, except that the cast of a null VALUE is an error. The reference is resolved
+ * as one whose NULL is missing, so no comparison against it can select a NULL row.
+ */
+function resolveIdentityCast(
+  expression: OperatorOperand,
+  context: TranslationContext
+): ResolvedOperand | undefined {
+  const target = IDENTITY_CASTS[expression.operator];
+  const [operand] = expression.operands;
+  if (
+    target === undefined ||
+    expression.operands.length !== 1 ||
+    operand === undefined ||
+    !isNamedOperand(operand)
+  ) {
+    return undefined;
+  }
+  const fieldRef = resolveFieldReference(operand.name, context);
+  if (fieldRef.valueType !== target) return undefined;
+  return { ...fieldRef, nullAttributeRepresentation: "omitted" };
+}
+
+const IDENTITY_CASTS: Record<string, string> = { string: "string", double: "number" };
 
 function resolveTimestampOperand(
   expression: OperatorOperand,
