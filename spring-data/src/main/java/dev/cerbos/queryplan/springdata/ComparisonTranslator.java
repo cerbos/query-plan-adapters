@@ -152,8 +152,8 @@ final class ComparisonTranslator {
         }
 
         /**
-         * {@code string(variable)}. Only a {@link Boolean} column is translated
-         * ({@link #booleanStringComparison}).
+         * {@code string(variable)}. String, Boolean and numeric columns are translated
+         * ({@link #stringOfFieldComparison}).
          */
         record StringOfField(String variable) implements Resolved {}
 
@@ -278,7 +278,7 @@ final class ComparisonTranslator {
                     && left instanceof Resolved.StringOfField sf
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
-                return booleanStringComparison(op, sf, text, operands, scope);
+                return stringOfFieldComparison(op, sf, text, operands, scope);
             }
             // `field op add(value, value)`: strings concatenate, as in CEL.
             if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
@@ -407,26 +407,53 @@ final class ComparisonTranslator {
         return constant(holds(op, left.compareTo(right)));
     }
 
+    /** The numeric column types whose values CEL receives as doubles, rendered by %g. */
+    private static final Set<Class<?>> DOUBLE_RENDERED =
+            Set.of(Double.class, Integer.class, Long.class);
+
     /**
-     * {@code string(boolColumn) eq/ne "text"}. CEL renders a bool as exactly {@code "true"} or
-     * {@code "false"}, so the constant is matched here and only the boolean column reaches SQL.
-     * SQL has no portable spelling of the conversion: {@code CAST} gives {@code '1'} on MySQL,
-     * and a text-producing {@code CASE} compares in the connection collation, which is
-     * case-insensitive under MySQL Connector/J.
+     * {@code string(column) eq/ne "text"}, decided per column type. SQL has no portable spelling
+     * of CEL's conversion ({@code CAST} gives {@code '1'} for a MySQL boolean and its own number
+     * format everywhere), so the constant is inverted in Java and only the column reaches SQL:
      *
-     * <p>Any other constant matches nothing. A NULL column stays UNKNOWN, because CEL's
-     * {@code string()} errors on it and the PDP denies. Only {@link Boolean} columns qualify:
-     * a primitive {@code boolean} path fails the leaf's type check and folds to a constant.
+     * <ul>
+     *   <li>{@link String}: {@code string()} is the identity, so the column is compared as it
+     *       stands, through any override for {@code op}.</li>
+     *   <li>{@link Boolean}: CEL renders exactly {@code "true"} or {@code "false"}. A
+     *       text-producing {@code CASE} would compare in the connection collation, which is
+     *       case-insensitive under MySQL Connector/J.</li>
+     *   <li>{@link Double}, {@link Integer}, {@link Long}: the one double CEL renders as the
+     *       constant ({@link CelDoubleText}), compared as a double.</li>
+     * </ul>
+     *
+     * <p>A constant no value renders as matches nothing. A NULL column stays UNKNOWN under both
+     * polarities, even one declared EXPLICIT, because CEL's {@code string()} errors on null and
+     * the PDP denies. Other column types, primitive ones included, are refused.
      */
-    private Predicate booleanStringComparison(String op, Resolved.StringOfField field,
+    private Predicate stringOfFieldComparison(String op, Resolved.StringOfField field,
                                               String value, List<Operand> operands, Scope scope) {
         Path<?> path = scope.path(field.variable());
-        if (!Boolean.class.equals(path.getJavaType())) {
-            throw leafOperandError(op, operands);
+        Class<?> type = path.getJavaType();
+        if (String.class.equals(type)) {
+            return leaf.applyLeaf(op, path, value);
         }
-        if ("true".equals(value) || "false".equals(value)) {
-            return leaf.applyLeaf(op, path, Boolean.valueOf(value));
+        if (Boolean.class.equals(type)) {
+            if ("true".equals(value) || "false".equals(value)) {
+                return leaf.applyLeaf(op, path, Boolean.valueOf(value));
+            }
+            return matchesNothing(op, path);
         }
+        if (DOUBLE_RENDERED.contains(type)) {
+            if (CelDoubleText.solve(value) instanceof CelDoubleText.Solution.Exactly exactly) {
+                return leaf.defaultLeaf(op, path, exactly.value());
+            }
+            return matchesNothing(op, path);
+        }
+        throw leafOperandError(op, operands);
+    }
+
+    /** eq FALSE and ne TRUE, UNKNOWN for a NULL column. */
+    private Predicate matchesNothing(String op, Path<?> path) {
         return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
                 () -> cb.isNull(path));
     }

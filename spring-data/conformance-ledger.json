@@ -33,18 +33,6 @@
       "status": "unsupported",
       "reason": "int() over a double truncates toward zero in CEL, while PostgreSQL and MySQL CAST round to nearest, so the cast is refused rather than lowered to CAST."
     },
-    "cast/string/from-double": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no cast expression: a predicate compares a path against a literal or another path. The reference's one string() form is over a BOOLEAN column, whose CEL text is exactly \"true\" or \"false\" and is compared in Java; over any other column type string() is refused in the leaf operand, because a number's text form is what the dialects render on their own terms and nothing in the Criteria API reproduces CEL's"
-    },
-    "cast/string/negated-explicit-null": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL string conversion expression that preserves conversion errors under negation."
-    },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL string conversion expression that preserves conversion errors under negation."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, which is mapped to a String column: a String does not pin an absolute instant, and a malformed value must stay a CEL error, which no SQL cast preserves, so the adapter refuses to compare it."

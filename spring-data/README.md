@@ -213,7 +213,7 @@ is consulted only where the adapter has resolved a `(field, value)` pair for a t
 
 - **Reached:** `eq`/`ne`/`lt`/`gt`/`le`/`ge` (value-first forms under the mirrored name; `add`-folded,
   null-RHS and arithmetic-vs-constant forms included), `string()` over a boolean column (receives the
-  column and a `Boolean`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
+  column and a `Boolean`) or a string column (the column and the `String`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
   `in`, a bare boolean attribute (as `eq`), unknown leaf operators such as `matches`, and timestamp
   comparisons (value is the parsed `java.time.Instant`, including for column types the default
   rejects). `not` wraps the built predicate, so an override applies under both polarities.
@@ -306,9 +306,10 @@ Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWi
 `map(...)`), and `hierarchy(...)`. `OperatorFunction` overrides can't cover all of them (for example
 `hasIntersection` over a plain field never consults one), so fix the collation in the schema.
 
-`string()` over a boolean column is the one conversion with no string predicate in SQL — the
-constant is compared in Java — because a literal-vs-literal comparison would use the **connection**
-collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by default.
+`string()` over a boolean or numeric column has no string predicate in SQL — the constant is
+inverted in Java and the column compared with the result — because a literal-vs-literal comparison
+would use the **connection** collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by
+default.
 
 CI runs the conformance suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
 the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
@@ -349,7 +350,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; division guarded with `NULLIF` |
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
-| `string(R.attr.flag) == "true"` / `!=` (boolean column only) | Decided in Java: `col = true`, `col = false`, or no row for any other constant; NULL excluded under both polarities |
+| `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants |
 | Bare boolean variable | `cb.equal(path, true)` |
 
@@ -366,7 +367,7 @@ consulted.
 | Arithmetic on non-numeric operands | `R.attr.aString + "x" < "y"` | no | String-concat `add` folding is `eq`/`ne`-only |
 | Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
 | List indexing | `R.attr.tags[0] == "x"` | no | JPA collections are unordered |
-| Type casts (`int()`, `double()`, `string()` except over a boolean column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria |
+| Type casts (`int()`, `double()`, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
@@ -385,11 +386,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 58 / 80 |
-| adversarial | 183 / 227 |
+| extended | 59 / 80 |
+| adversarial | 185 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 65 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 62 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -611,6 +612,14 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `string()` over a string or numeric column compared with a string constant (`==`/`!=`) now
+  translates instead of throwing.
+- A field-to-field `==`/`!=` between an `EXPLICIT` attribute and an undeclared or `OMITTED` one now
+  translates instead of throwing `UnmappedAttributeException`.
+- `==`/`!=` against a bare null on an attribute declared
+  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` now translates instead of
+  throwing: `x == null` selects no row and `x != null` exactly the non-NULL rows, and a NULL row
+  stays out under negation. A call-level `OMITTED` still refuses them on undeclared attributes.
 - [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
   the relation an enclosing lambda iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
   ranges its subquery over a fresh root pinned to the outer row by identity instead of joining off
