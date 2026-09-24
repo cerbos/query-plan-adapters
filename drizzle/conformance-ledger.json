@@ -13,18 +13,6 @@
       "status": "unsupported",
       "reason": "Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
-    "cast/int/malformed-string": {
-      "status": "unsupported",
-      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits: Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
-    },
-    "cast/int/negated-malformed-string": {
-      "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
-    },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest: Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() comparison over an ISO-date string column: 'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."

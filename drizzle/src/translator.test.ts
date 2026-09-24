@@ -694,6 +694,41 @@ describe("a hierarchy split per character", () => {
   });
 });
 
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). int() over a string or double column is
+// carried by cases only against small constants. Delete each test when a case carrying it lands.
+describe("int() over a string or double column", () => {
+  const intPlan = (condition: unknown): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: condition as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    }) as PlanResourcesResponse;
+  const intOf = { operator: "int", operands: [{ name: "request.resource.attr.aString" }] };
+
+  // PostgreSQL and MySQL compare a bigint with a double by converting the bigint, which is inexact
+  // at 2^53 and beyond: measured, int("9223372036854775807") == 2^63 is true on both.
+  test("Corpus gap. is refused against a constant at or beyond 2^53", () => {
+    const queryPlan = intPlan({ operator: "eq", operands: [intOf, { value: 2 ** 53 }] });
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql })).toThrow(
+      UnsupportedQueryPlanError,
+    );
+  });
+
+  // A result up to 2^63 - 1 would overflow a bigint and fail the whole query.
+  test("Corpus gap. is refused inside arithmetic", () => {
+    const queryPlan = intPlan({
+      operator: "gt",
+      operands: [{ operator: "add", operands: [intOf, { value: 1 }] }, { value: 50 }],
+    });
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql })).toThrow(
+      UnsupportedQueryPlanError,
+    );
+  });
+});
+
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function: malformed by construction, so there is no golden to
   // read. A shape CEL *can* express belongs in the corpus instead.

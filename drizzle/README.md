@@ -381,7 +381,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 213 / 227 |
+| adversarial | 216 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -464,7 +464,13 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   still throws.
 - `int()` over an integer column (`integer`, `smallint`, `int`, `serial`, `bigint` in `number`
   mode, …) now translates, as the column itself (`CAST(… AS INTEGER)` on SQLite, whose INTEGER
-  affinity can keep a fraction). `int()` of any other column still throws.
+  affinity can keep a fraction).
+- `int()` over a double or string column now translates when compared directly with a number
+  constant below 2^53 in magnitude. Over a double it truncates toward zero and is NULL (CEL's error)
+  at ±2^63 or beyond; over a string it accepts exactly what Go's `strconv.ParseInt(s, 10, 64)` does —
+  an optional sign and ASCII digits, within int64 — and is NULL otherwise, where SQL's CAST would read
+  a numeric prefix. A larger constant, or the result inside arithmetic, throws: PostgreSQL and MySQL
+  compare a bigint with a double inexactly there, and a bigint can overflow.
 - **Breaking:** `%` translates only as `int(<integer column>) % <non-zero whole constant>`, and
   throws otherwise. It used to be emitted for any operands, but CEL's `%` has no double overload —
   `R.attr.aNumber % 2` is an error the PDP denies, which the old filter answered — and a zero

@@ -48,7 +48,11 @@ import {
   withPolarity,
 } from "./predicates";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
-import { buildValueExpression, resolveScalarOperand } from "./values";
+import {
+  buildCheckedIntComparison,
+  buildValueExpression,
+  resolveScalarOperand,
+} from "./values";
 import type { BuildFilterOptions, Mapper } from "./types";
 
 /**
@@ -675,6 +679,11 @@ export const buildComparisonFilter = (
       "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value",
     );
   }
+
+  const checkedInt =
+    buildCheckedIntComparison(operator, left, right, mapper, options) ??
+    buildCheckedIntComparison(MIRRORED_OPERATORS[operator], right, left, mapper, options);
+  if (checkedInt !== undefined) return withPolarity(checkedInt, negated);
 
   const leftTimestamp = timestampField(left, mapper);
   const rightTimestampLiteral = subMillisecondTimestampLiteral(right);

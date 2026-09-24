@@ -48,8 +48,10 @@ import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
  * INTEGER)` is `100` on SQLite, `0` on MySQL and a hard error on PostgreSQL — so a direct lowering
  * returns rows the PDP denies. The numeric direction is no safer: CEL's `int()` truncates toward
  * zero, SQLite's CAST truncates, but PostgreSQL and MySQL round to nearest, so `int(-0.6)` is `0`
- * to CEL and `-1` to those engines. The one `int()` that needs no CAST is over a column whose
- * Drizzle type holds only whole numbers (`buildIntegerConversion`); every other is refused.
+ * to CEL and `-1` to those engines. So `int()` is lowered only where the column says what it
+ * holds: over a whole-number column it is the column (`buildIntegerConversion`); over a double or
+ * string column it validates and truncates the way cel-go does, per dialect, and only as a direct
+ * comparison with a small constant (`buildCheckedIntComparison`). Every other conversion is refused.
  *
  * `string()` (cerbos/query-plan-adapters#340): there is no cast TARGET the three stores share.
  * `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on MySQL 8.4, which
@@ -184,6 +186,113 @@ const integerConversionColumn = (
  */
 const buildIntegerConversion = (column: AnyColumn, expr: SQL): SQL =>
   is(column, SQLiteColumn) ? sql`cast(${expr} as integer)` : expr;
+
+/** The store a column belongs to, read off its Drizzle class. */
+const columnDialect = (column: AnyColumn): "sqlite" | "postgresql" | "mysql" | undefined =>
+  is(column, SQLiteColumn)
+    ? "sqlite"
+    : is(column, PgColumn)
+      ? "postgresql"
+      : is(column, MySqlColumn)
+        ? "mysql"
+        : undefined;
+
+/** 2^63, the first double cel-go's `int()` refuses in either direction (`doubleToInt64Checked`). */
+const INT64_BOUND = 9223372036854775808;
+
+/**
+ * `int()` over a double column: cel-go refuses a value at or beyond ±2^63 (and NaN or an
+ * infinity) and otherwise truncates toward zero. Each store has an exact truncation — PostgreSQL's
+ * `trunc`, MySQL's `TRUNCATE(x, 0)`, and SQLite's `CAST(… AS INTEGER)`, which truncates there (and
+ * only there) — and the CASE leaves the refused values NULL, CEL's error.
+ */
+const buildDoubleToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
+  const dialect = columnDialect(column);
+  const truncated =
+    dialect === "postgresql"
+      ? sql`trunc(${expr})`
+      : dialect === "mysql"
+        ? sql`truncate(${expr}, 0)`
+        : dialect === "sqlite"
+          ? sql`cast(${expr} as integer)`
+          : undefined;
+  if (truncated === undefined) return undefined;
+  return sql`(case when ${expr} > ${bindConstant(-INT64_BOUND)} and ${expr} < ${bindConstant(INT64_BOUND)} then ${truncated} end)`;
+};
+
+/**
+ * `int()` over a string column: cel-go's `strconv.ParseInt(s, 10, 64)` — an optional sign, then one
+ * or more ASCII digits and nothing else, within int64 — or an error. SQL's own CAST reads a
+ * numeric prefix instead (`'100%_done'` is 100 on SQLite, 0 on MySQL, an error on PostgreSQL), so
+ * the string is validated first and cast only when valid; anything else is NULL, CEL's error.
+ *
+ * Validation needs no regex: removing every digit from the unsigned part must leave nothing, and
+ * once leading zeros are trimmed the digits must be fewer than 19, or exactly 19 and no greater
+ * than int64's bound — for equal-length digit strings, string order is numeric order.
+ */
+const buildStringToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
+  const dialect = columnDialect(column);
+  if (dialect === undefined) return undefined;
+  const sign = sql`substr(${expr}, 1, 1)`;
+  const unsigned = sql`(case when ${sign} in ('+', '-') then substr(${expr}, 2) else ${expr} end)`;
+  const nonDigits = [..."0123456789"].reduce<SQL>(
+    (rest, digit) => sql`replace(${rest}, ${digit}, '')`,
+    unsigned,
+  );
+  const significant =
+    dialect === "mysql" ? sql`trim(leading '0' from ${unsigned})` : sql`ltrim(${unsigned}, '0')`;
+  const bound = sql`(case when ${sign} = '-' then '9223372036854775808' else '9223372036854775807' end)`;
+  const valid = sql`length(${unsigned}) > 0 and length(${nonDigits}) = 0 and (length(${significant}) < 19 or (length(${significant}) = 19 and ${significant} <= ${bound}))`;
+  const cast =
+    dialect === "postgresql"
+      ? sql`cast(${expr} as bigint)`
+      : dialect === "mysql"
+        ? sql`cast(${expr} as signed)`
+        : sql`cast(${expr} as integer)`;
+  return sql`(case when ${valid} then ${cast} end)`;
+};
+
+/** 2^53: below it a double holds every integer exactly, so a store's bigint-to-double is exact. */
+const EXACT_DOUBLE_INTEGER_BOUND = 9007199254740992;
+
+/**
+ * `int(x) <op> constant` over a double or string column, where `x` is read through
+ * `buildDoubleToInt` / `buildStringToInt`. Their result can reach ±2^63, so it is lowered ONLY as a
+ * comparison with a number constant below 2^53 in magnitude: PostgreSQL and MySQL compare a bigint
+ * with a double by converting the bigint, which is exact against such a constant — measured,
+ * `int("9223372036854775807") == 9223372036854775808.0` is true on both where CEL says false — and
+ * arithmetic on the result could overflow a bigint and fail the whole query. `undefined` when the
+ * shape is anything else.
+ */
+export const buildCheckedIntComparison = (
+  operator: "eq" | "ne" | "lt" | "le" | "gt" | "ge",
+  conversion: PlanExpressionOperand,
+  constant: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL | undefined => {
+  if (
+    !isOperatorCall(conversion, "int") || !isExpressionOperand(conversion) ||
+    conversion.operands.length !== 1 ||
+    !isValueOperand(constant) || typeof constant.value !== "number" ||
+    !(Math.abs(constant.value) < EXACT_DOUBLE_INTEGER_BOUND)
+  ) {
+    return undefined;
+  }
+  const inner = conversion.operands[0]!;
+  const column = columnForOperand(inner, mapper);
+  if (column === undefined || INTEGER_COLUMN_TYPES.has(column.columnType)) return undefined;
+  const expr = () => buildValueExpression(inner, mapper, options);
+  const converted =
+    column.dataType === "number"
+      ? buildDoubleToInt(column, expr())
+      : column.dataType === "string"
+        ? buildStringToInt(column, expr())
+        : undefined;
+  if (converted === undefined) return undefined;
+  const symbol = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }[operator];
+  return sql`(${converted} ${sql.raw(symbol)} ${bindConstant(constant.value)})`;
+};
 
 /**
  * CEL's `%` is integer-only: over a double it is a no-overload error, which denies the row, so
