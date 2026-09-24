@@ -117,10 +117,6 @@
       "status": "unsupported",
       "reason": "exists first operand must be a variable"
     },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "Unsupported in operand combination: VARIABLE 'request.resource.attr.aOptionalString' / EXPRESSION map()"
-    },
     "regex/matches/anchored-prefix": {
       "status": "unsupported",
       "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."

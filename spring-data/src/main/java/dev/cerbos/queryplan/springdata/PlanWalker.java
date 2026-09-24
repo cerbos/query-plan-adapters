@@ -117,7 +117,12 @@ final class PlanWalker {
             // has_intersection is a deprecated alias the PDP still accepts.
             case "hasIntersection", "has_intersection" ->
                     membership.handleHasIntersection(operands, scope);
-            case "in" -> membership.handleIn(operands, scope);
+            case "in" -> {
+                Operand rewritten = membershipInMappedLiteral(operands);
+                yield rewritten != null
+                        ? traverse(rewritten, scope)
+                        : membership.handleIn(operands, scope);
+            }
             case "if" -> ternary.handleBareTernary(operands, scope);
             case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
             case "ancestorOf" -> hierarchy.handleAncestorDescendant(operands, scope, true);
@@ -177,6 +182,48 @@ final class PlanWalker {
                     expression("exists", variable, expression("lambda", body, element)));
         }
         return "ne".equals(op) ? expression("not", equality) : equality;
+    }
+
+    /**
+     * {@code x in list.map(t, body)} over a literal list, rewritten as
+     * {@code size(list.filter(t, x == body)) > 0}, whose strict count is UNKNOWN when any
+     * element's comparison is. That is exact because CEL's {@code map} errors when any element's
+     * body does, and {@code x == body} is UNKNOWN only where the body errors or {@code x} is a
+     * missing attribute. Returns {@code null} for any other shape, and when {@code x} reads the
+     * lambda variable's name, which the rewrite would capture.
+     */
+    private static Operand membershipInMappedLiteral(List<Operand> operands) {
+        if (operands.size() != 2
+                || operands.get(1).getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return null;
+        }
+        PlanResourcesFilter.Expression map = operands.get(1).getExpression();
+        if (!"map".equals(map.getOperator()) || map.getOperandsCount() != 2
+                || map.getOperands(0).getNodeCase() != Operand.NodeCase.VALUE) {
+            return null;
+        }
+        ParsedLambda lambda = ParsedLambda.parse(map.getOperands(1),
+                "map second operand must be a lambda",
+                "lambda requires exactly 2 operands",
+                "lambda variable must be a variable operand");
+        Operand needle = operands.get(0);
+        if (readsName(needle, lambda.varName())) {
+            return null;
+        }
+        Operand variable = Operand.newBuilder().setVariable(lambda.varName()).build();
+        Operand filter = expression("filter", map.getOperands(0), expression("lambda",
+                expression("eq", needle, lambda.body()), variable));
+        return expression("gt", expression("size", filter), number(0));
+    }
+
+    private static boolean readsName(Operand operand, String name) {
+        return switch (operand.getNodeCase()) {
+            case VARIABLE -> operand.getVariable().equals(name)
+                    || operand.getVariable().startsWith(name + ".");
+            case EXPRESSION -> operand.getExpression().getOperandsList().stream()
+                    .anyMatch(child -> readsName(child, name));
+            default -> false;
+        };
     }
 
     private static Operand expression(String operator, Operand... operands) {
