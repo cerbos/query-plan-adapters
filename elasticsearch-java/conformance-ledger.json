@@ -65,6 +65,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts, whatever the enclosing comparison"
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as arithmetic/modulo/negative-dividend: mod is not in the leaf resolver, so the negated disjunct is refused and the whole disjunction with it"
+    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all"
@@ -72,6 +80,10 @@
     "arithmetic/multiply/inexact-fraction-equals": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic with fractional values without scripts"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts; the division, multiplication and addition are all computed leaf operands"
     },
     "arithmetic/multiply/negative-multiplier": {
       "status": "unsupported",
@@ -89,6 +101,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL numeric parsing."
     },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "int() over a numeric field is a computed operand; the Query DSL cannot cast a field without scripts."
+    },
     "cast/int/malformed-string": {
       "status": "unsupported",
       "reason": "int() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
@@ -101,6 +117,10 @@
       "status": "unsupported",
       "reason": "int() over a numeric field is a computed operand; the Query DSL cannot cast a field without scripts."
     },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "int() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
+    },
     "cast/string/from-boolean": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double"
@@ -108,6 +128,14 @@
     "cast/string/from-double": {
       "status": "unsupported",
       "reason": "The Query DSL has no computed operand: a term or range query compares a FIELD against a literal, and there is no place to apply a cast to the field first. Painless runtime scripts could express it, which is the enhancement #226 tracks"
+    },
+    "cast/string/from-double-spellings": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
     },
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
@@ -277,6 +305,10 @@
       "status": "unsupported",
       "reason": "eq against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "eq against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison (ordered, counting duplicates)"
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts"
@@ -357,9 +389,17 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "The hierarchy operand parser refuses an empty delimiter before the relation is lowered: a path cannot be split into segments on an empty string, so there is no segment prefix to compare the stored path against"
+    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "The hierarchy operand parser refuses an empty delimiter before the relation is lowered: a path cannot be split into segments on an empty string, so there is no segment prefix to compare the stored path against, and the prefix query the descendant test lowers to would match the path itself (a2, never its own descendant)"
+    },
+    "hierarchy/overlaps/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Same empty-delimiter refusal as hierarchy/ancestor-of/empty-delimiter, reached through overlaps"
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
@@ -489,6 +529,10 @@
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
+    "principal/exists-one/duplicate-elements": {
+      "status": "unsupported",
+      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat query."
+    },
     "principal/exists-one/long-list": {
       "status": "unsupported",
       "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat query."
@@ -509,6 +553,14 @@
       "status": "unsupported",
       "reason": "Unexpected map expression in leaf operand"
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{,2}"
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks — Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^one"
@@ -525,6 +577,10 @@
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: a.*b"
     },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ — Lucene's . matches a newline where RE2's does not"
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{q}[*][?]b"
@@ -533,9 +589,17 @@
       "status": "unsupported",
       "reason": "Lookahead is outside the RE2/Lucene common regular expression syntax; translating it as a Lucene regexp would change CEL error semantics."
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 — the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
+    },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: [[:digit:]]"
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: [[:digit:]a-c]{1,2}"
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
       "status": "unsupported",
@@ -548,6 +612,14 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix"
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix: a Lucene regexp always matches the whole term"
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\s*"
     },
     "relation/all/to-one-chain": {
       "status": "unsupported",
@@ -653,6 +725,10 @@
       "status": "unsupported",
       "reason": "Unexpected add expression in leaf operand"
     },
+    "string/concatenate/ordering": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as string/concatenate/field-to-field: a range query compares a field against a literal, and there is no place to concatenate two fields first"
+    },
     "string/concatenate/unsatisfiable-not-equals": {
       "status": "unsupported",
       "reason": "Unexpected add expression in leaf operand"
@@ -717,9 +793,17 @@
       "status": "unsupported",
       "reason": "The cross-type question this probe asks is never reached: the positional read of aBoolList is refused as a computed leaf operand before the literal 1 is compared with anything, and a disjunction with one untranslatable branch is refused whole, so the aNumber == 5 branch that keeps the oracle live goes with it"
     },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion, so the string(aDouble) disjunct is refused and the whole disjunction with it."
+    },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Mirror of type-mismatch/equals/boolean-list-element-against-number-literal: the positional read of aNumberList is refused as a computed leaf operand before the literal true is compared with anything, and the whole disjunction with it"
+    },
+    "type-mismatch/equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "eq against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",
