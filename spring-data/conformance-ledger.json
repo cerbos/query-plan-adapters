@@ -109,10 +109,6 @@
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter."
-    },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
       "reason": "exists first operand must be a variable"
@@ -120,10 +116,6 @@
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
       "reason": "exists first operand must be a variable"
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Unsupported size(filter(...)) expression"
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",

@@ -342,10 +342,10 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `R.attr.coll == ["x"]`, `== []`, and `!=` over a relation | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare |
 | `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
 | `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
-| `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined |
+| `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined; over a literal list, the same per-element `CASE` sum as `exists_one` |
 | `size(string)` | `cb.length(column)` (see [Gotchas](#sizestring-counts-differently-for-astral-characters)) |
 | `exists` / `all` / `filter` | One correlated aggregate scoring subquery with CEL's three-valued truth table |
-| `exists_one` | Correlated strict count `= 1`, NULL-poisoned |
+| `exists_one` | Correlated strict count `= 1`, NULL-poisoned; over a literal list (a principal attribute the planner cannot unroll), a sum of per-element `CASE` terms, NULL when any element's body is UNKNOWN |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
 | Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
 | `int(R.attr.n) % k` (`n` an `Integer` column) | `MOD(n, k)`, which truncates toward zero as CEL does (`-5 % 2` is `-1`); a zero divisor is UNKNOWN |
@@ -388,11 +388,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
+| extended | 63 / 80 |
 | adversarial | 190 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 55 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 53 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -618,6 +618,8 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `exists_one` and `size(filter(...))` over a literal list (a principal attribute longer than the
+  planner unrolls) now translate instead of throwing.
 - `==`/`!=` between a relation and a list constant of at most one element now translates instead of
   throwing.
 - `int(R.attr.n) % k` over an `Integer` column now translates to `MOD` instead of throwing.

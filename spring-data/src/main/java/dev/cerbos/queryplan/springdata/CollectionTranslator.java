@@ -9,6 +9,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
 
 import com.google.protobuf.Value;
@@ -18,8 +19,7 @@ import java.util.Set;
 
 /**
  * Translates {@code exists}, {@code exists_one} and {@code all} over a relation chain, and
- * folds {@code exists} and {@code all} over a literal list. The subqueries come from
- * {@link ChainSubqueries}. {@code filter} in boolean position is refused by the walk, and
+ * folds them over a literal list. The subqueries come from {@link ChainSubqueries}. {@code filter} in boolean position is refused by the walk, and
  * {@code size(filter(...))} belongs to {@link SizeTranslator}.
  */
 final class CollectionTranslator {
@@ -117,14 +117,15 @@ final class CollectionTranslator {
      * Folds a macro over a literal list: substitutes each element into the body and joins the
      * results with {@code or} ({@code exists}) or {@code and} ({@code all}), as the planner
      * does for short lists. An empty list gives false for {@code exists} and true for
-     * {@code all}.
+     * {@code all}. {@code exists_one} is the strict count ({@link #literalStrictCount}) equal
+     * to 1.
      */
     private Predicate handleKnownValueCollection(String op, Value collectionValue,
                                                  Operand lambdaOperand, Scope scope) {
-        if (!"exists".equals(op) && !"all".equals(op)) {
+        if (!"exists".equals(op) && !"all".equals(op) && !"exists_one".equals(op)) {
             throw Refusals.unsupported(op
                     + " over a literal collection value is not supported. "
-                    + "Only exists() and all() can be folded into a flat filter.");
+                    + "Only exists(), all() and exists_one() can be folded into a flat filter.");
         }
         if (collectionValue.getKindCase() != Value.KindCase.LIST_VALUE) {
             // CEL cannot iterate a scalar, so the planner cannot emit this.
@@ -136,6 +137,9 @@ final class CollectionTranslator {
                 op + " over a literal collection supports single-variable lambdas only",
                 "lambda variable must be a variable operand");
 
+        if ("exists_one".equals(op)) {
+            return cb.equal(literalStrictCount(cb, walker, collectionValue, lambda, scope), 1L);
+        }
         List<Value> elements = collectionValue.getListValue().getValuesList();
         if (elements.isEmpty()) {
             return "exists".equals(op) ? cb.disjunction() : cb.conjunction();
@@ -149,6 +153,32 @@ final class CollectionTranslator {
                     substituteLambdaVariable(lambda.body(), lambda.varName(), element));
         }
         return walker.traverse(Operand.newBuilder().setExpression(combined).build(), scope);
+    }
+
+    /**
+     * The number of elements of a literal list whose body holds, or NULL when any body is
+     * UNKNOWN: {@code exists_one} and {@code filter} evaluate every element and error if any
+     * does. Each element contributes {@code CASE WHEN p THEN 1 WHEN NOT p THEN 0 END}, which is
+     * NULL for an UNKNOWN body, and SQL {@code +} carries that NULL into the sum.
+     */
+    static Expression<Long> literalStrictCount(CriteriaBuilder cb, PlanWalker walker,
+                                               Value list, ParsedLambda lambda, Scope scope) {
+        if (list.getKindCase() != Value.KindCase.LIST_VALUE) {
+            // CEL cannot iterate a scalar, so the planner cannot emit this.
+            throw Refusals.malformed("a macro over a literal collection requires a list value");
+        }
+        TriPredicate tri = new TriPredicate(cb);
+        Expression<Long> count = cb.literal(0L);
+        for (Value element : list.getListValue().getValuesList()) {
+            Operand body = substituteLambdaVariable(lambda.body(), lambda.varName(), element);
+            // Built twice: a predicate node must not be used in both polarities.
+            Expression<Long> matched = cb.<Long>selectCase()
+                    .when(walker.traverse(body, scope), 1L)
+                    .when(tri.not(walker.traverse(body, scope)), 0L)
+                    .otherwise(cb.nullLiteral(Long.class));
+            count = cb.sum(count, matched);
+        }
+        return count;
     }
 
     /**
