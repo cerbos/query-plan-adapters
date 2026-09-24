@@ -33,14 +33,6 @@
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
-    },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
-    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a filter() conjunct is refused rather than dropped (dropping it would over-grant)."
@@ -52,14 +44,6 @@
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() translates only as the collection operand of hasIntersection; used as the whole condition it is a list, not a boolean, and is refused."
-    },
-    "collection/map/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "map() translates only as the collection operand of hasIntersection, where the projection becomes the inner select of an EXISTS. Comparing the ordered projection itself to a literal list has no Criteria form"
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "regex/matches/anchored-prefix": {
       "status": "unsupported",

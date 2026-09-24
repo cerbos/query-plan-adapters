@@ -146,47 +146,149 @@ final class PlanWalker {
     private static final String LIST_ELEMENT = "__cerbos_list_element";
 
     /**
-     * {@code coll == [v]} or {@code coll == []} over a relation, rewritten as
-     * {@code size(coll) == 1 && coll.exists(e, e == v)} or {@code size(coll) == 0}, and
-     * {@code !=} as its negation. CEL list equality is ordered, but a list of at most one
-     * element has no order to compare, so the rewrite is exact. Returns {@code null} for any
-     * other shape, including a longer list, which a JPA collection cannot order.
+     * {@code coll == [v1, ..., vn]} with {@code coll} a relation, a {@code map()} projection of
+     * one ({@code t} or {@code t.f}), or an {@code except()} of one, rewritten into operators
+     * that translate, and {@code !=} as its negation. CEL list equality is ordered:
+     * <ul>
+     *   <li>at most one element has no order to compare, so it is
+     *       {@code size(coll) == n && coll.exists(e, e == v)};</li>
+     *   <li>more need the relation's declared position field, and are
+     *       {@code size(coll) == n && coll[0] == v1 && ...}, each read in range once the size
+     *       matches;</li>
+     *   <li>an {@code except()} difference is compared only with at most one element, as
+     *       {@code size(diff) == n} and, for one, a kept element equal to it.</li>
+     * </ul>
+     * Returns {@code null} for any other shape, which the comparison then refuses.
      */
     private static Operand wholeListEquality(String op, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
             return null;
         }
-        Operand variable = operands.get(0);
+        Operand collection = operands.get(0);
         Operand literal = operands.get(1);
-        if (variable.getNodeCase() == Operand.NodeCase.VALUE) {
-            variable = operands.get(1);
+        if (collection.getNodeCase() == Operand.NodeCase.VALUE) {
+            collection = operands.get(1);
             literal = operands.get(0);
         }
-        if (variable.getNodeCase() != Operand.NodeCase.VARIABLE
-                || literal.getNodeCase() != Operand.NodeCase.VALUE
-                || literal.getValue().getKindCase() != Value.KindCase.LIST_VALUE
-                || literal.getValue().getListValue().getValuesCount() > 1) {
-            return null;
-        }
-        try {
-            if (!(scope.resolve(variable.getVariable()) instanceof Scope.ResolvedRelation)) {
-                return null;
-            }
-        } catch (IllegalArgumentException unmapped) {
-            // Left to the comparison, which reports the list constant.
+        if (literal.getNodeCase() != Operand.NodeCase.VALUE
+                || literal.getValue().getKindCase() != Value.KindCase.LIST_VALUE) {
             return null;
         }
         List<Value> elements = literal.getValue().getListValue().getValuesList();
-        Operand size = expression("size", variable);
-        Operand equality = expression("eq", size, number(elements.size()));
-        if (!elements.isEmpty()) {
-            Operand element = Operand.newBuilder().setVariable(LIST_ELEMENT).build();
-            Operand body = expression("eq", element,
-                    Operand.newBuilder().setValue(elements.get(0)).build());
-            equality = expression("and", equality,
-                    expression("exists", variable, expression("lambda", body, element)));
+        Operand equality = switch (collection.getNodeCase()) {
+            case VARIABLE -> relationEquality(collection.getVariable(), null, elements, scope);
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression e = collection.getExpression();
+                if ("map".equals(e.getOperator()) && e.getOperandsCount() == 2
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    ParsedLambda projection = ParsedLambda.parse(e.getOperands(1),
+                            "map second operand must be a lambda",
+                            "lambda requires exactly 2 operands",
+                            "lambda variable must be a variable operand");
+                    yield relationEquality(e.getOperands(0).getVariable(), projection,
+                            elements, scope);
+                }
+                if ("except".equals(e.getOperator()) && e.getOperandsCount() == 2
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE
+                        && elements.size() <= 1
+                        && isRelation(e.getOperands(0).getVariable(), scope)) {
+                    yield differenceEquality(collection, e, elements);
+                }
+                yield null;
+            }
+            default -> null;
+        };
+        if (equality == null) {
+            return null;
         }
         return "ne".equals(op) ? expression("not", equality) : equality;
+    }
+
+    /**
+     * The equality of {@code variable}, or of its {@code projection}, with {@code elements};
+     * {@code null} when {@code variable} is no relation, the projection is not {@code t} or
+     * {@code t.f}, or the list is longer than one and the relation declares no position.
+     */
+    private static Operand relationEquality(String variable, ParsedLambda projection,
+                                            List<Value> elements, Scope scope) {
+        if (!isRelation(variable, scope)) {
+            return null;
+        }
+        String field = null;
+        if (projection != null) {
+            Operand body = projection.body();
+            String name = projection.varName();
+            if (body.getNodeCase() != Operand.NodeCase.VARIABLE) {
+                return null;
+            }
+            String projected = body.getVariable();
+            if (projected.startsWith(name + ".") && projected.indexOf('.', name.length() + 1) < 0) {
+                field = projected.substring(name.length() + 1);
+            } else if (!projected.equals(name)) {
+                return null;
+            }
+        }
+        Operand listVar = Operand.newBuilder().setVariable(variable).build();
+        Operand equality = expression("eq", expression("size", listVar), number(elements.size()));
+        if (elements.size() == 1) {
+            Operand element = Operand.newBuilder().setVariable(
+                    field == null ? LIST_ELEMENT : LIST_ELEMENT + "." + field).build();
+            Operand body = expression("eq", element, constant(elements.get(0)));
+            return expression("and", equality, expression("exists", listVar, expression("lambda",
+                    body, Operand.newBuilder().setVariable(LIST_ELEMENT).build())));
+        }
+        if (elements.size() > 1) {
+            Scope.Resolution resolved = scope.resolve(variable);
+            if (!(resolved instanceof Scope.ResolvedRelation ref) || ref.isChained()
+                    || ref.tail().positionField() == null) {
+                return null;
+            }
+            PlanResourcesFilter.Expression.Builder all = PlanResourcesFilter.Expression
+                    .newBuilder().setOperator("and").addOperands(equality);
+            for (int k = 0; k < elements.size(); k++) {
+                Operand read = expression("index", listVar, number(k));
+                if (field != null) {
+                    read = expression("get-field", read,
+                            Operand.newBuilder().setVariable(field).build());
+                }
+                all.addOperands(expression("eq", read, constant(elements.get(k))));
+            }
+            return Operand.newBuilder().setExpression(all).build();
+        }
+        return equality;
+    }
+
+    /**
+     * {@code rel.except(b) == []} or {@code == [v]}: the difference is empty, or holds one
+     * element and it is {@code v}.
+     */
+    private static Operand differenceEquality(Operand difference,
+                                              PlanResourcesFilter.Expression except,
+                                              List<Value> elements) {
+        Operand size = expression("eq", expression("size", difference), number(elements.size()));
+        if (elements.isEmpty()) {
+            return size;
+        }
+        ParsedLambda keep = SizeTranslator.exceptKeeps(except);
+        Operand element = Operand.newBuilder().setVariable(keep.varName()).build();
+        Operand kept = expression("and", keep.body(),
+                expression("eq", element, constant(elements.get(0))));
+        Operand matches = expression("filter", except.getOperands(0),
+                expression("lambda", kept, element));
+        return expression("and", size, expression("gt", expression("size", matches), number(0)));
+    }
+
+    private static boolean isRelation(String variable, Scope scope) {
+        try {
+            return scope.resolve(variable) instanceof Scope.ResolvedRelation;
+        } catch (IllegalArgumentException unmapped) {
+            // Left to the comparison, which reports the list constant.
+            return false;
+        }
+    }
+
+    private static Operand constant(Value value) {
+        return Operand.newBuilder().setValue(value).build();
     }
 
     /**

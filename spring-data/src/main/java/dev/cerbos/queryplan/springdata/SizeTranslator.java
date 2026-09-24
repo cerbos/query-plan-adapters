@@ -106,14 +106,63 @@ final class SizeTranslator {
                         literal ? collection.getValue() : null);
             }
             if ("except".equals(argOperator)) {
-                // size(coll.except([...])): list difference has no JPA translation.
-                throw Refusals.exceptUnsupported();
+                return exceptAsFilter(arg.getExpression());
             }
             // A computed collection, e.g. a map() projection or a literal list.
             throw Refusals.unsupported(
                     "Unsupported size() expression: size() argument must be a collection "
                             + "attribute or filter(...), got " + Refusals.describeOperand(arg));
         }
+    }
+
+    /** A lambda variable no plan names, for the element of a rewritten {@code except}. */
+    private static final String EXCEPT_ELEMENT = "__cerbos_except_element";
+
+    /**
+     * {@code a.except(b)} as {@code a.filter(x, !(x in b))}: Cerbos keeps each element of
+     * {@code a} that {@code b} does not contain, in order and with duplicates. {@code b} is a
+     * literal list, or a one-element {@code [expr]}, whose membership is {@code x == expr}; a
+     * longer computed list is refused, since one erroring element must fail the whole list.
+     */
+    private static SizeArgument exceptAsFilter(PlanResourcesFilter.Expression except) {
+        ParsedLambda keep = exceptKeeps(except);
+        Operand collection = except.getOperands(0);
+        return switch (collection.getNodeCase()) {
+            case VARIABLE -> new SizeArgument(collection.getVariable(), keep, null);
+            case VALUE -> new SizeArgument(null, keep, collection.getValue());
+            default -> throw Refusals.exceptUnsupported();
+        };
+    }
+
+    /** The filter lambda keeping the elements {@code a.except(b)} keeps. */
+    static ParsedLambda exceptKeeps(PlanResourcesFilter.Expression except) {
+        List<Operand> ops = except.getOperandsList();
+        if (ops.size() != 2) {
+            throw Refusals.malformed("except requires exactly 2 operands");
+        }
+        Operand removed = ops.get(1);
+        Operand element = Operand.newBuilder().setVariable(EXCEPT_ELEMENT).build();
+        Operand membership;
+        if (removed.getNodeCase() == Operand.NodeCase.VALUE
+                && removed.getValue().getKindCase() == Value.KindCase.LIST_VALUE) {
+            membership = expression("in", element, removed);
+        } else if (removed.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "list".equals(removed.getExpression().getOperator())
+                && removed.getExpression().getOperandsCount() == 1) {
+            membership = expression("eq", element, removed.getExpression().getOperands(0));
+        } else {
+            throw Refusals.exceptUnsupported();
+        }
+        return new ParsedLambda(expression("not", membership), EXCEPT_ELEMENT);
+    }
+
+    private static Operand expression(String operator, Operand... operands) {
+        PlanResourcesFilter.Expression.Builder e =
+                PlanResourcesFilter.Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            e.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(e).build();
     }
 
     /**

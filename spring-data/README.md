@@ -184,7 +184,7 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
 | `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
@@ -341,7 +341,8 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `contains` / `startsWith` / `endsWith` | `cb.like` with `\`, `%`, `_`, `[` escaped; also the constant-receiver form (`"a,b".contains(R.attr.x)`) |
 | Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
 | Field-to-field comparisons | `cb.equal(pathA, pathB)` and friends, including inside lambdas |
-| `R.attr.coll == ["x"]`, `== []`, and `!=` over a relation | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare |
+| `R.attr.coll == ["x"]`, `== []`, and `!=`, over a relation or its `map(t, t.f)` projection | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare. Longer lists need `withPositionField`, and are `size(coll) == n && coll[0] == v0 && ...` |
+| `size(a.except(b))`, `a.except(b) == []` / `== [v]` | `size(a.filter(x, !(x in b)))`, as Cerbos keeps each element of `a` that `b` does not contain; equality with `[v]` is a difference of one element that equals `v` |
 | `R.attr.list[i] <op> v`, `R.attr.list[i].f <op> v` (relation with `withPositionField`) | `list.exists(e, e.position = i && e <op> v)` as a three-valued score subquery; UNKNOWN when no element sits at `i` or `i` is not a non-negative integer, as CEL errors |
 | `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
 | `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
@@ -377,8 +378,8 @@ consulted.
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
-| `eq`/`ne` between a relation and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; use `in`/`hasIntersection`, or `size()` with `exists()` |
-| `except` | `size(R.attr.tags.except(["archived"])) > 0` | no | Rewrite as `R.attr.tags.exists(x, !(x in ["archived"]))` |
+| `eq`/`ne` between a relation without a declared position field and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; declare `withPositionField(...)`, or use `in`/`hasIntersection` |
+| `except` in boolean position, compared with a list of two or more elements, or removing a computed list of two or more | `R.attr.tags.except(["a"]) == ["b", "c"]` | no | A list difference in SQL has no order to compare; `size(...)` of one and equality with at most one element translate |
 
 ## Conformance contract
 
@@ -392,11 +393,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 69 / 80 |
-| adversarial | 206 / 227 |
+| extended | 72 / 80 |
+| adversarial | 207 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 31 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 27 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -627,6 +628,9 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `size(...)` of an `except()` difference, and its equality with a list of at most one element,
+  now translate instead of throwing, as does list equality of any length over a relation that
+  declares `withPositionField` (and over its `map(t, t.f)` projection).
 - The planner's `list(...)` and `struct(...)` literal expressions (lists of lists, maps, lists of
   maps) are folded to constants, and a scalar compared with a list or map literal is decided
   (false for `==`, true for `!=`) instead of throwing. Macros over a literal list of maps
