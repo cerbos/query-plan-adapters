@@ -1,6 +1,10 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { is } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { PgColumn } from "drizzle-orm/pg-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
@@ -11,8 +15,18 @@ import {
   resolveConstantNumber,
 } from "./arithmetic";
 import type { LeafComparisonOperator } from "./arithmetic";
+import { parseCelDoubleString } from "./conversion";
 import { buildFilterFromExpression } from "./filter";
-import { buildIndexedComparison } from "./indexed";
+import {
+  buildIndexedComparison,
+  indexedListEquality,
+  resolveIndexedList,
+} from "./indexed";
+import {
+  exceedsMillisecondPrecision,
+  formatRfc3339Nanoseconds,
+  parseRfc3339Nanoseconds,
+} from "./timestamp";
 import {
   buildColumnExpression,
   columnForOperand,
@@ -33,11 +47,16 @@ import {
   applyComparisonWithExpression,
   buildNullGuard,
   constantCondition,
+  bindConstant,
   operandExpression,
   withPolarity,
 } from "./predicates";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
-import { buildValueExpression, resolveScalarOperand } from "./values";
+import {
+  buildCheckedIntComparison,
+  buildValueExpression,
+  resolveScalarOperand,
+} from "./values";
 import type { BuildFilterOptions, Mapper } from "./types";
 
 /**
@@ -54,6 +73,25 @@ interface ComparisonContext {
   /** The polarity a `not` pushed down to this comparison. */
   negated: boolean;
 }
+
+/** The operators whose result is always a boolean, so a comparison with `true` / `false` is one. */
+const BOOLEAN_VALUED_OPERATORS = new Set([
+  "matches",
+  "contains",
+  "startsWith",
+  "endsWith",
+  "in",
+  "hasIntersection",
+  "ancestorOf",
+  "descendentOf",
+  "overlaps",
+  "exists",
+  "exists_one",
+  "all",
+]);
+
+const isBooleanValued = (operand: PlanExpressionOperand): operand is ExpressionOperand =>
+  isExpressionOperand(operand) && BOOLEAN_VALUED_OPERATORS.has(operand.operator);
 
 // Mirror map for value-first comparisons: the planner preserves source order, so
 // `3 <= R.attr.aNumber` arrives as le(value, variable) and must become `aNumber >= 3`,
@@ -294,6 +332,164 @@ const buildMixedTypeComparison = (
 };
 
 /**
+ * The fractional-second digits every value of a timestamp column carries at most, read off its
+ * Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (the server's default is 6), a MySQL
+ * `datetime` / `timestamp`'s `fsp` (MySQL's default is 0). A SQLite text column holds whatever
+ * string the application wrote, so it is held to the millisecond contract the README states.
+ */
+const timestampColumnDigits = (column: AnyColumn): number | undefined => {
+  const declared = column as AnyColumn & { precision?: number; fsp?: number };
+  if (is(column, PgColumn) && column.columnType.startsWith("PgTimestamp")) {
+    return declared.precision ?? 6;
+  }
+  if (
+    is(column, MySqlColumn) &&
+    (column.columnType.startsWith("MySqlDateTime") || column.columnType.startsWith("MySqlTimestamp"))
+  ) {
+    return declared.fsp ?? 0;
+  }
+  if (is(column, SQLiteColumn) && column.dataType === "string") return 3;
+  return undefined;
+};
+
+/**
+ * A typed timestamp column compared with a literal finer than the adapter binds — in practice the
+ * planner's `now()`, which it folds at nanosecond precision.
+ *
+ * Rounding the literal would compare a different instant. But every value the column holds lies on
+ * its precision grid `g`, and between two grid points there is no value to disagree about, so each
+ * ordering has an exact equivalent against a grid point: `c < T` is `c < ceil(T)`, `c <= T` is
+ * `c <= floor(T)`, `c > T` is `c > floor(T)` and `c >= T` is `c >= ceil(T)`. An off-grid `T` equals
+ * no value, so `==` is false and `!=` true for every present row; a NULL column stays UNKNOWN, as
+ * everywhere else a timestamp is compared. With the column's grid unknown, the shape is refused.
+ */
+const buildOffGridTimestampComparison = (
+  context: ComparisonContext,
+  operator: LeafComparisonOperator,
+  field: { name: string },
+  literal: string,
+): SQL => {
+  const { mapper, options, negated } = context;
+  const resolved = resolveFieldReference(field.name, mapper);
+  const column = isMappingConfig(resolved.mapping) ? resolved.mapping.column : undefined;
+  const digits = column === undefined ? undefined : timestampColumnDigits(column);
+  if (digits === undefined || digits > 9) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot compare '${field.name}' with a timestamp finer than a millisecond (${literal}): ` +
+        "the column's precision is not declared on a PostgreSQL timestamp, a MySQL datetime or " +
+        "timestamp, or a SQLite text column, so no grid point is known to compare against instead",
+    );
+  }
+  const instant = parseRfc3339Nanoseconds(literal);
+  const grid = 10n ** BigInt(9 - digits);
+  const remainder = ((instant % grid) + grid) % grid;
+  const floor = instant - remainder;
+  const ceil = remainder === 0n ? floor : floor + grid;
+  const expr = buildColumnExpression(resolved.mapping, field.name);
+  const bound = (nanoseconds: bigint): SQL =>
+    sql`${formatRfc3339Nanoseconds(nanoseconds, digits)}`;
+  const comparison =
+    remainder === 0n
+      ? applyComparisonWithExpression(operator, expr, bound(floor))
+      : operator === "lt"
+        ? sql`${expr} < ${bound(ceil)}`
+        : operator === "le"
+          ? sql`${expr} <= ${bound(floor)}`
+          : operator === "gt"
+            ? sql`${expr} > ${bound(floor)}`
+            : operator === "ge"
+              ? sql`${expr} >= ${bound(ceil)}`
+              : sql`(case when ${expr} is null then null else ${constantCondition(operator === "ne")} end)`;
+  return withPolarity(
+    wrapRelationChain(resolved.relations, comparison, field.name, options),
+    negated,
+  );
+};
+
+/** `timestamp(<field typed "timestamp">)`, as the field it converts. */
+const timestampField = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): { name: string } | undefined => {
+  if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  if (operand.operands.length !== 1 || inner === undefined || !isNameOperand(inner)) {
+    return undefined;
+  }
+  const { mapping } = resolveFieldReference(inner.name, mapper);
+  return isMappingConfig(mapping) && mapping.valueType === "timestamp" ? inner : undefined;
+};
+
+/** `timestamp("<literal>")` whose literal has non-zero digits below the millisecond. */
+const subMillisecondTimestampLiteral = (operand: PlanExpressionOperand): string | undefined => {
+  if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  return operand.operands.length === 1 &&
+    inner !== undefined &&
+    isValueOperand(inner) &&
+    typeof inner.value === "string" &&
+    exceedsMillisecondPrecision(inner.value)
+    ? inner.value
+    : undefined;
+};
+
+/**
+ * `string(x) == "lit"` / `!=` over a number column, lowered without a CAST (which would render the
+ * number in the store's format, not CEL's — see `UNSUPPORTED_CONVERSIONS` in `values.ts`).
+ *
+ * CEL's `string()` over a double is a function, so the equality holds exactly when `x` is the one
+ * double CEL spells `lit` (`parseCelDoubleString`), and a numeric comparison against that double
+ * says so. When no double is spelled `lit` — `"2.0"`, `"1e6"`, `"abc"` — equality is false for
+ * every present row and inequality true. A NULL column is a missing attribute or a null value, for
+ * which CEL's `string()` raises, so it is UNKNOWN under both polarities either way.
+ *
+ * Zero is refused: CEL spells `-0.0` as `"-0"`, and SQL's `x = 0` cannot tell it from `0.0`. So is
+ * a non-finite spelling (`"NaN"`), which no SQL comparison reproduces on every store.
+ */
+const buildNumberStringComparison = (
+  context: ComparisonContext,
+  conversion: ExpressionOperand,
+  literal: string,
+): SQL => {
+  const { operator, mapper, options, negated } = context;
+  const inner = conversion.operands[0]!;
+  const target = parseCelDoubleString(literal);
+  if (target !== undefined && (target === 0 || !Number.isFinite(target))) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot translate string() of a number compared with "${literal}": SQL cannot tell the ` +
+        "doubles CEL spells differently here apart (0 from -0), or has no comparison for them " +
+        "(NaN)",
+    );
+  }
+  const dynamic = resolveScalarOperand(inner, mapper, options);
+  const present =
+    target === undefined
+      ? sql`(case when ${dynamic.expr} is null then null else ${constantCondition(operator === "ne")} end)`
+      : operator === "eq"
+        ? sql`(${dynamic.expr} = ${bindConstant(target)})`
+        : sql`(${dynamic.expr} <> ${bindConstant(target)})`;
+  const reference = isNameOperand(inner) ? inner.name : "'string' operand";
+  return withPolarity(
+    wrapRelationChain(dynamic.relations, present, reference, options),
+    negated,
+  );
+};
+
+/** A `string()` over one number column, if `operand` is one. */
+const numberStringConversion = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): ExpressionOperand | undefined => {
+  if (!isStringConversion(operand) || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  return operand.operands.length === 1 &&
+    inner !== undefined &&
+    columnForOperand(inner, mapper)?.dataType === "number"
+    ? operand
+    : undefined;
+};
+
+/**
  * The CEL type of an operand where the plan or the mapping settles it, or `undefined`. A
  * transform owns its own comparison, so its column's type is not the operand's.
  */
@@ -314,6 +510,8 @@ const scalarType = (
   }
   return columnForOperand(operand, mapper)?.dataType;
 };
+
+const SCALAR_TYPES = new Set(["string", "number", "boolean"]);
 
 /** Two fields, each possibly behind a relation. */
 const buildFieldToFieldComparison = (
@@ -395,6 +593,21 @@ export const buildComparisonFilter = (
     );
   }
 
+  // `pred == true` is `pred`, and `pred == false` is `!pred` — an error stays an error under
+  // both — so the predicate is translated in condition position with the polarity folded in.
+  if (operator === "eq" || operator === "ne") {
+    const [predicate, literal] =
+      isBooleanValued(left) && isValueOperand(right) ? [left, right] : [right, left];
+    if (
+      isBooleanValued(predicate) &&
+      isValueOperand(literal) &&
+      typeof literal.value === "boolean"
+    ) {
+      const same = (operator === "eq") === literal.value;
+      return buildFilterFromExpression(predicate, mapper, options, negated === same);
+    }
+  }
+
   if (isOperatorCall(left, "if")) {
     return buildTernaryComparison(context, left, right, true);
   }
@@ -460,6 +673,23 @@ export const buildComparisonFilter = (
     return constantCondition(result !== negated);
   }
 
+  const listField = isNameOperand(left) ? left : isNameOperand(right) ? right : undefined;
+  const listLiteral = [left, right].find(
+    (operand) => isValueOperand(operand) && Array.isArray(operand.value),
+  );
+  if (
+    listField !== undefined && listLiteral !== undefined && isValueOperand(listLiteral) &&
+    (operator === "eq" || operator === "ne")
+  ) {
+    const indexed = resolveIndexedList(listField.name, mapper);
+    if (indexed) {
+      const equality = indexedListEquality({
+        ...indexed,
+        values: listLiteral.value as Value[],
+      });
+      return withPolarity(equality, (operator === "ne") !== negated);
+    }
+  }
   if (
     (isNameOperand(left) || isNameOperand(right)) &&
     [left, right].some(
@@ -471,8 +701,53 @@ export const buildComparisonFilter = (
     );
   }
 
+  const checkedInt =
+    buildCheckedIntComparison(operator, left, right, mapper, options) ??
+    buildCheckedIntComparison(MIRRORED_OPERATORS[operator], right, left, mapper, options);
+  if (checkedInt !== undefined) return withPolarity(checkedInt, negated);
+
+  const leftTimestamp = timestampField(left, mapper);
+  const rightTimestampLiteral = subMillisecondTimestampLiteral(right);
+  if (leftTimestamp && rightTimestampLiteral !== undefined) {
+    return buildOffGridTimestampComparison(context, operator, leftTimestamp, rightTimestampLiteral);
+  }
+  const rightTimestamp = timestampField(right, mapper);
+  const leftTimestampLiteral = subMillisecondTimestampLiteral(left);
+  if (rightTimestamp && leftTimestampLiteral !== undefined) {
+    return buildOffGridTimestampComparison(
+      context,
+      MIRRORED_OPERATORS[operator],
+      rightTimestamp,
+      leftTimestampLiteral,
+    );
+  }
+
+  if (operator === "eq" || operator === "ne") {
+    const leftConversion = numberStringConversion(left, mapper);
+    const rightConversion = numberStringConversion(right, mapper);
+    if (leftConversion && isValueOperand(right) && typeof right.value === "string") {
+      return buildNumberStringComparison(context, leftConversion, right.value);
+    }
+    if (rightConversion && isValueOperand(left) && typeof left.value === "string") {
+      return buildNumberStringComparison(context, rightConversion, left.value);
+    }
+  }
+
   const leftType = scalarType(left, mapper);
   const rightType = scalarType(right, mapper);
+  // A map literal equals no string, number or boolean — but a JSON column may hold a map equal to
+  // it, so the heterogeneous answer is only given against a scalar column.
+  const isMapLiteral = (operand: PlanExpressionOperand): boolean =>
+    isValueOperand(operand) && operand.value !== null && typeof operand.value === "object" &&
+    !Array.isArray(operand.value);
+  if (
+    [left, right].some(isMapLiteral) &&
+    ![leftType, rightType].some((type) => type && SCALAR_TYPES.has(type))
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "A map literal can only be compared with a string, number or boolean attribute",
+    );
+  }
   if (leftType && rightType && leftType !== rightType) {
     return buildMixedTypeComparison(context, left, right);
   }

@@ -32,6 +32,13 @@ export const TRUE_CONDITION = sql`1 = 1`;
 export const withPolarity = (filter: SQL, negated: boolean): SQL =>
   negated ? not(filter) : filter;
 
+/**
+ * A boolean UNKNOWN on every dialect — CEL's evaluation error, which denies under both polarities
+ * and which `||` / `&&` absorb exactly as SQL's OR / AND absorb NULL (`err || true` is true,
+ * `err && false` is false). A bare NULL is inferred as text by PostgreSQL, where NOT rejects it.
+ */
+export const UNKNOWN_CONDITION = sql`(null = true)`;
+
 /** A plan-time boolean, as the constant condition that spells it. */
 export const constantCondition = (value: boolean): SQL =>
   value ? TRUE_CONDITION : FALSE_CONDITION;
@@ -260,16 +267,21 @@ export const applyComparisonWithExpression = (
   valueExplicitNull = false,
 ): SQL => {
   const isEquality = operator === "eq" || operator === "ne";
-  // Mixing the two conventions across one comparison has no faithful rendering. The declared side
-  // needs a definite answer for its NULL (CEL holds a null VALUE); the undeclared side needs
-  // UNKNOWN for its NULL (a missing attribute, which CEL denies under both polarities). A definite
-  // predicate returns rows the PDP refuses; a plain one drops rows the PDP allows. Refuse it
-  // rather than pick a direction — declare both attributes, or neither.
+  // Mixing the two conventions across one comparison. The declared side needs a definite answer
+  // for its NULL (CEL holds a null VALUE); the undeclared side needs UNKNOWN for its NULL (a
+  // missing attribute, which CEL denies under both polarities). The asymmetric expansion alone is
+  // definite for both — `l IS NOT NULL AND l = r` is FALSE when both are NULL, so its negation
+  // would allow a row CEL denies — so the undeclared side's NULL is caught first by a CASE, which
+  // leaves the expansion to answer only rows where that side is present.
   if (isEquality && fieldExplicitNull !== valueExplicitNull) {
-    throw new UnsupportedQueryPlanError(
-      `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
-        "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither.",
-    );
+    const omittedExpr = fieldExplicitNull ? valueExpr : fieldExpr;
+    const equality = sql`(case when ${omittedExpr} is null then null else ${definiteEquality(
+      fieldExpr,
+      valueExpr,
+      fieldExplicitNull,
+      valueExplicitNull,
+    )} end)`;
+    return operator === "eq" ? equality : not(equality);
   }
   if (isEquality && fieldExplicitNull && valueExplicitNull) {
     const equality = definiteEquality(fieldExpr, valueExpr, true, true);
@@ -313,6 +325,36 @@ export const assertNullOperandTranslatable = (
   }
 };
 
+/**
+ * A null operand against a column on the omitted convention, where a NULL column is a MISSING
+ * attribute and a present one is never null. CEL raises over the missing attribute — denied under
+ * both polarities, so UNKNOWN — and over a present value `== null` is false and `!= null` true; an
+ * ordering against null is a no-overload error for every row. A null element of an `in` list can
+ * therefore never match and is dropped. `undefined` when no null operand is involved.
+ */
+const applyOmittedNullComparison = (
+  mapping: BaseMapperEntry,
+  operator: ComparisonOperator,
+  value: Value,
+): SQL | undefined => {
+  const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+  if (column === undefined) return undefined;
+  const whenPresent = (present: SQL): SQL =>
+    sql`(case when ${column} is null then null else ${present} end)`;
+  if (value === null) {
+    if (operator === "eq") return whenPresent(FALSE_CONDITION);
+    if (operator === "ne") return whenPresent(TRUE_CONDITION);
+    return sql`(null = true)`;
+  }
+  if (operator === "in" && Array.isArray(value) && value.includes(null)) {
+    const present = value.filter((element) => element !== null);
+    return present.length === 0
+      ? whenPresent(FALSE_CONDITION)
+      : applyColumnComparison(column, "in", present, false);
+  }
+  return undefined;
+};
+
 /** A whole relation compared as a value: it is never equal to a constant. */
 const applyRelationComparison = (operator: ComparisonOperator): SQL => {
   switch (operator) {
@@ -331,11 +373,12 @@ const applyRelationComparison = (operator: ComparisonOperator): SQL => {
 /** Drizzle's scalar data types, each of which holds exactly one CEL type. */
 const SCALAR_DATA_TYPES = new Set(["string", "number", "boolean"]);
 
-/** A string, number or boolean constant that a column of another of those types cannot equal. */
+/**
+ * A non-null constant a string, number or boolean column cannot equal: a scalar of another of those
+ * types, or a list or map, which equals no scalar at all.
+ */
 const isCrossTypeScalar = (dataType: string, value: Value): boolean =>
-  SCALAR_DATA_TYPES.has(dataType) &&
-  SCALAR_DATA_TYPES.has(typeof value) &&
-  typeof value !== dataType;
+  SCALAR_DATA_TYPES.has(dataType) && value !== null && typeof value !== dataType;
 
 /** `column IN (values)`, with CEL's reading of a null element and of an explicit-null column. */
 const buildColumnMembership = (
@@ -449,6 +492,13 @@ export const applyComparison = (
   // The declaration lives on the mapper entry, but the entry unwraps to a bare column one frame
   // down, so it has to be carried rather than re-read.
   const declared = mappingNullRepresentation(mapping) ?? inherited;
+  const plainColumn =
+    isColumn(mapping) ||
+    (isMappingConfig(mapping) && !mapping.transform && !mapping.relation && !mapping.indexable);
+  if (plainColumn && (declared ?? options.nullRepresentation) === "omitted") {
+    const omitted = applyOmittedNullComparison(mapping, operator, value);
+    if (omitted !== undefined) return omitted;
+  }
   if (value === null) {
     assertNullOperandTranslatable(
       `\`${operator}\` against a null operand`,

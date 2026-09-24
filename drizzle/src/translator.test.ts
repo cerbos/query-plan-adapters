@@ -11,6 +11,8 @@ import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
+import { formatCelDouble, parseCelDoubleString } from "./conversion";
+import { compileRegex } from "./regex";
 import type {
   Mapper,
   MapperEntry,
@@ -112,7 +114,7 @@ describe("the refusal type", () => {
   });
 
   test("a shape the adapter cannot express raises it", () => {
-    expect(() => translate("postgresql", "regex/matches/digit-class")).toThrow(
+    expect(() => translate("postgresql", "collection/map/equals-list-literal")).toThrow(
       UnsupportedQueryPlanError,
     );
   });
@@ -285,7 +287,6 @@ describe("nullAttributeRepresentation", () => {
   // `aOptionalString == null`: the planner emits the same `eq(attr, null)` whichever convention
   // the caller uses, so the adapter has to be told.
   const NULL_EQ_MISSING = "null/equals/null-literal-on-missing-attribute";
-  const OMITTED = /under nullAttributeRepresentation "omitted"/;
 
   test("explicit: a null operand becomes an IS NULL filter", () => {
     expect(
@@ -299,21 +300,21 @@ describe("nullAttributeRepresentation", () => {
     ).toContain('"a_optional_string" is null');
   });
 
-  test("omitted: the same plan is refused rather than translated", () => {
-    // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // filter above would return exactly those rows (#302).
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, {
+  // A NULL column on the omitted convention sends no attribute, so check() denies on a
+  // missing-attribute error — under both polarities — where the explicit filter above returns
+  // exactly those rows (#302). Omitted is recognisable by that guard: NULL, never a match.
+  const OMITTED_GUARD = "is null then null else";
+
+  test("omitted: the same plan never matches, and a NULL column is UNKNOWN", () => {
+    const rendered = render(
+      "postgresql",
+      filterFor("postgresql", NULL_EQ_MISSING, {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       }),
-    ).toThrow(UnsupportedQueryPlanError);
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, {
-        mapper: UNDECLARED,
-        nullAttributeRepresentation: "omitted",
-      }),
-    ).toThrow(OMITTED);
+    ).sql;
+    expect(rendered).toContain(`"a_optional_string" ${OMITTED_GUARD}`);
+    expect(rendered.replace(OMITTED_GUARD, "")).not.toContain("is null");
   });
 
   // #308. A per-attribute declaration overrides the call-level option in both directions.
@@ -323,14 +324,20 @@ describe("nullAttributeRepresentation", () => {
     expect(
       render("postgresql", filterFor("postgresql", nullEq, { nullAttributeRepresentation: "omitted" })),
     ).toEqual(render("postgresql", filterFor("postgresql", nullEq)));
-    expect(() =>
-      translate("postgresql", nullEq, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" }),
-    ).toThrow(OMITTED);
+    expect(
+      render(
+        "postgresql",
+        filterFor("postgresql", nullEq, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" }),
+      ).sql,
+    ).toContain(OMITTED_GUARD);
 
     // `aOptionalString` declares "omitted", so a call-level "explicit" does not reach it either.
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, { nullAttributeRepresentation: "explicit" }),
-    ).toThrow(OMITTED);
+    expect(
+      render(
+        "postgresql",
+        filterFor("postgresql", NULL_EQ_MISSING, { nullAttributeRepresentation: "explicit" }),
+      ).sql,
+    ).toContain(OMITTED_GUARD);
   });
 
   test.each(["eq", "ne"])("mixed scalar types preserve explicit-null %s", (operator) => {
@@ -365,17 +372,23 @@ describe("nullAttributeRepresentation", () => {
       const run = () =>
         translate("postgresql", NULL_EQ_MISSING, { mapper, nullAttributeRepresentation: outer });
       if (outer === "omitted") {
-        expect(run).toThrow(OMITTED);
+        expect(run()).toEqual(
+          translate("postgresql", NULL_EQ_MISSING, {
+            mapper: UNDECLARED,
+            nullAttributeRepresentation: "omitted",
+          }),
+        );
       } else {
         expect(run()).toEqual(translate("postgresql", NULL_EQ_MISSING, { mapper: UNDECLARED }));
       }
     },
   );
 
-  // #302 completeness: under a call-level "omitted" with no per-attribute declarations, every plan
-  // carrying a null literal is refused — keyed off the null OPERAND, not a list of operators — except
-  // a null compared with an indexed list ELEMENT, which is a value, not a missing attribute.
-  test("under omitted, every null literal is refused unless it compares an indexed element", () => {
+  // #302 completeness: under a call-level "omitted" with no per-attribute declarations, no plan
+  // carrying a null literal SELECTS the NULL rows — keyed off the null OPERAND, not a list of
+  // operators. Every `IS NULL` left in the SQL sits in a guard that makes the row NULL, never a
+  // match, unless it compares an indexed list ELEMENT, which is a value, not a missing attribute.
+  test("under omitted, no null literal selects the NULL rows unless it compares an indexed element", () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
       const record = node as Record<string, unknown>;
@@ -396,23 +409,45 @@ describe("nullAttributeRepresentation", () => {
       .map((g) => g.id);
     expect(nullCarrying).toEqual(expect.arrayContaining([NULL_EQ_MISSING, ...INDEXED_ELEMENT]));
 
-    const notRejected = nullCarrying.filter((id) => {
-      const run = () =>
-        translate("postgresql", id, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" });
-      if (INDEXED_ELEMENT.includes(id)) {
-        run();
-        return false;
-      }
+    const selectingNull = nullCarrying.filter((id) => {
+      if (INDEXED_ELEMENT.includes(id)) return false;
+      let result: QueryPlanToDrizzleResult;
       try {
-        run();
-        return true;
+        result = translate("postgresql", id, {
+          mapper: UNDECLARED,
+          nullAttributeRepresentation: "omitted",
+        });
       } catch (error) {
-        return !OMITTED.test(String(error));
+        if (error instanceof UnsupportedQueryPlanError) return false;
+        throw error;
       }
+      if (result.kind !== PlanKind.CONDITIONAL) return false;
+      // Two guards exclude rather than select: a CASE arm that makes the row NULL, and the
+      // NOT EXISTS that denies a row whose projected relation element is missing.
+      const unguarded = render("postgresql", result.filter)
+        .sql.replace(/case when (?:(?!then).)*? then null/g, "")
+        .replace(/not exists \(select 1 from [^()]* where \([^()]* is null\)\)/g, "");
+      return /\bis null\b/.test(unguarded);
     });
-    expect(notRejected).toEqual([]);
+    expect(selectingNull).toEqual([]);
   });
 });
+
+const timestampPlan = (operator: string, instant: string): PlanResourcesResponse =>
+  ({
+    kind: PlanKind.CONDITIONAL,
+    condition: {
+      operator,
+      operands: [
+        { operator: "timestamp", operands: [{ name: "request.resource.attr.createdAt" }] },
+        { operator: "timestamp", operands: [{ value: instant }] },
+      ],
+    } as unknown as PlanExpressionOperand,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  }) as PlanResourcesResponse;
 
 describe("timestamp literals", () => {
   // `timestamp/less-than/relative-window` compares against the literal the planner folds
@@ -421,11 +456,43 @@ describe("timestamp literals", () => {
   const WINDOW = "timestamp/less-than/relative-window";
   const at = (now: string) => filterFor("postgresql", WINDOW, { now });
 
-  test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    expect(() => at("2026-08-11T09:13:39.123456789Z")).toThrow(UnsupportedQueryPlanError);
-    expect(() => at("2026-08-11T09:13:39.123456789Z")).toThrow(
-      "Timestamp value exceeds millisecond precision",
-    );
+  // No seed sits within a grid step of `now()`, so which side of the literal the bound grid point
+  // falls on is invisible to the harness: a floor where a ceiling belongs returns the same rows.
+  test.each([
+    ["postgresql", "2026-08-11T09:13:39.123457Z"],
+    ["mysql", "2026-08-11T09:13:39.123457Z"],
+    ["sqlite", "2026-08-11T09:13:39.124Z"],
+  ] as const)(
+    "a nanosecond instant — what the PDP actually folds — bounds `<` by the next grid point (%s)",
+    (store, bound) => {
+      const filter = filterFor(store, WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
+      expect(render(store, filter).params).toEqual([bound]);
+    },
+  );
+
+  test.each([
+    ["lt", "<", "2026-08-11T09:13:39.123457Z"],
+    ["le", "<=", "2026-08-11T09:13:39.123456Z"],
+    ["gt", ">", "2026-08-11T09:13:39.123456Z"],
+    ["ge", ">=", "2026-08-11T09:13:39.123457Z"],
+  ])("`%s` against an off-grid instant compares with the grid point on its side", (operator, symbol, bound) => {
+    const filter = queryPlanToDrizzle({
+      queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
+      mapper: MAPPERS.postgresql,
+    });
+    if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    const rendered = render("postgresql", filter.filter);
+    expect(rendered.sql).toContain(` ${symbol} $1`);
+    expect(rendered.params).toEqual([bound]);
+  });
+
+  test.each(["eq", "ne"])("`%s` against an off-grid instant binds no instant at all", (operator) => {
+    const filter = queryPlanToDrizzle({
+      queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
+      mapper: MAPPERS.postgresql,
+    });
+    if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    expect(render("postgresql", filter.filter).params).toEqual([]);
   });
 
   test("the same plan at millisecond precision translates", () => {
@@ -446,7 +513,6 @@ describe("timestamp literals", () => {
     ["a date with no time part", "2024-01-01"],
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
-    ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
     ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC-3339|millisecond|instant range/);
@@ -492,6 +558,191 @@ describe("what the stores cannot show", () => {
       }
     });
     expect(offenders.map((g) => g.id)).toEqual([]);
+  });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `string(R.attr.aDouble) == "1e+06"` is
+// policy-reachable, but the corpus's one `string()`-of-a-double case has a single witness, -0.6,
+// so no case proves the exponent layout or the refusal of a spelling CEL never produces. Delete
+// this block when cases carrying those spellings land.
+describe("CEL's string() of a double", () => {
+  // Every expected string is Go's own `fmt.Sprintf("%g", d)`, cel-go's spelling of the conversion.
+  test.each([
+    [-0.6, "-0.6"],
+    [2, "2"],
+    [123456, "123456"],
+    [1e6, "1e+06"],
+    [1234567, "1.234567e+06"],
+    [1e21, "1e+21"],
+    [0.0001, "0.0001"],
+    [0.00001, "1e-05"],
+    [1.5e-5, "1.5e-05"],
+    [0.1 + 0.2, "0.30000000000000004"],
+    [100000.5, "100000.5"],
+    [Number.MAX_VALUE, "1.7976931348623157e+308"],
+    [5e-324, "5e-324"],
+  ])("Corpus gap. %p is spelled %p", (value, spelling) => {
+    expect(formatCelDouble(value)).toBe(spelling);
+    expect(parseCelDoubleString(spelling)).toBe(value);
+  });
+
+  test.each(["2.0", "1e6", "1E+06", " 2", "+2", "0x10", "", ".5", "Infinity"])(
+    "Corpus gap. no double is spelled %p, so equality with it matches no row",
+    (spelling) => {
+      expect(parseCelDoubleString(spelling)).toBeUndefined();
+    },
+  );
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `R.attr.aString in {"one": 1}` is
+// policy-reachable, and no case asks it: CEL's `in` over a map tests its keys. Delete this block
+// when a case carrying a map literal as the collection of `in` lands.
+describe("membership in a map literal", () => {
+  test("Corpus gap. tests the map's keys, not its values", () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          {
+            operator: "struct",
+            operands: [
+              { operator: "set-field", operands: [{ value: "one" }, { value: 1 }] },
+              { operator: "set-field", operands: [{ value: "two" }, { value: "three" }] },
+            ],
+          },
+        ],
+      } as unknown as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    } as PlanResourcesResponse;
+    const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql });
+    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    expect(render("postgresql", result.filter).params).toEqual(["one", "two"]);
+  });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Every pattern here is policy-reachable, and
+// the corpus's regex cases witness only one pattern per rule. These pin the RE2 rules the
+// lowering relies on that no case exercises yet. Delete each when a case carrying it lands.
+describe("RE2 patterns lowered without a regex engine", () => {
+  test.each([
+    ["a+b", [{ kind: "contains", literals: ["ab"] }]],
+    ["x*ab*", [{ kind: "contains", literals: ["a"] }]],
+    ["^a.*", [{ kind: "startsWith", literals: ["a"] }]],
+    ["^(?:a|b)c?$", [{ kind: "equals", literals: ["a", "ac", "b", "bc"] }]],
+    ["^\\.$", [{ kind: "equals", literals: ["."] }]],
+    ["^[[:digit:]x-z]{2,}$", [{ kind: "allCharactersIn", characters: [..."0123456789xyz"], min: 2 }]],
+    ["^.+$", [{ kind: "noNewline", min: 1 }]],
+    ["a|", [{ kind: "contains", literals: ["a"] }, { kind: "contains", literals: [""] }]],
+  ])("Corpus gap. %p lowers to %p", (pattern, plans) => {
+    expect(compileRegex(pattern)).toEqual(plans);
+  });
+
+  test("Corpus gap. (?i) folds k and s the way RE2 does, through KELVIN SIGN and LONG S", () => {
+    expect(compileRegex("(?i)^ks$")).toEqual([
+      {
+        kind: "equals",
+        literals: ["ks", "kS", "k\u017F", "Ks", "KS", "K\u017F", "\u212As", "\u212AS", "\u212A\u017F"],
+      },
+    ]);
+  });
+
+  // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches().
+  test.each(["a(?=b)", "a(?!b)", "(?<=a)b", "a**", "{2}a", "*a", "a{2,1}", "a{1001}", "(a", "[b-a]", "a\\"])(
+    "Corpus gap. %p is an RE2 error, so the condition is UNKNOWN",
+    (pattern) => {
+      expect(compileRegex(pattern)).toBe("error");
+    },
+  );
+
+  test("Corpus gap. a brace that opens no count is a literal", () => {
+    expect(compileRegex("^a{,2}$")).toEqual([{ kind: "equals", literals: ["a{,2}"] }]);
+  });
+
+  test.each(["[^a]", "\\D", "a.b", "^a.*b.*c$", "(?i)^é$", "(?s)a", "\\bword", "^a$b"])(
+    "Corpus gap. %p is refused",
+    (pattern) => {
+      expect(() => compileRegex(pattern)).toThrow(UnsupportedQueryPlanError);
+    },
+  );
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Only descendentOf is carried by a case for
+// a hierarchy split on an empty delimiter. Delete each test when a case carrying it lands.
+describe("a hierarchy split per character", () => {
+  const characterHierarchy = (operator: string): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator,
+        operands: [
+          {
+            operator: "hierarchy",
+            operands: [{ name: "request.resource.attr.scope" }, { value: "" }],
+          },
+          { operator: "hierarchy", operands: [{ value: "ab" }, { value: "" }] },
+        ],
+      } as unknown as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    }) as PlanResourcesResponse;
+  const paramsOf = (operator: string): unknown[] => {
+    const result = queryPlanToDrizzle({
+      queryPlan: characterHierarchy(operator),
+      mapper: MAPPERS.postgresql,
+    });
+    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    return render("postgresql", result.filter).params;
+  };
+
+  // Go's strings.Split("", "") is zero segments, which is every longer path's ancestor.
+  test("Corpus gap. ancestorOf is one of the strict prefixes, the empty string included", () => {
+    expect(paramsOf("ancestorOf")).toEqual(["", "a"]);
+  });
+
+  test("Corpus gap. overlaps is any prefix, or an extension", () => {
+    expect(paramsOf("overlaps")).toEqual(["", "a", "ab", "ab", "ab"]);
+  });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). int() over a string or double column is
+// carried by cases only against small constants. Delete each test when a case carrying it lands.
+describe("int() over a string or double column", () => {
+  const intPlan = (condition: unknown): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition: condition as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    }) as PlanResourcesResponse;
+  const intOf = { operator: "int", operands: [{ name: "request.resource.attr.aString" }] };
+
+  // PostgreSQL and MySQL compare a bigint with a double by converting the bigint, which is inexact
+  // at 2^53 and beyond: measured, int("9223372036854775807") == 2^63 is true on both.
+  test("Corpus gap. is refused against a constant at or beyond 2^53", () => {
+    const queryPlan = intPlan({ operator: "eq", operands: [intOf, { value: 2 ** 53 }] });
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql })).toThrow(
+      UnsupportedQueryPlanError,
+    );
+  });
+
+  // A result up to 2^63 - 1 would overflow a bigint and fail the whole query.
+  test("Corpus gap. is refused inside arithmetic", () => {
+    const queryPlan = intPlan({
+      operator: "gt",
+      operands: [{ operator: "add", operands: [intOf, { value: 1 }] }, { value: 50 }],
+    });
+    expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql })).toThrow(
+      UnsupportedQueryPlanError,
+    );
   });
 });
 

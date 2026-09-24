@@ -85,3 +85,39 @@ export const extractLambdaComponents = (
   }
   return { variable: second, expression: first };
 };
+
+/**
+ * The plan with every `list(...)` and `struct(set-field(...)...)` constructor whose leaves are all
+ * constants replaced by the constant it builds — `["a"]`, `{"a": 1}` — so a constructor reaches the
+ * translators exactly as the planner's own folded literals do. A struct with a non-string or
+ * repeated key is left as it is: CEL rejects a repeated key, and a JSON-sourced attribute never
+ * holds a non-string one.
+ */
+export const foldConstantConstructors = (
+  operand: PlanExpressionOperand,
+): PlanExpressionOperand => {
+  if (!isExpressionOperand(operand)) return operand;
+  const operands = operand.operands.map(foldConstantConstructors);
+  if (operand.operator === "list" && operands.every(isValueOperand)) {
+    return { value: operands.map((element) => element.value) };
+  }
+  if (operand.operator === "struct") {
+    const entries: [string, Value][] = [];
+    for (const field of operands) {
+      if (!isExpressionOperand(field) || field.operator !== "set-field") break;
+      const [key, value] = field.operands;
+      if (
+        field.operands.length !== 2 || key === undefined || value === undefined ||
+        !isValueOperand(key) || typeof key.value !== "string" || !isValueOperand(value) ||
+        entries.some(([existing]) => existing === key.value)
+      ) {
+        break;
+      }
+      entries.push([key.value, value.value]);
+    }
+    if (entries.length === operands.length) {
+      return { value: Object.fromEntries(entries) };
+    }
+  }
+  return { operator: operand.operator, operands };
+};

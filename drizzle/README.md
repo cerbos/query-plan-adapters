@@ -154,8 +154,20 @@ See [Mapping hazards](#mapping-hazards).
 - `hasIntersection(map(R.attr.tags, t, t.name), ["a"])` becomes `column IN (...)` over the mapped
   field. Either operand order works; a pair with no literal list throws.
 - `exists`, `exists_one` and `all` over a relation-mapped attribute become correlated subqueries.
-- `filter()` is supported inside `size(filter(...))`. On its own it returns a list, not a boolean,
-  and throws.
+  Over a literal list (a principal attribute the planner folded) each element is substituted into
+  the lambda: `exists` and `all` become an `OR` / `AND` of the results, and `exists_one` a count of
+  the TRUE ones that is NULL if any element's condition is UNKNOWN, since CEL's `exists_one`
+  absorbs no error. `size(filter(...))` over a literal list counts the same way, and `map()` over a
+  literal list is unrolled into the list of its substituted bodies.
+- `size(a.except(b))` is `size(a.filter(t, !(t in b)))`, as Cerbos keeps each element `b` does not
+  contain. `b` must be constant unless `a` is a non-empty literal list, because an erroring `b` makes
+  `except()` raise even when `a` is empty.
+- `x in [e1, e2]` with elements built at evaluation is CEL's equality against each, and an error if
+  any element is a missing attribute.
+- `filter()` is supported inside `size(filter(...))`. On its own — like `map()`, or `except()` with
+  a list argument — it returns a list, not a boolean, which CEL evaluates to an error: it becomes
+  an UNKNOWN condition, denied under both polarities and absorbed by `||` / `&&` as CEL absorbs
+  the error.
 - For a relation that stores scalar values, set `collectionValueType: "scalar"` and the relation's
   `field`. This enables membership such as `R.attr.owner in R.attr.tagNames`, including explicit
   `null` elements.
@@ -168,10 +180,17 @@ Attributes compared through CEL's `timestamp()` must opt in:
 "request.resource.attr.createdAt": { column: resources.createdAt, valueType: "timestamp" },
 ```
 
-Constants must be strict RFC 3339, within years 0001–9999, and exactly representable at millisecond
-precision (digits after the third fractional digit must be zero). They are normalized to UTC. Your
-column and database must keep the same precision. Sub-millisecond `now()` thresholds and
-`timestamp()` over an untyped string throw.
+Constants must be strict RFC 3339 and within years 0001–9999. They are normalized to UTC. A
+constant exactly representable at millisecond precision is compared as it is; your column and
+database must keep at least that precision.
+
+A finer constant — in practice `now()`, which the planner folds at nanosecond precision — is
+compared with the nearest point of the column's own precision grid on the correct side (`c < T`
+becomes `c < ceil(T)`, `c <= T` becomes `c <= floor(T)`, and so on; `==` is false for every present
+row). That is exact because the column holds no value between two grid points. The grid is read
+from the Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (default 6), a MySQL `datetime`
+or `timestamp`'s `fsp` (default 0), and milliseconds for a SQLite text column. Any other column
+type throws for such a constant, as does `timestamp()` over an untyped string.
 
 ## Indexed collection columns
 
@@ -192,10 +211,14 @@ const mapper = {
 | `"pgArray"` | PostgreSQL arrays of `text`, `varchar`, `boolean`, `integer`, `smallint` |
 
 - Supported: `==` / `!=` against a scalar literal (string, finite number, boolean, null), in either
-  operand order, under any logical operator. The index must be a constant non-negative 32-bit
+  operand order, under any logical operator. The whole list compared with a list literal
+  (`R.attr.tags == ["a", "b"]`) is CEL's ordered equality — the same length and each position
+  equal — and reads the declared column even when the mapping also has a relation, which has no
+  order. The index must be a constant non-negative 32-bit
   integer. Positions are zero-based, including PostgreSQL arrays with a nonstandard lower bound.
-  Values and paths are bound parameters.
-- Throws: dynamic or negative indexes, object-field projection (`get-field`), ordered comparisons,
+  Values and paths are bound parameters. A negative or fractional position is an error in CEL and
+  becomes an UNKNOWN condition.
+- Throws: dynamic indexes, object-field projection (`get-field`), ordered comparisons,
   indexes nested inside other value expressions, a mapping with a `transform`, and undeclared
   storage (a related table does not define list order).
 - Refused array types: numeric, bigint, temporal and custom decoders (their application values can
@@ -226,17 +249,19 @@ The planner emits the same `eq(x, null)` node whether your application sends a N
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The call-level `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for
-NULL columns, set it to `"omitted"`: every null comparison operand then throws instead of producing a
-filter that returns rows the PDP denies.
+NULL columns, set it to `"omitted"`. A null operand is then read the way CEL reads it on that
+convention: a present value is never null, so `x == null` matches no row and `x != null` every
+present one, while a NULL column — a missing attribute — is UNKNOWN, excluded under both polarities
+as CEL's error denies it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). A null
+element of an `in` list can never match and is dropped. A mapping with a `transform`, a function
+mapping or a relation still throws for a null operand, since the adapter does not own its
+comparison.
 
 ```ts
 queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-This rejects more than the shapes that actually over-grant (`x != null` is fine either way), because
-a leaf cannot see whether an enclosing `not` will flip it
-([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). The option is scoped to each
-call, including when a mapper starts another translation.
+The option is scoped to each call, including when a mapper starts another translation.
 
 ### Declare the convention per attribute
 
@@ -260,12 +285,13 @@ Declaring `"explicit"` asserts that the column can be NULL **and** that NULL rea
 explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it never yields SQL
 UNKNOWN: CEL's `null != "x"` is true and the row must come back. Ordering and string operators are
 unchanged, since CEL errors (and denies) on a null receiver. Declaring `"omitted"` on an entry
-applies the null-operand rejection to that attribute only.
+applies the omitted reading of a null operand to that attribute only.
 
 - Undeclared attributes keep the default rendering, so `!=` against a constant under-grants NULL
   rows until you declare them.
-- **Declare both sides of a field-to-field comparison, or neither.** Mixing conventions in one
-  comparison throws.
+- A field-to-field `==` / `!=` between an attribute declared `"explicit"` and one that is not is
+  read the way CEL reads it: UNKNOWN when the undeclared side is NULL (a missing attribute), and a
+  definite answer otherwise, with the declared side's NULL a null value.
 
 See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
@@ -298,16 +324,35 @@ renders them as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`. That explicit collati
 the other operand, so `string(R.attr.flag) == R.attr.label` compares `label` byte-exactly. SQLite
 and PostgreSQL literals carry no collation.
 
+### `matches()`
+
+No store's regex dialect is RE2, CEL's engine — MySQL's ICU engine lets `$` match before a
+trailing newline, PostgreSQL's and MySQL's syntaxes differ from RE2's in classes and flags, and
+SQLite has no regex operator — so a pattern is never handed to the store. It is parsed by the adapter and lowered only when what it matches can be said
+with the exact string predicates above:
+
+- a finite set of literals under its anchors — `^ab$` is `=`, `^(ab|b)$` and `(?i)^one$` are
+  `IN (…)`, `^h` is `startsWith`, `e$` is `endsWith`, `\d` is `contains` any digit; a repetition at an
+  unanchored end needs only its minimum (`a+b` is `contains "ab"`);
+- every character from a small set: `^[ab@#]+$`;
+- a prefix and a suffix around a run of `.`, which excludes a newline: `^a.*b$`.
+
+A top-level alternation (`^o|e$`) is the OR of its branches. `(?i)` folds case as RE2 does, including
+`k` to KELVIN SIGN and `s` to LONG S, and refuses a non-ASCII letter. A pattern RE2 rejects — a
+lookahead, `a**` — is an error in CEL, so it becomes an UNKNOWN condition. Anything else throws:
+negated classes, `\b`, flags other than a leading `(?i)`, a pattern whose literal expansion passes 256
+strings, or a receiver that is not a mapped string column.
+
 ## Supported operators
 
 | Kind | Operators |
 | --- | --- |
 | Logical | `and`, `or`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
-| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string |
+| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
-| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean column |
+| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
 filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
@@ -341,8 +386,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
-| adversarial | 183 / 227 |
+| extended | 76 / 80 |
+| adversarial | 221 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -400,6 +445,53 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A null operand under the `"omitted"` convention now translates instead of throwing: `== null` is
+  false for a present value and UNKNOWN for a NULL column, `!= null` true and UNKNOWN, and a null
+  `in` element is dropped. A field-to-field equality mixing the two conventions translates too,
+  UNKNOWN when the omitted side is NULL. Neither selects a NULL row, which is what the refusal was
+  guarding against.
+- `matches()` now translates for the patterns described under [`matches()`](#matches), instead of
+  always throwing, and a boolean-valued call compared with `true` / `false`
+  (`R.attr.s.matches("^h") == true`) is that call or its negation.
+- `list(...)` and map (`{"a": 1}`) constructors whose leaves are all constants are folded into the
+  literal they build before translation. A map or list literal compared with a string, number or
+  boolean attribute is CEL's heterogeneous equality — `==` false and `!=` true for a present value —
+  and against any other column throws. `x in {"a": 1}` tests the map's keys. A list or map element
+  is never a member of a collection of scalars (`["a"] in R.attr.tagNames` is false).
+- An `in` list or `hasIntersection` list now also drops list and map elements against a string,
+  number or boolean column, as it already dropped scalars of another type: `aString in [["one"]]`
+  used to bind the nested list, which the driver expanded into `'one'` and matched.
+- A shape CEL always evaluates to an error now translates to an UNKNOWN condition instead of
+  throwing: a list-valued `filter()`, `map()` or `except()` where a boolean belongs, and a negative
+  or fractional index position (`R.attr.tags[-1]`). UNKNOWN is excluded under both polarities, and
+  `err || x` is `x` in both CEL and SQL.
+- A timestamp constant finer than a millisecond — the planner's `now()` — now translates against a
+  PostgreSQL, MySQL or SQLite-text timestamp column, compared with a grid point of the column's
+  declared precision (see [Timestamps](#timestamps)), instead of throwing.
+- A hierarchy built from segments — `hierarchy(["projects", R.id])` — now translates against a
+  constant hierarchy or another built one: its length is known, so `ancestorOf`, `descendentOf` and
+  `overlaps` become equalities between the segments of the shared prefix. A NULL column segment is
+  an error in CEL, so it leaves the result UNKNOWN. A built path against a column-backed hierarchy
+  still throws.
+- `int()` over an integer column (`integer`, `smallint`, `int`, `serial`, `bigint` in `number`
+  mode, …) now translates, as the column itself (`CAST(… AS INTEGER)` on SQLite, whose INTEGER
+  affinity can keep a fraction).
+- `int()` over a double or string column now translates when compared directly with a number
+  constant below 2^53 in magnitude. Over a double it truncates toward zero and is NULL (CEL's error)
+  at ±2^63 or beyond; over a string it accepts exactly what Go's `strconv.ParseInt(s, 10, 64)` does —
+  an optional sign and ASCII digits, within int64 — and is NULL otherwise, where SQL's CAST would read
+  a numeric prefix. A larger constant, or the result inside arithmetic, throws: PostgreSQL and MySQL
+  compare a bigint with a double inexactly there, and a bigint can overflow.
+- **Breaking:** `%` translates only as `int(<integer column>) % <non-zero whole constant>`, and
+  throws otherwise. It used to be emitted for any operands, but CEL's `%` has no double overload —
+  `R.attr.aNumber % 2` is an error the PDP denies, which the old filter answered — and a zero
+  divisor raises on PostgreSQL.
+- String `+` now translates instead of throwing: `||` on SQLite and PostgreSQL, `CONCAT()` on
+  MySQL, where `||` is logical OR. As for `size()` and indexed storage, the dialect is read off the
+  Drizzle class of a column among the operands, so a concatenation reaching no Drizzle column
+  (only callback mappings, or columns of two dialects) still throws. A NULL operand makes the
+  concatenation NULL on all three stores, so a missing attribute stays excluded under both
+  polarities. A `+` nested inside another (`(a + b) + (c + d)`) is recognized as concatenation too.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.
@@ -426,17 +518,24 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 - **Breaking** (Cerbos 0.55): ordered comparisons involving NaN evaluate to false, so their negation
   can allow a row. Cerbos 0.54 denied it. Use Cerbos 0.55 if policies can produce NaN in a negated
   comparison.
-- **Breaking:** `string()` over a number or text column (e.g. `string(R.attr.aDouble) == "-0.6"`)
-  throws. It used to emit `CAST(… AS TEXT)`, a syntax error on MySQL. Compare the underlying column,
-  or store the text in its own column ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)).
+- **Breaking:** `string()` over a number or text column no longer emits `CAST(… AS TEXT)`, a syntax
+  error on MySQL ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)). It translates
+  without a cast where it can: over a text column it is the column itself, and over a number column
+  compared with `==` / `!=` against a string (`string(R.attr.aDouble) == "-0.6"`) it becomes a
+  numeric comparison against the one double CEL spells that way — so `"1e+06"` matches `1000000`,
+  and `"2.0"`, which CEL never produces, matches no row. Any other `string()` of a number (an
+  ordering, `"0"`, `"NaN"`, a column-valued other side) throws.
 - `string()` over a **boolean** column now translates instead of throwing, as a `CASE` whose
   `IS NULL` arm keeps NULL rows excluded under both polarities
   ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)).
 - **Breaking:** `hasIntersection` normalizes operand order, so the value-first spelling translates
   instead of becoming `FALSE`; an operand pair with no literal list now throws
   ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
-- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) throws. Its old
-  filter matched the path itself (`hierarchy/descendent-of/empty-delimiter` returned a denied row).
+- **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) no longer emits
+  its old filter, which matched the path itself (`hierarchy/descendent-of/empty-delimiter` returned
+  a denied row). A column split that way against a constant whose segments are single characters
+  now translates as string-prefix logic over characters, as Cerbos splits per character; any other
+  empty-delimiter shape throws.
 - **Breaking:** bare temporal field comparisons, whole-list equality, list-valued membership
   needles, and nested division where an inner zero divisor could be evaluated before the outer
   guard now throw before returning SQL. They previously emitted incorrect filters or failed in the
