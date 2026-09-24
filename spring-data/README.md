@@ -184,7 +184,7 @@ three exception types, all extending `IllegalArgumentException`:
 | Exception | Meaning | What to do |
 |---|---|---|
 | `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod`, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
-| `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant, mixed NULL conventions in one comparison | Change the mapping |
+| `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
 A conditional plan is translated when the Specification is first evaluated, so that is where these
@@ -235,10 +235,12 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
 The default, `EXPLICIT`, translates to `IS NULL`. If you omit attributes for NULL columns, pass
-`OMITTED`: every null comparison operand then throws `UnsupportedPlanShapeException` instead of
-emitting a filter that returns denied rows. This check is eager (in `toSpecification`), and it
-rejects every null operand, including aligned ones like `x != null`, because a leaf can't tell
-whether an enclosing `not` will flip it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
+`OMITTED`: every null comparison operand against an undeclared attribute then throws
+`UnsupportedPlanShapeException` instead of emitting a filter that returns denied rows. This check is
+eager (in `toSpecification`), and it rejects every such null operand, including aligned ones like
+`x != null`, because a leaf can't tell whether an enclosing `not` will flip it
+([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). Declare `OMITTED` on the
+attribute itself (below) and `eq`/`ne` against a bare null translate instead.
 
 ```java
 SpringDataQueryPlanAdapter.toSpecification(plan,
@@ -267,8 +269,14 @@ null. The equality family (`eq`, `ne`, `in`) over it then never renders as SQL U
 receiver is a CEL error, which denies like UNKNOWN). Undeclared attributes keep the old rendering,
 where `!=` against a constant under-grants NULL rows.
 
-**Declare both sides of a field-to-field comparison, or neither** — mixing conventions throws
-`UnmappedAttributeException`. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308)
+Declaring `OMITTED` asserts a NULL reaches `check()` as a missing attribute. `x == null` and
+`x != null` against it then translate three-valued: a NULL column is UNKNOWN under both polarities,
+as CEL's missing-attribute error denies under both, so `x == null` selects no row and `x != null`
+selects exactly the non-NULL ones. Other null operands (a null in an `in` list, say) still throw, as
+does a registered override for `eq`/`ne`, which would receive the null.
+
+A field-to-field `==`/`!=` between an `EXPLICIT` attribute and an undeclared or `OMITTED` one is
+definite for a NULL on the explicit side and UNKNOWN for a NULL on the other. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308)
 and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 ## Database collation requirements
@@ -378,10 +386,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 180 / 227 |
+| adversarial | 183 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 68 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 65 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -395,10 +403,10 @@ Other guarantees:
   true (in 0.54 it was an error and stayed denied under negation).
 - Bare comparisons between temporal columns throw: the database compares instants while CEL compares
   the attribute strings. Use `timestamp()` for instant comparison.
-- A null comparison against an attribute declared
-  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` throws; declared `EXPLICIT`,
-  `eq`, `ne` and `in` include NULL rows where CEL's null value says they should
-  (cerbos/query-plan-adapters#302, #308).
+- An `eq`/`ne` null comparison against an attribute declared
+  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` is UNKNOWN for a NULL column
+  under both polarities; declared `EXPLICIT`, `eq`, `ne` and `in` include NULL rows where CEL's null
+  value says they should (cerbos/query-plan-adapters#302, #308).
 
 ## Mapping hazards
 

@@ -67,8 +67,9 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
      *
      * <p>Under {@link NullAttributeRepresentation#EXPLICIT}, {@code eq}, {@code ne} and
      * {@code in} are rendered so a NULL column gives a definite result, as CEL does, instead of
-     * SQL UNKNOWN. Under {@link NullAttributeRepresentation#OMITTED}, null operands against
-     * this attribute are rejected.
+     * SQL UNKNOWN. Under {@link NullAttributeRepresentation#OMITTED}, {@code eq} and {@code ne}
+     * against a bare null are UNKNOWN for a NULL column under both polarities, and other null
+     * operands against this attribute are rejected.
      *
      * @param jpaPath entity property name, or a dot-separated path
      * @param nullAttributeRepresentation how a NULL in this column reaches {@code check()}

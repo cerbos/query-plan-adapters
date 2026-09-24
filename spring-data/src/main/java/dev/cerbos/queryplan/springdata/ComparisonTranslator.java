@@ -339,6 +339,14 @@ final class ComparisonTranslator {
         Path<?> path = scope.path(field.variable());
 
         if (value == null) {
+            // A NULL column sends no attribute, so `x == null` is never true: a present value is
+            // unequal and a missing one is a CEL error, which denies. The upfront OMITTED scan
+            // lets this shape through only without an override for op.
+            if (("eq".equals(op) || "ne".equals(op)) && !leaf.overridden(op)
+                    && leaf.isDeclaredOmitted(field.variable(), scope)) {
+                return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
+                        () -> cb.isNull(path));
+            }
             return leaf.withOverride(op, path, null, () -> switch (op) {
                 case "eq" -> cb.isNull(path);
                 case "ne" -> cb.isNotNull(path);
@@ -613,17 +621,14 @@ final class ComparisonTranslator {
                     : tri.unknown();
         }
         // A NULL on the explicit-null side needs a definite answer and a NULL on the other
-        // side needs UNKNOWN. No single predicate does both, so refuse. It is unmapped because
-        // the caller fixes it by declaring the convention on both attributes or neither.
+        // side needs UNKNOWN: the definite equality, made UNKNOWN wherever the omitted side is
+        // NULL, whatever the explicit side holds.
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
-            throw Refusals.unmapped(
-                    "Cannot translate `" + op + "` between two columns under mixed null"
-                            + " conventions: cannot compare an attribute declared"
-                            + " explicit-null with one on the omitted convention: the"
-                            + " omitted side is UNKNOWN for a NULL column while the"
-                            + " declared side is definite, and no single predicate is"
-                            + " both. Declare the convention on both mappings, or on"
-                            + " neither.");
+            Expression<?> omitted = leftExplicit ? right : left;
+            Predicate equality = tri.baseUnlessUnknown(
+                    leaf.definiteEquality("eq", left, right, leftExplicit, rightExplicit),
+                    () -> cb.isNull(omitted));
+            return "ne".equals(op) ? tri.not(equality) : equality;
         }
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit && rightExplicit) {
             return leaf.definiteEquality(op, left, right, leftExplicit, rightExplicit);

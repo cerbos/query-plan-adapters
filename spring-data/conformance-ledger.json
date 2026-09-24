@@ -141,14 +141,6 @@
       "status": "unsupported",
       "reason": "The comparison is a_optional_string against a concatenation of a constant with the primary key. The reference lowers CEL's `+` as arithmetic, which requires numeric operands; CEL's string overload has no arithmetic meaning and is refused rather than rendered as a numeric addition"
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared NullAttributeRepresentation.OMITTED in the mapping (resources.json omits it when NULL), so `== null` is a CEL missing-attribute error that denies every row while IS NULL would return the NULL rows; the adapter refuses a null operand against an OMITTED attribute (#302)."
-    },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side is declared EXPLICIT (a NULL column is a null value, so the comparison needs a definite answer) and the other OMITTED (a NULL column is a missing attribute, so it needs UNKNOWN); no single Criteria predicate gives both, so the adapter refuses the comparison (#308)."
-    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
@@ -232,10 +224,6 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "Unsupported operator: matches"
-    },
-    "relation/not-equals/one-hop-null-literal": {
-      "status": "unsupported",
-      "reason": "parent.aOptionalString is declared NullAttributeRepresentation.OMITTED in the mapping (resources.json omits it when NULL), and the adapter refuses every null operand against an OMITTED attribute, `!= null` included: a missing attribute is a CEL error that denies under both polarities, which a plain IS NOT NULL does not preserve under negation (#302)."
     },
     "string/concatenate/field-to-field": {
       "status": "unsupported",

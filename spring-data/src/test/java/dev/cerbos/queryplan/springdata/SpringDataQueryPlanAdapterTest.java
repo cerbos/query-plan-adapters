@@ -883,8 +883,35 @@ class SpringDataQueryPlanAdapterTest {
                     exprOp("gt", var("request.resource.attr.owner"), sval("x")))));
         }
 
+        /**
+         * An OMITTED declaration wins over the call-level EXPLICIT default: a null comparison is
+         * never true for eq nor false for ne, and a NULL column stays UNKNOWN under negation.
+         */
         @Test
-        void declaringOmittedRejectsANullOperandUnderTheExplicitDefault() {
+        void declaringOmittedMakesANullOperandThreeValuedUnderTheExplicitDefault() {
+            Map<String, AttributeMapping> omitted = Map.of("request.resource.attr.omitted",
+                    AttributeMapping.field("aOptionalString", NullAttributeRepresentation.OMITTED));
+            Operand eqNull = exprOp("eq", var("request.resource.attr.omitted"), nullVal());
+            Operand neNull = exprOp("ne", var("request.resource.attr.omitted"), nullVal());
+            withResource(nullOwner(), () -> {
+                assertEquals(0, runCount(eqNull, omitted, Map.of()));
+                assertEquals(0, runCount(exprOp("not", eqNull), omitted, Map.of()));
+                assertEquals(0, runCount(neNull, omitted, Map.of()));
+                assertEquals(0, runCount(exprOp("not", neNull), omitted, Map.of()));
+            });
+            ResourceEntity present = new ResourceEntity("present-omitted");
+            present.setaOptionalString("x");
+            withResource(present, () -> {
+                assertEquals(0, runCount(eqNull, omitted, Map.of()));
+                assertEquals(1, runCount(exprOp("not", eqNull), omitted, Map.of()));
+                assertEquals(1, runCount(neNull, omitted, Map.of()));
+                assertEquals(0, runCount(exprOp("not", neNull), omitted, Map.of()));
+            });
+        }
+
+        /** An override would receive the null and could select NULL rows, so it is refused. */
+        @Test
+        void declaringOmittedRejectsANullOperandUnderAnOverride() {
             PlanResourcesResponse resp = buildResponse(
                     PlanResourcesFilter.Kind.KIND_CONDITIONAL,
                     exprOp("eq", var("request.resource.attr.omitted"), nullVal()));
@@ -892,7 +919,7 @@ class SpringDataQueryPlanAdapterTest {
                     () -> SpringDataQueryPlanAdapter.toSpecification(resp,
                             Map.of("request.resource.attr.omitted", AttributeMapping.field(
                                     "aOptionalString", NullAttributeRepresentation.OMITTED)),
-                            Map.of(), NullAttributeRepresentation.EXPLICIT));
+                            Map.of("eq", THROWING_OVERRIDE), NullAttributeRepresentation.EXPLICIT));
             assertTrue(thrown.getMessage().contains("missing-attribute error"));
         }
 

@@ -55,14 +55,12 @@ class RefusalTypesTest {
 
     /**
      * The corpus refusals that are the mapping's to fix rather than a Criteria limit:
-     * {@code createdBy} is a String column, which does not pin an instant, and the mixed-null case
-     * compares two columns declared under different null conventions. Every other corpus refusal
-     * is an {@link UnsupportedPlanShapeException}.
+     * {@code createdBy} is a String column, which does not pin an instant. Every other corpus
+     * refusal is an {@link UnsupportedPlanShapeException}.
      */
     private static final Set<String> UNMAPPED = Set.of(
             "cast/timestamp/malformed-string",
-            "cast/timestamp/negated-malformed-string",
-            "null/not-equals/field-to-field-mixed-null-conventions");
+            "cast/timestamp/negated-malformed-string");
 
     private static EntityManagerFactory emf;
 
@@ -93,14 +91,17 @@ class RefusalTypesTest {
     }
 
     /**
-     * Under OMITTED, a null comparison is refused by {@code toSpecification} itself, before any
-     * predicate is built, because any NULL-matching filter would over-grant.
+     * Under a call-level OMITTED, a null comparison against an undeclared attribute is refused by
+     * {@code toSpecification} itself, before any predicate is built, because any NULL-matching
+     * filter would over-grant.
      */
     @Test
     void theOmittedConventionRefusalIsAnUnsupportedShapeRaisedEagerly() {
         PlanResourcesResponse plan = Corpus.plan("null/equals/null-literal-on-missing-attribute");
+        Options callLevelOmitted = Options.of(Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS)
+                .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> SpringDataQueryPlanAdapter.toSpecification(plan, OPTIONS));
+                () -> SpringDataQueryPlanAdapter.toSpecification(plan, callLevelOmitted));
         assertInstanceOf(UnsupportedPlanShapeException.class, ex);
         assertTrue(ex.getMessage().contains("NullAttributeRepresentation.OMITTED"), ex.getMessage());
     }
