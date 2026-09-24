@@ -368,11 +368,32 @@ function buildFieldToFieldFilter(
     // needs UNKNOWN for its NULL (a missing attribute, which CEL denies under both polarities). A
     // definite predicate returns rows the PDP refuses; a plain one drops rows the PDP allows.
     // Refuse it rather than pick a direction — declare both attributes, or neither.
+    // Mixing the two conventions across one comparison: the explicit side's NULL is a null VALUE,
+    // which `!=` answers TRUE against any present value, while the other side's NULL is a missing
+    // attribute, an error under both polarities. `other = other` is TRUE for a present value and
+    // UNKNOWN for a NULL one, so it carries exactly that error into the explicit-null arm:
+    //
+    //   explicit NULL, other present -> TRUE        explicit NULL, other NULL -> UNKNOWN
+    //   explicit present, other NULL -> UNKNOWN     both present -> the plain comparison
+    //
+    // and `==` is its negation.
     if (leftExplicit !== rightExplicit) {
-      throw new UnsupportedQueryPlanError(
-        `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
-          "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither."
-      );
+      const [explicitField, otherField] = leftExplicit
+        ? [leftField, rightField]
+        : [rightField, leftField];
+      const otherReference = { _ref: otherField, _container: container };
+      const inequality: PrismaFilter = {
+        OR: [
+          {
+            AND: [
+              { [explicitField]: null },
+              { [otherField]: { equals: otherReference } },
+            ],
+          },
+          { NOT: { [explicitField]: { equals: otherReference } } },
+        ],
+      };
+      return operator === "ne" ? inequality : { NOT: inequality };
     }
     if (leftExplicit) {
       const equality: PrismaFilter = {

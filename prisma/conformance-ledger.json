@@ -213,10 +213,6 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column."
     },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single Prisma filter is both, so the adapter refuses mixed conventions across one comparison."
-    },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
@@ -281,10 +277,6 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
     },
-    "relation/all/to-one-chain": {
-      "status": "unsupported",
-      "reason": "every() applies to a single relation; a multi-hop chain would need the universal to be evaluated against the flattened tail while still requiring the intermediate hop, which nested every/some cannot express — the adapter throws"
-    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
@@ -304,10 +296,6 @@
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still an arbitrary count threshold none/some cannot express"
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "The same missing form reached from the other direction: here BOTH operands of the `+` are columns, so there is no constant to invert off either side and nothing to solve the comparison back into a plain column filter"
     },
     "string/contains/field-to-field": {
       "status": "unsupported",

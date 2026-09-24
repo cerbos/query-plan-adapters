@@ -222,7 +222,8 @@ explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it is 
 because CEL denies them on a null receiver anyway. An undeclared attribute keeps the old rendering,
 under which `!=` against a constant under-grants NULL rows.
 
-Declare both sides of a field-to-field comparison, or neither. Mixed conventions throw. See
+A field-to-field `==`/`!=` between an explicit-null attribute and one that is not keeps both: the
+explicit side's NULL compares as a value, the other side's NULL stays an error. See
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
@@ -302,7 +303,7 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles |
 | Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
-| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved to a plain comparison (`R.attr.n + 1 > 2` → `{ n: { gt: 1 } }`; negative multipliers flip the direction); string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`) |
+| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved to a plain comparison (`R.attr.n + 1 > 2` → `{ n: { gt: 1 } }`; negative multipliers flip the direction); string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
 | Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
 
@@ -343,9 +344,8 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   related collection column.
 - **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
   fractional addition (not reversible in IEEE-754).
-- **Other malformed shapes:** the two-list `except` function compared to a list or counted past emptiness, `all()` over a
-  multi-hop chain, an empty hierarchy delimiter,
-  non-scalar comparison literals, empty `and`/`or`, and
+- **Other malformed shapes:** the two-list `except` function compared to a list or counted past
+  emptiness, an empty hierarchy delimiter, non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
 
 #### Operators Prisma `where` cannot express
@@ -387,7 +387,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 160 / 227 |
+| adversarial | 163 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -450,6 +450,13 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- `all()` over a multi-hop chain translates (the hops must exist, and the predicate holds at the
+  end of every path). **Fix:** a negated `all()` over a chain put its negation outside the inner
+  hops (`some { NOT { some P } }`), which admitted a hop with no elements — where `all()` is
+  vacuously true — and missed a hop whose elements only partly matched; the false witness is now
+  an element at the end of the chain.
+- A field-to-field `==`/`!=` across mixed null conventions translates instead of throwing, and
+  `a + b == "lit"` over two string columns is one arm per split of the literal.
 - Macros over a literal list (a folded principal attribute) are expanded before translation:
   `exists`/`all` over a `list(...)` of structs as well as of values, and `exists_one`,
   `size(filter(...))` and `size(except(list, [x]))` whose body is `t == x` or `t != x`, which count

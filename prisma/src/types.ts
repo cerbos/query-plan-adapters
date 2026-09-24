@@ -69,7 +69,8 @@ export function settleTypeMismatches(
       return settleLambdaBody(expr, context, positive);
   }
 
-  const cast = rewriteCastComparison(expr, context, positive);
+  const cast =
+    rewriteCastComparison(expr, context, positive) ?? rewriteConcatenation(expr, context);
   if (cast !== undefined) return settleTypeMismatches(cast, context, positive);
 
   const outcomes = leafOutcomes(expr, context);
@@ -210,6 +211,66 @@ function rewriteCastComparison(
     return operator === "eq" ? range : { operator: "not", operands: [range] };
   }
   return undefined;
+}
+
+/** Past this many code points, a literal is not split across a two-column concatenation. */
+const MAX_CONCATENATION_SPLITS = 256;
+
+/**
+ * `a + b == "lit"` over two string columns: the literal split at every code point, one arm per
+ * split, `a == prefix && b == suffix`. Each arm also ORs in `!startsWith(column, "")` for both
+ * columns — FALSE for a present value, UNKNOWN for a NULL one — so a missing operand leaves the
+ * whole comparison UNKNOWN under both polarities, as the error `+` raises on it does in CEL.
+ */
+function rewriteConcatenation(
+  expr: OperatorOperand,
+  context: TranslationContext
+): PlanExpressionOperand | undefined {
+  const { operator } = expr;
+  if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
+  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [sum, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
+  if (
+    !isOperatorOperand(sum) ||
+    sum.operator !== "add" ||
+    sum.operands.length !== 2 ||
+    !isValueOperand(literal) ||
+    typeof literal.value !== "string"
+  ) {
+    return undefined;
+  }
+  const [left, right] = sum.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const columns = [left, right].filter(isNamedOperand);
+  if (
+    columns.length !== 2 ||
+    columns.some((column) => {
+      const fieldRef = resolveFieldReference(column.name, context);
+      return fieldRef.valueType !== "string" || (fieldRef.relations?.length ?? 0) > 0;
+    })
+  ) {
+    return undefined;
+  }
+  const codePoints = Array.from(literal.value);
+  if (codePoints.length > MAX_CONCATENATION_SPLITS) return undefined;
+
+  const arms: PlanExpressionOperand[] = [];
+  for (let split = 0; split <= codePoints.length; split++) {
+    arms.push({
+      operator: "and",
+      operands: [
+        { operator: "eq", operands: [left, { value: codePoints.slice(0, split).join("") }] },
+        { operator: "eq", operands: [right, { value: codePoints.slice(split).join("") }] },
+      ],
+    });
+  }
+  for (const column of columns) {
+    arms.push({
+      operator: "not",
+      operands: [{ operator: "startsWith", operands: [column, { value: "" }] }],
+    });
+  }
+  const equality: PlanExpressionOperand = { operator: "or", operands: arms };
+  return operator === "eq" ? equality : { operator: "not", operands: [equality] };
 }
 
 /**
