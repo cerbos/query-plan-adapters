@@ -17,10 +17,6 @@
       "status": "unsupported",
       "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
     },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "int() over a double truncates toward zero in CEL, while PostgreSQL and MySQL CAST round to nearest, so the cast is refused rather than lowered to CAST."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, which is mapped to a String column: a String does not pin an absolute instant, and a malformed value must stay a CEL error, which no SQL cast preserves, so the adapter refuses to compare it."

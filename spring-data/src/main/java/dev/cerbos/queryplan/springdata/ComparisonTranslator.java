@@ -160,6 +160,12 @@ final class ComparisonTranslator {
          */
         record StringOfField(String variable) implements Resolved {}
 
+        /**
+         * {@code int(variable)}. Only a Double or Integer column compared with a number is
+         * translated ({@link #intOfFieldComparison}).
+         */
+        record IntOfField(String variable) implements Resolved {}
+
         /** An operand no leaf case handles, reported by {@link #leafOperandError}. */
         record Opaque() implements Resolved {}
     }
@@ -186,6 +192,10 @@ final class ComparisonTranslator {
                 if ("string".equals(exprOp) && e.getOperandsCount() == 1
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
                     yield new Resolved.StringOfField(e.getOperands(0).getVariable());
+                }
+                if ("int".equals(exprOp) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    yield new Resolved.IntOfField(e.getOperands(0).getVariable());
                 }
                 if (!ArithmeticTranslator.ARITHMETIC_OPS.contains(exprOp)) {
                     yield new Resolved.Opaque();
@@ -282,6 +292,11 @@ final class ComparisonTranslator {
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
                 return stringOfFieldComparison(op, sf, text, operands, scope);
+            }
+            if (left instanceof Resolved.IntOfField intField
+                    && right instanceof Resolved.Constant c
+                    && c.value() instanceof Number n) {
+                return intOfFieldComparison(op, intField, n.doubleValue(), operands, scope);
             }
             // `field op add(value, value)`: strings concatenate, as in CEL.
             if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
@@ -452,6 +467,55 @@ final class ComparisonTranslator {
 
     private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
         return constant(holds(op, left.compareTo(right)));
+    }
+
+    /** {@code 2^63}: CEL's int() errors at or beyond it in either direction. */
+    private static final double INT64_LIMIT = 0x1p63;
+
+    /**
+     * {@code int(column) op c}, over a Double or Integer column. CEL's {@code int()} truncates a
+     * double toward zero, which PostgreSQL and MySQL {@code CAST} do not (they round), so the
+     * comparison is solved for the column instead: {@code int(d) >= m} is {@code d >= m} for a
+     * positive {@code m} and {@code d > m - 1} otherwise, and {@code int(d) <= m} is
+     * {@code d <= m} for a negative {@code m} and {@code d < m + 1} otherwise. A NULL column, or
+     * one outside the int64 range (where CEL errors, NaN included), is UNKNOWN under both
+     * polarities.
+     */
+    private Predicate intOfFieldComparison(String op, Resolved.IntOfField field, double c,
+                                           List<Operand> operands, Scope scope) {
+        Path<?> path = scope.path(field.variable());
+        Class<?> type = path.getJavaType();
+        if (!Double.class.equals(type) && !Integer.class.equals(type)) {
+            throw leafOperandError(op, operands);
+        }
+        if (Double.isNaN(c) || Math.abs(c) >= 0x1p53) {
+            throw Refusals.unsupported("int() compared with " + c + " is not supported: the"
+                    + " bound is not an exactly representable integer");
+        }
+        Expression<Double> d = path.as(Double.class);
+        boolean integral = c == Math.rint(c);
+        Predicate base = switch (op) {
+            case "gt" -> atLeast(d, Math.floor(c) + 1);
+            case "ge" -> atLeast(d, Math.ceil(c));
+            case "lt" -> atMost(d, Math.ceil(c) - 1);
+            case "le" -> atMost(d, Math.floor(c));
+            case "eq" -> integral ? cb.and(atLeast(d, c), atMost(d, c)) : cb.disjunction();
+            case "ne" -> integral ? tri.not(cb.and(atLeast(d, c), atMost(d, c)))
+                    : cb.conjunction();
+            default -> throw Refusals.internal("Unsupported int() comparison operator: " + op);
+        };
+        return tri.baseUnlessUnknown(base, () -> cb.or(cb.isNull(path),
+                cb.le(d, -INT64_LIMIT), cb.ge(d, INT64_LIMIT)));
+    }
+
+    /** {@code trunc(d) >= m} for an integral {@code m}. */
+    private Predicate atLeast(Expression<Double> d, double m) {
+        return m > 0 ? cb.ge(d, m) : cb.gt(d, m - 1);
+    }
+
+    /** {@code trunc(d) <= m} for an integral {@code m}. */
+    private Predicate atMost(Expression<Double> d, double m) {
+        return m < 0 ? cb.le(d, m) : cb.lt(d, m + 1);
     }
 
     /** The numeric column types whose values CEL receives as doubles, rendered by %g. */

@@ -353,6 +353,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `exists_one` | Correlated strict count `= 1`, NULL-poisoned; over a literal list (a principal attribute the planner cannot unroll), a sum of per-element `CASE` terms, NULL when any element's body is UNKNOWN |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
 | Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
+| `int(R.attr.d) <op> c` (`d` a `Double` or `Integer` column) | Solved for the column, since CEL truncates toward zero where SQL `CAST` rounds: `int(d) == 0` is `-1 < d < 1`; UNKNOWN for a NULL or out-of-int64-range column, as CEL errors |
 | `int(R.attr.n) % k` (`n` an `Integer` column) | `MOD(n, k)`, which truncates toward zero as CEL does (`-5 % 2` is `-1`); a zero divisor is UNKNOWN |
 | Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; a zero column divisor split out and compared as CEL's NaN / ±Infinity (see [Gotchas](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities)) |
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
@@ -376,7 +377,7 @@ consulted.
 | `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
 | Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
 | List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
-| Type casts (`int()`, `double()`, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
+| Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
@@ -396,10 +397,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 79 / 80 |
-| adversarial | 215 / 227 |
+| adversarial | 216 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 12 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 11 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -630,6 +631,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `int(R.attr.d) <op> c` over a `Double` or `Integer` column now translates instead of throwing.
 - `matches()` now translates without an override where `LIKE` spells the pattern's RE2 language
   exactly (see [Supported operators](#supported-operators)); a pattern RE2 rejects is UNKNOWN, as
   CEL errors. Other patterns still throw unless a `matches` override is registered, which still
