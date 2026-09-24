@@ -469,7 +469,7 @@ export function buildMapper(
     "request.resource.attr.aDouble": schema.resources.aDouble,
     // The corpus's default NULL convention: a NULL column sends no attribute (resources.json omits
     // it), so `== null` is a missing-attribute error in CEL, never true. Declaring it is what makes
-    // the adapter refuse a null operand here instead of emitting an over-granting IS NULL.
+    // the adapter read a NULL column here as UNKNOWN instead of emitting an over-granting IS NULL.
     "request.resource.attr.aOptionalString": {
       column: schema.resources.aOptionalString,
       nullAttributeRepresentation: "omitted",

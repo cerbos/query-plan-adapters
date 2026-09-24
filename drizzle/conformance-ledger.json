@@ -33,18 +33,6 @@
       "status": "unsupported",
       "reason": "map() translates only inside hasIntersection, where the projection becomes the inner column of an EXISTS. Comparing the ordered projection itself to a literal list has no SQL form the adapter builds."
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
-    },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single SQL predicate is both, so the adapter refuses mixed conventions across one comparison."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."

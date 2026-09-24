@@ -249,17 +249,19 @@ The planner emits the same `eq(x, null)` node whether your application sends a N
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The call-level `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for
-NULL columns, set it to `"omitted"`: every null comparison operand then throws instead of producing a
-filter that returns rows the PDP denies.
+NULL columns, set it to `"omitted"`. A null operand is then read the way CEL reads it on that
+convention: a present value is never null, so `x == null` matches no row and `x != null` every
+present one, while a NULL column — a missing attribute — is UNKNOWN, excluded under both polarities
+as CEL's error denies it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). A null
+element of an `in` list can never match and is dropped. A mapping with a `transform`, a function
+mapping or a relation still throws for a null operand, since the adapter does not own its
+comparison.
 
 ```ts
 queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-This rejects more than the shapes that actually over-grant (`x != null` is fine either way), because
-a leaf cannot see whether an enclosing `not` will flip it
-([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). The option is scoped to each
-call, including when a mapper starts another translation.
+The option is scoped to each call, including when a mapper starts another translation.
 
 ### Declare the convention per attribute
 
@@ -283,12 +285,13 @@ Declaring `"explicit"` asserts that the column can be NULL **and** that NULL rea
 explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it never yields SQL
 UNKNOWN: CEL's `null != "x"` is true and the row must come back. Ordering and string operators are
 unchanged, since CEL errors (and denies) on a null receiver. Declaring `"omitted"` on an entry
-applies the null-operand rejection to that attribute only.
+applies the omitted reading of a null operand to that attribute only.
 
 - Undeclared attributes keep the default rendering, so `!=` against a constant under-grants NULL
   rows until you declare them.
-- **Declare both sides of a field-to-field comparison, or neither.** Mixing conventions in one
-  comparison throws.
+- A field-to-field `==` / `!=` between an attribute declared `"explicit"` and one that is not is
+  read the way CEL reads it: UNKNOWN when the undeclared side is NULL (a missing attribute), and a
+  definite answer otherwise, with the declared side's NULL a null value.
 
 See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
@@ -384,7 +387,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 218 / 227 |
+| adversarial | 221 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -442,6 +445,11 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A null operand under the `"omitted"` convention now translates instead of throwing: `== null` is
+  false for a present value and UNKNOWN for a NULL column, `!= null` true and UNKNOWN, and a null
+  `in` element is dropped. A field-to-field equality mixing the two conventions translates too,
+  UNKNOWN when the omitted side is NULL. Neither selects a NULL row, which is what the refusal was
+  guarding against.
 - `matches()` now translates for the patterns described under [`matches()`](#matches), instead of
   always throwing, and a boolean-valued call compared with `true` / `false`
   (`R.attr.s.matches("^h") == true`) is that call or its negation.

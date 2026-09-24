@@ -287,7 +287,6 @@ describe("nullAttributeRepresentation", () => {
   // `aOptionalString == null`: the planner emits the same `eq(attr, null)` whichever convention
   // the caller uses, so the adapter has to be told.
   const NULL_EQ_MISSING = "null/equals/null-literal-on-missing-attribute";
-  const OMITTED = /under nullAttributeRepresentation "omitted"/;
 
   test("explicit: a null operand becomes an IS NULL filter", () => {
     expect(
@@ -301,21 +300,21 @@ describe("nullAttributeRepresentation", () => {
     ).toContain('"a_optional_string" is null');
   });
 
-  test("omitted: the same plan is refused rather than translated", () => {
-    // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // filter above would return exactly those rows (#302).
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, {
+  // A NULL column on the omitted convention sends no attribute, so check() denies on a
+  // missing-attribute error — under both polarities — where the explicit filter above returns
+  // exactly those rows (#302). Omitted is recognisable by that guard: NULL, never a match.
+  const OMITTED_GUARD = "is null then null else";
+
+  test("omitted: the same plan never matches, and a NULL column is UNKNOWN", () => {
+    const rendered = render(
+      "postgresql",
+      filterFor("postgresql", NULL_EQ_MISSING, {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       }),
-    ).toThrow(UnsupportedQueryPlanError);
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, {
-        mapper: UNDECLARED,
-        nullAttributeRepresentation: "omitted",
-      }),
-    ).toThrow(OMITTED);
+    ).sql;
+    expect(rendered).toContain(`"a_optional_string" ${OMITTED_GUARD}`);
+    expect(rendered.replace(OMITTED_GUARD, "")).not.toContain("is null");
   });
 
   // #308. A per-attribute declaration overrides the call-level option in both directions.
@@ -325,14 +324,20 @@ describe("nullAttributeRepresentation", () => {
     expect(
       render("postgresql", filterFor("postgresql", nullEq, { nullAttributeRepresentation: "omitted" })),
     ).toEqual(render("postgresql", filterFor("postgresql", nullEq)));
-    expect(() =>
-      translate("postgresql", nullEq, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" }),
-    ).toThrow(OMITTED);
+    expect(
+      render(
+        "postgresql",
+        filterFor("postgresql", nullEq, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" }),
+      ).sql,
+    ).toContain(OMITTED_GUARD);
 
     // `aOptionalString` declares "omitted", so a call-level "explicit" does not reach it either.
-    expect(() =>
-      translate("postgresql", NULL_EQ_MISSING, { nullAttributeRepresentation: "explicit" }),
-    ).toThrow(OMITTED);
+    expect(
+      render(
+        "postgresql",
+        filterFor("postgresql", NULL_EQ_MISSING, { nullAttributeRepresentation: "explicit" }),
+      ).sql,
+    ).toContain(OMITTED_GUARD);
   });
 
   test.each(["eq", "ne"])("mixed scalar types preserve explicit-null %s", (operator) => {
@@ -367,17 +372,23 @@ describe("nullAttributeRepresentation", () => {
       const run = () =>
         translate("postgresql", NULL_EQ_MISSING, { mapper, nullAttributeRepresentation: outer });
       if (outer === "omitted") {
-        expect(run).toThrow(OMITTED);
+        expect(run()).toEqual(
+          translate("postgresql", NULL_EQ_MISSING, {
+            mapper: UNDECLARED,
+            nullAttributeRepresentation: "omitted",
+          }),
+        );
       } else {
         expect(run()).toEqual(translate("postgresql", NULL_EQ_MISSING, { mapper: UNDECLARED }));
       }
     },
   );
 
-  // #302 completeness: under a call-level "omitted" with no per-attribute declarations, every plan
-  // carrying a null literal is refused — keyed off the null OPERAND, not a list of operators — except
-  // a null compared with an indexed list ELEMENT, which is a value, not a missing attribute.
-  test("under omitted, every null literal is refused unless it compares an indexed element", () => {
+  // #302 completeness: under a call-level "omitted" with no per-attribute declarations, no plan
+  // carrying a null literal SELECTS the NULL rows — keyed off the null OPERAND, not a list of
+  // operators. Every `IS NULL` left in the SQL sits in a guard that makes the row NULL, never a
+  // match, unless it compares an indexed list ELEMENT, which is a value, not a missing attribute.
+  test("under omitted, no null literal selects the NULL rows unless it compares an indexed element", () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
       const record = node as Record<string, unknown>;
@@ -398,21 +409,27 @@ describe("nullAttributeRepresentation", () => {
       .map((g) => g.id);
     expect(nullCarrying).toEqual(expect.arrayContaining([NULL_EQ_MISSING, ...INDEXED_ELEMENT]));
 
-    const notRejected = nullCarrying.filter((id) => {
-      const run = () =>
-        translate("postgresql", id, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" });
-      if (INDEXED_ELEMENT.includes(id)) {
-        run();
-        return false;
-      }
+    const selectingNull = nullCarrying.filter((id) => {
+      if (INDEXED_ELEMENT.includes(id)) return false;
+      let result: QueryPlanToDrizzleResult;
       try {
-        run();
-        return true;
+        result = translate("postgresql", id, {
+          mapper: UNDECLARED,
+          nullAttributeRepresentation: "omitted",
+        });
       } catch (error) {
-        return !OMITTED.test(String(error));
+        if (error instanceof UnsupportedQueryPlanError) return false;
+        throw error;
       }
+      if (result.kind !== PlanKind.CONDITIONAL) return false;
+      // Two guards exclude rather than select: a CASE arm that makes the row NULL, and the
+      // NOT EXISTS that denies a row whose projected relation element is missing.
+      const unguarded = render("postgresql", result.filter)
+        .sql.replace(/case when (?:(?!then).)*? then null/g, "")
+        .replace(/not exists \(select 1 from [^()]* where \([^()]* is null\)\)/g, "");
+      return /\bis null\b/.test(unguarded);
     });
-    expect(notRejected).toEqual([]);
+    expect(selectingNull).toEqual([]);
   });
 });
 
