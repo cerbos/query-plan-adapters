@@ -244,14 +244,14 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 29 seed documents. Passed cases on the current PDP, 0.55.0, where the
+function over the corpus's 38 seed documents. Passed cases on the current PDP, 0.55.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
 | extended | 70 / 80 |
-| adversarial | 206 / 227 |
+| adversarial | 222 / 250 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.55.0 there is one, `null/has/missing-attribute`
@@ -271,18 +271,18 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 302 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 318 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
-| Convex's filter engine, alone | 53 |
+| Convex's filter engine, alone | 55 |
 | the engine narrowing and the `postFilter` deciding (a root `and` mixing both) | 2 |
-| the adapter's `postFilter`, alone | 241 |
+| the adapter's `postFilter`, alone | 255 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
-Convex's own comparison semantics only decide the 53, which include the null comparisons against
+Convex's own comparison semantics only decide the 55, which include the null comparisons against
 the explicit-null `owner` field (`q.eq(field, null)` against a stored null).
 
 The harness runs against a self-hosted `convex-backend` container pinned in `docker-compose.yml`.

@@ -32,9 +32,18 @@ export const getNestedValue = (obj: unknown, path: string): unknown => {
   return current;
 };
 
+/** A number or an int beyond the safe range: `int()` returns a bigint only there. */
+const isNumeric = (value: unknown): value is number | bigint =>
+  typeof value === "number" || typeof value === "bigint";
+
 export const valuesEqual = (left: unknown, right: unknown): boolean => {
-  if (typeof left === "number" && typeof right === "number") {
-    return !Number.isNaN(left) && !Number.isNaN(right) && left === right;
+  if (isNumeric(left) && isNumeric(right)) {
+    // JavaScript compares a bigint with a number exactly, so 2^53 + 1 never equals 2^53.
+    return (
+      !Number.isNaN(left) &&
+      !Number.isNaN(right) &&
+      !(left < right || left > right)
+    );
   }
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
@@ -71,9 +80,8 @@ export const compareValues = (
   }
   if (Number.isNaN(left) || Number.isNaN(right)) return false;
   if (
-    (typeof left !== "number" || typeof right !== "number") &&
-    (typeof left !== "string" || typeof right !== "string") &&
-    (typeof left !== "bigint" || typeof right !== "bigint")
+    !(isNumeric(left) && isNumeric(right)) &&
+    (typeof left !== "string" || typeof right !== "string")
   ) {
     return EVALUATION_ERROR;
   }
@@ -220,45 +228,47 @@ export const parseRfc3339Timestamp = (
 // -- type conversions: string(), double(), int() --------------------------------------------------
 
 const CEL_DOUBLE_STRING = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-const CEL_INT_STRING = /^-?\d+$/;
+const CEL_INT_STRING = /^[+-]?\d+$/;
 
 /**
- * The magnitude band in which `String(n)` was MEASURED to render a double exactly as CEL does.
- *
- * CEL's number formatting is Go's, and it does not agree with JavaScript's everywhere. Probing the
- * pinned PDP with `string(R.attr.d) == R.attr.js` (the two renderings compared by the PDP itself)
- * puts the disagreements outside this band and nowhere inside it: 0.0000999, 1e15, 1e16, 1e19,
- * 1234567890123456 and `Number.MAX_SAFE_INTEGER` all differ, while 0, 100, 1000, 0.25, 1.3, 16.3,
- * -4.7, -0.6, 0.0001 and 0.0001234 all agree.
- *
- * The band is deliberately narrower than the agreement it is derived from — 1e21 agrees and is
- * still refused — because the rule producing it is Go's and is not restated here. Outside the
- * band the conversion is an evaluation error, which DENIES the row: the same thing CEL does with a
- * conversion it cannot perform, and the safe direction, since the failure that matters is an
- * over-grant (cerbos/query-plan-adapters#376).
+ * CEL renders a double with Go's `strconv.FormatFloat(d, 'g', -1, 64)`: the shortest digits that
+ * round-trip, in exponent form when the decimal exponent is below -4 or at least 6 ("1e+06",
+ * "-9.5e+18", "1e-05"), and plainly otherwise ("100000", "0.0001"). JavaScript's `String(n)`
+ * switches to exponent form only at 1e21 and 1e-7, and spells the exponent differently, so only
+ * the DIGITS are taken from JavaScript — `toExponential()` with no argument yields the same
+ * shortest round-trip digits Go does — and the layout is Go's.
  */
-const STRING_CAST_MIN_MAGNITUDE = 1e-4;
-const STRING_CAST_MAX_MAGNITUDE = 1e15;
+const formatGoDouble = (value: number): string => {
+  if (Number.isNaN(value)) return "NaN";
+  if (!Number.isFinite(value)) return value > 0 ? "+Inf" : "-Inf";
+  // JavaScript renders a negative zero as "0" where CEL renders "-0".
+  const sign = value < 0 || Object.is(value, -0) ? "-" : "";
+  if (value === 0) return `${sign}0`;
+  const [mantissa = "", exponentPart = ""] = Math.abs(value)
+    .toExponential()
+    .split("e");
+  const digits = mantissa.replace(".", "");
+  const exponent = Number(exponentPart);
+  if (exponent < -4 || exponent >= 6) {
+    const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
+    const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+    return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
+  }
+  const pointAt = exponent + 1;
+  if (pointAt <= 0) return `${sign}0.${"0".repeat(-pointAt)}${digits}`;
+  if (pointAt >= digits.length) {
+    return `${sign}${digits}${"0".repeat(pointAt - digits.length)}`;
+  }
+  return `${sign}${digits.slice(0, pointAt)}.${digits.slice(pointAt)}`;
+};
 
-// A bool needs no band: CEL renders "true"/"false" and so does JavaScript, exactly. That is why
-// convex is one of the two adapters that lower `string()` over a boolean rather than refusing it —
-// the SQL adapters cannot, because SQLite and MySQL store 1/0.
+// A bool renders "true"/"false" in CEL and in JavaScript alike. That is why convex is one of the
+// two adapters that lower `string()` over a boolean rather than refusing it — the SQL adapters
+// cannot, because SQLite and MySQL store 1/0.
 export const convertToString = (value: unknown): string | EvaluationError => {
   if (typeof value === "string") return value;
   if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number" && Number.isFinite(value)) {
-    // JavaScript renders a negative zero as "0" where CEL renders "-0".
-    if (Object.is(value, -0)) return EVALUATION_ERROR;
-    const magnitude = Math.abs(value);
-    if (
-      magnitude !== 0 &&
-      (magnitude < STRING_CAST_MIN_MAGNITUDE ||
-        magnitude >= STRING_CAST_MAX_MAGNITUDE)
-    ) {
-      return EVALUATION_ERROR;
-    }
-    return String(value);
-  }
+  if (typeof value === "number") return formatGoDouble(value);
   return EVALUATION_ERROR;
 };
 
@@ -273,15 +283,34 @@ export const convertToDouble = (value: unknown): number | EvaluationError => {
   return Number.isFinite(converted) ? converted : EVALUATION_ERROR;
 };
 
-export const convertToInt = (value: unknown): number | EvaluationError => {
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
+/**
+ * An int as the evaluator carries it: a number while it is a safe integer, a bigint past that, so
+ * `int("9007199254740993")` is not rounded onto 2^53. A zero is always the unsigned `0` — a CEL
+ * int has no negative zero, and `int("-0")` and `int(-0.5)` are both 0.
+ */
+const celInt = (value: bigint): number | bigint | EvaluationError => {
+  if (value < INT64_MIN || value > INT64_MAX) return EVALUATION_ERROR;
+  const asNumber = Number(value);
+  return Number.isSafeInteger(asNumber) ? asNumber : value;
+};
+
+export const convertToInt = (
+  value: unknown,
+): number | bigint | EvaluationError => {
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) return EVALUATION_ERROR;
-    const converted = Math.trunc(value);
-    return Number.isSafeInteger(converted) ? converted : EVALUATION_ERROR;
+    // cel-go refuses a double at or beyond either int64 bound, -2^63 included.
+    if (!Number.isFinite(value) || value <= -(2 ** 63) || value >= 2 ** 63) {
+      return EVALUATION_ERROR;
+    }
+    return celInt(BigInt(Math.trunc(value)));
   }
+  // Go's strconv.ParseInt: an optional sign, then decimal digits and nothing else. BigInt() alone
+  // would also accept surrounding whitespace, which ParseInt rejects.
   if (typeof value !== "string" || !CEL_INT_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
-  const converted = Number(value);
-  return Number.isSafeInteger(converted) ? converted : EVALUATION_ERROR;
+  return celInt(BigInt(value));
 };
