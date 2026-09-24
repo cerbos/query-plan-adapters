@@ -205,7 +205,10 @@ class AdversarialConformanceTest {
             case "h2":
                 return Persistence.createEntityManagerFactory("adversarial-pu");
             case "postgres": {
-                PostgreSQLContainer pg = new PostgreSQLContainer(DatabaseTestImages.POSTGRES);
+                // Byte-exact collation. The image's default en_US.utf8 orders linguistically, so
+                // "OneSet" < "b" is false there while CEL orders by code point.
+                PostgreSQLContainer pg = new PostgreSQLContainer(DatabaseTestImages.POSTGRES)
+                        .withEnv("POSTGRES_INITDB_ARGS", "--lc-collate=C");
                 pg.start();
                 database = pg;
                 return Persistence.createEntityManagerFactory(
@@ -400,7 +403,7 @@ class AdversarialConformanceTest {
         assertFalse(withParent.isEmpty(), "some seed must carry a mainCategory");
         assertTrue(withParent.size() < executeIds((root, query, cb) -> null).size(),
                 "not every seed carries one");
-        assertEquals(withParent, filteredIdsFor(compare("lt", size, 2)));
+        assertEquals(withParent, filteredIdsFor(compare("lt", size, 3)));
     }
 
     private static Operand expression(String operator, Operand... operands) {

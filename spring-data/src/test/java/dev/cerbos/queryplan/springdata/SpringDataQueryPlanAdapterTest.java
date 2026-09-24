@@ -1781,14 +1781,12 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: the corpus compares a scalar column with a map
-         * literal ({@code type-mismatch/equals/string-field-against-map-literal}) but not with a
-         * list constant.
+         * <strong>Corpus gap.</strong> #509: the corpus carries {@code aString == [...]} field
+         * first ({@code type-mismatch/equals/string-field-against-list-literal}); the value-first
+         * order and {@code !=} are not carried.
          */
         @Test
         void aScalarFieldNeverEqualsAListConstant() {
-            assertEquals(0, runCount(
-                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B))));
             assertEquals(0, runCount(
                     exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString"))));
             assertEquals(presentStrings(), runCount(

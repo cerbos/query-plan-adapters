@@ -1,6 +1,26 @@
 {
   "adapter": "spring-data",
   "cases": {
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "The divisor aDouble / aNumber is zero with the sign of aDouble's zero, and CEL's quotient is an infinity of that sign; SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "SQL MOD matches CEL's truncating % only between int() of an Integer column and an integral constant; a divisor that is itself arithmetic (int(aNumber) - 5) has no faithful int() lowering, since CAST rounds where CEL truncates toward zero."
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "CEL % has no double overload, so aNumber % 2 is an error on every row; the adapter lowers % only between int() of an Integer column and an integral constant and refuses the rest rather than let a store modulo turn the error into a negatable value."
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "A division that may be 0/0 composed into further arithmetic: CEL carries the NaN through the multiplication and addition, while SQL has no NaN and the NULLIF zero guard yields NULL, so the shape is refused."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, so double() over a string column is refused rather than lowered to CAST."
@@ -8,6 +28,14 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "The plan carries the int literal as a double, which at 2^53 and beyond no longer pins a single integer, so int() compared with such a bound is refused rather than compared through double arithmetic."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -32,6 +60,10 @@
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() returns a list, not a boolean; it translates as the collection of hasIntersection, in list equality and in membership, and used as the whole condition it is refused."
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded repetitions x* and a+ have no LIKE spelling (register an OperatorFunction for matches to use a database regex)."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
