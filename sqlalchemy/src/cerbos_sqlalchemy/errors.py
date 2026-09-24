@@ -1,16 +1,16 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """The one error ``get_query`` raises for a plan it cannot translate."""
 
 
 class UnsupportedPlanError(ValueError):
-    """The plan holds a shape this adapter cannot express as a SQL filter.
+    """Raised when a plan holds a shape this adapter cannot express as a SQL filter.
 
-    Raised instead of emitting a best-effort filter: a wrong filter returns rows the PDP
-    denies, while this error is a bug report. It subclasses ``ValueError``, which is what
-    these refusals raised before the type existed, so existing ``except ValueError``
-    handlers keep catching it. An operator override that cannot translate the shape it
-    was handed should raise it too.
+    The adapter refuses rather than emit a best-effort filter, since a wrong filter
+    returns rows the PDP denies. It subclasses ``ValueError`` so existing handlers
+    still catch it. Operator overrides that cannot translate a shape should raise it too.
 
-    Invalid caller configuration -- an unknown null representation, an unmapped attribute,
-    a missing ``table_mapping`` -- is not a plan refusal and keeps raising ``ValueError``,
-    ``KeyError`` or ``TypeError``.
+    Invalid caller configuration, such as an unmapped attribute or a missing
+    ``table_mapping``, still raises ``ValueError``, ``KeyError`` or ``TypeError``.
     """

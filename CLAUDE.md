@@ -43,10 +43,14 @@ the byte-exact collation `utf8mb4_0900_bin`: MySQL's default makes `=` case-inse
 
 ### Python (SQLAlchemy)
 ```bash
-pdm install
+pdm install -G :all    # or ./pw install: pyprojectx fetches pdm, ruff and isort into .pyprojectx/
 pdm run test           # pytest: unit suites and the conformance harness
-pdm run format         # isort + black
+pdm run format         # isort + ruff format
+pdm run lint           # ruff check --fix; CI fails on any diff format or lint leaves
 ```
+
+Every `pdm` command also runs through the pyprojectx wrapper, `./pw` (`pw.bat` on Windows), as in
+cerbos-sdk-python: `./pw test`, `./pw format`, `./pw lint`, `./pw pdm build`.
 
 `tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite, and the
 cases that read a `collection_columns` declaration again on PostgreSQL (`sqlalchemy/POSTGRES_IMAGE`,

@@ -1,19 +1,12 @@
-"""Conformance harness: replay the recorded corpus against real stores.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-For both PDPs in ``conformance/pdp-versions.json`` and every golden file under
-``conformance/golden/<tag>/``, the recorded plan is translated through ``get_query`` with
-the one mapping in ``corpus.py``, executed, and the returned ids are compared with the
-``allowed`` ids the PDP recorded. No PDP runs here. ``conformance-ledger.json`` lists the
-cases this adapter cannot pass and why; see ``conformance/README.md``, "The harness contract".
+"""Conformance harness: replay the recorded corpus against real stores. No PDP runs here.
 
-Stores:
-
-- ``sqlite``: every case, on SQLite with ``PRAGMA case_sensitive_like = ON``.
-- ``sqlite-async``: every case again, the returned ``Select`` executed through an
-  ``AsyncSession`` over aiosqlite.
-- ``postgresql-json`` / ``postgresql-pgArray``: the cases whose plan reads a collection
-  declared in ``collection_columns``, on a pinned PostgreSQL (``POSTGRES_IMAGE``), once per
-  storage shape, because that is where those renderings exist.
+Each golden plan, for both recorded PDPs, is translated with ``corpus.py``'s mapping and
+executed; the ids must equal the recorded ``allowed``. ``conformance-ledger.json`` lists the
+exceptions. SQLite runs every case, sync and async; PostgreSQL runs only the cases that read
+a declared collection, once per storage shape.
 """
 
 import asyncio
@@ -21,7 +14,7 @@ import json
 import os
 from collections import Counter
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from corpus import (
@@ -44,25 +37,25 @@ from corpus import (
     read_corpus_json,
     reads_declared_collection,
 )
-
-from cerbos_sqlalchemy import UnsupportedPlanError, get_query
 from sqlalchemy import create_engine, event, insert, text
 
-SEEDS: List[Dict[str, Any]] = read_corpus_json("seeds.json")["seeds"]
-DERIVED: Dict[str, Dict[str, Any]] = read_corpus_json("derived-fields.json")["derived"]
+from cerbos_sqlalchemy import UnsupportedPlanError, get_query
+
+SEEDS: list[dict[str, Any]] = read_corpus_json("seeds.json")["seeds"]
+DERIVED: dict[str, dict[str, Any]] = read_corpus_json("derived-fields.json")["derived"]
 
 with open(
     os.path.join(os.path.dirname(__file__), "..", "conformance-ledger.json"),
     encoding="utf-8",
 ) as _f:
-    LEDGER: Dict[str, Dict[str, Any]] = json.load(_f)["cases"]
+    LEDGER: dict[str, dict[str, Any]] = json.load(_f)["cases"]
 
 GOLDEN = {tag: golden_cases(tag) for tag in PDP_TAGS}
 
 STORES = ("sqlite", "sqlite-async", "postgresql-json", "postgresql-pgArray")
 
 #: ``(tier, outcome)`` per store and tag, printed by ``conftest.py`` after the run.
-RESULTS: Dict[str, Counter] = {}
+RESULTS: dict[str, Counter] = {}
 
 
 def _params():
@@ -98,7 +91,7 @@ def _seed(engine) -> None:
     def instant(value):
         return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
-    rows: Dict[Any, List[Dict[str, Any]]] = {
+    rows: dict[Any, list[dict[str, Any]]] = {
         model: []
         for model in (
             AdvResource,
@@ -123,28 +116,27 @@ def _seed(engine) -> None:
                 "scope": derived["scope"],
                 "created_at": instant(derived["createdAt"]),
                 "updated_at": instant(derived["updatedAt"]),
-                # The ordered copies `collection_columns` declares (#227): exactly the lists
-                # resources.json carries. A missing tag name is a missing element attribute.
+                # The ordered copies `collection_columns` declares (#227). A missing tag
+                # name is omitted, not null.
                 "tags_json": [
                     {k: v for k, v in tag.items() if v is not None} for tag in tags
                 ],
                 "tag_names_json": tag_names,
-                # No category sends no `mainCategory`, and stores NULL.
+                # A seed with no category sends no `mainCategory`, so store NULL.
                 "main_sub_categories_json": [{"name": n} for n in sub_names] or None,
-                # The PostgreSQL arrays hold scalars, so `tags` keeps its ids: size() counts
-                # elements, and the element is never read.
+                # PostgreSQL arrays hold scalars, so `tags` stores ids. Only size() reads it.
                 "tags_array": [tag["id"] for tag in tags],
                 "tag_names_array": tag_names,
                 "main_sub_categories_array": list(sub_names) or None,
-                # The scalar lists as the corpus spells them, null elements included.
+                # Null elements included.
                 "a_number_list_json": seed["aNumberList"],
                 "a_bool_list_json": seed["aBoolList"],
                 "a_number_list_array": seed["aNumberList"],
                 "a_bool_list_array": seed["aBoolList"],
             }
         )
-        # The to-one chain, one owned row per level: a seed with no parent gets no row,
-        # which is what makes an absent parent a missing attribute rather than a NULL value.
+        # One owned row per level. A seed with no parent gets no row, so the parent is
+        # missing rather than NULL.
         parent = parent_of(seed)
         if parent is not None:
             parent_id = f"{seed['id']}-parent"
@@ -213,8 +205,8 @@ def sqlite_engine(sqlite_url):
     engine.dispose()
 
 
-# The PostgreSQL arrays, rebased to start at index 0: an adapter reading `array[i + 1]`
-# would pass against PostgreSQL's default lower bound of 1.
+# Rebased to start at index 0, so an adapter reading `array[i + 1]` cannot pass by
+# relying on PostgreSQL's default lower bound of 1.
 _PG_ARRAY_COLUMNS = {
     "tags_array": "TEXT[]",
     "tag_names_array": "TEXT[]",
@@ -257,9 +249,8 @@ def pg_engine():
         engine.dispose()
 
 
-# A list, not a set: a filter that duplicates a row (a join fanning out) returns that row
-# twice to a caller, and collapsing the result would hide it.
-def _execute(store: str, query, request) -> List[str]:
+# A list, not a set, so a filter that duplicates a row (a fanning-out join) is caught.
+def _execute(store: str, query, request) -> list[str]:
     if store == "sqlite-async":
         return _execute_async(request.getfixturevalue("sqlite_url"), query)
     engine = request.getfixturevalue(
@@ -269,10 +260,10 @@ def _execute(store: str, query, request) -> List[str]:
         return [row.id for row in conn.execute(query)]
 
 
-def _execute_async(path: str, query) -> List[str]:
+def _execute_async(path: str, query) -> list[str]:
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-    async def run() -> List[str]:
+    async def run() -> list[str]:
         engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
         event.listen(engine.sync_engine, "connect", _case_sensitive_like)
         try:
@@ -287,7 +278,7 @@ def _execute_async(path: str, query) -> List[str]:
 # -- the contract -----------------------------------------------------------
 
 
-def _translate(store: str, case: Dict[str, Any]):
+def _translate(store: str, case: dict[str, Any]):
     return get_query(
         plan_from_golden(case),
         AdvResource,
@@ -302,8 +293,7 @@ def _translate(store: str, case: Dict[str, Any]):
     )
 
 
-# A cartesian-product warning means a subquery failed to correlate and compared against
-# EVERY row of a table: silently wrong, so it is an error.
+# A cartesian-product warning means a subquery failed to correlate: make it an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 @pytest.mark.parametrize("store,tag,case", _params())
 def test_case(store, tag, case, request):
@@ -324,9 +314,9 @@ def test_case(store, tag, case, request):
     else:
         returned = _execute(store, _translate(store, case), request)
         if status == "divergent":
-            assert sorted(returned) != sorted(
-                case["allowed"]
-            ), f"{case['id']} now matches the PDP: remove its divergent ledger entry"
+            assert sorted(returned) != sorted(case["allowed"]), (
+                f"{case['id']} now matches the PDP: remove its divergent ledger entry"
+            )
         else:
             assert sorted(returned) == sorted(case["allowed"])
     tally[(case["tier"], status)] += 1
@@ -339,5 +329,5 @@ def test_every_ledger_entry_names_a_golden_case():
         assert entry["status"] in ("unsupported", "divergent"), case_id
         assert entry["reason"], case_id
         assert entry["status"] != "divergent" or entry.get("issue"), case_id
-        # A `pdp` scope naming a tag no longer recorded matches nothing, so the entry is dead.
+        # A `pdp` scope naming an unrecorded tag matches nothing.
         assert set(entry.get("pdp", PDP_TAGS)) <= set(PDP_TAGS), case_id

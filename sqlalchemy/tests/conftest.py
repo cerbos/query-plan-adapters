@@ -1,15 +1,16 @@
-"""Fixtures for the offline suites: a throwaway in-memory schema, in both model styles.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-No PDP is started anywhere in this test suite. The suites these fixtures serve build their
-plans by hand; the ones that read a real planner's output read it from
-``conformance/golden/`` (``test_translator.py`` and ``test_adversarial_conformance.py``).
+"""Fixtures for the offline suites: an in-memory SQLite schema in both model styles.
+
+No PDP starts in this test suite. Recorded planner output comes from
+``conformance/golden/``.
 """
 
 import sys
 from importlib.metadata import version
 
 import pytest
-
 from sqlalchemy import (
     Boolean,
     Column,
@@ -37,7 +38,7 @@ class Resource(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(30))
-    # Camel case, matching the resource attribute names the corpus policies use
+    # Camel case to match the policies' attribute names.
     aBool = Column(Boolean)
     aString = Column(String)
     aNumber = Column(Integer)
@@ -48,9 +49,8 @@ class Resource(Base):
     creator = relationship("User", foreign_keys=[createdBy])
 
 
-# The SQLAlchemy 2.0 declarative style, mapped onto parallel tables holding the
-# same rows. These are not `DeclarativeMeta` instances, so they exercise a
-# different arm of `GenericTable` (#181).
+# 2.0-style models on parallel tables with the same rows. They are not
+# `DeclarativeMeta` instances, so they take a different arm of `GenericTable`.
 try:
     from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -110,20 +110,12 @@ _RESOURCE_ROWS = [
 
 @pytest.fixture(scope="module")
 def engine():
-    # in-memory database.
-    #
-    # A SQLite REGEXP function used to be registered here, for the one retired test that
-    # EXECUTED a caller-supplied `matches` override. What that override does to the emitted
-    # SQL is now asserted in `test_translator.py` from a recorded regex plan, and
-    # nothing left in this file executes one, so registering it would be dead setup.
     engine = create_engine("sqlite://")
 
-    # generate tables from sqla metadata
     Base.metadata.create_all(engine)
     if HAS_DECLARATIVE_BASE:
         ModernBase.metadata.create_all(engine)
 
-    # Populate with test data
     with engine.connect() as conn:
         conn.execute(
             insert(User.__table__),
@@ -161,11 +153,9 @@ def resource_table():
 
 
 def _require_declarative_base() -> None:
-    """Skip on 1.4, but fail loudly if 2.0 could not build the models.
+    """Skip on 1.4, but fail if 2.0 could not build the models.
 
-    Keyed on the installed version, not on `HAS_DECLARATIVE_BASE`: keyed on the
-    import result, a rename upstream would turn the whole 2.0 leg into silent
-    skips and leave CI green with the models never exercised.
+    Keyed on the installed version so an upstream rename cannot turn into silent skips.
     """
     if _IS_SQLA_14:
         pytest.skip("DeclarativeBase requires SQLAlchemy >= 2.0")

@@ -1,13 +1,10 @@
-"""The plan's condition tree: decoding it from the wire, and the queries asked of its shape.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-Both SDK clients' spellings are normalised here, once, into three node types, so nothing
-downstream has to know which transport a plan came through.
-"""
-
-from __future__ import annotations
+"""The plan's condition tree, decoded from either SDK's wire format into three node types."""
 
 from dataclasses import dataclass
-from typing import Any, FrozenSet, Tuple, Union
+from typing import Any
 
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
@@ -19,8 +16,7 @@ LAMBDA_BINDING_OPERATORS = frozenset(
     {"exists", "exists_one", "all", "filter", "map", "except"}
 )
 
-#: The operators whose collection operand is read from its declared storage rather than from
-#: ``attr_map``: the only two a collection's storage decides.
+#: Operators whose collection operand is read from its declared storage, not ``attr_map``.
 COLLECTION_STORAGE_OPERATORS = frozenset({"size", "index"})
 
 
@@ -37,22 +33,17 @@ class Variable:
 @dataclass(frozen=True)
 class Expr:
     operator: str
-    operands: Tuple[Operand, ...]
+    operands: tuple["Operand", ...]
 
 
-Operand = Union[Value, Variable, Expr]
+Operand = Value | Variable | Expr
 
 
 def _widen_integral_literals(node: Any) -> Any:
     """Rebind wire integers that do not fit int64 as floats.
 
-    A plan literal is a protobuf ``Value.number_value`` — always a double — but
-    the JSON path renders an integral double without a fraction, so ``-1e19``
-    arrives as the Python int ``-10000000000000000000``. Binding that int is a
-    driver error on SQLite (``OverflowError: Python int too large to convert to
-    SQLite INTEGER``) rather than the comparison the policy wrote. Every int
-    outside int64 is such a double exactly, so widening it back is lossless;
-    ints inside int64 are left alone so nothing else this module emits moves.
+    Plan numbers are doubles, but JSON renders ``-1e19`` as an int, which SQLite
+    cannot bind (``OverflowError``). Such ints are exact doubles, so this is lossless.
     """
     if isinstance(node, dict):
         return {key: _widen_integral_literals(value) for key, value in node.items()}
@@ -68,7 +59,7 @@ def _widen_integral_literals(node: Any) -> Any:
 
 
 def parse_operand(node: object) -> Operand:
-    """Normalize the HTTP/gRPC wire spellings once, before semantic traversal."""
+    """Decode an HTTP or gRPC wire operand into the node types."""
     if isinstance(node, dict):
         if set(node) == {"expression"}:
             return parse_operand(node["expression"])
@@ -140,9 +131,7 @@ def substitute_lambda_variable(
     )
 
 
-def declared_collection_name(
-    expression: Expr, declared: FrozenSet[str]
-) -> Union[str, None]:
+def declared_collection_name(expression: Expr, declared: frozenset[str]) -> str | None:
     """The attribute ``expression`` reads through its declared storage, if it reads one."""
     if expression.operator not in COLLECTION_STORAGE_OPERATORS:
         return None
@@ -164,18 +153,13 @@ def _reads_variable(operand: Operand, variable_name: str) -> bool:
 
 
 def assert_no_same_collection_correlation(
-    operand: Operand, enclosing: Tuple[Tuple[str, str], ...] = ()
+    operand: Operand, enclosing: tuple[tuple[str, str], ...] = ()
 ) -> None:
-    """Refuse a macro nested over the collection an enclosing macro iterates, when its body
-    reads the enclosing element.
+    """Refuse a nested macro over the same collection whose body reads the outer element.
 
-    ``attr_map`` binds a lambda variable's fields to columns by name, and an operator override
-    receives the collection's marker and a translated body — never the scope. Both macros'
-    subqueries therefore range over the one unaliased table, and a body comparing the inner
-    element with the outer one renders as a column compared with itself: SQL resolves both to
-    the innermost row, which denies what CEL allows and, under negation, allows what it denies
-    (cerbos/query-plan-adapters#509). There is no mapping a caller can supply that gives the
-    inner scope its own alias, so the shape is refused before any SQL is built.
+    ``attr_map`` gives both lambda scopes the same unaliased table, so the inner
+    subquery would compare each row with itself. That denies what CEL allows and,
+    under negation, allows what it denies. See #509.
     """
     if not isinstance(operand, Expr):
         return

@@ -1,7 +1,6 @@
 name: SQLAlchemy Pull Request
 
-# No branch filter: like the other adapter workflows, tests must also run on PRs
-# targeting non-main bases (e.g. stacked PRs).
+# No branch filter, so stacked PRs are tested too.
 on:
   pull_request:
     paths:
@@ -14,8 +13,9 @@ on:
       # result. A negation must come after every pattern it narrows.
       - "!**/*.md"
 
-# A newer push to the same pull request makes this run's result moot, so cancel it rather than
-# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+permissions: {}
+
+# Cancel a pull request's superseded runs; other triggers always finish.
 concurrency:
   group: sqlalchemy-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -28,12 +28,12 @@ jobs:
   test-sqla:
     name: SQLA ${{ matrix.sqlalchemy.name }} test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        # `pyproject.toml` declares `sqlalchemy>=1.4`, and the two major lines
-        # differ where this adapter reaches — `DeclarativeBase` exists only on
-        # 2.0 — so a single-version job leaves half the supported range unproven.
+        # Both supported majors: they differ where the adapter reaches.
         sqlalchemy:
           - name: "1.4"
             constraint: "sqlalchemy<2"
@@ -41,6 +41,8 @@ jobs:
             constraint: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
@@ -54,26 +56,36 @@ jobs:
       - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
         name: Setup PDM
         with:
-          python-version: "3.10" # Version range or exact version of a Python version to use, the same as actions/setup-python
-          prerelease: true # Allow prerelease versions to be installed
-          enable-pep582: true # Enable PEP 582 package loading globally
+          python-version: "3.10"
+          prerelease: true
+          enable-pep582: true
 
-      # The 2.x leg installs straight from the committed lockfile. The 1.4 leg
-      # re-resolves under a constraint into a throwaway lockfile, so pdm.lock
-      # stays the single pinned source of truth and no second lockfile has to be
-      # kept in step with it.
+      # 2.x uses pdm.lock. 1.4 re-resolves into a throwaway lockfile.
+      # -G selects only the named dev groups, so `test` is listed explicitly.
       - if: matrix.sqlalchemy.constraint == ''
-        run: pdm install -G testcontainers
+        run: pdm install -G testcontainers -G test -G lint
 
       - if: matrix.sqlalchemy.constraint != ''
         run: |
           echo "${{ matrix.sqlalchemy.constraint }}" > /tmp/sqlalchemy-constraint.txt
-          pdm install -G testcontainers \
+          pdm install -G testcontainers -G test \
             --override /tmp/sqlalchemy-constraint.txt \
             --lockfile /tmp/sqlalchemy-${{ matrix.sqlalchemy.name }}.lock
 
-      # Fails the job if the constraint did not take, rather than silently
-      # running the same version twice.
+      # Run once. Both rewrite files, and check-repo-status fails on any diff.
+      - name: Format
+        if: matrix.sqlalchemy.constraint == ''
+        run: pdm run format
+
+      - name: Lint
+        if: matrix.sqlalchemy.constraint == ''
+        run: pdm run lint
+
+      - name: Check repo status
+        if: matrix.sqlalchemy.constraint == ''
+        uses: cerbos/actions/check-repo-status@c19f023116079958e91290ea4af73e25296d7614 # main
+
+      # Fail if the constraint did not take effect.
       - name: Assert SQLAlchemy version
         run: |
           pdm run python - <<'PY'
@@ -84,10 +96,8 @@ jobs:
           print(f"SQLAlchemy {installed}")
           PY
 
-      # `get_query`'s overloads are a static contract the runtime suite cannot
-      # reach, so pyright checks them separately. 2.x only: 1.4's stubs declare
-      # neither `DeclarativeBase` nor `__table__`, so none of the inferences the
-      # fixture pins exist there.
+      # Checks `get_query`'s overloads. 2.x only: 1.4's stubs lack
+      # `DeclarativeBase` and `__table__`.
       - name: Type-check the public signature
         if: matrix.sqlalchemy.constraint == ''
         run: npx -y pyright@1.1.411
@@ -97,29 +107,18 @@ jobs:
       # decisions are recorded. Both SQLAlchemy majors run it.
       - run: pdm run test
 
-  # The example application: the published distribution, installed from the wheel `pdm build`
-  # produced and used the way a consumer uses it, against the shared demo domain. It covers the
-  # two things the suite above structurally cannot — the packaging surface (which modules the
-  # distribution carries, and its `Requires-Dist` resolved against a consumer's pinned tree),
-  # which every suite bypasses by importing from `../src`, and the usage shapes past a single flat
-  # query (pagination, and composing the adapter's `Select` with the application's own predicate).
-  # See cerbos/query-plan-adapters#349 and
-  # docs/adr/0002-examples-install-the-packed-artifact.md.
-  #
-  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` sets `automerge: true` for every
-  # non-major bump, and that is the path an ORM regression takes into `main` today. Because the
-  # example's lockfile is committed and Renovate manages it, a SQLAlchemy bump arrives as ONE PR
-  # touching both sqlalchemy/pyproject.toml and sqlalchemy/example/ — and this job, being a check
-  # on that PR, is what blocks the automerge when the new version breaks real usage. Moving it to
-  # a nightly run or a workflow of its own silently restores that gap.
-  #
-  # One Python leg only, and one SQLAlchemy major: the demo domain discriminates the distribution
-  # and the ORM's real query methods, not the interpreter — and the 1.4/2.x split is a semantics
-  # dimension, already run twice above by the job this one sits beside.
+  # Runs the example against the built wheel, testing packaging and usage shapes.
+  # See docs/adr/0002-examples-install-the-packed-artifact.md.
+  # Keep this job in this workflow: it is the check that blocks Renovate's automerge
+  # of a SQLAlchemy bump that breaks real usage.
   example:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
@@ -132,10 +131,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      # No `pdm install` here: the example builds the adapter and installs its own pinned tree
-      # from sqlalchemy/example/pdm.lock, in its own environment. The PDP is a container started
-      # by the runner from demo/docker-compose.yml, pinned to `current` in
-      # conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action here, because an
-      # example must reach the PDP the way a deployed application does.
+      # No `pdm install`: the example builds the adapter and installs its own pinned tree.
+      # The runner starts the PDP from demo/docker-compose.yml (pinned in
+      # conformance/pdp-versions.json), as a deployed app would reach it.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh sqlalchemy

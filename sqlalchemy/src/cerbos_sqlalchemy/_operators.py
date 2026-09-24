@@ -1,21 +1,20 @@
-"""The default lowering of every plan operator the adapter translates without help.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-``OPERATOR_FNS`` at the bottom is the registry, and the operator tables beside it say how the
-translator hands each operator its operands. Adding an operator is an edit to this module
-alone: a handler, a registry entry, and -- if it takes one operand, or its operands may be
-swapped -- an entry in the matching table.
+"""Default SQL lowering for each plan operator.
+
+To add an operator, write a handler, register it in ``OPERATOR_FNS``, and add it to
+the operand tables below if it is unary or order-insensitive.
 """
-
-from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Any, Callable, Dict, NoReturn, Tuple
+from typing import Any, NoReturn
 
-from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import (
     ARRAY,
     JSON,
@@ -38,6 +37,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
+
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
 _LIKE_ESCAPE_CHAR = "\\"
 _RFC3339_TIMESTAMP = re.compile(
@@ -69,8 +70,7 @@ class ConditionalValue:
     else_value: Any
 
 
-#: The values that carry a possibly non-finite number symbolically, to be folded by the
-#: enclosing comparison rather than bound into SQL.
+#: Possibly non-finite numbers, folded by the enclosing comparison instead of bound into SQL.
 SYMBOLIC_NUMBERS = (IEEEConstant, ConditionalValue)
 
 
@@ -81,7 +81,7 @@ class Hierarchy:
 
 
 def _is_number(value: Any) -> bool:
-    """A numeric plan literal: an int or a float, and never a bool."""
+    """True for an int or float literal, never a bool."""
     return not isinstance(value, bool) and isinstance(value, (int, float))
 
 
@@ -98,8 +98,7 @@ def scalar_kind(value: Any) -> str:
 
 
 def _base_type(type_: Any) -> Any:
-    """``type_`` with decorators unwrapped -- including SQLAlchemy 1.4's ``with_variant()``,
-    which returns a ``Variant`` decorator where 2.x returns a copy of the base type."""
+    """Unwrap type decorators, including SQLAlchemy 1.4's ``Variant`` from ``with_variant()``."""
     while isinstance(type_, TypeDecorator):
         type_ = type_.impl
     return type_
@@ -111,8 +110,7 @@ def _base_type(type_: Any) -> Any:
 def _escape_like_literal(needle: str) -> str:
     """Escape LIKE metacharacters in a literal needle.
 
-    ``[`` is a character-class opener on SQL Server even with an ESCAPE clause,
-    so escape it alongside the portable ``%``/``_`` wildcards.
+    ``[`` is escaped too because SQL Server treats it as a character class.
     """
     return (
         needle.replace(_LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2)
@@ -125,9 +123,7 @@ def _escape_like_literal(needle: str) -> str:
 def _escape_like_column(needle: Any) -> Any:
     """Escape LIKE metacharacters in a column-valued needle at query time.
 
-    A NULL needle propagates through REPLACE to a NULL pattern, so the LIKE
-    stays UNKNOWN and the row is excluded — matching CEL's missing-attribute
-    error (deny) for the same row.
+    A NULL needle gives a NULL pattern, so the row is excluded, as CEL denies it.
     """
     escaped = func.replace(needle, _LIKE_ESCAPE_CHAR, _LIKE_ESCAPE_CHAR * 2)
     escaped = func.replace(escaped, "%", _LIKE_ESCAPE_CHAR + "%")
@@ -138,14 +134,8 @@ def _escape_like_column(needle: Any) -> Any:
 def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> Any:
     """Translate CEL contains/startsWith/endsWith to an escaped LIKE.
 
-    The receiver (haystack) is the first operand and the needle the second, in
-    CEL source order — the receiver may be a constant (`"const".contains(col)`)
-    and the needle may be a column (field-to-field), so both sides accept
-    either shape. `prefix`/`suffix` add `%` before/after the escaped needle.
-
-    NOTE: `LIKE` collation is dialect-controlled; CEL string matching is
-    case-sensitive, so case-insensitive dialects (e.g. SQLite without
-    `PRAGMA case_sensitive_like`) need it configured for exact semantics.
+    Either side may be a constant or a column. CEL matching is case-sensitive, so
+    a case-insensitive LIKE (SQLite by default) must be configured to match.
     """
     if any(scalar_kind(value) not in ("", "string") for value in (receiver, needle)):
         return null()
@@ -168,9 +158,8 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
 
 def _string_size(value: Any, _: Any) -> Any:
     if isinstance(_base_type(getattr(value, "type", None)), (JSON, ARRAY)):
-        # A JSON or array column holds a collection, and LENGTH() of it is a number that
-        # answers a different question -- the length of its text, or nothing CEL means. Which
-        # SQL counts its elements depends on how it is stored, so the caller has to say.
+        # LENGTH() would measure the text, not count elements. Counting depends on
+        # the storage, so the caller must declare it.
         raise UnsupportedPlanError(
             "size() over a collection-typed column needs its storage declared: map the "
             'attribute in collection_columns with storage "json" or "pgArray"'
@@ -185,12 +174,8 @@ def _string_size(value: Any, _: Any) -> Any:
 def _reject_numeric_cast(operator: str) -> NoReturn:
     """Fail closed on CEL's int()/double().
 
-    CEL reads a WHOLE string or raises, and an error denies the row; SQL reads
-    whatever numeric prefix parses, so ``CAST('100%_done' AS INTEGER)`` is 100 on
-    SQLite and the filter returns rows the PDP denies. The numeric direction is no
-    safer: CEL truncates toward zero where PostgreSQL and MySQL round, so
-    ``int(-0.6)`` is 0 to CEL and -1 to them. Nothing in the plan says what type the
-    operand's column holds, so no lowering is faithful for every row.
+    CAST reads a numeric prefix (``'100%_done'`` is 100 on SQLite) where CEL denies,
+    and PostgreSQL and MySQL round where CEL truncates. See #311.
     """
     raise UnsupportedPlanError(
         f"'{operator}()' cannot be lowered to SQL CAST: CAST reads a numeric prefix "
@@ -202,19 +187,11 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
 def _string_cast(c: Any) -> Any:
     """CEL's ``string()``.
 
-    Numeric and text columns lower to a CAST: CEL formats the shortest decimal that
-    round-trips, and so do SQLite, PostgreSQL (12+, where that became the default) and
-    MySQL.
-
-    A BOOLEAN column does not go through a CAST. SQLite and MySQL have no boolean type and
-    store 1/0, so ``CAST(a_bool AS VARCHAR)`` is ``'1'`` where CEL's ``string(true)`` is
-    ``'true'`` -- the same query would return every matching row on PostgreSQL and none on
-    SQLite (cerbos/query-plan-adapters#376). A CASE spells CEL's two words on every
-    dialect instead (cerbos/query-plan-adapters#418), and its first arm is load-bearing: a
-    NULL boolean is a missing attribute or a null value, CEL has no ``string()`` for either
-    and denies the row, so the result must stay NULL rather than fall through to
-    ``'false'``. The two words are literals, so on MySQL they compare in the connection's
-    collation, which has to be case-sensitive as the columns' does.
+    Numbers use CAST, which formats the shortest round-trip decimal on SQLite,
+    PostgreSQL 12+ and MySQL. Booleans use a CASE because SQLite and MySQL cast
+    them to ``'1'``/``'0'`` (#376, #418). A NULL boolean must stay NULL, since CEL
+    denies it. On MySQL the literals use the connection collation, which must be
+    case-sensitive.
     """
     if isinstance(_base_type(getattr(c, "type", None)), Boolean):
         return case(
@@ -229,18 +206,11 @@ def _string_cast(c: Any) -> Any:
 
 
 def _require_signed_zero(denominator: Any) -> None:
-    """Reject a zero denominator whose sign the adapter cannot observe.
+    """Reject an integer zero denominator, whose sign is unknown.
 
-    IEEE-754 keeps the sign of a zero, so ``n / -0.0`` is the OPPOSITE infinity from
-    ``n / 0.0``. The planner does ship the sign — the wire operand for ``-0.0`` is
-    ``-0`` — but Cerbos's HTTP transport renders a whole double without a decimal
-    point and Python's ``json.loads("-0")`` returns the **int** ``0``, discarding the
-    sign bit. A float operand keeps it (``json.loads("-0.0")`` is ``-0.0``), which is
-    what the gRPC client delivers.
-
-    So when the denominator arrives as an integer zero the adapter cannot tell which
-    infinity CEL produced, and guessing returns rows the PDP denies. Fail closed
-    instead (cerbos/query-plan-adapters#312).
+    ``n / -0.0`` and ``n / 0.0`` are opposite infinities. Over HTTP, ``-0.0``
+    arrives as ``-0``, which JSON decodes to the int ``0``, losing the sign.
+    gRPC keeps it as a float. See #312.
     """
     if isinstance(denominator, bool) or not isinstance(denominator, int):
         return
@@ -255,9 +225,7 @@ def _require_signed_zero(denominator: Any) -> None:
 
 
 def _float_div(c: Any, v: Any) -> Any:
-    """CEL numeric attribute arithmetic is double-typed (Cerbos transports all
-    numbers as doubles), so force float division: dialects with integer `/`
-    (SQLite, PostgreSQL) would otherwise truncate `3 / 2.0` to `1`."""
+    """Divide as doubles, as CEL does. SQLite and PostgreSQL would truncate integer ``/``."""
     if _is_number(c) and _is_number(v):
         numerator = float(c)
         denominator = float(v)
@@ -273,28 +241,12 @@ def _float_div(c: Any, v: Any) -> Any:
     numerator = float(c) if _is_number(c) else cast(c, Float)
     denominator = float(v) if _is_number(v) else cast(v, Float)
 
-    # A zero denominator is NOT an error in CEL: attribute arithmetic is
-    # double-typed, so `0/0` is NaN and `x/0` is a signed infinity. Lowering
-    # that to SQL NULL loses the distinction — `NULL != 1.0` is UNKNOWN and
-    # excludes the row, while `NaN != 1.0` is TRUE and the PDP allows it.
-    # Keep the three IEEE cases symbolic and let the enclosing comparison fold
-    # each arm (see `_compare`/`_compare_leaf`), which is exact for ordered and
-    # equality comparisons alike.
-    #
-    # A NULL numerator or denominator makes every branch condition UNKNOWN, so
-    # the folded CASE yields NULL and the row stays excluded under BOTH
-    # polarities — the correct outcome for a CEL missing-attribute error.
-    #
-    # The finite arm keeps a NULLIF guard: it can never be selected when the
-    # denominator is zero, but dialects that evaluate CASE arms eagerly would
-    # otherwise abort the whole query on a division by zero.
-    #
-    # IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
-    # `n / 0.0`. A CONSTANT denominator carries its sign on the wire (the planner ships
-    # `-0` verbatim and protobuf doubles preserve the sign bit), so it must be applied.
-    # A COLUMN denominator does not: SQL cannot tell -0.0 from 0.0 and no portable
-    # function reads the sign bit, so the positive-zero reading is assumed and
-    # documented (cerbos/query-plan-adapters#312).
+    # In CEL, x/0 is NaN or a signed infinity, not an error. SQL NULL would be
+    # wrong (`NaN != 1.0` is TRUE), so keep these arms symbolic for the enclosing
+    # comparison to fold. A NULL operand still makes the whole CASE NULL.
+    # NULLIF stops dialects that evaluate CASE arms eagerly from failing on /0.
+    # A constant denominator's sign is applied. SQL cannot read a column's
+    # zero sign, so a column is assumed +0.0. See #312.
     denominator_sign = 1.0
     if _is_number(v):
         _require_signed_zero(v)
@@ -318,11 +270,8 @@ def _float_div(c: Any, v: Any) -> Any:
 def arith_over_conditional(op_fn: Callable[[Any, Any], Any], left: Any, right: Any):
     """Distribute a binary arithmetic operator across a retained ternary.
 
-    ``R.attr.aNumber / R.attr.aNumber + 1.0`` composes addition on top of a division
-    that is NaN for a zero row. Lowering that arm to SQL makes it ``NULL + 1``, and
-    ``NULL != 2.0`` is UNKNOWN where CEL's ``NaN != 2.0`` is TRUE — the row the PDP
-    allows would be dropped (cerbos/query-plan-adapters#312). Keeping the arms
-    symbolic lets the enclosing comparison fold each one exactly.
+    Keeps a NaN arm symbolic, since ``NULL + 1 != 2.0`` is UNKNOWN where CEL's
+    ``NaN + 1 != 2.0`` is TRUE. See #312.
     """
     if isinstance(left, ConditionalValue):
         return ConditionalValue(
@@ -344,8 +293,7 @@ def arith_over_conditional(op_fn: Callable[[Any, Any], Any], left: Any, right: A
                 "arithmetic combines a non-finite value with a column, which SQL "
                 "cannot carry"
             )
-        # A non-finite operand absorbs every finite one under +, -, * and /, so the
-        # result is always non-finite and stays symbolic.
+        # A non-finite operand keeps the result non-finite under + - * /.
         result = op_fn(float(left_value), float(right_value))
         if isinstance(result, IEEEConstant):
             return result
@@ -388,14 +336,12 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
         left_is_nan = left_is_ieee and math.isnan(left_value)
         right_is_nan = right_is_ieee and math.isnan(right_value)
         if left_is_nan or right_is_nan:
-            # Cerbos 0.55 uses IEEE false for unordered comparisons, including under NOT.
+            # IEEE: NaN is unequal and unordered, even under NOT (as in Cerbos 0.55).
             other = right_value if left_is_nan else left_value
             if isinstance(other, (int, float)):
-                # CEL follows IEEE: NaN is unequal to everything and unordered.
                 return operator == "ne"
             if hasattr(other, "is_"):
-                # Preserve CEL missing-attribute errors as SQL UNKNOWN while
-                # folding every present numeric value dialect-independently.
+                # NULL stays UNKNOWN, as CEL errors on a missing attribute.
                 return case(
                     (other.is_(None), null()),
                     else_=(operator == "ne"),
@@ -439,9 +385,8 @@ def _in(c: Any, values: Any) -> Any:
     """CEL membership, including explicit-null list elements."""
     members = values if isinstance(values, list) else [values]
     non_nulls = [member for member in members if member is not None]
-    # CEL's equality is heterogeneous: `5 in ["5"]` is false. A member the column's
-    # type cannot equal is dropped here, as `_compare_leaf` answers the same pair
-    # under `==`, rather than handed to a store that converts '5' to 5.
+    # `5 in ["5"]` is false in CEL. Drop members of another type rather than let
+    # the store coerce '5' to 5.
     column_kind = scalar_kind(c)
     comparable = [
         member
@@ -452,8 +397,7 @@ def _in(c: Any, values: Any) -> Any:
     if comparable:
         predicates.append(c.in_(comparable))
     elif non_nulls and hasattr(c, "isnot"):
-        # Every member was dropped: false for a present value, and NULL for an
-        # absent one, exactly as `c IN (...)` would have answered.
+        # All members dropped: FALSE if present, NULL if absent, like `c IN (...)`.
         predicates.append(case((c.isnot(None), false())))
     if len(non_nulls) != len(members):
         predicates.append(c.is_(None))
@@ -472,8 +416,7 @@ def _parse_rfc3339(value: str) -> datetime:
     digits = match.group(4) or ""
     if len(digits) > 6 and any(d != "0" for d in digits[6:]):
         raise UnsupportedPlanError(
-            "Timestamp literal precision exceeds the exact microsecond range: "
-            f"{value}"
+            f"Timestamp literal precision exceeds the exact microsecond range: {value}"
         )
     try:
         normalized = _EXCESS_RFC3339_PRECISION.sub(r"\1", value)
@@ -523,7 +466,7 @@ def _hierarchy(value: Any, delimiter: Any) -> Hierarchy:
     return Hierarchy(value, delimiter)
 
 
-def _matching_hierarchies(left: Any, right: Any) -> Tuple[Hierarchy, Hierarchy]:
+def _matching_hierarchies(left: Any, right: Any) -> tuple[Hierarchy, Hierarchy]:
     if not isinstance(left, Hierarchy) or not isinstance(right, Hierarchy):
         raise UnsupportedPlanError("Hierarchy operator requires hierarchy() operands")
     if left.delimiter != right.delimiter:
@@ -578,8 +521,7 @@ def _hierarchy_overlaps(left: Any, right: Any) -> Any:
 
 # -- the registry ------------------------------------------------------------------------------
 
-# Read-only, so that no caller can change the defaults for every other `get_query` call in
-# the process: an override is always explicit and per call (`operator_override_fns`).
+# Read-only so no caller can change the defaults process-wide. Override per call.
 OPERATOR_FNS = MappingProxyType(
     {
         "eq": _comparison("eq"),
@@ -589,28 +531,21 @@ OPERATOR_FNS = MappingProxyType(
         "le": _comparison("le"),
         "ge": _comparison("ge"),
         "in": _in,
-        # Arithmetic operators — return value expressions (not boolean), composed
-        # inside parent comparisons like gt(add(col, 1), 2).
+        # Arithmetic returns values, composed inside comparisons.
         "add": lambda c, v: c + v,
         "sub": lambda c, v: c - v,
         "mult": lambda c, v: c * v,
         "div": _float_div,
         "mod": lambda c, v: c % v,
-        # CEL receiver-style string matches. Operands arrive in source order
-        # (receiver first): the receiver may be a constant and the needle a
-        # column, and LIKE metacharacters in the needle are always escaped.
+        # Receiver-style string matches. Operands arrive receiver first.
         "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
         "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),
         "endsWith": lambda c, v: _string_match(c, v, prefix=True, suffix=False),
-        # Type conversions — value-returning expressions. Only string() survives: SQL CAST
-        # does not reproduce CEL's int()/double(), which read a WHOLE string or raise where
-        # CAST reads a numeric prefix, and truncate toward zero where PostgreSQL and MySQL
-        # round (cerbos/query-plan-adapters#311).
+        # int() and double() always throw. See _reject_numeric_cast.
         "string": lambda c, _: _string_cast(c),
         "double": lambda *_: _reject_numeric_cast("double"),
         "int": lambda *_: _reject_numeric_cast("int"),
-        # size() over a string column. A collection is declared in `collection_columns` and
-        # never reaches this handler; an undeclared JSON or array column is refused here.
+        # String size only. Declared collections never reach this handler.
         "size": _string_size,
         "timestamp": _timestamp,
         "hierarchy": _hierarchy,
@@ -620,40 +555,22 @@ OPERATOR_FNS = MappingProxyType(
     }
 )
 
-#: Value-returning operators that take a single operand, handed to their handler as
-#: ``(operand, None)``.
+#: Single-operand operators, called as ``handler(operand, None)``.
 UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp"})
 
-#: Directional operators mirror when their operands swap sides; symmetric operators are
-#: unchanged. The planner preserves policy source order, so `1 < R.attr.x` arrives as
-#: lt(value(1), variable(x)) and must translate as `x > 1`, not `x < 1` (#257).
-MIRRORED_OPERATORS: Dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": "le"}
+#: Operators to mirror when a value comes first: `1 < R.attr.x` becomes `x > 1`. See #257.
+MIRRORED_OPERATORS: dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": "le"}
 
-#: Operators whose semantics don't depend on which operand holds the column:
-#: `eq`/`ne` are symmetric, value-first `in` (`value in R.attr.list`) still
-#: means membership against the column, and set intersection is commutative, so
-#: all four normalize to column-first. Every OTHER operator keeps its wire
-#: (source) order when the value comes first — receiver-style string matches
-#: (`"const".contains(R.attr.x)`) would otherwise silently swap haystack and
-#: needle.
+#: Operators normalised to column-first. All others keep source order, or
+#: `"const".contains(R.attr.x)` would swap haystack and needle.
 ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in", "hasIntersection"})
 
-#: Collection macros that fold into a flat boolean combination of their
-#: per-element bodies. `exists_one`/`filter`/`map` have no such flattening and
-#: fail closed instead.
+#: Macros that fold into a boolean over their per-element bodies. Others fail closed.
 FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all"})
 
-# What a DEFAULT operator handler can lower: a SQL construct the mapper produced, a literal
-# decoded from the plan (JSON carries no other kind of value), or one of THIS module's own
-# symbolic values, which the handlers above know how to fold.
-#
-# Everything else is foreign. An operator override may return whatever it likes -- the
-# corpus's `map` and `filter` overrides return deferred tuples -- but such a value only means
-# something to the ENCLOSING override that consumes it, and once a default handler is running
-# there is no enclosing override left to do so. Python then compares the intermediate with
-# `==`, yields a bare `False`, and that reaches `where()` as a perfectly valid boolean which
-# excludes every row: an emitted filter for a shape the adapter cannot express, and silent
-# because it never threw (`collection/map/equals-list-literal`, cerbos/query-plan-adapters#387).
+# What a default handler can lower: SQL, plan literals, and this module's symbolic
+# values. An override's intermediate value (e.g. a deferred tuple) must throw here,
+# or Python's `==` turns it into a bare False that silently filters. See #387.
 _LOWERABLE_OPERAND_TYPES = (
     ColumnElement,
     InstrumentedAttribute,

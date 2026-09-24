@@ -10,7 +10,7 @@ into a [SQLAlchemy](https://docs.sqlalchemy.org/) `Select`, for use with the
 pip install cerbos-sqlalchemy
 ```
 
-- Python >= 3.8
+- Python >= 3.10
 - SQLAlchemy >= 1.4 (1.4 and 2.x are both tested)
 - Cerbos Python SDK (`cerbos`) >= 0.10.4; Cerbos PDP > v0.16
 - Either SDK client: the HTTP `CerbosClient` or the gRPC client (see [Transports](#transports))
@@ -508,7 +508,13 @@ demo/scripts/run-example.sh sqlalchemy
 | `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) (declared collection storage) |
 
 ```bash
-pdm install
+pdm install -G :all
 pdm run test            # all three
-pdm run format          # isort + black
+pdm run format          # isort + ruff format
+pdm run lint            # ruff check --fix
 ```
+
+Without PDM installed, run the same commands through the [pyprojectx](https://pyprojectx.github.io/)
+wrapper, `./pw` (`pw.bat` on Windows), which installs PDM, ruff and isort into `.pyprojectx/` on
+first use: `./pw install`, `./pw test`, `./pw format`, `./pw lint`, or `./pw pdm <command>`. CI runs
+`format` and `lint` on the SQLAlchemy 2.x leg and fails if they leave a diff.
