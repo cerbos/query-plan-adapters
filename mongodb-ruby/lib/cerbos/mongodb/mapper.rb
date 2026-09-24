@@ -138,33 +138,38 @@ module Cerbos
 
       # Resolves a plan variable to a document path, through the relation it belongs to if any.
       # A to-many relation keeps its array segment first so it can be split off.
+      #
+      # An unmapped reference raises rather than being used verbatim as a document path. A plan
+      # reference such as +request.resource.attr.status+ names no field any real document has,
+      # and MongoDB's negations match a document the path is absent from: +$ne+ and +$nor+ over a
+      # path nothing stores select every document, so a typo or a missing mapper entry turned
+      # <tt>R.attr.status != "x"</tt> into a filter returning the whole collection
+      # (cerbos/query-plan-adapters#492). A caller whose documents really are shaped like the plan
+      # path opts in per reference with an entry that names no field (+{}+ or
+      # <tt>{nullable: true}</tt>), or a callable mapper that returns one.
+      #
+      # @raise [MapperError] if the mapper has no entry for +reference+
       def resolve_field(reference)
-        parts = reference.split(".")
-        return Resolved.new([reference], nil) if parts.empty? || parts.last.empty?
+        lookup_field(reference) or raise MapperError,
+          "No mapper entry for #{reference}: an unmapped reference is not used verbatim as a " \
+          "document path, because MongoDB's $ne and $nor match every document a path is absent " \
+          "from. Map it to a field, or declare it with an entry to use the plan path as-is."
+      end
 
-        config = lookup(reference)
-        return relation_reference(config.relation, config.relation.field) if config&.relation
-        return Resolved.new([config.field], nil) if config&.field
-
-        if parts.length > 1
-          parent = lookup(parts[0..-2].join("."))&.relation
-          if parent
-            return relation_reference(parent, parent.fields[parts.last]&.field || parts.last)
-          end
-        end
-
-        Resolved.new([reference], nil)
+      # The relation a plan variable is reached through, if any. Unlike {#resolve_field} it does
+      # not refuse an unmapped name: the guards that ask it walk every variable in an operand,
+      # and the emission site is what refuses the references.
+      def relation_of(reference)
+        lookup_field(reference)&.relation
       end
 
       # The mapper a collection macro's lambda body is translated with: the iteration variable
       # (and +variable.field+) resolve against the relation's element +fields+, relative to the
-      # element; every other key falls through to this mapper.
+      # element; every other key falls through to this mapper, unmapped if it is unmapped here.
       def scoped(collection_path, variable)
         outer = self
         Mapper.new(lambda { |key|
-          unless key == variable || key.start_with?("#{variable}.")
-            next outer.lookup(key) || Config.new(key, false, nil, nil, nil)
-          end
+          next outer.lookup(key) unless key == variable || key.start_with?("#{variable}.")
 
           relation = outer.lookup(collection_path)&.relation
           if key == variable
@@ -179,6 +184,23 @@ module Cerbos
       end
 
       private
+
+      # The document path +reference+ maps to, or nil when the mapper has no entry for it.
+      def lookup_field(reference)
+        config = lookup(reference)
+        return relation_reference(config.relation, config.relation.field) if config&.relation
+        return Resolved.new([config.field], nil) if config&.field
+
+        parts = reference.split(".")
+        last = parts.pop
+        if !parts.empty? && last && !last.empty?
+          parent = lookup(parts.join("."))&.relation
+          return relation_reference(parent, parent.fields[last]&.field || last) if parent
+        end
+
+        # An entry with neither `field` nor `relation` is the caller's opt-in to the plan path.
+        Resolved.new([reference], nil) if config
+      end
 
       def relation_reference(relation, field)
         path = if field.nil?

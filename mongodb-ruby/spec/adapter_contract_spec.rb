@@ -3,10 +3,12 @@
 require "bson"
 
 # The caller-supplied contract: what an application passes in, which the corpus structurally
-# cannot vary. actions.json classifies every action against ONE mapper, so a value_parser, a
-# callable mapper, the mapper's own validation, the per-call null representation and the plan
-# shapes the adapter accepts have no corpus spelling (CLAUDE.md, "What a translator unit test may
-# pin", kind 2). Offline: the plans are built here, and nothing opens a connection.
+# cannot vary. The conformance harness replays every case through ONE mapper, so a value_parser,
+# a callable mapper, an unmapped reference, the mapper's own validation, the per-call null
+# representation and the plan shapes the adapter accepts have no case spelling (CLAUDE.md, "What
+# a translator unit test may pin", kinds 1 and 2). So does the boundary between a refusal and a
+# mapping mistake, which the harness's `unsupported` assertion rests on. Offline: nothing opens a
+# connection.
 RSpec.describe "adapter contract" do
   def plan(condition) = {"kind" => "KIND_CONDITIONAL", "condition" => condition}
 
@@ -24,18 +26,55 @@ RSpec.describe "adapter contract" do
     it "reports each plan kind and a filter that is safe to run as-is" do
       allowed = Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_ALLOWED"})
       denied = Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_DENIED"})
-      conditional = Cerbos::MongoDB.query_plan_to_filter(plan: plan(var("request.resource.attr.aBool")))
+      conditional = Cerbos::MongoDB.query_plan_to_filter(
+        plan: plan(var("request.resource.attr.aBool")), mapper: {"request.resource.attr.aBool" => {field: "aBool"}}
+      )
 
       expect([allowed.kind, allowed.always_allowed?, allowed.filter]).to eq(["KIND_ALWAYS_ALLOWED", true, {}])
       expect([denied.kind, denied.always_denied?, denied.filter]).to eq(["KIND_ALWAYS_DENIED", true, {"$expr" => false}])
       expect([conditional.kind, conditional.conditional?]).to eq(["KIND_CONDITIONAL", true])
-      expect(conditional.filter).to eq({"request.resource.attr.aBool" => {"$eq" => true}})
+      expect(conditional.filter).to eq({"aBool" => {"$eq" => true}})
+    end
+  end
+
+  describe "the refusal type" do
+    # The harness passes an `unsupported` ledger entry on any Cerbos::MongoDB::Error except a
+    # MapperError. These pin both sides of that line.
+    it "refuses a shape it cannot express with an Error that is not a MapperError" do
+      golden = ConformanceCorpus.golden("regex/matches/lookahead-from-principal")
+      expect { Cerbos::MongoDB.query_plan_to_filter(plan: golden.fetch("plan"), mapper: CorpusMapper::MAPPER) }
+        .to raise_error(Cerbos::MongoDB::UnsupportedError) { |error| expect(error).not_to be_a(Cerbos::MongoDB::MapperError) }
+    end
+
+    it "reports a mapping mistake as a MapperError, not as a refusal" do
+      golden = ConformanceCorpus.golden("string/equals/case-sensitive")
+      expect { Cerbos::MongoDB.query_plan_to_filter(plan: golden.fetch("plan")) }
+        .to raise_error(Cerbos::MongoDB::MapperError)
     end
 
     it "does not let a caller mutate the unconditional filters for the next call" do
       expect(Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_ALLOWED"}).filter).to be_frozen
       expect(Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_DENIED"}).filter).to be_frozen
     end
+  end
+
+  # The README's mapping-hazard contract rests on ONE structural fact: this adapter builds no
+  # subquery. A relation is a path inside the same document, so the filter and the application read
+  # the same document. No corpus case can state that (a case asks which documents come back), so it
+  # is pinned against the source, which is total over mapper shapes where a walk of emitted filters
+  # is not (cerbos/query-plan-adapters#323).
+  it "emits no $lookup and reaches no second collection" do
+    forbidden = /\$lookup|\$graphLookup|\$unionWith|\.aggregate\b/
+    sources = Dir[File.expand_path("../lib/**/*.rb", __dir__)].sort
+    # Guard the guard: a scan that found no files, or lost the entry point, would pass vacuously.
+    expect(sources.map { |path| File.basename(path) }).to include("mongodb.rb", "translator.rb")
+    # Prose about the guard is not a violation of it, so comments come off first.
+    offending = sources.flat_map { |path|
+      File.readlines(path, encoding: "UTF-8").each_with_index.filter_map { |line, index|
+        "#{File.basename(path)}:#{index + 1}" if line.sub(/#.*$/, "").match?(forbidden)
+      }
+    }
+    expect(offending).to be_empty
   end
 
   describe "the plans it reads" do
@@ -84,19 +123,51 @@ RSpec.describe "adapter contract" do
 
     # BSON has no integer wider than 64 bits, and the planner's number was a double all along.
     it "keeps an integral literal beyond int64 as the double it was on the wire" do
-      emitted = filter(expr("gt", var("request.resource.attr.aDouble"), val(-10_000_000_000_000_000_000)))
-      bound = emitted.fetch("request.resource.attr.aDouble").fetch("$gt")
+      mapper = {"request.resource.attr.aDouble" => {field: "aDouble"}}
+      emitted = filter(expr("gt", var("request.resource.attr.aDouble"), val(-10_000_000_000_000_000_000)), mapper)
+      bound = emitted.fetch("aDouble").fetch("$gt")
       expect(bound).to be_a(Float)
       expect { BSON::Document.new(emitted).to_bson }.not_to raise_error
     end
   end
 
   describe "the mapper" do
-    it "maps a field, and uses the plan's path verbatim when nothing maps it" do
+    it "maps a field" do
       mapper = {"request.resource.attr.title" => {field: "doc.title"}}
       expect(filter(expr("eq", var("request.resource.attr.title"), val("a")), mapper)).to eq({"doc.title" => {"$eq" => "a"}})
-      expect(filter(expr("eq", var("request.resource.attr.other"), val("a")), mapper))
-        .to eq({"request.resource.attr.other" => {"$eq" => "a"}})
+    end
+
+    # Before cerbos/query-plan-adapters#492 an unmapped reference was used verbatim as a document
+    # path, and `$ne` or `$nor` over a path no document stores matched every document.
+    describe "an unmapped reference" do
+      let(:negated) { expr("ne", var("request.resource.attr.status"), val("x")) }
+      let(:message) { /No mapper entry for request.resource.attr.status: an unmapped reference is not used verbatim/ }
+
+      it "is refused when the Hash has no entry for it" do
+        expect { filter(negated, {"request.resource.attr.title" => {field: "title"}}) }
+          .to raise_error(Cerbos::MongoDB::MapperError, message)
+      end
+
+      it "is refused when a callable returns no entry for it" do
+        expect { filter(negated, ->(_) {}) }.to raise_error(Cerbos::MongoDB::MapperError, message)
+      end
+
+      it "is refused under the default mapper" do
+        expect { filter(negated) }.to raise_error(Cerbos::MongoDB::MapperError, message)
+      end
+
+      it "is refused as the collection a macro ranges over" do
+        macro = expr("exists", var("request.resource.attr.status"),
+          expr("lambda", expr("eq", var("t.name"), val("a")), var("t")))
+        expect { filter(macro, {"request.resource.attr.title" => {field: "title"}}) }
+          .to raise_error(Cerbos::MongoDB::MapperError, message)
+      end
+
+      # The opt-in, for a caller whose documents really are shaped like the plan path.
+      it "keeps the plan path when an entry naming no field declares it" do
+        expect(filter(negated, {"request.resource.attr.status" => {}}))
+          .to eq({"request.resource.attr.status" => {"$ne" => "x"}})
+      end
     end
 
     it "accepts a callable in place of a Hash, with string or symbol keys" do
@@ -151,9 +222,11 @@ RSpec.describe "adapter contract" do
   describe "the null attribute representation" do
     let(:null_eq) { expr("eq", var("request.resource.attr.x"), val(nil)) }
 
+    let(:mapper) { {"request.resource.attr.x" => {field: "x"}} }
+
     it "matches null under :explicit and refuses it under :omitted" do
-      expect(filter(null_eq)).to eq({"$and" => [{"request.resource.attr.x" => {"$exists" => true}}, {"request.resource.attr.x" => {"$eq" => nil}}]})
-      expect { filter(null_eq, null_attribute_representation: :omitted) }
+      expect(filter(null_eq, mapper)).to eq({"$and" => [{"x" => {"$exists" => true}}, {"x" => {"$eq" => nil}}]})
+      expect { filter(null_eq, mapper, null_attribute_representation: :omitted) }
         .to raise_error(Cerbos::MongoDB::UnsupportedError, /missing-attribute error/)
     end
 

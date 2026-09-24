@@ -58,7 +58,7 @@ module Cerbos
         array_parents = []
         to_one_paths = []
         variable_names(operand).each do |name|
-          relation = mapper.resolve_field(name).relation
+          relation = mapper.relation_of(name)
           next if relation.nil?
 
           array_parents << relation.requires_parent if relation.requires_parent

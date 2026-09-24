@@ -182,7 +182,7 @@ module Cerbos
           {"$size" => inner},
           {"$cond" => [{"$eq" => [{"$type" => inner}, "string"]}, {"$strLenCP" => inner}, nil]}
         ]}
-        parent = variable?(operand) ? mapper.resolve_field(operand.name).relation&.requires_parent : nil
+        parent = variable?(operand) ? mapper.relation_of(operand.name)&.requires_parent : nil
         return size if parent.nil?
 
         # An absent to-one parent counts as UNKNOWN, not 0. null loses against every number in

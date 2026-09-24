@@ -124,8 +124,13 @@ silently ignored would drop a guard.
 | `value_type` | `:number`, `:string`, `:boolean` or `:date_time`. Settles an equality against a constant of another type without a query, and refuses shapes a stored `Date` cannot answer (a bare comparison of two date fields: MongoDB has discarded the strings CEL compares). |
 | `relation` | `type: :one` for an embedded subdocument (a to-one hop, required to be present outside any negation), `type: :many` for an array of subdocuments (`$elemMatch`). `field` names the element field the relation stands for, `fields` maps element fields, `requires_parent` names an optional to-one parent array the path is reached through. |
 
-Without a mapper the plan's paths are used verbatim, which only works if your documents use
-Cerbos's attribute paths as field names.
+**An unmapped reference raises `Cerbos::MongoDB::MapperError`** rather than being used verbatim as
+a document path. No real document stores `request.resource.attr.status`, and MongoDB's `$ne` and
+`$nor` match every document a path is absent from, so a missing entry used to turn
+`R.attr.status != "x"` into a filter returning the whole collection
+([#492](https://github.com/cerbos/query-plan-adapters/issues/492)). If your documents really do use
+Cerbos's attribute paths as field names, declare each one with an entry that names no field (`{}`,
+or `{nullable: true}`), or return one from a callable mapper.
 
 ### NULL attribute representation
 
@@ -214,8 +219,8 @@ No suite starts a PDP.
 - `spec/mongoid_spec.rb` asserts, offline, that the Mongoid criteria's selector is the emitted
   filter for every corpus case, and that a bare `where` is not.
 - `spec/adapter_contract_spec.rb` covers what the corpus cannot vary: `value_parser`, callable
-  mappers, mapper validation, the per-call null representation, the plan
-  shapes accepted, and that no source file
+  mappers, unmapped references, mapper validation, the per-call null representation, the plan
+  shapes accepted, the line between a refusal and a mapping mistake, and that no source file
   reaches a second collection.
 
 ## Mapping hazards
