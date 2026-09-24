@@ -189,10 +189,10 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The default is `"explicit"` (`IS NULL`). If you omit attributes for NULL columns, set `"omitted"`:
-the adapter then never emits a filter that selects the NULL rows. A comparison that can only deny
-under that convention is settled without one: `x == null` is FALSE for a present value and an
-error for an absent one, so outside any `!` it denies every row, and `!(x != null)` likewise. Every
-other null comparison operand is rejected.
+the adapter then never emits a filter that selects the NULL rows. `x == null` is FALSE for a
+present value and an error for an absent one, so it becomes `NOT startsWith(x, "")` (for a string
+column): FALSE when present, UNKNOWN when NULL, under either polarity. `x != null` is the
+presence test itself. Every other null comparison operand is rejected.
 
 ```ts
 queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
@@ -486,8 +486,8 @@ vacuously true, matching the empty list your application would send to `check()`
   (see [Timestamps](#timestamps)).
 - A list-valued `filter()`, `map()` or `except()` where a boolean is required is a CEL error, and
   settles as one: a whole condition that is one returns `ALWAYS_DENIED` rather than throwing. Under
-  `nullAttributeRepresentation: "omitted"`, `x == null` outside any `!` (and `!(x != null)`)
-  settles the same way instead of being refused.
+  `nullAttributeRepresentation: "omitted"`, `x == null` and `x != null` over a typed column
+  translate to presence tests instead of being refused.
 - `size()` of a `valueType: "string"` column translates for any threshold, as `LIKE` patterns of
   `_` (`size(x) > 4` is `startsWith: "_____"`). A threshold of 2^32 or more, which no store can
   hold, needs no pattern; one past 1024 characters short of that is refused. Fractional and
@@ -495,12 +495,16 @@ vacuously true, matching the empty list your application would send to `check()`
   `size(chain) >= 0` on a multi-hop chain is "the chain exists".
 - A comparison whose outcome the declared `valueType` settles is no longer refused. CEL's
   heterogeneous equality answers `==` false and `!=` true across types, so `aNumber == "5"`,
-  `aString == {"a": 1}` and `"2" in aNumberList` fold to constants, and an `in`/`hasIntersection`
+  `aString == {"a": 1}` and `"2" in aNumberList` settle, and an `in`/`hasIntersection`
   list drops the literals that can never match (`aNumber in ["5", 2]` is `aNumber in [2]`). A
   no-overload call (`aNumber.contains("2")`, `size(aBool)`, `hierarchy(aNumber)`) is a CEL error,
   which is settled only where the enclosing `!`, `&&`, `||`, `exists` and `all` fix how an error
-  decides the row. Where a missing attribute could still raise an error the other way, the shape is
-  refused as before. A conditional plan that folds to `false` returns `ALWAYS_DENIED` instead of
+  decides the row. A column is trusted never to be missing only when its mapping says
+  `nullable: false` (or it is an explicit-null attribute); otherwise the settled comparison is a
+  presence test on it (`startsWith(x, "")`, `x > 0 || x <= 0`, `x || !x`), TRUE when the value is
+  there and UNKNOWN on NULL, so a missing attribute stays denied under a negation. A column reached
+  through `relation.fields` and a projected list element now carry the `valueType` declared for
+  them. A conditional plan that folds to `false` returns `ALWAYS_DENIED` instead of
   throwing. This supersedes the `in value type does not match mapped <type> field` refusal below
   for scalar literals.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of

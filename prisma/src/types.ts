@@ -23,7 +23,16 @@ type CelType = "string" | "number" | "boolean" | "null" | "list" | "map";
  * denies: a no-overload call, or a missing attribute (an omitted NULL column, an absent to-one
  * parent) reached before the comparison could decide.
  */
-type Outcomes = { true?: boolean; false?: boolean; error?: boolean };
+type Outcomes = {
+  true?: boolean;
+  false?: boolean;
+  error?: boolean;
+  /**
+   * When the only error is a missing column: each such column's presence test, TRUE when the
+   * value is there and UNKNOWN when it is NULL (see presence).
+   */
+  missing?: PlanExpressionOperand[];
+};
 
 const ORDERING_OPERATORS = new Set(["lt", "le", "gt", "ge"]);
 const STRING_OPERATORS = new Set(["contains", "startsWith", "endsWith", "matches"]);
@@ -81,6 +90,16 @@ export function settleTypeMismatches(
 
   const outcomes = leafOutcomes(expr, context);
   if (outcomes === undefined) return rewriteLiteralLists(expr, context);
+  // Definite once every column is present, and an error otherwise: the presence tests carry the
+  // error as SQL UNKNOWN, which decides the row as CEL's error does under either polarity.
+  if (outcomes.missing !== undefined && outcomes.true !== outcomes.false) {
+    const present: PlanExpressionOperand =
+      outcomes.missing.length === 1
+        ? outcomes.missing[0]!
+        : { operator: "and", operands: outcomes.missing };
+    if (outcomes.missing.length === 0) return { value: outcomes.true === true };
+    return outcomes.true ? present : { operator: "not", operands: [present] };
+  }
   if (positive && !outcomes.true) return { value: false };
   if (!positive && !outcomes.false) return { value: true };
   if (!outcomes.error && !(outcomes.true && outcomes.false)) {
@@ -160,9 +179,9 @@ function distributeTernary(
   ];
   if (!isNamedOperand(condition)) return undefined;
   const fieldRef = resolveFieldReference(condition.name, context);
-  if (scalarType(fieldRef) !== "boolean" || mayBeMissing(fieldRef) || fieldRef.relations?.length) {
-    return undefined;
-  }
+  if (scalarType(fieldRef) !== "boolean" || fieldRef.relations?.length) return undefined;
+  // A missing condition is an error that selects neither branch; its presence test keeps it one.
+  const conditionPresent = mayBeMissing(fieldRef) ? presence(condition, fieldRef) : undefined;
   // A relation reached in a branch would be required around the whole expansion under an
   // enclosing negation (see negateRequiringHops), where CEL never evaluates the unselected branch.
   const reachesRelation = (operand: PlanExpressionOperand): boolean =>
@@ -184,6 +203,9 @@ function distributeTernary(
     operands: [
       { operator: "and", operands: [condition, onTrue] },
       { operator: "and", operands: [{ operator: "not", operands: [condition] }, onFalse] },
+      ...(conditionPresent === undefined
+        ? []
+        : [{ operator: "not", operands: [conditionPresent] }]),
     ],
   };
 }
@@ -517,11 +539,8 @@ function leafOutcomes(
     const nan = [left, right].find((o) => isValueOperand(o) && Number.isNaN(o.value));
     if (nan !== undefined) {
       const other = nan === left ? right : left;
-      const missing = isNamedOperand(other)
-        ? mayBeMissing(resolveFieldReference(other.name, context))
-        : !isValueOperand(other);
       if (!isNamedOperand(other) && !isValueOperand(other)) return undefined;
-      return { [operator === "ne" ? "true" : "false"]: true, error: missing };
+      return definite(operator === "ne", [other], context);
     }
     const nullComparison = omittedNullComparison(operator, left, right, context);
     if (nullComparison !== undefined) return nullComparison;
@@ -545,9 +564,8 @@ function leafOutcomes(
     ) {
       return undefined;
     }
-    const missing = leftType.mayBeMissing || rightType.mayBeMissing;
     if (ORDERING_OPERATORS.has(operator)) return { error: true };
-    return { [operator === "eq" ? "false" : "true"]: true, error: missing };
+    return definite(operator !== "eq", [left, right], context);
   }
 
   if (STRING_OPERATORS.has(operator) && operands.length === 2) {
@@ -582,7 +600,7 @@ function leafOutcomes(
     const elements = literalElements(collection);
     if (field !== undefined && elements !== undefined) {
       return elements.every((element) => isMismatch(field.type, element))
-        ? { false: true, error: field.mayBeMissing }
+        ? definite(false, [member], context)
         : undefined;
     }
     return undefined;
@@ -627,7 +645,63 @@ function omittedNullComparison(
   if (fieldRef.relations && fieldRef.relations.length > 0) return undefined;
   const convention = fieldRef.nullAttributeRepresentation ?? context.nullRepresentation;
   if (convention !== "omitted") return undefined;
-  return { [operator === "eq" ? "false" : "true"]: true, error: true };
+  const test = presence(field, fieldRef);
+  return {
+    [operator === "eq" ? "false" : "true"]: true,
+    error: true,
+    ...(test === undefined ? {} : { missing: [test] }),
+  };
+}
+
+/**
+ * A leaf that is `value` whenever the named operands among `operands` are present, and a
+ * missing-attribute error when one is not.
+ */
+function definite(
+  value: boolean,
+  operands: PlanExpressionOperand[],
+  context: TranslationContext
+): Outcomes {
+  const missing: PlanExpressionOperand[] = [];
+  let unknowable = false;
+  for (const operand of operands) {
+    if (!isNamedOperand(operand)) continue;
+    const fieldRef = resolveFieldReference(operand.name, context);
+    if (!mayBeMissing(fieldRef)) continue;
+    const test = presence(operand, fieldRef);
+    if (test === undefined) unknowable = true;
+    else missing.push(test);
+  }
+  return {
+    [value ? "true" : "false"]: true,
+    error: unknowable || missing.length > 0,
+    ...(unknowable ? {} : { missing }),
+  };
+}
+
+/**
+ * A predicate TRUE for a present value of the column and UNKNOWN for a NULL one, spelled with
+ * the plain comparisons the translator leaves to SQL's three-valued logic. Undefined for a column
+ * whose type is not declared.
+ */
+function presence(
+  column: NamedOperand,
+  fieldRef: ResolvedFieldReference
+): PlanExpressionOperand | undefined {
+  const compare = (operator: string, value: Value): PlanExpressionOperand => ({
+    operator,
+    operands: [column, { value }],
+  });
+  switch (scalarType(fieldRef)) {
+    case "string":
+      return compare("startsWith", "");
+    case "number":
+      return { operator: "or", operands: [compare("gt", 0), compare("le", 0)] };
+    case "boolean":
+      return { operator: "or", operands: [compare("eq", true), compare("eq", false)] };
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -769,16 +843,16 @@ function scalarType(fieldRef: ResolvedFieldReference): CelType | undefined {
 }
 
 /**
- * Whether evaluating the reference can raise a missing-attribute error: a NULL column the caller
- * omits, or a to-one hop that may be absent. A column sent as an explicit null holds a null VALUE,
- * which heterogeneous equality compares definitely.
+ * Whether evaluating the reference can raise a missing-attribute error: a to-one hop that may be
+ * absent, or a column that may be NULL. A column sent as an explicit null holds a null VALUE,
+ * which heterogeneous equality compares definitely. Only `nullable: false` says a column is never
+ * NULL: an undeclared mapping is not evidence of NOT NULL, and settling a comparison as if it
+ * were would admit the NULL rows under a negation.
  */
 function mayBeMissing(fieldRef: ResolvedFieldReference): boolean {
   if (fieldRef.relations?.some((relation) => relation.type === "one")) return true;
   if (fieldRef.nullAttributeRepresentation === "explicit") return false;
-  return (
-    fieldRef.nullAttributeRepresentation === "omitted" || fieldRef.nullable === true
-  );
+  return fieldRef.nullable !== false;
 }
 
 /**

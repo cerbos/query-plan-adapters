@@ -85,9 +85,11 @@ describe("declared scalar types", () => {
       filters: { aString: { equals: 0 } },
     });
     // Declared, the type settles the comparison: CEL's heterogeneous equality answers a string
-    // column against a number false for every row, so nothing is bound for a store to coerce.
+    // column against a number false for every present value, so nothing is bound for a store to
+    // coerce. `NOT LIKE '%'` is that false, kept UNKNOWN on a NULL, which is a missing attribute.
     expect(translate("type-mismatch/equals/string-field-against-number-principal")).toEqual({
-      kind: PlanKind.ALWAYS_DENIED,
+      kind: PlanKind.CONDITIONAL,
+      filters: { NOT: { aString: { startsWith: "" } } },
     });
   });
 });
@@ -119,6 +121,7 @@ describe("nullAttributeRepresentation", () => {
   // the adapter has to be told. The corpus mapping declares it per attribute; these vary the
   // call-level option and the declaration, which the corpus cannot.
   const MISSING = "null/equals/null-literal-on-missing-attribute";
+  const NEVER = { kind: PlanKind.CONDITIONAL, filters: { NOT: { aOptionalString: { startsWith: "" } } } };
 
   test("explicit (the default): == null is an IS NULL filter", () => {
     expect(translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
@@ -127,36 +130,38 @@ describe("nullAttributeRepresentation", () => {
     });
   });
 
-  test("omitted: the same plan denies every row rather than selecting the NULL ones", () => {
+  test("omitted: the same plan selects no row rather than the NULL ones", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // IS NULL filter would return exactly those rows (#302); a present value is never null.
+    // IS NULL filter would return exactly those rows (#302); a present value is never null, so
+    // `== null` is FALSE for it — `NOT LIKE '%'`, which stays UNKNOWN on the NULL rows.
     expect(
       translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
-    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
+    ).toEqual(NEVER);
   });
 
   test("a per-attribute declaration overrides the call-level option, in both directions", () => {
     // Declared omitted, called explicit: no IS NULL filter (#308).
-    expect(translate(MISSING)).toEqual({ kind: PlanKind.ALWAYS_DENIED });
+    expect(translate(MISSING)).toEqual(NEVER);
     // Declared explicit (`owner`), called omitted: translated.
     expect(
       translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" }).kind
     ).toBe(PlanKind.CONDITIONAL);
-    // Strip the declaration and the same call is denied outright.
+    // Strip the declaration and the same call selects no row.
     expect(
       translate("null/equals/null-literal", {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       })
-    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
+    ).toEqual(NEVER);
   });
 
   // The rejection must key off the null OPERAND, not a list of operators: `hasIntersection(tagNames,
   // ["public", null])` carries one in its value list. Enumerating the goldens rather than naming
   // shapes covers a newly added case carrying a null constant automatically.
-  // A plan whose null comparison settles (`x == null` is false or an error, so every row is
-  // denied) passes too: ALWAYS_DENIED selects no NULL row.
-  test("no plan carrying a null literal selects NULL rows under call-level omitted", () => {
+  // A plan whose null comparison settles passes too: `x == null` is FALSE for a present value and
+  // an error for a missing one, rendered with presence tests that are UNKNOWN on NULL. Any
+  // NULL-selecting filter needs an IS NULL leaf, i.e. a null literal in the emitted where-input.
+  test("no plan carrying a null literal emits an IS NULL filter under call-level omitted", () => {
     const carrying = readGoldens(CURRENT).filter((golden) => carriesNullLiteral(golden.plan));
     const ids = carrying.map((golden) => golden.id);
     expect(ids).toContain(MISSING);
@@ -170,7 +175,9 @@ describe("nullAttributeRepresentation", () => {
           model: MODEL,
           nullAttributeRepresentation: "omitted",
         });
-        return result.kind === PlanKind.ALWAYS_DENIED ? [] : [golden.id];
+        return result.kind === PlanKind.CONDITIONAL && JSON.stringify(result.filters).includes("null")
+          ? [golden.id]
+          : [];
       } catch (error) {
         // A positional read of a list compares an element, not an optionally absent field; the
         // index operator has no Prisma filter form under either representation.
