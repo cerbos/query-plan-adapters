@@ -85,66 +85,6 @@
       "status": "unsupported",
       "reason": "Comparison operator missing value operand."
     },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "matches() regex: 'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: matches."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "matches() with an anchored top-level alternation (^o|e$): 'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."

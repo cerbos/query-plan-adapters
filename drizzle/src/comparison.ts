@@ -66,6 +66,25 @@ interface ComparisonContext {
   negated: boolean;
 }
 
+/** The operators whose result is always a boolean, so a comparison with `true` / `false` is one. */
+const BOOLEAN_VALUED_OPERATORS = new Set([
+  "matches",
+  "contains",
+  "startsWith",
+  "endsWith",
+  "in",
+  "hasIntersection",
+  "ancestorOf",
+  "descendentOf",
+  "overlaps",
+  "exists",
+  "exists_one",
+  "all",
+]);
+
+const isBooleanValued = (operand: PlanExpressionOperand): operand is ExpressionOperand =>
+  isExpressionOperand(operand) && BOOLEAN_VALUED_OPERATORS.has(operand.operator);
+
 // Mirror map for value-first comparisons: the planner preserves source order, so
 // `3 <= R.attr.aNumber` arrives as le(value, variable) and must become `aNumber >= 3`,
 // never `aNumber <= 3` (see cerbos/query-plan-adapters#258/#259 for the same bug class
@@ -564,6 +583,21 @@ export const buildComparisonFilter = (
       options,
       negated,
     );
+  }
+
+  // `pred == true` is `pred`, and `pred == false` is `!pred` — an error stays an error under
+  // both — so the predicate is translated in condition position with the polarity folded in.
+  if (operator === "eq" || operator === "ne") {
+    const [predicate, literal] =
+      isBooleanValued(left) && isValueOperand(right) ? [left, right] : [right, left];
+    if (
+      isBooleanValued(predicate) &&
+      isValueOperand(literal) &&
+      typeof literal.value === "boolean"
+    ) {
+      const same = (operator === "eq") === literal.value;
+      return buildFilterFromExpression(predicate, mapper, options, negated === same);
+    }
   }
 
   if (isOperatorCall(left, "if")) {

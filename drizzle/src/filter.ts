@@ -34,13 +34,16 @@ import {
   assertNullOperandTranslatable,
   buildStringMatchCondition,
   characterLength,
+  columnExpression,
   constantCondition,
+  constantExpression,
   FALSE_CONDITION,
   operandExpression,
   UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import type { StringMatchOperator } from "./predicates";
+import { compileRegex } from "./regex";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
 import type { BaseMapperEntry, BuildFilterOptions, Mapper } from "./types";
 import { resolveScalarOperand } from "./values";
@@ -294,6 +297,95 @@ const buildMembershipFilter = (
   );
 };
 
+/**
+ * `field.matches("pattern")`, lowered through `compileRegex` into the adapter's exact string
+ * predicates — never into the store's own regex dialect, none of which is RE2.
+ *
+ * A NULL receiver is a missing attribute (or a null value, which has no `matches()`): CEL raises,
+ * so the whole predicate is NULL for it, even where a pattern matches every string.
+ */
+const buildMatchesFilter = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const [receiverOperand, patternOperand] = operands;
+  if (
+    operands.length !== 2 ||
+    receiverOperand === undefined || !isNameOperand(receiverOperand) ||
+    patternOperand === undefined || !isValueOperand(patternOperand) ||
+    typeof patternOperand.value !== "string"
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "'matches' is supported only with a field receiver and a constant pattern",
+    );
+  }
+  const resolved = resolveFieldReference(receiverOperand.name, mapper);
+  const { mapping } = resolved;
+  if (
+    typeof mapping === "function" ||
+    isRelationValue(mapping) ||
+    (isMappingConfig(mapping) && mapping.transform !== undefined)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "'matches' cannot be delegated to a transform or function mapping",
+    );
+  }
+  const column = columnForOperand(receiverOperand, mapper);
+  // A non-string receiver is a CEL no-overload error: UNKNOWN.
+  if (column && column.dataType !== "string") return sql`null`;
+  const plans = compileRegex(patternOperand.value);
+  if (plans === "error") return UNKNOWN_CONDITION;
+
+  const expr = buildColumnExpression(mapping, receiverOperand.name);
+  const receiver = columnExpression(expr);
+  const length = characterLength([column]);
+  const match = (operator: StringMatchOperator, literal: string): SQL =>
+    buildStringMatchCondition(operator, receiver, constantExpression(sql`${literal}`), length);
+  const anyOf = (conditions: SQL[]): SQL =>
+    conditions.length === 0 ? FALSE_CONDITION : or(...conditions)!;
+  const atLeast = (characters: number): SQL | undefined =>
+    characters > 0 ? sql`${length(expr)} >= ${characters}` : undefined;
+  const noNewline = (): SQL => not(match("contains", "\n"));
+
+  const conditions = plans.map((plan): SQL => {
+    switch (plan.kind) {
+      case "equals":
+        return sql`${expr} in ${plan.literals.map((literal) => sql`${literal}`)}`;
+      case "startsWith":
+      case "endsWith":
+      case "contains":
+        return anyOf(plan.literals.map((literal) => match(plan.kind, literal)));
+      case "allCharactersIn": {
+        // Remove every allowed character; nothing may be left. REPLACE is case-sensitive and
+        // literal on all three stores, as `contains` already relies on.
+        const rest = plan.characters.reduce<SQL>(
+          (current, character) => sql`replace(${current}, ${character}, '')`,
+          expr,
+        );
+        return and(sql`length(${rest}) = 0`, atLeast(plan.min))!;
+      }
+      case "noNewline":
+        return and(noNewline(), atLeast(plan.min))!;
+      case "prefixSuffix":
+        return and(
+          anyOf(
+            plan.pairs.map(([prefix, suffix]) =>
+              and(
+                match("startsWith", prefix),
+                match("endsWith", suffix),
+                atLeast([...prefix].length + plan.min + [...suffix].length),
+              )!,
+            ),
+          ),
+          noNewline(),
+        )!;
+    }
+  });
+  const filter = sql`(case when ${expr} is null then null else ${anyOf(conditions)} end)`;
+  return wrapRelationChain(resolved.relations, filter, receiverOperand.name, options);
+};
+
 /** A ternary in boolean position: each branch guarded by the (un)satisfied condition. */
 const buildTernaryFilter = (
   operands: PlanExpressionOperand[],
@@ -439,9 +531,7 @@ export const buildFilterFromExpression = (
       }
       return buildCollectionOperatorFilter(operator, operands, mapper, negated, options);
     case "matches":
-      throw new UnsupportedQueryPlanError(
-        "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics",
-      );
+      return withPolarity(buildMatchesFilter(operands, mapper, options), negated);
     case "hasIntersection":
       // Only the call-level option is passed on: an enclosing lambda's `skipRelations` is not.
       return withPolarity(

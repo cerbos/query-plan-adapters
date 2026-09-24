@@ -12,6 +12,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import { formatCelDouble, parseCelDoubleString } from "./conversion";
+import { compileRegex } from "./regex";
 import type {
   Mapper,
   MapperEntry,
@@ -113,7 +114,7 @@ describe("the refusal type", () => {
   });
 
   test("a shape the adapter cannot express raises it", () => {
-    expect(() => translate("postgresql", "regex/matches/digit-class")).toThrow(
+    expect(() => translate("postgresql", "comparison/equals/whole-list-literal")).toThrow(
       UnsupportedQueryPlanError,
     );
   });
@@ -605,6 +606,52 @@ describe("membership in a map literal", () => {
     if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
     expect(render("postgresql", result.filter).params).toEqual(["one", "two"]);
   });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Every pattern here is policy-reachable, and
+// the corpus's regex cases witness only one pattern per rule. These pin the RE2 rules the
+// lowering relies on that no case exercises yet. Delete each when a case carrying it lands.
+describe("RE2 patterns lowered without a regex engine", () => {
+  test.each([
+    ["a+b", [{ kind: "contains", literals: ["ab"] }]],
+    ["x*ab*", [{ kind: "contains", literals: ["a"] }]],
+    ["^a.*", [{ kind: "startsWith", literals: ["a"] }]],
+    ["^(?:a|b)c?$", [{ kind: "equals", literals: ["a", "ac", "b", "bc"] }]],
+    ["^\\.$", [{ kind: "equals", literals: ["."] }]],
+    ["^[[:digit:]x-z]{2,}$", [{ kind: "allCharactersIn", characters: [..."0123456789xyz"], min: 2 }]],
+    ["^.+$", [{ kind: "noNewline", min: 1 }]],
+    ["a|", [{ kind: "contains", literals: ["a"] }, { kind: "contains", literals: [""] }]],
+  ])("Corpus gap. %p lowers to %p", (pattern, plans) => {
+    expect(compileRegex(pattern)).toEqual(plans);
+  });
+
+  test("Corpus gap. (?i) folds k and s the way RE2 does, through KELVIN SIGN and LONG S", () => {
+    expect(compileRegex("(?i)^ks$")).toEqual([
+      {
+        kind: "equals",
+        literals: ["ks", "kS", "k\u017F", "Ks", "KS", "K\u017F", "\u212As", "\u212AS", "\u212A\u017F"],
+      },
+    ]);
+  });
+
+  // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches().
+  test.each(["a(?=b)", "a(?!b)", "(?<=a)b", "a**", "{2}a", "*a", "a{2,1}", "a{1001}", "(a", "[b-a]", "a\\"])(
+    "Corpus gap. %p is an RE2 error, so the condition is UNKNOWN",
+    (pattern) => {
+      expect(compileRegex(pattern)).toBe("error");
+    },
+  );
+
+  test("Corpus gap. a brace that opens no count is a literal", () => {
+    expect(compileRegex("^a{,2}$")).toEqual([{ kind: "equals", literals: ["a{,2}"] }]);
+  });
+
+  test.each(["[^a]", "\\D", "a.b", "^a.*b.*c$", "(?i)^é$", "(?s)a", "\\bword", "^a$b"])(
+    "Corpus gap. %p is refused",
+    (pattern) => {
+      expect(() => compileRegex(pattern)).toThrow(UnsupportedQueryPlanError);
+    },
+  );
 });
 
 describe("plans the planner cannot produce", () => {

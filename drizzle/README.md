@@ -312,13 +312,32 @@ renders them as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`. That explicit collati
 the other operand, so `string(R.attr.flag) == R.attr.label` compares `label` byte-exactly. SQLite
 and PostgreSQL literals carry no collation.
 
+### `matches()`
+
+No store's regex dialect is RE2, CEL's engine — MySQL's ICU engine lets `$` match before a
+trailing newline, PostgreSQL's and MySQL's syntaxes differ from RE2's in classes and flags, and
+SQLite has no regex operator — so a pattern is never handed to the store. It is parsed by the adapter and lowered only when what it matches can be said
+with the exact string predicates above:
+
+- a finite set of literals under its anchors — `^ab$` is `=`, `^(ab|b)$` and `(?i)^one$` are
+  `IN (…)`, `^h` is `startsWith`, `e$` is `endsWith`, `\d` is `contains` any digit; a repetition at an
+  unanchored end needs only its minimum (`a+b` is `contains "ab"`);
+- every character from a small set: `^[ab@#]+$`;
+- a prefix and a suffix around a run of `.`, which excludes a newline: `^a.*b$`.
+
+A top-level alternation (`^o|e$`) is the OR of its branches. `(?i)` folds case as RE2 does, including
+`k` to KELVIN SIGN and `s` to LONG S, and refuses a non-ASCII letter. A pattern RE2 rejects — a
+lookahead, `a**` — is an error in CEL, so it becomes an UNKNOWN condition. Anything else throws:
+negated classes, `\b`, flags other than a leading `(?i)`, a pattern whose literal expansion passes 256
+strings, or a receiver that is not a mapped string column.
+
 ## Supported operators
 
 | Kind | Operators |
 | --- | --- |
 | Logical | `and`, `or`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
-| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation) |
+| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
 | Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
@@ -355,8 +374,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 66 / 80 |
-| adversarial | 203 / 227 |
+| extended | 73 / 80 |
+| adversarial | 211 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -414,6 +433,9 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- `matches()` now translates for the patterns described under [`matches()`](#matches), instead of
+  always throwing, and a boolean-valued call compared with `true` / `false`
+  (`R.attr.s.matches("^h") == true`) is that call or its negation.
 - `list(...)` and map (`{"a": 1}`) constructors whose leaves are all constants are folded into the
   literal they build before translation. A map or list literal compared with a string, number or
   boolean attribute is CEL's heterogeneous equality — `==` false and `!=` true for a present value —
