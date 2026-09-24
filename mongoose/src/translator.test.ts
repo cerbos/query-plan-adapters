@@ -212,8 +212,18 @@ describe("nullAttributeRepresentation", () => {
     );
     expect(nullCarrying).toContain(indexedNull);
 
+    // A plan the adapter refuses under "explicit" too is refused for its shape, not its null
+    // (a whole-list comparison with `[null]` in the list), so the option has nothing to add.
+    const refusedRegardless = (id: string): boolean => {
+      try {
+        translate(id);
+        return false;
+      } catch (error) {
+        return error instanceof UnsupportedQueryPlanError;
+      }
+    };
     const notRejected = nullCarrying.filter((id) => {
-      if (id === indexedNull) return false;
+      if (id === indexedNull || refusedRegardless(id)) return false;
       try {
         translate(id, { nullAttributeRepresentation: "omitted" });
         return true;

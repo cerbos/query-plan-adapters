@@ -33,9 +33,21 @@
       "status": "unsupported",
       "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through an inequality"
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "int() over a numeric column has no faithful $convert lowering (it rounds where CEL truncates toward zero), the same refusal as `arithmetic/modulo/negative-dividend`; the column divisor would also need its zero row (a1) to deny, where $mod by zero aborts the whole query"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "CEL's % has no double overload and every attribute number reaches CEL as a double, so the modulo is an error on every document; $mod computes a floating remainder instead, which the negation turns into a match, so the adapter refuses % unless its dividend is an integer size()"
+    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "int() over a numeric column, needed to give `%` an integer operand, has no faithful $convert lowering — the same limitation that makes `cast/int/negative-fraction` unsupported. The cast is refused before the modulo is reached"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`: the NaN comes from a row-dependent 0/0, and $divide aborts the query on a zero denominator instead of producing NaN for that document"
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -44,6 +56,10 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "The translator unconditionally refuses numeric casts; it has no implemented lowering that proves CEL conversion and error semantics under negation. MongoDB $convert rejects malformed prefixes, so the existing refusal message does not accurately describe that store behavior."
+    },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "int() over a numeric column: $convert to long rounds where CEL truncates toward zero, and raises nothing where CEL errors outside the int64 range, so the adapter refuses the cast rather than lower it."
     },
     "cast/int/malformed-string": {
       "status": "unsupported",
@@ -56,6 +72,10 @@
     "cast/int/negative-fraction": {
       "status": "unsupported",
       "reason": "int() over a numeric column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, so the adapter refuses the cast rather than lower it."
     },
     "cast/string/negated-missing-attribute": {
       "status": "unsupported",
@@ -161,6 +181,10 @@
       "status": "unsupported",
       "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "$divide by a zero denominator fails when MongoDB optimizes the query ('can't $divide by zero'), aborting it before any document is read rather than yielding CEL's +Inf/-Inf; constant folding means even a $cond arm no document takes still aborts, so the adapter rejects the literal 1.0/0.0 and -1.0/0.0 branches"
@@ -209,9 +233,17 @@
       "status": "unsupported",
       "reason": "Mongoose's $expr caster drops the schema when it recurses into a non-literal right-hand operand (cast$expr.js castComparison calls _castExpression(val[1]) with no schema argument), so a comparison whose right side is another $cond containing a path/literal comparison throws TypeError: Cannot read properties of undefined (reading 'path') while the query is built. MongoDB itself evaluates $cond against $cond correctly, so a Mongoose fix would change this answer"
     },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Same empty-separator refusal as `hierarchy/descendent-of/empty-delimiter`: the ancestor $in list is built by splitting the path on its separator, and an empty separator splits it into characters whose prefixes leave out the empty string (a8's zero-segment ancestor)"
+    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "The hierarchy operand parser refuses an empty separator before the anchored `^prefix + separator` regex is built: with an empty separator that regex would match the path itself (a2, never its own descendant) as well as every string extension of it"
+    },
+    "hierarchy/overlaps/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Same empty-separator refusal as `hierarchy/descendent-of/empty-delimiter`: overlaps is the ancestor $in list and the anchored descendant regex joined, and neither has a form for an empty separator"
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
@@ -265,6 +297,10 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: except."
     },
+    "principal/exists-one/duplicate-elements": {
+      "status": "unsupported",
+      "reason": "exists_one over a literal collection folds into a flat filter only for exists() and all(): an $or of per-element matches answers \"at least one\", and \"exactly one\" needs the count of matching elements, duplicates included, which the fold does not carry"
+    },
     "principal/exists-one/long-list": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
@@ -293,6 +329,14 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (a brace RE2 reads literally, PCRE2 as a quantifier)."
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (an inline (?i) flag, whose Unicode folding orbits RE2 and PCRE2 do not share)."
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
@@ -317,9 +361,17 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. PCRE2 accepts patterns RE2 rejects ((a)\\1, a literal {2}a), so a pattern outside the subset cannot be sent to $regex and is refused."
+    },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (bracket expressions and counted repetition)."
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
       "status": "unsupported",
@@ -328,6 +380,14 @@
     "regex/matches/top-level-alternation-single-characters": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset, and PCRE2's \\s also matches a vertical tab that RE2's does not."
+    },
+    "relation/all/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/exists/negated-to-one-chain`: negating a collection macro would turn CEL errors into matches, and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent"
     },
     "relation/exists/negated-to-one-chain": {
       "status": "unsupported",
@@ -373,6 +433,10 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
     },
+    "string/concatenate/ordering": {
+      "status": "unsupported",
+      "reason": "Same refusal as `string/concatenate/field-to-field`: `+` between two field paths has no constant to tell CEL's string and numeric overloads apart, and the mapper carries no field types, so neither $concat nor $add can be chosen"
+    },
     "string/contains/negated-field-to-field": {
       "status": "unsupported",
       "reason": "The needle is a nullable COLUMN. Mongoose's guard refuses `not` over a nullable field outright, because a missing field matches a negated aggregation predicate and the row the PDP denies would be returned — the same rejection that protects the other negated nullable shapes"
@@ -396,6 +460,14 @@
     "type-mismatch/descendent-of/number-field-as-path": {
       "status": "unsupported",
       "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."
+    },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics — aDouble is nullable, and a missing field matches a negated predicate the PDP denies."
+    },
+    "type-mismatch/equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: a list literal compared with a field is read as whole-list comparison, which a relation mapping cannot express."
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",
