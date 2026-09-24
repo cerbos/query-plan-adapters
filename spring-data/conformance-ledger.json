@@ -45,66 +45,6 @@
       "status": "unsupported",
       "reason": "map() translates only as the collection operand of hasIntersection; used as the whole condition it is a list, not a boolean, and is refused."
     },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable RE2 regular expression predicate."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches"
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"

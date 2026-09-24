@@ -184,7 +184,7 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — a regex `LIKE` cannot spell, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
 | `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
@@ -304,8 +304,9 @@ byte-exact but PAD SPACE (`'a' = 'a '` is TRUE). `utf8mb4_0900_bin` is both byte
 
 Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWith`/`endsWith`
 (including constant-receiver and field-to-field forms), `in`, `hasIntersection` (direct and
-`map(...)`), and `hierarchy(...)`. `OperatorFunction` overrides can't cover all of them (for example
-`hasIntersection` over a plain field never consults one), so fix the collation in the schema.
+`map(...)`), `hierarchy(...)`, `matches(...)`, and `string()` and `+` comparisons.
+`OperatorFunction` overrides can't cover all of them (for example `hasIntersection` over a plain
+field never consults one), so fix the collation in the schema.
 
 `string()` over a boolean or numeric column has no string predicate in SQL — the constant is
 inverted in Java and the column compared with the result — because a literal-vs-literal comparison
@@ -360,6 +361,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
 | A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
+| `R.attr.s.matches("re")` (and `== true` / `== false`) | Where the pattern's language is exact in `LIKE`: each top-level alternative a finite set of strings (literals, escapes, classes, `\d \w \s`, POSIX classes, groups, `|`, bounded repetition, a leading `(?i)` over ASCII) anchored or not, as `=` / `IN` / `LIKE 's%'` / `'%s'` / `'%s%'`; `^...$` with `.*` / `.+` between finite parts, as `LIKE` plus `NOT LIKE '%\n%'` (RE2's `.` excludes a newline); `^[set]*$` / `^[set]+$` as `REPLACE` of every member leaving `''`. A pattern RE2 rejects (lookaround, backreference) is UNKNOWN, as CEL errors. A registered `matches` override takes precedence |
 | Bare boolean variable | `cb.equal(path, true)` |
 
 ## Not yet supported
@@ -372,7 +374,7 @@ consulted.
 | Construct | Example CEL | Overridable | Notes |
 |---|---|---|---|
 | `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
-| Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
+| Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
 | List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
 | Type casts (`int()`, `double()`, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
@@ -393,11 +395,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 72 / 80 |
-| adversarial | 207 / 227 |
+| extended | 79 / 80 |
+| adversarial | 215 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 27 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 12 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -628,6 +630,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `matches()` now translates without an override where `LIKE` spells the pattern's RE2 language
+  exactly (see [Supported operators](#supported-operators)); a pattern RE2 rejects is UNKNOWN, as
+  CEL errors. Other patterns still throw unless a `matches` override is registered, which still
+  takes precedence.
 - `size(...)` of an `except()` difference, and its equality with a list of at most one element,
   now translate instead of throwing, as does list equality of any length over a relation that
   declares `withPositionField` (and over its `map(t, t.f)` projection).

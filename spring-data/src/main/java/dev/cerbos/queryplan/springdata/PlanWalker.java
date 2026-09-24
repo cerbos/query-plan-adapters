@@ -31,6 +31,7 @@ final class PlanWalker {
     private final TriPredicate tri;
     private final LeafTranslator leaf;
     private final HierarchyTranslator hierarchy;
+    private final RegexTranslator regex;
     private final TernaryTranslator ternary;
     private final ComparisonTranslator comparisons;
     private final MembershipTranslator membership;
@@ -46,6 +47,7 @@ final class PlanWalker {
         this.maxMacroDepth = options.effectiveMaxMacroDepth();
         this.leaf = new LeafTranslator(cb, tri, options.operatorOverrides());
         this.hierarchy = new HierarchyTranslator(cb, tri);
+        this.regex = new RegexTranslator(cb, tri);
         ChainSubqueries subqueries = new ChainSubqueries(cb, tri, selectInvocation);
         this.ternary = new TernaryTranslator(cb, tri, this);
         this.comparisons = new ComparisonTranslator(cb, tri, leaf, ternary,
@@ -127,13 +129,53 @@ final class PlanWalker {
             case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
             case "ancestorOf" -> hierarchy.handleAncestorDescendant(operands, scope, true);
             case "descendentOf" -> hierarchy.handleAncestorDescendant(operands, scope, false);
+            case "matches" -> {
+                if (leaf.overridden("matches") || operands.size() != 2
+                        || operands.get(0).getNodeCase() != Operand.NodeCase.VARIABLE
+                        || operands.get(1).getNodeCase() != Operand.NodeCase.VALUE
+                        || operands.get(1).getValue().getKindCase()
+                                != Value.KindCase.STRING_VALUE) {
+                    yield leafComparison(op, operands, scope);
+                }
+                yield regex.matches(scope.path(operands.get(0).getVariable()),
+                        operands.get(1).getValue().getStringValue());
+            }
             case "eq", "ne" -> {
+                Operand predicate = booleanComparison(op, operands);
+                if (predicate != null) {
+                    yield traverse(predicate, scope);
+                }
                 Operand rewritten = wholeListEquality(op, operands, scope);
                 yield rewritten != null
                         ? traverse(rewritten, scope) : leafComparison(op, operands, scope);
             }
             default -> leafComparison(op, operands, scope);
         };
+    }
+
+    /**
+     * {@code matches(...) == true} and its spellings, as the predicate or its negation:
+     * {@code == true} and {@code != false} keep it, {@code == false} and {@code != true} negate
+     * it. A {@code matches()} error stays UNKNOWN under both. {@code null} for any other shape.
+     */
+    private static Operand booleanComparison(String op, List<Operand> operands) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        Operand predicate = operands.get(0);
+        Operand literal = operands.get(1);
+        if (predicate.getNodeCase() == Operand.NodeCase.VALUE) {
+            predicate = operands.get(1);
+            literal = operands.get(0);
+        }
+        if (predicate.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"matches".equals(predicate.getExpression().getOperator())
+                || literal.getNodeCase() != Operand.NodeCase.VALUE
+                || literal.getValue().getKindCase() != Value.KindCase.BOOL_VALUE) {
+            return null;
+        }
+        boolean keep = literal.getValue().getBoolValue() == "eq".equals(op);
+        return keep ? predicate : expression("not", predicate);
     }
 
     /** A leaf comparison: a positional list read if an operand is one, else the comparison. */
