@@ -299,7 +299,7 @@ state. Three kinds of material live only there, and they are not equal:
 
 ## Working with Adapters
 
-- Edit only `src/` — never commit `lib/` until tests pass
+- On the TypeScript adapters edit `src/`: `lib/` is `tsc` output and gitignored (activerecord's `lib/` is its source tree)
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and a new case runs in every adapter's harness
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no ledger to opt out with
 - Never edit `policies/conformance.yaml`, `resources.json` or anything under `golden/` by hand: the generator writes them, and CI fails if they are stale
@@ -318,7 +318,7 @@ per-adapter label, or `conformance` for corpus-wide work. See `docs/agents/issue
 
 ### Triage labels
 
-The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+The five canonical roles, mapped to this tracker's label strings in `docs/agents/triage-labels.md` (`ready-for-agent` is `ready-for-implementation` here).
 
 ### Domain docs
 
