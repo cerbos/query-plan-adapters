@@ -345,8 +345,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 63 / 80 |
-| adversarial | 189 / 227 |
+| extended | 64 / 80 |
+| adversarial | 190 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -404,6 +404,11 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A hierarchy built from segments — `hierarchy(["projects", R.id])` — now translates against a
+  constant hierarchy or another built one: its length is known, so `ancestorOf`, `descendentOf` and
+  `overlaps` become equalities between the segments of the shared prefix. A NULL column segment is
+  an error in CEL, so it leaves the result UNKNOWN. A built path against a column-backed hierarchy
+  still throws.
 - `int()` over an integer column (`integer`, `smallint`, `int`, `serial`, `bigint` in `number`
   mode, …) now translates, as the column itself (`CAST(… AS INTEGER)` on SQLite, whose INTEGER
   affinity can keep a fraction). `int()` of any other column still throws.
