@@ -55,6 +55,7 @@ import { wrapCombinedRelations, wrapRelationChain } from "./relations";
 import {
   buildCheckedIntComparison,
   buildValueExpression,
+  isIntegerColumnReference,
   resolveScalarOperand,
 } from "./values";
 import type { BuildFilterOptions, Mapper } from "./types";
@@ -194,13 +195,17 @@ const buildDivisionComparison = (
 
   // IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from
   // `n / 0.0`. The planner ships the denominator verbatim (the wire operand is `-0`),
-  // so a CONSTANT denominator's sign is knowable and must be applied. A COLUMN
-  // denominator is not: SQL cannot tell -0.0 from 0.0 and no portable function reads
-  // the sign bit, so the positive-zero reading is assumed and documented.
-  const denominatorIsNegativeZero = Object.is(
-    resolveConstantNumber(denominatorOperand),
-    -0,
-  );
+  // so a CONSTANT denominator's sign is knowable and must be applied, and an integer
+  // column's zero is always positive. Any other denominator's is not: SQLite stores
+  // -0.0 as 0 and no portable function reads the sign bit, so when the two infinities
+  // answer the comparison differently the shape is refused below.
+  const constantDenominator = resolveConstantNumber(denominatorOperand);
+  const denominatorIsNegativeZero = Object.is(constantDenominator, -0);
+  // A zero numerator never reaches an infinite arm, so the sign cannot matter there.
+  const zeroSignIsKnown =
+    constantDenominator !== undefined ||
+    isIntegerColumnReference(denominatorOperand, mapper) ||
+    resolveConstantNumber(numeratorOperand) === 0;
   const signed = (infinity: number): number =>
     denominatorIsNegativeZero ? -infinity : infinity;
 
@@ -208,7 +213,7 @@ const buildDivisionComparison = (
   // Substitute each IEEE outcome for the division and fold the rest of the enclosing
   // expression in JavaScript's own IEEE space, so `NaN + 1.0` stays NaN instead of
   // becoming SQL NULL (which would exclude a row `NaN != 2.0` allows).
-  const arm = (nonFinite: number): SQL => {
+  const arm = (nonFinite: number): boolean => {
     const folded = foldWithSubstitution(enclosing, division, nonFinite);
     if (folded === undefined) {
       throw new UnsupportedQueryPlanError(
@@ -221,8 +226,19 @@ const buildDivisionComparison = (
       operator,
       ...inWireOrder(divisionIsLeft, folded, 0),
     );
-    return result !== negated ? sql`true` : sql`false`;
+    return result !== negated;
   };
+  const armFilter = (holds: boolean): SQL => (holds ? sql`true` : sql`false`);
+
+  const positiveArm = arm(signed(Number.POSITIVE_INFINITY));
+  const negativeArm = arm(signed(Number.NEGATIVE_INFINITY));
+  if (!zeroSignIsKnown && positiveArm !== negativeArm) {
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate a division by a column that may hold a signed zero: CEL divides by " +
+        "-0.0 to the opposite infinity from 0.0 and the comparison tells them apart, but SQLite " +
+        "stores -0.0 as 0 and no SQL dialect has a portable way to read the sign of a zero",
+    );
+  }
 
   const enclosingExpr = buildValueExpression(enclosing, mapper, options);
   const finite = applyComparisonWithExpression(
@@ -238,9 +254,9 @@ const buildDivisionComparison = (
     operandExpression(otherExpr, other),
   );
   const ieeeArms = sql`
-      when ${denominator} = 0 and ${numerator} = 0 then ${arm(Number.NaN)}
-      when ${denominator} = 0 and ${numerator} > 0 then ${arm(signed(Number.POSITIVE_INFINITY))}
-      when ${denominator} = 0 then ${arm(signed(Number.NEGATIVE_INFINITY))}
+      when ${denominator} = 0 and ${numerator} = 0 then ${armFilter(arm(Number.NaN))}
+      when ${denominator} = 0 and ${numerator} > 0 then ${armFilter(positiveArm)}
+      when ${denominator} = 0 then ${armFilter(negativeArm)}
       else ${withPolarity(finite, negated)}
     end)`;
 
@@ -690,11 +706,17 @@ export const buildComparisonFilter = (
       return withPolarity(equality, (operator === "ne") !== negated);
     }
   }
+  // A string, number or boolean column never equals a list, which the heterogeneous-equality
+  // arm below answers; only a field that might hold a list needs the whole-list refusal.
   if (
     (isNameOperand(left) || isNameOperand(right)) &&
     [left, right].some(
       (operand) => isValueOperand(operand) && Array.isArray(operand.value),
-    )
+    ) &&
+    ![left, right].some((operand) => {
+      const type = isNameOperand(operand) ? scalarType(operand, mapper) : undefined;
+      return type !== undefined && SCALAR_TYPES.has(type);
+    })
   ) {
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value",

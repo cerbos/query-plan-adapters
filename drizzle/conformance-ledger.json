@@ -1,9 +1,17 @@
 {
   "adapter": "drizzle",
   "cases": {
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "A division by a double column that may hold -0.0: CEL divides a positive number by -0.0 to -Infinity and by 0.0 to +Infinity, and `> 0.0` tells them apart, but SQLite stores -0.0 as 0 and no SQL dialect has a portable way to read the sign of a zero. The adapter refuses a zero-capable column denominator whenever the two infinities answer the comparison differently."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards."
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "Cannot translate arithmetic over a division whose denominator may be zero when the surrounding expression adds a column: CEL carries NaN through `* 0.0 + aDouble`, but SQL has no NaN or Infinity to carry it through (SQLite answers a zero division NULL, PostgreSQL raises), so the non-finite arms can only be folded against constants."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -12,6 +20,14 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "int() over a string column compared with a constant at or beyond 2^53: PostgreSQL and MySQL compare a bigint with a double by converting the bigint, so 2^53 + 1 would equal 2^53. The adapter lowers the checked int() only against a constant below 2^53 in magnitude and refuses the rest."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",

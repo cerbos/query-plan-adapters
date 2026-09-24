@@ -161,6 +161,20 @@ const INTEGER_COLUMN_TYPES = new Set([
 ]);
 
 /**
+ * Whether `operand` is a bare reference to an integer column. Such a column cannot hold -0.0, so a
+ * zero read from it is CEL's positive zero; a double column's zero may be either, and SQLite does
+ * not even store the sign.
+ */
+export const isIntegerColumnReference = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): boolean => {
+  if (!isNameOperand(operand)) return false;
+  const column = columnForOperand(operand, mapper);
+  return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType);
+};
+
+/**
  * The integer column an `int()` operand converts, if it converts one. CEL's `int()` over a whole
  * number is that number, so no CAST is needed and the rounding every other `int()` would inherit
  * from PostgreSQL and MySQL never arises.
@@ -295,11 +309,38 @@ export const buildCheckedIntComparison = (
 };
 
 /**
- * CEL's `%` is integer-only: over a double it is a no-overload error, which denies the row, so
- * only an `int()` over an integer column is a dividend it can take. The divisor must be a non-zero
- * whole constant: CEL's `x % 0` is an error, which SQLite and MySQL answer NULL but PostgreSQL
- * raises. SQLite, PostgreSQL and MySQL all give the remainder the dividend's sign — truncated
- * division, as CEL does — so `-5 % 2` is `-1` on each.
+ * A divisor `%` can take from a column: `int()` of an integer column, alone or plus or minus a
+ * whole constant. Its value is an integer on every dialect, so the remainder stays integral.
+ */
+const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+  if (integerConversionColumn(operand, mapper) !== undefined) return true;
+  if (
+    !(isOperatorCall(operand, "add") || isOperatorCall(operand, "sub")) ||
+    !isExpressionOperand(operand) ||
+    operand.operands.length !== 2
+  ) {
+    return false;
+  }
+  const [left, right] = operand.operands;
+  const isWholeConstant = (side: PlanExpressionOperand | undefined): boolean => {
+    const value = side === undefined ? undefined : resolveConstantNumber(side);
+    return value !== undefined && Number.isSafeInteger(value);
+  };
+  return (
+    (integerConversionColumn(left!, mapper) !== undefined && isWholeConstant(right)) ||
+    (isWholeConstant(left) && integerConversionColumn(right!, mapper) !== undefined)
+  );
+};
+
+/**
+ * CEL's `%` is integer-only, and no attribute is an integer: CEL reads every attribute number as a
+ * double. So `%` straight over an attribute is a no-overload error, which denies the row whatever
+ * surrounds it; it is lowered to a NULL, which SQL's three-valued logic carries the same way.
+ * Only an `int()` over an integer column is a dividend `%` can take. The divisor is a non-zero
+ * whole constant or an integer column divisor; CEL's `x % 0` is an error, which SQLite and MySQL
+ * answer NULL but PostgreSQL raises, so a column divisor's zero is turned into a NULL first.
+ * SQLite, PostgreSQL and MySQL all give the remainder the dividend's sign — truncated division, as
+ * CEL does — so `-5 % 2` is `-1` on each.
  */
 const buildModulo = (
   leftOperand: PlanExpressionOperand,
@@ -307,8 +348,20 @@ const buildModulo = (
   mapper: Mapper,
   options: BuildFilterOptions,
 ): SQL => {
+  if (isNameOperand(leftOperand) || isNameOperand(rightOperand)) {
+    return sql`cast(null as float(53))`;
+  }
   const dividend = integerConversionColumn(leftOperand, mapper);
   const divisor = resolveConstantNumber(rightOperand);
+  if (
+    dividend !== undefined &&
+    divisor === undefined &&
+    isIntegerColumnDivisor(rightOperand, mapper)
+  ) {
+    const left = buildValueExpression(leftOperand, mapper, options);
+    const right = buildValueExpression(rightOperand, mapper, options);
+    return sql`(${left} % nullif(${right}, 0))`;
+  }
   if (
     dividend === undefined ||
     divisor === undefined ||
@@ -317,8 +370,9 @@ const buildModulo = (
   ) {
     throw new UnsupportedQueryPlanError(
       "Cannot translate '%': CEL's modulo is defined only over integers, so the adapter lowers " +
-        "it only for int() of an integer column by a non-zero whole constant. A double operand " +
-        "is a no-overload error in CEL, and a zero divisor raises on PostgreSQL",
+        "it only for int() of an integer column by a non-zero whole constant or by int() of an " +
+        "integer column plus or minus a whole constant. A double constant is a no-overload error in CEL, and " +
+        "a zero constant divisor raises on PostgreSQL",
     );
   }
   const left = buildValueExpression(leftOperand, mapper, options);
