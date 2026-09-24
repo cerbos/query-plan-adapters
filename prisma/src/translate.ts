@@ -30,6 +30,7 @@ import {
 import type { OperatorOperand } from "./plan";
 import { negateRequiringHops, referencesChainedRelation } from "./relations";
 import { containsCollectionOperator } from "./rewrite";
+import { handleMatchesOperator } from "./regex";
 import { handleStringOperator } from "./strings";
 import { handleBooleanTernaryOperator, tryHandleTernaryComparison } from "./ternary";
 import { normalizeRfc3339Milliseconds, parseRfc3339Instant } from "./timestamp";
@@ -94,6 +95,8 @@ export function buildPrismaFilterFromCerbosExpression(
     case "startsWith":
     case "endsWith":
       return handleStringOperator(operator, operands, context);
+    case "matches":
+      return handleMatchesOperator(operands, context);
     case "hasIntersection":
       return handleHasIntersectionOperator(operands, context);
     case "lambda":

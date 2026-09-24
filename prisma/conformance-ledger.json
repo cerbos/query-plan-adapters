@@ -181,63 +181,7 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
     },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no regular-expression operator."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
-    },
     "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no regular-expression operator."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
-    },
-    "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
     },

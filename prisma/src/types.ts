@@ -7,6 +7,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { enterLambdaScope, lookupMapping, resolveFieldReference } from "./mapping";
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import type { MapperConfig } from "./index";
+import { isInvalidPattern } from "./regex";
 import { COMPARISON_OPERATORS, isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 
@@ -24,7 +25,7 @@ type CelType = "string" | "number" | "boolean" | "null" | "list" | "map";
 type Outcomes = { true?: boolean; false?: boolean; error?: boolean };
 
 const ORDERING_OPERATORS = new Set(["lt", "le", "gt", "ge"]);
-const STRING_OPERATORS = new Set(["contains", "startsWith", "endsWith"]);
+const STRING_OPERATORS = new Set(["contains", "startsWith", "endsWith", "matches"]);
 const HIERARCHY_OPERATORS = new Set(["overlaps", "ancestorOf", "descendentOf"]);
 const LIST_OPERATORS = new Set(["filter", "map", "except"]);
 
@@ -70,6 +71,7 @@ export function settleTypeMismatches(
   }
 
   const cast =
+    unwrapBooleanComparison(expr) ??
     rewriteCastComparison(expr, context, positive) ??
     rewriteConcatenation(expr, context) ??
     splitDivision(expr, context);
@@ -133,6 +135,50 @@ function scopedContext(
 }
 
 // -- casts ---------------------------------------------------------------------------------------
+
+/** Operators whose value is a boolean (or an error), never anything else. */
+const BOOLEAN_OPERATORS = new Set([
+  "and",
+  "or",
+  "not",
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "in",
+  "contains",
+  "startsWith",
+  "endsWith",
+  "matches",
+  "exists",
+  "all",
+  "exists_one",
+  "hasIntersection",
+]);
+
+/**
+ * `b == true`, `b != false` (and the mirrors) over a boolean-valued `b` are `b`; `b == false` and
+ * `b != true` are `!b`. An error in `b` is an error either way.
+ */
+function unwrapBooleanComparison(expr: OperatorOperand): PlanExpressionOperand | undefined {
+  if ((expr.operator !== "eq" && expr.operator !== "ne") || expr.operands.length !== 2) {
+    return undefined;
+  }
+  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [inner, literal] = isValueOperand(first) ? [second, first] : [first, second];
+  if (
+    !isValueOperand(literal) ||
+    typeof literal.value !== "boolean" ||
+    !isOperatorOperand(inner) ||
+    !BOOLEAN_OPERATORS.has(inner.operator)
+  ) {
+    return undefined;
+  }
+  const same = (expr.operator === "eq") === literal.value;
+  return same ? inner : { operator: "not", operands: [inner] };
+}
 
 /**
  * `string(column) == "lit"` and `int(column) == k` (and their `!=` forms), solved for the column
@@ -402,6 +448,13 @@ function leafOutcomes(
   context: TranslationContext
 ): Outcomes | undefined {
   const { operator, operands } = expr;
+  // A pattern RE2 rejects fails on every row it is evaluated for.
+  if (operator === "matches" && operands.length === 2) {
+    const pattern = operands[1]!;
+    if (isValueOperand(pattern) && typeof pattern.value === "string" && isInvalidPattern(pattern.value)) {
+      return { error: true };
+    }
+  }
   // A list where a boolean is required: CEL's logical operators raise a no-overload error on it,
   // and a condition that is not a boolean denies.
   if (LIST_OPERATORS.has(operator)) return { error: true };

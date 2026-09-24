@@ -52,7 +52,7 @@ describe("the refusal type", () => {
   test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", () => {
     let raised: unknown;
     try {
-      translate("regex/matches/digit-class");
+      translate("collection/index/first-element-of-string-list");
     } catch (error) {
       raised = error;
     }

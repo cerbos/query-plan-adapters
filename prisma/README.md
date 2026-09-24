@@ -304,6 +304,7 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
 | Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
+| Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row |
 | Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
 
@@ -358,7 +359,7 @@ or a same-model field reference, never an expression. These shapes throw:
 | --- | --- | --- |
 | `a % b` | `arithmetic/modulo/*` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
 | Arithmetic on both sides | `arithmetic/add/on-both-sides` | Field references compare two columns as they are; no operand is an expression. |
-| `matches` | `regex/matches/*` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
+| `matches` beyond the LIKE-decidable subset | `regex/matches/lucene-reserved-characters-in-class` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)), and no provider here has RE2. A repeated class (`[ab]+`), a negated class, a wildcard in a pattern not anchored at both ends, or a literal `%`/`_`/`\` inside a LIKE has no exact LIKE spelling. |
 | List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
 | `int()`, `double()` or `timestamp()` parsing a string; an `int()` threshold | `cast/int/malformed-string`, `cast/double/malformed-string`, `cast/timestamp/malformed-string` and their negations | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). `int()` of a number is translated only as `==` (or `!=` under a `!`): a threshold would need CEL's ±2^63 overflow bound spelled out, which an `Int` column rejects. The invertible casts are solved for the column instead — `string()` of a boolean or number, `int(d) == k` as the interval truncation maps to `k`, and `string()`/`double()` of a column already of that type. |
 | `size()` of `filter()` over a relation | `size/equals/filtered-collection` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
@@ -386,8 +387,8 @@ out of every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 56 / 80 |
-| adversarial | 172 / 227 |
+| extended | 63 / 80 |
+| adversarial | 179 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -450,6 +451,8 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- `matches()` translates for the RE2 patterns a combination of LIKE filters decides exactly (see
+  [Supported operators](#supported-operators)); `b == true` over a boolean expression is `b`.
 - Arithmetic against a constant is solved exactly over IEEE-754 doubles: `x + c CMP v` (and `-`,
   `*`, `/` by a constant) becomes the range of doubles `x` for which the rounded result compares,
   found by bisecting the doubles in order, where it used to compute `v - c` — inexact for a
