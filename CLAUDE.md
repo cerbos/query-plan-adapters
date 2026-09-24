@@ -13,6 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
+| sequel | Ruby | `cerbos-sequel` | Sequel 5.x (5.60+) |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -66,6 +67,30 @@ RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 `spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
+
+### Ruby (Sequel)
+```bash
+# The same Docker layout as ActiveRecord, and the same two suites.
+cd sequel
+./scripts/test.sh                                      # all the specs, on SQLite
+./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
+RUBY_VERSION=3.2 SEQUEL_VERSION="= 5.60.0" ./scripts/test.sh
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb
+ADAPTER_TEST_DB=mysql ./scripts/test.sh spec/conformance_spec.rb
+./scripts/lint.sh                                      # standardrb
+```
+
+The translator is the ActiveRecord one ported onto Sequel's expression constructors. The
+collection mapping is `Cerbos::Sequel.association` (Sequel's word), and a `many_to_many` is opened
+into its join table and its target in one correlated subquery, a model shape the corpus has no
+spelling for, so `spec/adapter_contract_spec.rb` proves it. Inside `module Cerbos`, `Sequel` is the
+adapter; the library is `::Sequel`.
+
+Unlike ActiveRecord, the conformance harness also replays the corpus on a real PostgreSQL and a real
+MySQL (`ADAPTER_TEST_DB`, as on drizzle and prisma; an unknown value fails), pinned in
+`sequel/POSTGRES_IMAGE` and `sequel/MYSQL_IMAGE` and started by `scripts/test.sh` through Compose
+profiles. The contract suite refuses any store but SQLite. The MySQL driver is `trilogy`; set the
+collation with `collation_connection`, never `SET NAMES ... COLLATE`, which crashes that driver.
 
 ### Go (Ent, pgx)
 ```bash
@@ -227,7 +252,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle and Prisma run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The datastore is one.** Drizzle, Prisma and Sequel run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
@@ -241,7 +266,7 @@ packaged example succeed. Adapter test workflows run directly on pull requests a
 `workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
 filenames stable: npm trusted publishing is configured against them.
 
-Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
+Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*` and `spring-data/v*` only run that adapter's CI
 workflow: neither build configures a Maven Central release (both are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet.
@@ -303,7 +328,7 @@ state. Three kinds of material live only there, and they are not equal:
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and a new case runs in every adapter's harness
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no ledger to opt out with
 - Never edit `policies/conformance.yaml`, `resources.json` or anything under `golden/` by hand: the generator writes them, and CI fails if they are stale
-- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `sequel/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A harness passes corpus data through verbatim: one mapping for every case, no per-case options, no hand-projected subset of the dataset
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. The roster is the set of directories holding a `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something else (cases, seed rows) go in digits
 - Changing what an adapter can translate means updating its `conformance-ledger.json` and its README contract table in the same commit

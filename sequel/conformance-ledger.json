@@ -1,0 +1,305 @@
+{
+  "adapter": "sequel",
+  "cases": {
+    "arithmetic/add/self-division-plus-constant-greater-than": {
+      "reason": "CEL carries a NaN or a signed Infinity out of the division and through the arithmetic composed on top of it; SQL has no value that does, because the NULLIF divide-by-zero guard turns the whole sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so a division nested under further arithmetic fails closed instead of emitting the under-granting filter",
+      "status": "unsupported"
+    },
+    "arithmetic/add/self-division-plus-constant-not-equals": {
+      "reason": "The same nested-division limitation as `arithmetic/add/self-division-plus-constant-greater-than`, and the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/field-by-field": {
+      "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division.",
+      "status": "unsupported"
+    },
+    "cast/double/malformed-string": {
+      "reason": "SQL CAST reads a string's leading digits where CEL double() rejects the whole string; double() over a string column is refused.",
+      "status": "unsupported"
+    },
+    "cast/double/negated-malformed-string": {
+      "reason": "SQL floating-point casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe.",
+      "status": "unsupported"
+    },
+    "cast/int/malformed-string": {
+      "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused.",
+      "status": "unsupported"
+    },
+    "cast/int/negated-malformed-string": {
+      "reason": "SQL numeric casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe.",
+      "status": "unsupported"
+    },
+    "cast/int/negative-fraction": {
+      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused.",
+      "status": "unsupported"
+    },
+    "cast/timestamp/malformed-string": {
+      "reason": "timestamp() over a column holding a formatted string would compare text in SQL, not instants; the attribute must map to a datetime column.",
+      "status": "unsupported"
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "reason": "The mapper supplies a string column; the adapter only compares instants through native temporal columns, without portable error-preserving parsing of malformed strings.",
+      "status": "unsupported"
+    },
+    "collection/except/as-whole-condition": {
+      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
+      "status": "unsupported"
+    },
+    "collection/except/equals-list-literal": {
+      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
+      "status": "unsupported"
+    },
+    "collection/except/size-of-difference": {
+      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
+      "status": "unsupported"
+    },
+    "collection/filter/as-conjunct": {
+      "reason": "filter() yields a list, not a boolean; a filtered association cannot be used as a condition, even as one conjunct.",
+      "status": "unsupported"
+    },
+    "collection/filter/as-whole-condition": {
+      "reason": "filter() yields a list, not a boolean; a filtered association cannot be used as a condition.",
+      "status": "unsupported"
+    },
+    "collection/index/first-element-of-boolean-list": {
+      "reason": "Positional access into a list of booleans, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aBoolList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aBoolList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
+      "status": "unsupported"
+    },
+    "collection/index/first-element-of-number-list": {
+      "reason": "Positional access into a list of numbers, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aNumberList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aNumberList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
+      "status": "unsupported"
+    },
+    "collection/index/first-element-of-object-list": {
+      "reason": "A one_to_many association has no element order, so list indexing is refused.",
+      "status": "unsupported"
+    },
+    "collection/index/first-element-of-string-list": {
+      "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a one_to_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch",
+      "status": "unsupported"
+    },
+    "collection/index/first-element-of-string-list-equals-null": {
+      "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a one_to_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch",
+      "status": "unsupported"
+    },
+    "collection/index/fractional-position": {
+      "reason": "Relational associations do not expose CEL positional scalar-list indexing; the adapter refuses index before building a query.",
+      "status": "unsupported"
+    },
+    "collection/index/negated-first-element-of-boolean-list": {
+      "reason": "Positional access into a list of booleans, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aBoolList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aBoolList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
+      "status": "unsupported"
+    },
+    "collection/index/negated-first-element-of-number-list": {
+      "reason": "Positional access into a list of numbers, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aNumberList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aNumberList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
+      "status": "unsupported"
+    },
+    "collection/index/negated-first-element-of-string-list": {
+      "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a one_to_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch",
+      "status": "unsupported"
+    },
+    "collection/index/negated-out-of-bounds": {
+      "reason": "Relational associations do not expose CEL positional scalar-list indexing; the adapter refuses index before building a query.",
+      "status": "unsupported"
+    },
+    "collection/index/negative-position": {
+      "reason": "Relational associations do not expose CEL positional scalar-list indexing; the adapter refuses index before building a query.",
+      "status": "unsupported"
+    },
+    "collection/map/as-whole-condition": {
+      "reason": "map() yields a list, not a boolean; a projected association cannot be used as a condition.",
+      "status": "unsupported"
+    },
+    "collection/map/equals-list-literal": {
+      "reason": "map() is held as a projected association until size() or hasIntersection() gives it a scalar meaning as an aggregate or an EXISTS subquery. Comparing the ordered projection itself to a literal list gives it neither, and a correlated subquery has no ordering to compare element-wise against, so the held projection reaches a plain value position and is refused there",
+      "status": "unsupported"
+    },
+    "comparison/equals/whole-list-literal": {
+      "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
+      "status": "unsupported"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
+      "status": "unsupported"
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "reason": "An empty delimiter is refused when the hierarchy operand is parsed, before the descendant LIKE is built: the adapter emits `prefix + delimiter + '%'`, which with an empty delimiter is a bare string-prefix LIKE that also matches the path itself (a2, never its own descendant)",
+      "status": "unsupported"
+    },
+    "null/equals/null-literal-on-missing-attribute": {
+      "reason": "aOptionalString is omitted when NULL, so the mapping declares null_representation: :omitted, and the adapter refuses a null constant under it: the wire node is the same as an explicit-null equality, and IS NULL would return the rows check() denies as a missing-attribute error.",
+      "status": "unsupported"
+    },
+    "null/not-equals/field-to-field-mixed-null-conventions": {
+      "reason": "One side declares the explicit-null convention and the other does not; no single SQL predicate is both definite for the declared NULL and UNKNOWN for the omitted one, so the comparison is refused.",
+      "status": "unsupported"
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
+      "status": "unsupported"
+    },
+    "principal/exists/list-of-structs": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
+      "status": "unsupported"
+    },
+    "principal/map/membership-in-mapped-list": {
+      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
+      "status": "unsupported"
+    },
+    "regex/matches/anchored-prefix": {
+      "reason": "Sequel has no portable RE2 predicate; matches is refused.",
+      "status": "unsupported"
+    },
+    "regex/matches/bounded-repetition": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/case-insensitive-flag": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/compared-to-true": {
+      "reason": "Sequel has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
+      "status": "unsupported"
+    },
+    "regex/matches/digit-class": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/dot-excludes-newline": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/end-anchor-before-final-newline": {
+      "reason": "Sequel has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
+      "status": "unsupported"
+    },
+    "regex/matches/grouped-alternation": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/literal-brace": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/lookahead-from-principal": {
+      "reason": "Sequel has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
+      "status": "unsupported"
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/posix-character-class": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "reason": "Sequel has no portable RE2 predicate; matches is refused.",
+      "status": "unsupported"
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/unanchored": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "relation/not-equals/one-hop-null-literal": {
+      "reason": "parent.aOptionalString is omitted when NULL or when the parent row is absent, so the mapping declares null_representation: :omitted, and the adapter refuses every null constant under it, `!= null` included: a NOT above the IS NOT NULL would flip it to IS NULL and return rows check() denies.",
+      "status": "unsupported"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required.",
+      "status": "unsupported"
+    },
+    "timestamp/greater-than/relative-window-value-first": {
+      "reason": "The same sub-microsecond now() literal as `timestamp/less-than/relative-window`, reached with the operands the other way round. Operand order does not change what a Time binds as, so the refusal is the same one",
+      "status": "unsupported"
+    },
+    "timestamp/less-than/relative-window": {
+      "reason": "The planner folds `now() - duration(\"24h\")` to a literal with nanosecond precision, and Sequel literalizes a Time into SQL at microsecond precision at best — SQLite stores a formatted string and MySQL DATETIME(6) truncates. Rounding the literal compares against a different instant than the policy names, in the direction that admits rows just outside the window, so the adapter refuses rather than move the boundary",
+      "status": "unsupported"
+    },
+    "type-mismatch/contains/number-field-needle": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/contains/number-field-receiver": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/descendent-of/number-field-as-path": {
+      "reason": "hierarchy() is lowered to LIKE over the column, and CEL has no hierarchy(int): the PDP decides this case through a runtime type error. PostgreSQL has no LIKE over an integer column and rejects the query, while SQLite and MySQL coerce the number to text and match it, so the adapter refuses a non-string operand on every store",
+      "status": "unsupported"
+    },
+    "type-mismatch/ends-with/number-field-needle": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/ends-with/number-field-receiver": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/equals/boolean-list-element-against-number-literal": {
+      "reason": "The cross-type probe `aBoolList[0] == 1 || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-boolean-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite holds a boolean column as the integer 1, so a positional lowering that compared the stored `aBoolList` element with the literal would return b4 and c1, whose first element is true, where CEL's heterogeneous equality is false for every row",
+      "status": "unsupported"
+    },
+    "type-mismatch/equals/number-list-element-against-boolean-literal": {
+      "reason": "The cross-type probe `aNumberList[0] == true || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-number-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite reads the literal TRUE as the integer 1, so a positional lowering that compared the stored `aNumberList` element with the literal would return b4, whose first element is 1, where CEL's heterogeneous equality is false for every row",
+      "status": "unsupported"
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query.",
+      "status": "unsupported"
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query.",
+      "status": "unsupported"
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
+      "status": "unsupported"
+    },
+    "type-mismatch/size/boolean-field": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/size/number-field": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/starts-with/number-field-needle": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    },
+    "type-mismatch/starts-with/number-field-receiver": {
+      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant.",
+      "status": "unsupported"
+    }
+  }
+}

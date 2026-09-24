@@ -1,0 +1,58 @@
+# Services for the Sequel adapter's suites. Only Docker is required.
+#
+#   ./scripts/test.sh                 # all the suites, on SQLite
+#   ./scripts/test.sh spec/conformance_spec.rb
+#
+# `tests` mounts the repository root because the suites read ../conformance/. No suite needs a
+# PDP: the conformance suite replays the plans and decisions recorded in conformance/golden/.
+#
+# `postgres-store` and `mysql-store` are the real stores the conformance harness replays the
+# corpus on when ADAPTER_TEST_DB names one. Each sits behind a profile of its own, so a SQLite
+# run starts neither; scripts/test.sh starts the one it needs. Their images come from
+# POSTGRES_IMAGE and MYSQL_IMAGE beside this file, pinned by tag AND digest, and scripts/test.sh
+# exports both.
+
+services:
+  postgres-store:
+    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE - run via scripts/test.sh}
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: cerbos
+      POSTGRES_PASSWORD: cerbos
+      POSTGRES_DB: cerbos
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cerbos", "-d", "cerbos"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mysql-store:
+    image: ${MYSQL_IMAGE:?set MYSQL_IMAGE - run via scripts/test.sh}
+    profiles: ["mysql"]
+    # MySQL's default collation makes `=` case- and accent-insensitive, and CEL's equality is
+    # byte-exact: a store misconfiguration, not an adapter limitation. The harness also pins the
+    # collation on every table and on its connection (spec/support/database.rb).
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin"]
+    environment:
+      MYSQL_ROOT_PASSWORD: cerbos
+      MYSQL_DATABASE: cerbos
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pcerbos"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  tests:
+    build:
+      context: .
+      args:
+        RUBY_VERSION: ${RUBY_VERSION:-3.4}
+        SEQUEL_VERSION: ${SEQUEL_VERSION:-}
+    environment:
+      ADAPTER_TEST_DB: ${ADAPTER_TEST_DB:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      # Don't mount a volume at /bundle: it would hide the gems installed in the image.
+      - ..:/repo
+    working_dir: /repo/sequel
+    command: ["bundle", "exec", "rspec"]

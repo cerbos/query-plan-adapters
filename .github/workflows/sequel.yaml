@@ -1,0 +1,109 @@
+name: Sequel Test
+
+# No `policies/**` trigger: conformance/policies/ is the only policy suite (ADR 0008).
+on:
+  pull_request:
+    paths:
+      - "sequel/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/sequel.yaml"
+      - ".github/workflows/sequel-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
+  push:
+    tags:
+      - sequel/v*
+
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: sequel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: sequel
+
+permissions: {}
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby-version: ["3.2", "3.3", "3.4"]
+        # Empty resolves the newest 5.x. The Gemfile reads a non-empty value as ONE release.
+        sequel-version: [""]
+        include:
+          # Low end of the gemspec's Sequel range.
+          - ruby-version: "3.2"
+            sequel-version: "= 5.60.0"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      # Suites run in Docker, and none needs a PDP: the conformance suite replays the plans and
+      # decisions recorded in conformance/golden/.
+      - name: Run the adapter contract suite
+        env:
+          RUBY_VERSION: ${{ matrix.ruby-version }}
+          SEQUEL_VERSION: ${{ matrix.sequel-version }}
+        run: ./scripts/test.sh spec/adapter_contract_spec.rb
+
+      # Keep this in the same job as the tests. The corpus tests the translator, the SQL Sequel
+      # renders and the store, not the Ruby version, so it runs on the baseline leg and on the low
+      # end of the Sequel range.
+      #
+      # The store is a dimension, so every one runs: SQLite in memory, and a real PostgreSQL and
+      # MySQL started by scripts/test.sh from sequel/POSTGRES_IMAGE and sequel/MYSQL_IMAGE.
+      # Literal typing, collation and LIKE are translator behaviour that SQLite can answer the way
+      # CEL does by accident. The 5.60 leg skips MySQL: Sequel ships its trilogy adapter only
+      # from a later 5.x.
+      - name: Run the conformance suite on every store
+        if: (matrix.ruby-version == '3.4' && matrix.sequel-version == '') || matrix.sequel-version != ''
+        env:
+          RUBY_VERSION: ${{ matrix.ruby-version }}
+          SEQUEL_VERSION: ${{ matrix.sequel-version }}
+          STORES: ${{ matrix.sequel-version == '' && 'sqlite postgres mysql' || 'sqlite postgres' }}
+        run: |
+          for store in $STORES; do
+            ADAPTER_TEST_DB="$store" ./scripts/test.sh spec/conformance_spec.rb
+          done
+
+      - name: Lint
+        if: matrix.ruby-version == '3.4' && matrix.sequel-version == ''
+        run: ./scripts/lint.sh
+
+  # Keep this job in this workflow. Renovate automerges non-major bumps, and this job is the
+  # PR check that blocks a Sequel bump that breaks real usage.
+  # One Ruby version only: the demo tests the gem and the ORM, not the Ruby version.
+  example:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      # No `bundler-cache`: the example has no Gemfile.lock on purpose. The gem run.sh builds
+      # has no stable checksum, and fresh resolution picks up new Sequel releases.
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.4"
+
+      # run-example.sh starts the pinned PDP from demo/docker-compose.yml. No
+      # cerbos-setup-action: the example reaches the PDP the way a deployed app does.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh sequel
