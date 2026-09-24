@@ -337,13 +337,13 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   prefixes (`ancestorOf`, `descendentOf`, `overlaps`) throw on `%`, `_`, `\` or `[` (SQL Server
   opens a character class on `[` even with `ESCAPE`). If you match on backslashes, compare the
   whole value with `==`.
-- **Counting.** `exists_one`, and `size()` of a mapped relation other than empty, non-empty or (on
+- **Counting.** `exists_one` over a relation, and `size()` of a mapped relation other than empty, non-empty or (on
   a chain) reachable.
 - **Cross-model column comparisons**, including membership between an outer scalar column and a
   related collection column.
 - **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
   fractional addition (not reversible in IEEE-754).
-- **Other malformed shapes:** the two-list `except` function compared or counted, `all()` over a
+- **Other malformed shapes:** the two-list `except` function compared to a list or counted past emptiness, `all()` over a
   multi-hop chain, an empty hierarchy delimiter,
   non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
@@ -361,7 +361,7 @@ or a same-model field reference, never an expression. These shapes throw:
 | `matches` | `regex/matches/*` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
 | List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
 | `int()`, `double()` or `timestamp()` parsing a string; an `int()` threshold | `cast/int/malformed-string`, `cast/double/malformed-string`, `cast/timestamp/malformed-string` and their negations | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). `int()` of a number is translated only as `==` (or `!=` under a `!`): a threshold would need CEL's ±2^63 overflow bound spelled out, which an `Int` column rejects. The invertible casts are solved for the column instead — `string()` of a boolean or number, `int(d) == k` as the interval truncation maps to `k`, and `string()`/`double()` of a column already of that type. |
-| `size()` of a list that isn't a mapped relation | `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
+| `size()` of `filter()` over a relation | `size/equals/filtered-collection` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
 Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
 5–7 has no raw predicate inside `where` ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
@@ -386,8 +386,8 @@ out of every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 52 / 80 |
-| adversarial | 158 / 227 |
+| extended | 56 / 80 |
+| adversarial | 160 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -450,6 +450,11 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- Macros over a literal list (a folded principal attribute) are expanded before translation:
+  `exists`/`all` over a `list(...)` of structs as well as of values, and `exists_one`,
+  `size(filter(...))` and `size(except(list, [x]))` whose body is `t == x` or `t != x`, which count
+  the multiplicity of `x` and become membership. `size(except(R.attr.list, literals))` against an
+  emptiness threshold becomes `exists`/`all` over the relation.
 - Casts that can be inverted are solved for the column rather than refused: `string(aBool) ==
   "true"` is `aBool == true`, `string(aDouble) == "-0.6"` is `aDouble == -0.6` (and false when no
   double prints as the literal, as cel-go's `%g` decides), `int(aDouble) == 0` is

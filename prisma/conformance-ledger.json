@@ -85,10 +85,6 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
     },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
-    },
     "collection/exists-one/several-matches": {
       "status": "unsupported",
       "reason": "exists_one requires counting matching elements, which Prisma where-filters cannot express; the adapter throws instead of silently degrading to exists"
@@ -220,26 +216,6 @@
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",
       "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single Prisma filter is both, so the adapter refuses mixed conventions across one comparison."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: First operand of exists must be a collection reference."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: First operand of exists must be a collection reference."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a named collection operand."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
