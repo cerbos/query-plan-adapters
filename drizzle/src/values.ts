@@ -2,6 +2,8 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { is, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { PgColumn } from "drizzle-orm/pg-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { ARITHMETIC_OPERATORS } from "./arithmetic";
@@ -141,7 +143,8 @@ const booleanStringColumn = (
  * Whether an `add` is CEL's string overload rather than its numeric one.
  *
  * One string operand settles it: CEL has no mixed-type `+`, so a string on either side means the
- * whole expression is a concatenation.
+ * whole expression is a concatenation. A nested `+` is read the same way, so
+ * `(a + b) + (c + d)` over string columns is never lowered to numeric `+`.
  */
 const isStringConcatenation = (
   operands: PlanExpressionOperand[],
@@ -156,8 +159,77 @@ const isStringConcatenation = (
     if (isStringConversion(operand)) {
       return true;
     }
+    if (isOperatorCall(operand, "add")) {
+      return isStringConcatenation(operand.operands, mapper);
+    }
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
+
+type ConcatenationDialect = "pipes" | "concat";
+
+/**
+ * How the store spells string `+`, read off the Drizzle class of every column the concatenation
+ * reaches — as `indexed.ts` and `characterLength` do, so the caller still declares no dialect.
+ * `||` concatenates on SQLite and PostgreSQL but is LOGICAL OR on MySQL unless PIPES_AS_CONCAT is
+ * set, and MySQL's own spelling is CONCAT(). With no column of a known dialect in the tree — a
+ * callback mapping, or columns of two dialects — there is nothing to decide by, so `undefined`.
+ */
+const concatenationDialect = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): ConcatenationDialect | undefined => {
+  const dialects = new Set<ConcatenationDialect>();
+  const visit = (operand: PlanExpressionOperand): void => {
+    if (isExpressionOperand(operand)) {
+      operand.operands.forEach(visit);
+      return;
+    }
+    const column = columnForOperand(operand, mapper);
+    if (column === undefined) return;
+    if (is(column, MySqlColumn)) dialects.add("concat");
+    else if (is(column, PgColumn) || is(column, SQLiteColumn)) dialects.add("pipes");
+  };
+  operands.forEach(visit);
+  return dialects.size === 1 ? [...dialects][0] : undefined;
+};
+
+/**
+ * CEL's string `+`. Both spellings propagate NULL — `NULL || 'x'` and `CONCAT(NULL, 'x')` are
+ * both NULL — so a missing operand leaves the enclosing comparison UNKNOWN and the row out under
+ * either polarity, as CEL's missing-attribute error denies it. Two constants fold in JavaScript
+ * and need no dialect at all.
+ */
+const buildConcatenation = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (
+    isValueOperand(leftOperand) &&
+    typeof leftOperand.value === "string" &&
+    isValueOperand(rightOperand) &&
+    typeof rightOperand.value === "string"
+  ) {
+    return bindConstant(leftOperand.value + rightOperand.value);
+  }
+  const dialect = concatenationDialect([leftOperand, rightOperand], mapper);
+  if (dialect === undefined) {
+    // The numeric `+` the adapter would otherwise emit is silently wrong rather than a syntax
+    // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches nothing
+    // (cerbos/query-plan-adapters#376).
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate string concatenation: no Drizzle column of a single known dialect " +
+        "among its operands says how to spell it — || concatenates on SQLite and PostgreSQL " +
+        "but is logical OR on MySQL, which spells it CONCAT()",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  const right = buildValueExpression(rightOperand, mapper, options);
+  return dialect === "concat"
+    ? sql`concat(${left}, ${right})`
+    : sql`(${left} || ${right})`;
+};
 
 const buildArithmeticExpression = (
   operator: string,
@@ -185,6 +257,9 @@ const buildArithmeticExpression = (
     // semantics; SQLite represents bound NaN as NULL, whose comparisons are never true.
     return sql`${leftOperand.value / rightOperand.value}`;
   }
+  if (operator === "add" && isStringConcatenation(operands, mapper)) {
+    return buildConcatenation(leftOperand, rightOperand, mapper, options);
+  }
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);
   if (operator === "div") {
@@ -193,21 +268,6 @@ const buildArithmeticExpression = (
     // The comparison builder handles non-finite results in separate IEEE arms;
     // this expression supplies its finite branch.
     return sql`(cast(${left} as float(53)) / ${right})`;
-  }
-  if (operator === "add" && isStringConcatenation(operands, mapper)) {
-    // CEL overloads `+` on strings; SQL does not agree on how to spell that. `||` concatenates
-    // on SQLite and PostgreSQL but is LOGICAL OR on MySQL unless PIPES_AS_CONCAT is set, and
-    // MySQL's own spelling is CONCAT(). This adapter deliberately does not know its dialect
-    // (see `definiteEquality`), so there is no rendering it can prove correct everywhere —
-    // and the numeric `+` it would otherwise emit is silently wrong rather than a syntax
-    // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches
-    // nothing (cerbos/query-plan-adapters#376).
-    throw new UnsupportedQueryPlanError(
-      "Cannot translate string concatenation: CEL's + over strings has no dialect-independent " +
-        "SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, " +
-        "which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would " +
-        "coerce the operands to 0 rather than fail",
-    );
   }
   return sql`(${left} ${sql.raw(ARITHMETIC_OPERATORS[operator]!)} ${right})`;
 };

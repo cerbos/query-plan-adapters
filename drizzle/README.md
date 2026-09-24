@@ -304,7 +304,7 @@ and PostgreSQL literals carry no collation.
 | --- | --- |
 | Logical | `and`, `or`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
-| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string |
+| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
 | Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean column |
@@ -341,8 +341,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
-| adversarial | 183 / 227 |
+| extended | 60 / 80 |
+| adversarial | 187 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -400,6 +400,12 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- String `+` now translates instead of throwing: `||` on SQLite and PostgreSQL, `CONCAT()` on
+  MySQL, where `||` is logical OR. As for `size()` and indexed storage, the dialect is read off the
+  Drizzle class of a column among the operands, so a concatenation reaching no Drizzle column
+  (only callback mappings, or columns of two dialects) still throws. A NULL operand makes the
+  concatenation NULL on all three stores, so a missing attribute stays excluded under both
+  polarities. A `+` nested inside another (`(a + b) + (c + d)`) is recognized as concatenation too.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.

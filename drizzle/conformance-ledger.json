@@ -109,14 +109,6 @@
       "status": "unsupported",
       "reason": "Segmented hierarchy expressions are not supported by the Drizzle adapter."
     },
-    "identifier/equals/concatenation": {
-      "status": "unsupported",
-      "reason": "CEL's + over strings has no dialect-independent SQL spelling: || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT(). The numeric + the adapter emits for arithmetic is silently wrong rather than a syntax error — SQLite and MySQL coerce 'prefix:' to 0, so the comparison matched nothing."
-    },
-    "identifier/equals/concatenation-value-first": {
-      "status": "unsupported",
-      "reason": "Same missing dialect-independent concatenation as identifier/equals/concatenation, in value-first form."
-    },
     "null/equals/null-literal-on-missing-attribute": {
       "status": "unsupported",
       "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
@@ -208,18 +200,6 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "Same missing dialect-independent concatenation, between two columns rather than against a constant. This adapter refuses every string `+`, so the two-column case needs no extra type information to be rejected."
-    },
-    "string/concatenate/negated-unsatisfiable-equals": {
-      "status": "unsupported",
-      "reason": "Cannot translate string concatenation: CEL's + over strings has no dialect-independent SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would coerce the operands to 0 rather than fail."
-    },
-    "string/concatenate/unsatisfiable-not-equals": {
-      "status": "unsupported",
-      "reason": "Cannot translate string concatenation: CEL's + over strings has no dialect-independent SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would coerce the operands to 0 rather than fail."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
