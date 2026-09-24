@@ -1,14 +1,6 @@
 {
   "adapter": "spring-data",
   "cases": {
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "CEL carries a NaN or signed infinity through the arithmetic composed on top of a division, and SQL has no value that does — the NULLIF divide-by-zero guard turns the whole sum into NULL. The reference's non-finite rewrite only reaches a division that IS the comparison operand, so a division nested inside further arithmetic fails closed rather than emitting the under-granting filter"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "Same nested-division limitation as arithmetic/add/self-division-plus-constant-greater-than. This is the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it"
-    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "CEL `%` is integer-only while attribute values are doubles, so a satisfiable policy has to cast with int() first — and int() has no faithful SQL lowering, CAST rounding where CEL truncates toward zero. The same limitation refuses cast/int/negative-fraction"

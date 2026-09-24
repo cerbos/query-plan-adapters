@@ -347,7 +347,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `exists_one` | Correlated strict count `= 1`, NULL-poisoned |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
 | Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
-| Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; division guarded with `NULLIF` |
+| Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; a zero column divisor split out and compared as CEL's NaN / ±Infinity (see [Gotchas](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities)) |
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
 | String `+` in comparisons (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`) | `cb.concat` when a string constant or `String` column sits under the `add`, any other leaf refused; UNKNOWN when a concatenated column is NULL |
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
@@ -387,10 +387,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 186 / 227 |
+| adversarial | 188 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 60 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 58 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -552,11 +552,15 @@ Options.of(MAPPING).withMaxMacroDepth(8)
 `Options` wins over the property, which wins over the default. The property is read per translation
 and must be a positive integer (otherwise a plain `IllegalArgumentException`).
 
-### Division by a column is guarded with `NULLIF` — zero divisors deny
+### Division by a column: zero divisors compare as CEL's NaN and infinities
 
-CEL `x / 0` is ±Infinity; SQL errors. The adapter divides by `NULLIF(divisor, 0)`, so zero-divisor
-rows are UNKNOWN and excluded — under-inclusive where a policy relies on `x / 0 == Infinity`.
-Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
+CEL `x / 0` is ±Infinity and `0 / 0` is NaN; SQL errors. A comparison against a division by a
+column is split on the divisor: where it is zero, the NaN or infinity is compared in Java (so
+`a / a != 2.0` allows a zero row, as CEL does), and elsewhere the division runs in SQL over
+`NULLIF(divisor, 0)`. Arithmetic around the division is folded the same way when its other leaves
+are constants (`a / a + 1.0 > 1.0`); arithmetic that also reads another column, or holds a second
+such division, throws `UnsupportedPlanShapeException`, since SQL has no value that carries NaN
+through it. Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
 
 ### Ternary with a `NULL` condition column excludes the row
 
@@ -612,6 +616,8 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- Arithmetic composed on a division by a column (`a / a + 1.0 != 2.0`) now translates when its
+  other leaves are constants, instead of throwing: a zero divisor gives CEL's NaN or infinity.
 - String concatenation with a column (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`,
   under any comparison operator) now translates to `CONCAT` instead of throwing.
 - `string()` over a string or numeric column compared with a string constant (`==`/`!=`) now

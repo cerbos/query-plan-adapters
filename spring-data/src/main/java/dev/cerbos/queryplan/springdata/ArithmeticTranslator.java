@@ -14,6 +14,7 @@ import jakarta.persistence.criteria.Predicate;
 
 import com.google.protobuf.Value;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
@@ -36,6 +37,12 @@ final class ArithmeticTranslator {
     private final TriPredicate tri;
     private final LeafTranslator leaf;
     private final ComparisonTranslator comparisons;
+
+    /**
+     * The division the enclosing rewrite has already split on a zero divisor, while its non-zero
+     * arm is built. Its {@code NULLIF} guard never fires there, so arithmetic around it lowers.
+     */
+    private Operand guardedDivision;
 
     ArithmeticTranslator(CriteriaBuilder cb, TriPredicate tri, LeafTranslator leaf,
                          ComparisonTranslator comparisons) {
@@ -88,8 +95,8 @@ final class ArithmeticTranslator {
      */
     private Predicate tryDivisionByZeroComparison(
             String op, List<Operand> operands, Scope scope) {
-        if (isZeroCapableDivisionOperand(operands.get(0), scope)
-                && isZeroCapableDivisionOperand(operands.get(1), scope)) {
+        if (hasZeroCapableDivision(operands.get(0), scope)
+                && hasZeroCapableDivision(operands.get(1), scope)) {
             // Only one side can be rewritten; the other would still lower to NULL.
             throw Refusals.unsupported(
                     "a comparison with a zero-capable division on BOTH sides is not "
@@ -98,14 +105,14 @@ final class ArithmeticTranslator {
         }
         for (int side = 0; side < 2; side++) {
             Operand candidate = operands.get(side);
-            if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            // The division is the operand itself, or nested in arithmetic whose other leaves are
+            // constants, e.g. `a / a + 1.0`.
+            Operand divisionOperand = isZeroCapableDivisionOperand(candidate, scope)
+                    ? candidate : nestedZeroCapableDivision(candidate, scope);
+            if (divisionOperand == null) {
                 continue;
             }
-            PlanResourcesFilter.Expression division = candidate.getExpression();
-            if (!"div".equals(division.getOperator())
-                    || division.getOperandsCount() != 2) {
-                continue;
-            }
+            PlanResourcesFilter.Expression division = divisionOperand.getExpression();
             // A non-zero constant divisor cannot divide by zero. A zero constant still needs
             // the rewrite.
             NumericOperand divisor = resolveNumericOperand(division.getOperands(1), scope);
@@ -135,13 +142,24 @@ final class ArithmeticTranslator {
             Operand other = operands.get(divisionIsLeft ? 1 : 0);
 
             // A non-finite compares the same way against every present value, so against a
-            // column the arm is folded in Java and only a NULL column makes it UNKNOWN.
-            Function<Double, Predicate> arm = nonFinite -> {
+            // column the arm is folded in Java and only a NULL column makes it UNKNOWN. Around
+            // a nested division the arm is the whole side folded with the non-finite in place,
+            // which IEEE arithmetic in Java carries as CEL does.
+            Function<Double, Predicate> arm = divisionResult -> {
+                double nonFinite = divisionOperand == candidate ? divisionResult
+                        : foldAround(candidate, divisionOperand, divisionResult, scope);
                 NumericOperand o = resolveNumericOperand(other, scope);
                 if (o instanceof NumericOperand.Constant oc) {
                     return divisionIsLeft
                             ? comparisons.constantComparison(op, nonFinite, oc.value())
                             : comparisons.constantComparison(op, oc.value(), nonFinite);
+                }
+                if (Double.isFinite(nonFinite)) {
+                    // e.g. `1.0 / (1.0 / a)`: finite, so compared in SQL like any constant.
+                    List<Operand> substituted = divisionIsLeft
+                            ? List.of(numberOperand(nonFinite), other)
+                            : List.of(other, numberOperand(nonFinite));
+                    return numericComparisonWithoutZeroGuard(op, substituted, scope);
                 }
                 Predicate folded = divisionIsLeft
                         ? comparisons.constantComparison(op, nonFinite, 0.0)
@@ -164,9 +182,93 @@ final class ArithmeticTranslator {
                                     positiveDividend,
                                     () -> arm.apply(positiveDividendResult),
                                     () -> arm.apply(negativeDividendResult))),
-                    () -> numericComparisonWithoutZeroGuard(op, operands, scope));
+                    () -> withGuardedDivision(divisionOperand,
+                            () -> numericComparisonWithoutZeroGuard(op, operands, scope)));
         }
         return null;
+    }
+
+    private Predicate withGuardedDivision(Operand division, Supplier<Predicate> body) {
+        Operand previous = guardedDivision;
+        guardedDivision = division;
+        try {
+            return body.get();
+        } finally {
+            guardedDivision = previous;
+        }
+    }
+
+    /** Whether {@code operand} is, or has nested in its arithmetic, a zero-capable division. */
+    private boolean hasZeroCapableDivision(Operand operand, Scope scope) {
+        return isZeroCapableDivisionOperand(operand, scope)
+                || operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && ARITHMETIC_OPS.contains(operand.getExpression().getOperator())
+                && containsZeroCapableDivision(operand.getExpression(), scope);
+    }
+
+    /**
+     * The one zero-capable division nested under the arithmetic {@code operand}, or
+     * {@code null} when there is none. More than one cannot be split into arms and is refused
+     * when the operand is lowered.
+     */
+    private Operand nestedZeroCapableDivision(Operand operand, Scope scope) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !ARITHMETIC_OPS.contains(operand.getExpression().getOperator())) {
+            return null;
+        }
+        List<Operand> found = new ArrayList<>();
+        collectZeroCapableDivisions(operand.getExpression(), scope, found);
+        return found.size() == 1 ? found.get(0) : null;
+    }
+
+    private void collectZeroCapableDivisions(PlanResourcesFilter.Expression expr, Scope scope,
+                                             List<Operand> found) {
+        for (Operand child : expr.getOperandsList()) {
+            if (isZeroCapableDivisionOperand(child, scope)) {
+                found.add(child);
+            } else if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && ARITHMETIC_OPS.contains(child.getExpression().getOperator())) {
+                collectZeroCapableDivisions(child.getExpression(), scope, found);
+            }
+        }
+    }
+
+    /**
+     * {@code side} evaluated in Java with {@code division} replaced by {@code value}. Only a
+     * side whose other leaves are constants folds; one that still reads a column is refused,
+     * since SQL has no NaN or infinity to carry through it.
+     */
+    private double foldAround(Operand side, Operand division, double value, Scope scope) {
+        if (resolveNumericOperand(substitute(side, division, numberOperand(value)), scope)
+                instanceof NumericOperand.Constant c) {
+            return c.value();
+        }
+        throw nestedDivisionUnsupported();
+    }
+
+    private static Operand substitute(Operand node, Operand target, Operand replacement) {
+        if (node == target) {
+            return replacement;
+        }
+        if (node.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return node;
+        }
+        PlanResourcesFilter.Expression.Builder e = node.getExpression().toBuilder().clearOperands();
+        node.getExpression().getOperandsList()
+                .forEach(child -> e.addOperands(substitute(child, target, replacement)));
+        return Operand.newBuilder().setExpression(e).build();
+    }
+
+    private static Operand numberOperand(double value) {
+        return Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(value)).build();
+    }
+
+    private static UnsupportedPlanShapeException nestedDivisionUnsupported() {
+        return Refusals.unsupported(
+                "arithmetic composed on a division whose denominator may be "
+                        + "zero is not supported: CEL carries the resulting NaN "
+                        + "or infinity through the surrounding arithmetic and "
+                        + "SQL has no value that does");
     }
 
     private Predicate numericComparisonWithoutZeroGuard(
@@ -249,7 +351,7 @@ final class ArithmeticTranslator {
             return false;
         }
         for (Operand child : expr.getOperandsList()) {
-            if (isZeroCapableDivisionOperand(child, scope)) {
+            if (child != guardedDivision && isZeroCapableDivisionOperand(child, scope)) {
                 return true;
             }
             if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
@@ -315,12 +417,9 @@ final class ArithmeticTranslator {
                         && containsZeroCapableDivision(expr, scope)) {
                     // CEL carries NaN or infinity through the surrounding arithmetic, while
                     // NULLIF makes it NULL, so `NaN + 1.0 != 2.0` would drop a row the PDP
-                    // allows. The rewrite only handles a division that is the operand itself.
-                    throw Refusals.unsupported(
-                            "arithmetic composed on a division whose denominator may be "
-                                    + "zero is not supported: CEL carries the resulting NaN "
-                                    + "or infinity through the surrounding arithmetic and "
-                                    + "SQL has no value that does");
+                    // allows. The rewrite folds such arithmetic only when its other leaves are
+                    // constants, and lowers it only in the arm where the divisor is non-zero.
+                    throw nestedDivisionUnsupported();
                 }
                 if (!ARITHMETIC_OPS.contains(op)) {
                     // A cast or a size() inside arithmetic: legal CEL, no lowering.
