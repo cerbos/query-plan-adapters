@@ -292,19 +292,19 @@ class ElasticsearchAdversarialConformanceTest {
         }
     }
 
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
     private static List<Map<String, Object>> categoriesFor(Seed seed) {
-        List<Map<String, Object>> categories = new ArrayList<>();
+        if (seed.subCategoryNames().isEmpty()) return List.of();
+        List<Map<String, Object>> subCategories = new ArrayList<>();
         for (String subName : seed.subCategoryNames()) {
             List<Map<String, Object>> labels = derivedFor(seed).labels().stream().map(name -> {
                 Map<String, Object> label = new LinkedHashMap<>();
                 label.put("name", name);
                 return label;
             }).toList();
-            categories.add(Map.of(
-                    "name", "business",
-                    "subCategories", List.of(Map.of("name", subName, "labels", labels))));
+            subCategories.add(Map.of("name", subName, "labels", labels));
         }
-        return categories;
+        return List.of(Map.of("name", "business", "subCategories", subCategories));
     }
 
     // -- the real to-one relation (conformance/README.md, "The dataset") --------------------------

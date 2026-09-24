@@ -151,18 +151,22 @@ async function seedStore(): Promise<void> {
                 },
               },
             }),
+        // One category holding every subcategory name (conformance/README.md, "The dataset").
         categories: {
-          create: seed.subCategoryNames.map((subName) => ({
-            name: "business",
-            subCategories: {
-              create: [
-                {
-                  name: subName,
-                  labels: { create: derived.labels.map((name) => ({ name })) },
-                },
-              ],
-            },
-          })),
+          create:
+            seed.subCategoryNames.length === 0
+              ? []
+              : [
+                  {
+                    name: "business",
+                    subCategories: {
+                      create: seed.subCategoryNames.map((subName) => ({
+                        name: subName,
+                        labels: { create: derived.labels.map((name) => ({ name })) },
+                      })),
+                    },
+                  },
+                ],
         },
       },
     });

@@ -3,7 +3,8 @@
     "a1",
     "a6",
     "a8",
-    "c1"
+    "c1",
+    "i9"
   ],
   "degenerateReason": null,
   "id": "relation/size/non-empty-to-one-chain",

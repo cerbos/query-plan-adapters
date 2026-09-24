@@ -17,7 +17,10 @@
     "d2",
     "e1",
     "h1",
-    "h7"
+    "h7",
+    "i4",
+    "i6",
+    "i9"
   ],
   "degenerateReason": null,
   "id": "size/greater-than/string-length",

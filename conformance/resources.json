@@ -7,6 +7,11 @@
         "special"
       ],
       "context": "projects:f1",
+      "duplicateTeams": [
+        "set",
+        "set",
+        "same"
+      ],
       "emptyTeams": [],
       "fewTeams": [
         "set",
@@ -1124,6 +1129,233 @@
         "tags": []
       },
       "id": "h7"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 1000000,
+        "aNumber": 24,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "+051",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "+051"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i1"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 2,
+        "aNumber": 25,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "51 ",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "51 "
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 26.3,
+        "aNumber": 26,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "1e3",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "1e3"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i3"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 27.3,
+        "aNumber": 27,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "9223372036854775808",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "9223372036854775808"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i4"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": -0.0,
+        "aNumber": 28,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "-0",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "-0"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i5"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 29.3,
+        "aNumber": 29,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "9007199254740993",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "9007199254740993"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i6"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 30.3,
+        "aNumber": 30,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "Kſ",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "Kſ"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i7"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 31.3,
+        "aNumber": 31,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "\t ",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "\t "
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i8"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 32.3,
+        "aNumber": 32,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "a{,2}",
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "labels": [],
+                "name": "finance"
+              },
+              {
+                "labels": [],
+                "name": "legal"
+              }
+            ]
+          }
+        ],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "finance"
+            },
+            {
+              "name": "legal"
+            }
+          ],
+          "subNames": [
+            "finance",
+            "legal"
+          ]
+        },
+        "obj": {
+          "inner": "a{,2}"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "i9"
     }
   ]
 }

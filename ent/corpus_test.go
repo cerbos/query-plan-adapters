@@ -259,7 +259,8 @@ func (c *Corpus) parentSeedOf(s *Seed) *Seed {
 
 // Each seed owns its own category graph and its own parent chain rows, so no filter can match
 // through another row's data.
-func categoryID(s Seed, i int) string    { return fmt.Sprintf("%s-cat%d", s.ID, i) }
+// A seed owns one category, holding every subcategory name.
+func categoryID(s Seed) string           { return s.ID + "-cat" }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
 func parentID(s Seed) string             { return s.ID + "-parent" }
 func innerID(s Seed) string              { return s.ID + "-parent-inner" }

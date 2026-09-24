@@ -6,13 +6,10 @@ cases:
 - id: 'cast/double/malformed-string'
   tier: adversarial
   intent: double() over a string attribute compared with a threshold.
-  trap: 'CEL requires the whole string to be a number; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  trap: 'CEL requires the whole string to be a number (i1 "+051", i3 "1e3", i4 and i6 are; i2 "51 " is not); SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3, b2 and i2.'
   condition:
     match:
       expr: 'double(R.attr.aString) > 50.0'
-  degenerate:
-    oracle: empty
-    reason: 'No seed''s aString converts to a number, so double(R.attr.aString) is a conversion error for every seed and denies.'
 - id: 'cast/double/negated-malformed-string'
   tier: adversarial
   intent: '!(double(aString) > 50.0): a string-to-double conversion under negation.'
@@ -23,17 +20,14 @@ cases:
 - id: 'cast/int/malformed-string'
   tier: adversarial
   intent: 'int() over a string attribute compared with a threshold (int(aString) > 50).'
-  trap: 'CEL requires the whole string to be an integer; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  trap: 'CEL requires the whole string to parse as Go''s strconv.ParseInt does: i1 "+051" and i6 are integers, while i2 "51 ", i3 "1e3" and i4 (past int64) are errors. SQL CAST reads leading digits, trims, or goes through a double, so it wrongly returns a2, a3, b2 and i2-i4.'
   condition:
     match:
       expr: 'int(R.attr.aString) > 50'
-  degenerate:
-    oracle: empty
-    reason: 'No seed''s aString converts to an integer, so int(R.attr.aString) is a conversion error for every seed and denies.'
 - id: 'cast/int/negated-malformed-string'
   tier: adversarial
   intent: '!(int(aString) > 50): a string-to-int conversion under negation.'
-  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix or yields 0, so the negation turns those errors into matches.'
+  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix, yields 0 or wraps past int64 (i4), so the negation turns those errors into matches. h4 "0" and i5 "-0" are the integers it must keep.'
   condition:
     match:
       expr: '!(int(R.attr.aString) > 50)'

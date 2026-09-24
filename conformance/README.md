@@ -26,7 +26,7 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 29 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 38 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |
@@ -156,7 +156,8 @@ a vacuous pass.
 ## The dataset
 
 - `seeds.json` holds the rows: scalars, a `tags` to-many relation, `subCategoryNames` for the
-  `mainCategory` chain, and `parentSeedId`. `derived-fields.json` adds six more columns per seed.
+  `mainCategory` chain, and `parentSeedId`. A seed with `subCategoryNames` owns **one** category
+  holding every name as a subcategory, so a category can be partly matched by a predicate (i9). `derived-fields.json` adds six more columns per seed.
 - **Two NULL conventions, one per attribute.** A NULL column is a *missing attribute*, which CEL
   denies under both polarities. The exceptions are `owner` (which aliases `aOptionalString`),
   `coOwner` (which aliases `scope`), `tagNames`, `aNumberList` and `aBoolList`, which send an

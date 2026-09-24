@@ -1,7 +1,8 @@
 {
   "allowed": [
     "a1",
-    "a6"
+    "a6",
+    "i9"
   ],
   "degenerateReason": null,
   "id": "relation/ternary/to-one-chain-condition",

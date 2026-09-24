@@ -255,12 +255,19 @@ function toDocument(seed: Seed): AdversarialResourceDocument {
     createdAt: derived.createdAt === null ? null : new Date(derived.createdAt),
     updatedAt: derived.updatedAt === null ? null : new Date(derived.updatedAt),
     tags: seed.tags,
-    categories: seed.subCategoryNames.map((name) => ({
-      name: "business",
-      subCategories: [
-        { name, labels: derived.labels.map((label) => ({ name: label })) },
-      ],
-    })),
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
+    categories:
+      seed.subCategoryNames.length === 0
+        ? []
+        : [
+            {
+              name: "business",
+              subCategories: seed.subCategoryNames.map((name) => ({
+                name,
+                labels: derived.labels.map((label) => ({ name: label })),
+              })),
+            },
+          ],
     parent: storedParent(seed),
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,

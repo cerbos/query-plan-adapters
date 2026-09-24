@@ -295,21 +295,27 @@ class AdversarialConformanceTest {
             // One related row per element; a null element becomes a NULL column.
             s.aNumberList().forEach(r::addNumberListElement);
             s.aBoolList().forEach(r::addBoolListElement);
+            // One category holding every subcategory name (conformance/README.md, "The dataset").
             List<CategoryEntity> cats = new ArrayList<>();
-            for (String subName : s.subCategoryNames()) {
+            if (!s.subCategoryNames().isEmpty()) {
                 catSeq++;
-                SubCategoryEntity sub = new SubCategoryEntity("adv-sub-" + catSeq, subName);
-                List<LabelEntity> labels = new ArrayList<>();
-                for (String labelName : d.labels()) {
-                    LabelEntity label = new LabelEntity(
-                            "adv-lab-" + catSeq + "-" + (labels.size() + 1), labelName);
-                    em.persist(label);
-                    labels.add(label);
+                List<SubCategoryEntity> subs = new ArrayList<>();
+                for (String subName : s.subCategoryNames()) {
+                    String subId = "adv-sub-" + catSeq + "-" + (subs.size() + 1);
+                    SubCategoryEntity sub = new SubCategoryEntity(subId, subName);
+                    List<LabelEntity> labels = new ArrayList<>();
+                    for (String labelName : d.labels()) {
+                        LabelEntity label = new LabelEntity(
+                                subId + "-lab-" + (labels.size() + 1), labelName);
+                        em.persist(label);
+                        labels.add(label);
+                    }
+                    sub.setLabels(labels);
+                    em.persist(sub);
+                    subs.add(sub);
                 }
-                sub.setLabels(labels);
-                em.persist(sub);
                 CategoryEntity cat = new CategoryEntity("adv-cat-" + catSeq, "business");
-                cat.setSubCategories(new ArrayList<>(List.of(sub)));
+                cat.setSubCategories(subs);
                 em.persist(cat);
                 cats.add(cat);
             }
@@ -371,8 +377,8 @@ class AdversarialConformanceTest {
     /**
      * <strong>Corpus gap.</strong> #509: the corpus counts the {@code mainCategory} chain with
      * two spellings. These are the other thresholds and polarities, and rows without a
-     * {@code mainCategory} must stay out of every one (#316). Seeds with one have exactly one
-     * subCategory, and the rest are CEL missing-path errors, so each of these is empty.
+     * {@code mainCategory} must stay out of every one (#316). Seeds with one have one or two
+     * subCategories, and the rest are CEL missing-path errors, so each of these is empty.
      */
     @Test
     void everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
@@ -382,10 +388,10 @@ class AdversarialConformanceTest {
                 "size(chain) == 0", compare("eq", size, 0),
                 "size(chain) <= 0", compare("le", size, 0),
                 "size(chain) < 1", compare("lt", size, 1),
-                "size(chain) >= 2", compare("ge", size, 2),
+                "size(chain) >= 3", compare("ge", size, 3),
                 "!(size(chain) > 0)", expression("not", compare("gt", size, 0)),
                 "!(size(chain) >= 1)", expression("not", compare("ge", size, 1)),
-                "!(size(chain) < 2)", expression("not", compare("lt", size, 2)));
+                "!(size(chain) < 3)", expression("not", compare("lt", size, 3)));
         emptyByConstruction.forEach((shape, condition) -> assertEquals(List.of(),
                 filteredIdsFor(condition), "absent-parent guard leaked for " + shape));
 

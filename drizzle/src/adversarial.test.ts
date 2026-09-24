@@ -227,14 +227,17 @@ function seedRows(): SeedRows {
     for (const tag of seed.tags) {
       rows.tags.push({ tagId: tag.id, name: tag.name, resourceId: seed.id });
     }
-    seed.subCategoryNames.forEach((subName, index) => {
-      const categoryId = `${seed.id}-cat-${index}`;
-      const subCategoryId = `${categoryId}-sub`;
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
+    const categoryId = `${seed.id}-cat`;
+    if (seed.subCategoryNames.length > 0) {
       rows.categories.push({
         id: categoryId,
         name: "business",
         resourceId: seed.id,
       });
+    }
+    seed.subCategoryNames.forEach((subName, index) => {
+      const subCategoryId = `${categoryId}-sub-${index}`;
       rows.subCategories.push({
         id: subCategoryId,
         name: subName,
@@ -242,7 +245,7 @@ function seedRows(): SeedRows {
       });
       derivedFor(seed).labels.forEach((labelName, labelIndex) => {
         rows.labels.push({
-          id: `${categoryId}-label-${labelIndex}`,
+          id: `${subCategoryId}-label-${labelIndex}`,
           name: labelName,
           subCategoryId,
         });
