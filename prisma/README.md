@@ -103,7 +103,7 @@ An unmapped path is used verbatim as the Prisma field name, which makes the quer
 | Key | Description |
 | --- | --- |
 | `field` | Prisma field name. |
-| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter reject incompatible comparisons and string operations before Prisma sees them. Required (`"dateTime"`) for `timestamp()` comparisons. Undeclared keeps the untyped behaviour; the adapter cannot read your schema. |
+| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter settle comparisons the type already decides before Prisma sees them: CEL answers `R.attr.aNumber == "5"` false for every row and `R.attr.aNumber.contains("2")` with an error, so neither literal is bound for the store to coerce. Required (`"dateTime"`) for `timestamp()` comparisons. Undeclared keeps the untyped behaviour; the adapter cannot read your schema. |
 | `nullable` | `false` declares the column cannot be NULL, which drops the NULL guards on [relation elements](#relation-element-nullability) and hierarchy segments. |
 | `nullAttributeRepresentation` | Per-attribute NULL convention. See [Declare the convention per attribute](#declare-the-convention-per-attribute). |
 | `relation.name` | Prisma relation field name. |
@@ -355,7 +355,7 @@ or a same-model field reference, never an expression. These shapes throw:
 | `matches` | `regex/matches/*` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
 | List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
 | `int()`, `double()`, `string()` | `cast/*` | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). |
-| `size()` of a string, or of a list that isn't a mapped relation | `size/greater-than/string-non-empty`, `type-mismatch/size/*`, `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
+| `size()` of a string, or of a list that isn't a mapped relation | `size/greater-than/string-non-empty`, `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
 Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
 5–7 has no raw predicate inside `where` ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
@@ -381,7 +381,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 109 / 227 |
+| adversarial | 138 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -444,6 +444,16 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A comparison whose outcome the declared `valueType` settles is no longer refused. CEL's
+  heterogeneous equality answers `==` false and `!=` true across types, so `aNumber == "5"`,
+  `aString == {"a": 1}` and `"2" in aNumberList` fold to constants, and an `in`/`hasIntersection`
+  list drops the literals that can never match (`aNumber in ["5", 2]` is `aNumber in [2]`). A
+  no-overload call (`aNumber.contains("2")`, `size(aBool)`, `hierarchy(aNumber)`) is a CEL error,
+  which is settled only where the enclosing `!`, `&&`, `||`, `exists` and `all` fix how an error
+  decides the row. Where a missing attribute could still raise an error the other way, the shape is
+  refused as before. A conditional plan that folds to `false` returns `ALWAYS_DENIED` instead of
+  throwing. This supersedes the `in value type does not match mapped <type> field` refusal below
+  for scalar literals.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.

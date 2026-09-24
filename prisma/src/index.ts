@@ -7,6 +7,7 @@ import type { TranslationContext } from "./mapping";
 import { isOperatorOperand, isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
+import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
 
 export { PlanKind, UnsupportedQueryPlanError };
@@ -168,13 +169,20 @@ export function queryPlanToPrisma({
     case PlanKind.CONDITIONAL: {
       assertStructuralNulls(queryPlan.condition, context);
       const condition = constantFoldExpression(
-        hoistOuterScopeReferences(queryPlan.condition, [])
+        settleTypeMismatches(
+          hoistOuterScopeReferences(queryPlan.condition, []),
+          context
+        )
       );
       if (isValueOperand(condition)) {
-        // Real PDP plans fold constant conditions to ALWAYS_ALLOWED/ALWAYS_DENIED before
-        // they reach the adapter; this can only surface with hand-crafted plans.
+        // The planner folds a condition that is constant on its own, but not one the mapped
+        // column types decide (`R.attr.aNumber == "5"` is false for every row): that surfaces
+        // here, and is answered as the planner would have answered it.
         if (condition.value === true) {
           return { kind: PlanKind.CONDITIONAL, filters: {} };
+        }
+        if (condition.value === false) {
+          return { kind: PlanKind.ALWAYS_DENIED };
         }
         rejectConstantFalse();
       }

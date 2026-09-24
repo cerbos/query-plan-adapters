@@ -84,9 +84,11 @@ describe("declared scalar types", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { aString: { equals: 0 } },
     });
-    expect(() => translate("type-mismatch/equals/string-field-against-number-principal")).toThrow(
-      "eq value type does not match mapped string field",
-    );
+    // Declared, the type settles the comparison: CEL's heterogeneous equality answers a string
+    // column against a number false for every row, so nothing is bound for a store to coerce.
+    expect(translate("type-mismatch/equals/string-field-against-number-principal")).toEqual({
+      kind: PlanKind.ALWAYS_DENIED,
+    });
   });
 });
 
@@ -676,8 +678,8 @@ describe("plans the planner cannot produce", () => {
     ).toThrow(message);
   });
 
-  test("a constant-false predicate the planner should have folded", () => {
-    expect(() =>
+  test("a condition that folds to constant false is always denied", () => {
+    expect(
       queryPlanToPrisma({
         queryPlan: plan({
           operator: "if",
@@ -685,8 +687,6 @@ describe("plans the planner cannot produce", () => {
         }),
         mapper: MAPPER,
       })
-    ).toThrow(
-      "A constant-false conditional predicate must be folded by the Cerbos planner"
-    );
+    ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
   });
 });

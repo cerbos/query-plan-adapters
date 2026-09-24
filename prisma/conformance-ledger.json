@@ -465,133 +465,17 @@
       "status": "unsupported",
       "reason": "The planner emits a sub-millisecond now() literal that Prisma DateTime cannot represent without changing the CEL instant"
     },
-    "type-mismatch/contains/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/contains/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/descendent-of/number-field-as-path": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/ends-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/ends-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/equals/boolean-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "aBool is mapped with valueType boolean, CEL answers `aBool == \"true\"` false, and SQLite and MySQL store a boolean as the integer 1 and would coerce the string, adding every aBool-true row. The scalar comparison refuses the string literal against the mapped valueType before a filter exists; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-boolean-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its boolean element meets the number literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "aNumber is mapped with valueType number, and CEL's heterogeneous equality answers `aNumber == \"5\"` false for every row. Prisma has no filter form for a comparison that is false by type: binding \"5\" against the Int column hands it to Prisma's validator or to a store that coerces (SQLite and MySQL compare '5' = 5 as true, which would add a1), so the scalar comparison refuses the literal against the mapped valueType before a filter exists. The throw propagates out of the `or`, so the aNumber == 2 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/equals/number-field-against-string-principal": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
     },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
     },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-number-field": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/equals/string-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "aString is mapped with valueType string, CEL answers `aString == 0` false, and MySQL reads a non-numeric string as 0 when comparing it to a number, while h4's \"0\" matches on any store that coerces. The scalar comparison refuses the number literal against the mapped valueType before a filter exists; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/equals/string-field-against-number-principal": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/exists/element-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "The lambda body becomes a filter inside the tags relation's `some`, and its field `name` is mapped with valueType string; CEL answers `t.name == 0` false for every tag. The element comparison refuses the number literal against the mapped valueType before a filter exists rather than bind it for a store to coerce; the throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a map() projection lowers to the tags relation's `some` with `name in [...]`, and the walk checks every literal against the projected field's valueType string. Dropping 0 and keeping \"public\" would agree with CEL, but the walk does not partition a mixed list; it refuses the whole list rather than bind 0 against a string column"
-    },
-    "type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list": {
-      "status": "unsupported",
-      "reason": "Same membership walk as type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list: the only literal is a string against a list mapped with valueType boolean, which CEL answers false for every element and SQLite and MySQL would coerce, so the walk refuses it before a filter exists. The throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a relation-backed list lowers to the same membership walk as `in`, which checks every literal against the mapped valueType and refuses the whole list on the first mismatch. Dropping \"2\" and keeping 3 would agree with CEL, which answers the string false against every number, but the walk does not partition a mixed list; it refuses rather than bind \"2\" against a number column"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of hasIntersection must be a value."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
-    },
-    "type-mismatch/in/number-field-in-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "Membership of a scalar Int column in a literal list lowers to Prisma's `in`, and the walk checks every literal against the mapped valueType number. Dropping \"5\" and keeping 2 would agree with CEL, which answers the string false against every number, but the walk does not partition a mixed list; it refuses the whole list rather than bind \"5\" for SQLite or MySQL to coerce"
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
-    },
-    "type-mismatch/in/string-literal-in-resource-boolean-list": {
-      "status": "unsupported",
-      "reason": "The boolean mirror of type-mismatch/in/string-literal-in-resource-number-list: the list is mapped with valueType boolean, CEL answers \"true\" == true false, and SQLite and MySQL store a boolean as the integer 1, so the membership walk refuses the string literal before a filter exists rather than binding it for the store to coerce. The throw propagates out of the `or`, so the aNumber == 5 branch is not emitted either"
-    },
-    "type-mismatch/in/string-literal-in-resource-number-list": {
-      "status": "unsupported",
-      "reason": "The list is mapped as a relation whose valueType is number, and CEL's heterogeneous equality answers a string member false against every number element. Prisma has no filter form for a comparison that is false by type: binding \"2\" against the element column hands it to Prisma's validator or to a store that coerces (SQLite and MySQL compare '2' = 2 as true), so the membership walk refuses the literal before a filter exists. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
-    },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "The finite ternary branch compares a numeric value with a mapped string field; Prisma scalar filters cannot encode the CEL type-error result required for that branch and the adapter rejects the mismatched operand type."
-    },
-    "type-mismatch/not-equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "The `!=` mirror of type-mismatch/equals/number-field-against-string-literal: CEL answers `aNumber != \"5\"` TRUE for every row, and a store that coerced '5' = 5 would drop a1, an under-grant rather than an over-grant but a wrong filter all the same. The same valueType check refuses the string literal before a filter exists, taking the well-typed aNumber > 3 conjunct with it"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: struct."
-    },
-    "type-mismatch/size/boolean-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a relation mapping."
-    },
-    "type-mismatch/size/number-field": {
-      "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: size operator requires a relation mapping."
-    },
-    "type-mismatch/starts-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
-    },
-    "type-mismatch/starts-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "The declared Prisma field type is incompatible with the CEL operand; translating would yield an invalid Prisma filter or datastore coercion."
     }
   }
 }
