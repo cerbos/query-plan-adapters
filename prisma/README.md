@@ -305,7 +305,7 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
 | Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
 | Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row |
-| Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
+| Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)` (an empty delimiter splits per code point, so a descendant is `startsWith(path + "_")`), `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
 
 Outer-column references inside a macro (`R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`)
@@ -346,7 +346,7 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
 - **Unsolvable arithmetic.** Arithmetic on both sides, and division *by* a column other than
   `x / x`.
 - **Other malformed shapes:** the two-list `except` function compared to a list or counted past
-  emptiness, an empty hierarchy delimiter, non-scalar comparison literals, empty `and`/`or`, and
+  emptiness, non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
 
 #### Operators Prisma `where` cannot express
@@ -388,7 +388,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 63 / 80 |
-| adversarial | 179 / 227 |
+| adversarial | 180 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -451,6 +451,8 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- `hierarchy(x, "")` translates: Cerbos splits on an empty delimiter per code point, so a
+  descendant of `C` is `startsWith(C + "_")`, and the empty path is an ancestor of every other.
 - `matches()` translates for the RE2 patterns a combination of LIKE filters decides exactly (see
   [Supported operators](#supported-operators)); `b == true` over a boolean expression is `b`.
 - Arithmetic against a constant is solved exactly over IEEE-754 doubles: `x + c CMP v` (and `-`,
