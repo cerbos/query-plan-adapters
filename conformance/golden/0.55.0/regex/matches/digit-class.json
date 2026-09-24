@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "b2",
+    "f1",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/digit-class",
+  "intent": "matches() with the RE2 \\d digit escape, unanchored.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "\\d"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/digit-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"\\\\d\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Target regex dialects (SQL, Lucene) do not all support \\d or treat it as RE2 does."
+}

@@ -1,0 +1,79 @@
+{
+  "allowed": [
+    "a1",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/negated-literal-list-with-null-element",
+  "intent": "Negated membership of owner in a literal list holding strings and a null element.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.owner"
+                },
+                {
+                  "value": [
+                    "x",
+                    "one_two",
+                    null
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/negated-literal-list-with-null-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.owner in [\"x\", \"one_two\", null])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "SQL NOT IN (..., NULL) is UNKNOWN for every row and returns nothing."
+}

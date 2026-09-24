@@ -1,15 +1,11 @@
 """Fixtures for the offline suites: a throwaway in-memory schema, in both model styles.
 
-No PDP is started anywhere in this file. It used to start one per module, over two
-transports, loaded with the repository's shared policy suite, for a per-adapter suite
-that has been retired along with that suite — see ``test_query.py`` for what replaced it.
-The suites these fixtures serve now build their plans by hand; the ones that read a real
-planner's output read it from ``conformance/wire-fixtures/``
-(``test_translator.py``), and the one suite that still needs a live PDP starts its own,
-pinned and loaded with ``conformance/policies/``
-(``test_adversarial_conformance.py``).
+No PDP is started anywhere in this test suite. The suites these fixtures serve build their
+plans by hand; the ones that read a real planner's output read it from
+``conformance/golden/`` (``test_translator.py`` and ``test_adversarial_conformance.py``).
 """
 
+import sys
 from importlib.metadata import version
 
 import pytest
@@ -118,7 +114,7 @@ def engine():
     #
     # A SQLite REGEXP function used to be registered here, for the one retired test that
     # EXECUTED a caller-supplied `matches` override. What that override does to the emitted
-    # SQL is now asserted in `test_translator.py` from the `p-matches` wire fixture, and
+    # SQL is now asserted in `test_translator.py` from a recorded regex plan, and
     # nothing left in this file executes one, so registering it would be dead setup.
     engine = create_engine("sqlite://")
 
@@ -189,3 +185,19 @@ def modern_user_table():
 def modern_resource_table():
     _require_declarative_base()
     return ModernResource
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Per-tier outcomes of the conformance harness, when it ran."""
+    harness = sys.modules.get("test_adversarial_conformance")
+    if harness is None or not harness.RESULTS:
+        return
+    terminalreporter.section("conformance")
+    for run, tally in sorted(harness.RESULTS.items()):
+        tiers = sorted({tier for tier, _ in tally})
+        summary = ", ".join(
+            f"{tier} {tally[(tier, 'pass')]}/"
+            f"{sum(n for (t, _), n in tally.items() if t == tier)}"
+            for tier in tiers
+        )
+        terminalreporter.write_line(f"{run}: {summary} passed")

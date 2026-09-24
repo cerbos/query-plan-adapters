@@ -1,0 +1,328 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: collection
+description: 'Macros over resource collections: exists, all, exists_one, filter, map, except, hasIntersection, indexing.'
+cases:
+- id: 'collection/all/empty-collection'
+  tier: adversarial
+  intent: all() over a tag list where some rows have an empty list.
+  trap: 'all() on an empty collection is vacuously true; requiring at least one match, or a store that cannot tell empty from missing, gets those rows wrong.'
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, t.name == "public")'
+- id: 'collection/all/nested-exists-over-same-collection'
+  tier: adversarial
+  intent: 'all() over tags whose body is an exists() over the same tags, requiring a different tag (by id) with the same name.'
+  trap: 'Self-correlation makes u.id != t.id never true and drops a3; correlating the name but not the id counts a tag as its own duplicate and over-grants every single-tag row.'
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, R.attr.tags.exists(u, u.id != t.id && u.name == t.name))'
+- id: 'collection/all/nested-three-levels-middle'
+  tier: extended
+  intent: 'all() at the middle of three nested macros: categories.exists(subCategories.all(labels.exists(...))).'
+  trap: all() lowers to NOT EXISTS of the negated body while keeping the erroring row (a6) denied; empty inner collections make all() vacuously true.
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/except/as-whole-condition'
+  tier: adversarial
+  intent: 'The two-list except() used as the whole condition, returning a list rather than a boolean.'
+  trap: 'Treating a non-empty difference as true, or dropping it, emits a filter where CEL denies every row; the shape must throw.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.except(["public"])'
+  degenerate:
+    oracle: empty
+    reason: 'except() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.'
+- id: 'collection/except/equals-list-literal'
+  tier: extended
+  intent: 'A resource list minus a literal list, compared for equality with a list literal.'
+  trap: 'List equality is ordered and exact; a containment or membership lowering over-grants lists with extra or reordered elements.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.except(["public"]) == ["private"]'
+- id: 'collection/except/size-of-difference'
+  tier: extended
+  intent: 'size() of a resource list minus a literal list, compared > 0.'
+  trap: 'Lowering except() as the lambda macro form, or size() only over named collections, mistranslates the difference; null tagNames must deny.'
+  condition:
+    match:
+      expr: 'size(R.attr.tagNames.except(["public"])) > 0'
+- id: 'collection/exists-one/several-matches'
+  tier: adversarial
+  intent: exists_one() over a tag list where some rows have more than one matching element.
+  trap: Degrading exists_one to exists admits rows with two or more matches; it needs an exact count of one.
+  condition:
+    match:
+      expr: 'R.attr.tags.exists_one(t, t.name == "public")'
+- id: 'collection/exists/arithmetic-on-outer-attribute'
+  tier: extended
+  intent: exists() whose body combines an element comparison with arithmetic over an outer resource number.
+  trap: 'The outer attribute must stay bound to the parent row inside the element scope; resolving it against the element, or dropping the arithmetic, changes the rows.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == "public" && R.attr.aNumber + 1.0 > 2.0)'
+- id: 'collection/exists/element-contains-outer-attribute'
+  tier: adversarial
+  intent: 'exists() whose body is element.contains(outer attribute), a substring match with a column needle across scopes.'
+  trap: 'The outer needle must be LIKE-escaped at query time and bound to the parent row; a8''s empty needle matches every tag, and a missing needle must deny.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name.contains(R.attr.aString))'
+- id: 'collection/exists/element-field-to-element-field'
+  tier: extended
+  intent: exists() whose body compares two fields of the same element (t.id == t.name); b4 is the witness.
+  trap: 'Both operands are element columns; treating one as a literal, or binding one to the outer row, is wrong.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.id == t.name)'
+- id: 'collection/exists/element-field-to-outer-field'
+  tier: extended
+  intent: 'exists() whose body compares the element''s field with a top-level resource attribute (t.name == aString).'
+  trap: The comparison crosses from the element column to the correlated outer column; binding both to one scope compares the wrong fields.
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == R.attr.aString)'
+- id: 'collection/exists/element-in-literal-list'
+  tier: extended
+  intent: 'exists() over a resource string list whose body tests the element''s membership in a literal list.'
+  trap: 'The literal list is folded inside the lambda; the lambda variable must stay bound to the element, not resolve outside the lambda.'
+  condition:
+    match:
+      expr: '(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+- id: 'collection/exists/element-in-principal-list'
+  tier: extended
+  intent: 'exists() over resource tags whose body tests the element''s name for membership in a principal list attribute.'
+  trap: 'The principal list is folded into a literal list inside the lambda; the IN must apply to the element column, not the outer row.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name in P.attr.allowedTags)'
+- id: 'collection/exists/empty-collection'
+  tier: core
+  intent: exists() over a tag list where some rows have an empty list.
+  trap: 'exists() on an empty collection is false; a join-based translation must not return rows with no related elements.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == "public")'
+- id: collection/exists/negated
+  tier: adversarial
+  intent: 'Negated exists() over a tag list (!tags.exists(t, t.name == "private")).'
+  trap: 'Negating a nullable collection predicate turns a missing collection (a CEL error, denied) into a match; an empty collection must be allowed but a missing one must not.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists(t, t.name == "private")'
+- id: 'collection/exists/negated-element-in-literal-list'
+  tier: adversarial
+  intent: Negated exists() over a resource string list whose body tests membership in a literal list.
+  trap: 'Under negation a null tagNames list or null elements must not flip to an allow; NOT over a nullable array lowering over-grants.'
+  condition:
+    match:
+      expr: '!(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+- id: 'collection/exists/negated-empty-collection'
+  tier: adversarial
+  intent: 'Negated exists() over tags where several rows (a2, b1, b2, b3) have no tags.'
+  trap: 'exists over an empty collection is false, so its negation is true; stores that do not index empty arrays drop those rows, and NULL-name elements must stay UNKNOWN.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists(t, t.name == "public")'
+- id: 'collection/exists/negated-nested-over-same-collection'
+  tier: adversarial
+  intent: '!tags.exists(t, tags.exists(u, u.name != t.name)): every tag has the same name.'
+  trap: 'Reusing one alias for both levels makes the inner exists never true, so the negation over-grants a6; b6''s NULL-name tag must deny under both polarities.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))'
+- id: 'collection/exists/negated-nested-three-levels'
+  tier: adversarial
+  intent: 'Negation of the three-level nested exists over categories, subCategories and labels.'
+  trap: 'Rows that are definitely false are allowed but the erroring row (a6, unnamed label) must still deny; a plain NOT EXISTS allows it.'
+  condition:
+    match:
+      expr: '!R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/exists/nested-collection-size'
+  tier: extended
+  intent: 'size() of a nested collection inside exists() over another collection (categories.exists(c, size(c.subCategories) == 1)).'
+  trap: The count must be scoped to the current outer element; counting over the whole resource or the wrong join level gives wrong sizes.
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1)'
+- id: 'collection/exists/nested-over-same-collection'
+  tier: adversarial
+  intent: 'tags.exists(t, tags.exists(u, u.name != t.name)): some pair of tags differs by name.'
+  trap: 'The inner subquery needs a fresh alias correlated to the outer one; reusing one alias compares each tag with itself and drops a6 (#509).'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))'
+- id: 'collection/exists/nested-three-levels'
+  tier: extended
+  intent: 'exists nested three levels deep: categories, subCategories, labels with name == "gold".'
+  trap: 'An unnamed label (a6) errors and must deny through every level, and matching is case-sensitive (c1''s "Gold" must not match).'
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/exists/nested-with-outer-attribute'
+  tier: extended
+  intent: 'exists() over categories nesting exists() over subcategories, whose inner body also reads a top-level resource attribute (aBool).'
+  trap: The outer attribute must stay correlated to the root row across two lambda scopes; resolving it against the inner element loses the correlation.
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, c.subCategories.exists(s, s.name == "finance" && R.attr.aBool))'
+- id: 'collection/exists/outer-collection-inside-lambda'
+  tier: adversarial
+  intent: 'categories.exists() whose body tests size(c.subCategories) == 1 and the root''s tags.exists().'
+  trap: 'The inner tags.exists must correlate to the root entity, not to the category the outer lambda is iterating.'
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, t.name == "public"))'
+- id: 'collection/exists/scalar-list-equals'
+  tier: core
+  intent: 'exists() over a string list with an equality body (tagNames.exists(tagName, tagName == "public")).'
+  trap: 'The lambda variable is the element itself, not a field of a related row; tagNames'' explicit null elements must neither error the row nor match (#430).'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.exists(tagName, tagName == "public")'
+- id: 'collection/exists/scalar-list-negated-body'
+  tier: adversarial
+  intent: 'exists() over a string list with a negated equality body (tagNames.exists(tagName, !(tagName == "public"))).'
+  trap: 'A null element satisfies !(null == "public") in CEL but SQL NOT(NULL = ''public'') is UNKNOWN; a flat-array must_not also excludes mixed arrays CEL allows (#430).'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.exists(tagName, !(tagName == "public"))'
+- id: 'collection/filter/as-conjunct'
+  tier: adversarial
+  intent: 'A list-valued filter() as one conjunct of an and, beside a boolean attribute.'
+  trap: Dropping the untranslatable filter() conjunct leaves aBool alone and returns the 14 aBool rows; CEL denies every row because the conjunct is not a boolean.
+  condition:
+    match:
+      all:
+        of:
+        - expr: 'R.attr.tags.filter(t, t.name == "public")'
+        - expr: R.attr.aBool
+  degenerate:
+    oracle: empty
+    reason: 'The filter() conjunct returns a list, not a boolean, so the conjunction is not evaluable and CEL denies every seed. Dropping that conjunct leaves a bare-boolean filter that returns rows.'
+- id: 'collection/filter/as-whole-condition'
+  tier: adversarial
+  intent: 'filter() used as the entire condition, returning a list rather than a boolean.'
+  trap: 'There is no boolean meaning and check() denies every row; treating it as exists() (non-empty result) over-grants. It must be rejected.'
+  condition:
+    match:
+      expr: 'R.attr.tags.filter(t, t.name == "public")'
+  degenerate:
+    oracle: empty
+    reason: 'filter() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.'
+- id: 'collection/has-intersection/mapped-names-value-first'
+  tier: adversarial
+  intent: 'hasIntersection(["public", "other"], tags.map(t, t.name)): the literal list first, a projection second.'
+  trap: 'A translator that assumes field-first inverts the operands or fails to resolve the map() projection to the related column.'
+  condition:
+    match:
+      expr: 'hasIntersection(["public", "other"], R.attr.tags.map(t, t.name))'
+- id: 'collection/has-intersection/mapped-names-with-metacharacters'
+  tier: adversarial
+  intent: hasIntersection of a map() projection of tag names with a literal list holding unicode and LIKE metacharacters.
+  trap: 'List values must be compared by exact equality, never LIKE, so "100%_x" is not a pattern; unicode must round-trip byte-exact.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", "héllo🚀", "100%_x"])'
+- id: 'collection/has-intersection/value-first'
+  tier: adversarial
+  intent: hasIntersection with the literal list first and the resource list second.
+  trap: 'The answer is symmetric but the query is not: one side is a column and the other a parameter list, so swapping roles breaks; matching stays case-sensitive (c1''s "Public").'
+  condition:
+    match:
+      expr: 'hasIntersection(["public", "other"], R.attr.tagNames)'
+- id: 'collection/index/first-element-of-boolean-list'
+  tier: extended
+  intent: 'The first element of a boolean list compared with true (aBoolList[0] == true).'
+  trap: 'A position-blind match also finds true in second position (a5 [false, true]); a store reading true as 1 loses the boolean type.'
+  condition:
+    match:
+      expr: 'R.attr.aBoolList[0] == true'
+- id: 'collection/index/first-element-of-number-list'
+  tier: extended
+  intent: 'The first element of a number list compared with a literal (aNumberList[0] == 2).'
+  trap: 'A position-blind membership test (term query, $contains) also matches [3, 2]; losing the number type or reading empty lists as NULL matches the wrong rows.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList[0] == 2'
+- id: 'collection/index/first-element-of-object-list'
+  tier: extended
+  intent: 'A field of the first element of an object list compared with a literal (tags[0].name == "public").'
+  trap: 'Collection order must match the PDP''s list order and an out-of-range index is an error that denies; an unordered relation cannot express position.'
+  condition:
+    match:
+      expr: 'R.attr.tags[0].name == "public"'
+- id: 'collection/index/first-element-of-string-list'
+  tier: extended
+  intent: 'The first element of a resource string list compared with a literal (tagNames[0] == "public").'
+  trap: 'Row order is undefined in SQL, so most adapters must refuse; rewriting the index as any-element over-grants b6 ([null, "public"]), and empty lists are out of range and deny.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames[0] == "public"'
+- id: 'collection/index/first-element-of-string-list-equals-null'
+  tier: adversarial
+  intent: 'The first element of a string list compared with null (tagNames[0] == null).'
+  trap: 'An explicit null at position 0 is true while an absent position 0 is an out-of-range error; treating both as NULL over-grants.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames[0] == null'
+- id: 'collection/index/fractional-position'
+  tier: adversarial
+  intent: 'tagNames[0.5] == "public", OR''d with aNumber == 5 to keep the oracle discriminating.'
+  trap: 'A fractional index is an error in CEL; truncating 0.5 to 0 over-grants.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5'
+- id: 'collection/index/negated-first-element-of-boolean-list'
+  tier: adversarial
+  intent: '!(aBoolList[0] == true): the negated first-element comparison over a boolean list.'
+  trap: 'Empty lists error and must deny under negation while a null first element (a4) must allow; a must_not over an any-position match is a different predicate.'
+  condition:
+    match:
+      expr: '!(R.attr.aBoolList[0] == true)'
+- id: 'collection/index/negated-first-element-of-number-list'
+  tier: adversarial
+  intent: '!(aNumberList[0] == 2): the negated first-element comparison over a number list.'
+  trap: 'Empty lists error and must deny, while a null first element (a6 [null, 2]) is a value and must allow; a SQL NULL reading gets both wrong.'
+  condition:
+    match:
+      expr: '!(R.attr.aNumberList[0] == 2)'
+- id: 'collection/index/negated-first-element-of-string-list'
+  tier: adversarial
+  intent: 'Negated equality on the first element of a string list (!(tagNames[0] == "public")).'
+  trap: 'Out-of-range rows are errors and stay denied under negation, while a null element at position 0 is a value and is allowed.'
+  condition:
+    match:
+      expr: '!(R.attr.tagNames[0] == "public")'
+- id: 'collection/index/negated-out-of-bounds'
+  tier: adversarial
+  intent: '!(tagNames[1] == "public"): the second element under negation, where most rows have fewer than two tags.'
+  trap: 'An out-of-bounds index is an error that denies even under negation; reading the missing element as NULL or false and negating it over-grants every short list.'
+  condition:
+    match:
+      expr: '!(R.attr.tagNames[1] == "public")'
+- id: 'collection/index/negative-position'
+  tier: adversarial
+  intent: 'tagNames[-1] == "public", OR''d with aNumber == 5 to keep the oracle discriminating.'
+  trap: 'Index -1 is an error in CEL; treating it as the last element (Python or JSON-path style) over-grants.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames[-1] == "public" || R.attr.aNumber == 5'
+- id: 'collection/map/as-whole-condition'
+  tier: adversarial
+  intent: 'map() used as the entire condition, returning a list rather than a boolean.'
+  trap: 'There is no boolean meaning and check() denies every row; treating a non-empty projection as true over-grants. It must be rejected.'
+  condition:
+    match:
+      expr: 'R.attr.tags.map(t, t.name)'
+  degenerate:
+    oracle: empty
+    reason: 'map() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.'
+- id: 'collection/map/equals-list-literal'
+  tier: extended
+  intent: 'Ordered list equality over a projection (tags.map(t, t.id) == ["t3a", "t3b"]).'
+  trap: 'List equality is ordered and exact; treating it as set containment or intersection over-grants (a3 is the only witness).'
+  condition:
+    match:
+      expr: 'R.attr.tags.map(t, t.id) == ["t3a", "t3b"]'

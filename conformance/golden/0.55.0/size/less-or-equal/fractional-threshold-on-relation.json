@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-or-equal/fractional-threshold-on-relation",
+  "intent": "size() of a list reached through the mainCategory chain compared <= 1.5.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subCategories"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1.5
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-or-equal/fractional-threshold-on-relation",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.mainCategory.subCategories) <= 1.5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "<= 1.5 rounds down to <= 1, which a zero count also satisfies, so an unguarded chain admits parentless rows (all 22 instead of a1/a6/a8/c1)."
+}

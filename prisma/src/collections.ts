@@ -44,6 +44,7 @@ import {
   buildNegatedFilter,
   buildPrismaFilterFromCerbosExpression,
 } from "./translate";
+import { UnsupportedQueryPlanError } from "./errors";
 
 function newLambdaScope(
   variableName: string,
@@ -80,7 +81,7 @@ function foldKnownValueCollection(
   negated: boolean
 ): PrismaFilter {
   if (operator !== "exists" && operator !== "all") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection value is not supported. ` +
         "Only exists() and all() can be folded into a flat filter."
     );
@@ -88,18 +89,18 @@ function foldKnownValueCollection(
 
   const elements = collection.value;
   if (!Array.isArray(elements)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection requires a list value`
     );
   }
 
   if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Second operand of ${operator} must be a lambda expression`
     );
   }
   if (lambda.operands.length !== 2) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection supports single-variable lambdas only`
     );
   }
@@ -113,7 +114,7 @@ function foldKnownValueCollection(
     "Lambda variable must have a name"
   );
   if (!isNamedOperand(variable)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const filters = elements.map((element) => {
@@ -144,7 +145,7 @@ function buildCollectionLambdaParts(
   context: TranslationContext
 ): CollectionLambdaParts {
   if (operands.length !== 2) {
-    throw new Error(`${operator} requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`${operator} requires exactly two operands`);
   }
 
   const collection = assertDefined(
@@ -157,13 +158,13 @@ function buildCollectionLambdaParts(
   );
 
   if (!isNamedOperand(collection)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `First operand of ${operator} must be a collection reference`
     );
   }
 
   if (!isOperatorOperand(lambda)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Second operand of ${operator} must be a lambda expression`
     );
   }
@@ -173,12 +174,12 @@ function buildCollectionLambdaParts(
     "Lambda variable must have a name"
   );
   if (!isNamedOperand(variable)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
   if (!relations || relations.length === 0) {
-    throw new Error(`${operator} operator requires a relation mapping`);
+    throw new UnsupportedQueryPlanError(`${operator} operator requires a relation mapping`);
   }
   const head = relations[0]!;
   const restRelations = relations.slice(1);
@@ -273,7 +274,7 @@ function positiveCollectionFilter(
       return relationFilter(head, "some", negateFilter(filterValue));
     case "all":
       if (parts.restRelations.length > 0) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "all() over a multi-hop relation chain is not supported"
         );
       }
@@ -283,7 +284,7 @@ function positiveCollectionFilter(
       // with a definitive false witness, matching error absorption.)
       return excludeNullElements(relationFilter(head, "every", filterValue), parts);
     default:
-      throw new Error(`Unexpected operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unexpected operator: ${operator}`);
   }
 }
 
@@ -333,7 +334,7 @@ function negatedCollectionFilter(
         parts
       );
     default:
-      throw new Error(`Unexpected operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unexpected operator: ${operator}`);
   }
 }
 
@@ -357,12 +358,12 @@ function translateCollectionMacro(
   }
 
   if (operator === "exists_one") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "exists_one requires counting matching elements, which Prisma where-filters cannot express"
     );
   }
   if (operator === "filter") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "The filter() collection operator returns a list, not a boolean. " +
         "It cannot be used as a standalone condition. " +
         "Use exists() or combine filter() with size() instead."
@@ -401,7 +402,7 @@ export function handleMapOperator(
   context: TranslationContext
 ): PrismaFilter {
   if (operands.length !== 2) {
-    throw new Error("map requires exactly two operands");
+    throw new UnsupportedQueryPlanError("map requires exactly two operands");
   }
 
   const collection = assertDefined(
@@ -411,11 +412,11 @@ export function handleMapOperator(
   const lambda = assertDefined(operands[1], "map requires a lambda operand");
 
   if (!isNamedOperand(collection)) {
-    throw new Error("First operand of map must be a collection reference");
+    throw new UnsupportedQueryPlanError("First operand of map must be a collection reference");
   }
 
   if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
-    throw new Error("Second operand of map must be a lambda expression");
+    throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
 
   const projection = assertDefined(
@@ -427,12 +428,12 @@ export function handleMapOperator(
     "Map lambda expression must provide a variable"
   );
   if (!isNamedOperand(projection) || !isNamedOperand(variable)) {
-    throw new Error("Invalid map lambda expression structure");
+    throw new UnsupportedQueryPlanError("Invalid map lambda expression structure");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
   if (!relations || relations.length === 0) {
-    throw new Error("map operator requires a relation mapping");
+    throw new UnsupportedQueryPlanError("map operator requires a relation mapping");
   }
 
   const scopedContext = enterLambdaScope(
@@ -459,7 +460,7 @@ export function handleHasIntersectionOperator(
   context: TranslationContext
 ): PrismaFilter {
   if (operands.length !== 2) {
-    throw new Error("hasIntersection requires exactly two operands");
+    throw new UnsupportedQueryPlanError("hasIntersection requires exactly two operands");
   }
 
   // Intersection is symmetric, and the planner preserves policy source order — e.g.
@@ -481,19 +482,19 @@ export function handleHasIntersectionOperator(
   }
 
   if (!isNamedOperand(leftOperand)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "First operand of hasIntersection must be a field reference or map expression"
     );
   }
 
   if (!isValueOperand(rightOperand)) {
-    throw new Error("Second operand of hasIntersection must be a value");
+    throw new UnsupportedQueryPlanError("Second operand of hasIntersection must be a value");
   }
 
   const fieldRef = resolveFieldReference(leftOperand.name, context);
 
   if (!Array.isArray(rightOperand.value)) {
-    throw new Error("hasIntersection requires an array value");
+    throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
 
   if (fieldRef.relations && fieldRef.relations.length > 0) {
@@ -513,7 +514,7 @@ function handleMapIntersection(
   context: TranslationContext
 ): PrismaFilter {
   if (!isValueOperand(rightOperand)) {
-    throw new Error("Second operand of hasIntersection must be a value");
+    throw new UnsupportedQueryPlanError("Second operand of hasIntersection must be a value");
   }
 
   const collection = assertDefined(
@@ -526,11 +527,11 @@ function handleMapIntersection(
   );
 
   if (!isNamedOperand(collection)) {
-    throw new Error("First operand of map must be a collection reference");
+    throw new UnsupportedQueryPlanError("First operand of map must be a collection reference");
   }
 
   if (!isOperatorOperand(lambda)) {
-    throw new Error("Lambda expression must have operands");
+    throw new UnsupportedQueryPlanError("Lambda expression must have operands");
   }
 
   const variable = assertDefined(
@@ -538,12 +539,12 @@ function handleMapIntersection(
     "Lambda variable must have a name"
   );
   if (!isNamedOperand(variable)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
   if (!relations || relations.length === 0) {
-    throw new Error("Map operation requires relations");
+    throw new UnsupportedQueryPlanError("Map operation requires relations");
   }
 
   const projection = assertDefined(
@@ -551,7 +552,7 @@ function handleMapIntersection(
     "Invalid map lambda expression structure"
   );
   if (!isNamedOperand(projection)) {
-    throw new Error("Invalid map lambda expression structure");
+    throw new UnsupportedQueryPlanError("Invalid map lambda expression structure");
   }
 
   // Resolve the projection through the scoped mapper, collecting nullable element columns.
@@ -563,7 +564,7 @@ function handleMapIntersection(
   const fieldName = getLeafField(resolved.path);
 
   if (!Array.isArray(rightOperand.value))
-    throw new Error("hasIntersection requires a literal list");
+    throw new UnsupportedQueryPlanError("hasIntersection requires a literal list");
   const base = wrapInRelations(
     relations,
     buildMembershipFilter(
@@ -603,7 +604,7 @@ export function handleLambdaOperator(
   );
 
   if (!isNamedOperand(variable)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   return buildPrismaFilterFromCerbosExpression(condition, {

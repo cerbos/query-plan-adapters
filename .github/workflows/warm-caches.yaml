@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [ent, ent/example, pgx, pgx/example]
+        module: [ent, ent/example, pgx, pgx/example, conformance/generator]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,10 +81,13 @@ jobs:
 
       # setup-go caches the build cache as well as the module cache, so compile what the adapter
       # workflows compile: the test binaries with and without -race (the unit suite runs with it,
-      # the adversarial suite without). `-run '^$'` builds them and runs nothing.
+      # the conformance suite without). `-run '^$'` builds them and runs nothing. The generator is
+      # built and vetted, which is what conformance.yaml does with it.
       - name: Compile
         run: |
-          if [[ "${{ matrix.module }}" == */example ]]; then
+          if [[ "${{ matrix.module }}" == conformance/generator ]]; then
+            go build ./... && go vet ./...
+          elif [[ "${{ matrix.module }}" == */example ]]; then
             go build ./...
           else
             go test -race -count=1 -run '^$' ./...
@@ -100,7 +103,7 @@ jobs:
             translator-test: "*ElasticsearchTranslatorTest"
             example-task: writeRuntimeClasspath
           - adapter: spring-data
-            translator-test: "*SpringDataTranslatorTest"
+            translator-test: "*SpringDataQueryPlanAdapterTest"
             example-task: assemble
     runs-on: ubuntu-latest
     defaults:
@@ -122,8 +125,8 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # The translator unit test is offline and resolves the full test runtime classpath, which a
-      # compile task alone would not. Spring-data resolves a second ORM set on its `next` leg, so
+      # An offline unit test resolves the full test runtime classpath, which a compile task alone
+      # would not. Spring-data resolves a second ORM set on its `next` leg, so
       # both are fetched. The example resolves the adapter from mavenLocal, so it is published first.
       - name: Resolve dependencies
         run: |

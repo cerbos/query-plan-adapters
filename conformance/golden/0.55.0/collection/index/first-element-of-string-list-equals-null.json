@@ -1,0 +1,59 @@
+{
+  "allowed": [
+    "b5",
+    "b6",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/first-element-of-string-list-equals-null",
+  "intent": "The first element of a string list compared with null (tagNames[0] == null).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": null
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/first-element-of-string-list-equals-null",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames[0] == null"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An explicit null at position 0 is true while an absent position 0 is an out-of-range error; treating both as NULL over-grants."
+}

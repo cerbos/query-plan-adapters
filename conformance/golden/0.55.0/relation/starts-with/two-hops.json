@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/starts-with/two-hops",
+  "intent": "Prefix match two levels out (parent.inner.aString.startsWith(\"100\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.inner.aString"
+          },
+          {
+            "value": "100"
+          }
+        ],
+        "operator": "startsWith"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/starts-with/two-hops",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.inner.aString.startsWith(\"100\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Reading the wrong depth gives a disjoint answer: the right level is e1, one level short is a1/a4, the root is a2/a3."
+}

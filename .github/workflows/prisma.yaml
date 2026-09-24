@@ -30,7 +30,7 @@ defaults:
 jobs:
   test:
     strategy:
-      # The adversarial suite now shares this matrix, so the default fail-fast would let an
+      # The conformance harness shares this matrix, so the default fail-fast would let an
       # unrelated Node leg cancel the baseline leg mid-corpus and report it as "cancelled" —
       # neither a pass nor a failure for the repo's load-bearing signal. It also costs a whole
       # extra CI cycle whenever a genuinely broken change would have failed both.
@@ -44,24 +44,6 @@ jobs:
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
-
-      # Only the adversarial legs below need a PDP: the translator unit test reads its plans from
-      # conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and diffs
-      # against this same pinned version. Both steps are therefore gated to the baseline Node leg,
-      # the one the adversarial steps below run on.
-      - name: Read pinned Cerbos version
-        if: matrix.node-version == '22'
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        if: matrix.node-version == '22'
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
-        with:
-          # Without a token the action fetches the release under GitHub's stricter anonymous
-          # rate limit, and that download is the step that has failed a run with no code change.
-          github_token: ${{ github.token }}
-          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -84,24 +66,17 @@ jobs:
 
       # The translator unit test: offline, and engine-agnostic because it never hands a filter to
       # a Prisma client. The prisma-version dimension therefore no longer discriminates it — it
-      # is still the dimension the adversarial legs below and `npm run typecheck` above are
+      # is still the dimension the conformance legs below and `npm run typecheck` above are
       # matrixed on, which is why it stays.
       - name: Run tests
         run: npm test
 
-      # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs in both evaluation modes per Prisma major on the baseline Node leg. Each mode starts
-      # its own PDP so planning and the Check oracle share the engine configuration.
-      - name: Run adversarial differential suite (SQLite)
+      # The conformance harness replays the recorded goldens (no PDP) against a real store. The
+      # corpus discriminates the translator and the store, not the Node runtime, so it runs per
+      # Prisma major on the baseline Node leg only.
+      - name: Run conformance harness (SQLite)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:v${{ matrix.prisma-version }} || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial:v${{ matrix.prisma-version }}
 
       # The provider IS a translator property, unlike the Node runtime — and unlike the Prisma
       # major above it, which is an ENGINE matrix. A fractional threshold against an `Int` column,
@@ -109,34 +84,20 @@ jobs:
       # them evaluate differently here and were unproven while the corpus ran on SQLite alone
       # (cerbos/query-plan-adapters#320). The container comes from testcontainers, started by the
       # suite's own jest globalSetup, so it needs no service block on ubuntu-latest.
-      - name: Run adversarial differential suite (PostgreSQL)
+      - name: Run conformance harness (PostgreSQL)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:postgres:v${{ matrix.prisma-version }} || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial:postgres:v${{ matrix.prisma-version }}
 
       # The third provider (cerbos/query-plan-adapters#340), and the one whose STORE CONFIGURATION
       # is part of the contract: Prisma's MySQL migration engine writes
       # `COLLATE utf8mb4_unicode_ci` into every CREATE TABLE, which is case- and
-      # accent-insensitive, so a Prisma-managed MySQL database over-grants `cs-eq`, `unicode-eq`
-      # and every `hier-*` prefix probe until someone converts the tables. This leg proves the
+      # accent-insensitive, so a Prisma-managed MySQL database over-grants `string/equals/case-sensitive`, `string/equals/non-ascii-literal`
+      # and every `hierarchy/*` prefix case until someone converts the tables. This leg proves the
       # corpus against the collation README.md tells consumers to use. Gated to the baseline Node
-      # leg like the other two, giving 2 majors x 3 stores x 2 evaluation modes = 12 runs, all on Node 22.
-      - name: Run adversarial differential suite (MySQL)
+      # leg like the other two, giving 2 majors x 3 stores = 6 runs, all on Node 22.
+      - name: Run conformance harness (MySQL)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:mysql:v${{ matrix.prisma-version }} || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial:mysql:v${{ matrix.prisma-version }}
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the
@@ -154,7 +115,7 @@ jobs:
   # to a nightly run or a workflow of its own silently restores that gap.
   #
   # One Node leg only: the demo domain discriminates the package and the ORM, not the runtime —
-  # the same reasoning that gates the adversarial step above to Node 22.
+  # the same reasoning that gates the conformance steps above to Node 22.
   example:
     runs-on: ubuntu-latest
     steps:
@@ -180,7 +141,7 @@ jobs:
       - run: npm install
 
       # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh prisma

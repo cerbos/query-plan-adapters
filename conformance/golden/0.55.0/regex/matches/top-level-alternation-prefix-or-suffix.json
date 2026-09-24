@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "c1",
+    "h6"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/top-level-alternation-prefix-or-suffix",
+  "intent": "matches(\"^o|e$\"): an unparenthesised alternation of an anchored prefix and an anchored suffix.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^o|e$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/top-level-alternation-prefix-or-suffix",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^o|e$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 parses it as ^o OR e$; wrapping it as ^(...)$ or lowering ^ to a prefix query gets it wrong (c1 \"One\" matches only by its tail)."
+}

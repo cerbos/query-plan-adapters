@@ -1,0 +1,87 @@
+{
+  "allowed": [
+    "a1",
+    "a5",
+    "a6",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "size/equals/filtered-collection",
+  "intent": "Size of a filtered collection compared with a literal (size(tags.filter(t, t.name == \"public\")) == 1).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.name"
+                                  },
+                                  {
+                                    "value": "public"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "filter"
+                  }
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/equals/filtered-collection",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.tags.filter(t, t.name == \"public\")) == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The lambda must become the WHERE of the COUNT subquery; counting every element or ignoring the filter changes the result."
+}

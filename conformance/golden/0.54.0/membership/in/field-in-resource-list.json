@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "a9",
+    "b4",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/field-in-resource-list",
+  "intent": "Membership of one resource attribute in a resource list attribute (owner in tagNames).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/field-in-resource-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.owner in R.attr.tagNames"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Both operands are columns, so it cannot be an IN over parameters; a null owner in a list with a null element (e1) is true, without one false."
+}

@@ -19,15 +19,16 @@ import (
 	cerbosent "github.com/cerbos/query-plan-adapters/ent"
 )
 
-// Unit tests over hand-built plans, complementing the adversarial suite: the corpus proves
-// semantics against a real PDP but only ever feeds the adapter plans the planner actually emits, so
-// it cannot say what happens to a malformed or hostile one. Everything here runs without Docker.
+// Unit tests over hand-built plans, complementing the conformance suite: the corpus proves
+// semantics against plans recorded from a real PDP, but only ever feeds the adapter plans the
+// planner actually emits, so it cannot say what happens to a malformed or hostile one. Everything
+// here runs without Docker.
 //
 // The translator this file exercises is vendored byte-for-byte into the pgx module as well, so the
 // invariants below are deliberately kept in step with pgx/translate_test.go — same names, same
 // section order, same shapes — and `conformance/scripts/validate-corpus.sh` fails if the two
 // vendored trees drift. Two copies of the same code need two copies of the same proof: a fix landed
-// in one tree and not the other is otherwise caught only when a corpus action happens to exercise
+// in one tree and not the other is otherwise caught only when a corpus case happens to exercise
 // it, and none of the hostile shapes here come off a real planner wire at all
 // (cerbos/query-plan-adapters#319).
 
@@ -293,7 +294,7 @@ func TestSymmetricComparisonsNormaliseToColumnFirst(t *testing.T) {
 //
 // They are the kind of thing nothing else catches: a `+` written where `-` belongs, or `<` where
 // `<=` belongs, is valid SQL that quietly returns a different row set, and the corpus only notices
-// if some action happens to straddle the boundary the wrong symbol moves. Every arm is asserted so
+// if some case happens to straddle the boundary the wrong symbol moves. Every arm is asserted so
 // there is no operator whose spelling is taken on trust.
 func TestOperatorSymbols(t *testing.T) {
 	t.Parallel()
@@ -594,11 +595,12 @@ func TestRelationMembershipRespectsNullRepresentation(t *testing.T) {
 // int(1.9) is 1 to CEL while PostgreSQL's plain float-to-bigint cast rounds to 2, and MySQL needs
 // TRUNCATE() to say the same thing. It is wrong for a string one: CEL reads a WHOLE string or
 // raises, and an error denies the row, while SQL reads whatever numeric prefix parses. Nothing in
-// the plan says which kind of column the operand is, so the corpus actions cast-int-string /
-// cast-double-string cannot be told apart from cast-int-double at translation time and the whole
-// family fails closed. Re-enabling the numeric direction needs a caller-declared numeric ValueType,
-// the way timestamp() already works — and the integer render path was removed with the rest of it,
-// so re-enabling means writing it again rather than reviving an untested branch (#319).
+// the plan says which kind of column the operand is, so the corpus cases cast/int/malformed-string
+// and cast/double/malformed-string cannot be told apart from cast/int/negative-fraction at
+// translation time and the whole family fails closed. Re-enabling the numeric direction needs a
+// caller-declared numeric ValueType, the way timestamp() already works — and the integer render
+// path was removed with the rest of it, so re-enabling means writing it again rather than reviving
+// an untested branch (#319).
 func TestNumericCastsAreRejected(t *testing.T) {
 	t.Parallel()
 
@@ -616,9 +618,10 @@ func TestNumericCastsAreRejected(t *testing.T) {
 // TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
 // (cerbos/query-plan-adapters#418). A CAST alone renders the stored 1/0 as "1" on SQLite and MySQL
 // where CEL says "true", so the column is spelled through a CASE first, on every dialect. The
-// corpus's cast-string-bool proves the two words against the oracle on all three engines.
+// corpus case cast/string/from-boolean proves the two words against the recorded check() decisions
+// on all three engines.
 //
-// Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus action reaches
+// Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus case reaches
 // either, so this test is a bridge tracked by #469 rather than their home. The first is the IS NULL
 // arm ahead of the column's own test: the corpus's aBool is never null, and without the arm a NULL
 // column falls through to 'false', so `string(x) != "true"` returns a row the PDP denies. The
@@ -662,7 +665,7 @@ func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
 // -- dialect coverage ----------------------------------------------------------------------------
 
 // Everything in this section is ent-specific: pgx renders for one engine, while this adapter's
-// renderer spells the same tree three ways. The adversarial suite proves each spelling against a
+// renderer spells the same tree three ways. The conformance suite proves each spelling against a
 // real server, but only for the shapes the corpus happens to plan and only when Docker is
 // available. These pin the divergences themselves, so a wrong spelling fails in a second.
 

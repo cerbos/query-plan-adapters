@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "null/has-intersection/literal-list-with-null-element-against-mapped-names",
+  "intent": "hasIntersection(tags.map(t, t.name), [\"public\", null]).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "map"
+            }
+          },
+          {
+            "value": [
+              "public",
+              null
+            ]
+          }
+        ],
+        "operator": "hasIntersection"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has-intersection/literal-list-with-null-element-against-mapped-names",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hasIntersection(R.attr.tags.map(t, t.name), [\"public\", null])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A tag with no name is a missing key in CEL, not a null value, so the null literal must not match it as SQL NULL handling or an IS NULL rewrite would."
+}

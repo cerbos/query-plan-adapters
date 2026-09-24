@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a8",
+    "b1",
+    "c2",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/literal-list-with-null-element",
+  "intent": "Membership of owner in a literal list holding strings and a null element.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "value": [
+              "x",
+              "one_two",
+              null
+            ]
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/literal-list-with-null-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.owner in [\"x\", \"one_two\", null]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "null in [..., null] is true in CEL, so the null element must become an IS NULL disjunct; a raw IN (..., NULL) drops the null-owner rows."
+}

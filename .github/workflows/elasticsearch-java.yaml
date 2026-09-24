@@ -28,7 +28,7 @@ defaults:
 permissions: {}
 
 jobs:
-  # All suites run here, including the adversarial suite (CLAUDE.md, "CI").
+  # All suites run here, including the conformance harness (CLAUDE.md, "CI").
   test:
     permissions:
       contents: read
@@ -70,10 +70,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # build.gradle.kts forwards ELASTICSEARCH_IMAGE_FILE to the suites and declares it as an input.
+      # `build` runs the conformance harness too: it replays the recorded goldens against
+      # Elasticsearch, with no PDP.
       - name: Build and test (${{ matrix.elasticsearch-image-file }})
-        run: |
-          ADAPTER_TEST_STRICT_EVALUATION=false ./gradlew build --no-daemon
-          ADAPTER_TEST_STRICT_EVALUATION=true ./gradlew test --tests '*ElasticsearchAdversarialConformanceTest' --no-daemon
+        run: ./gradlew build --no-daemon
         env:
           ELASTICSEARCH_IMAGE_FILE: ${{ matrix.elasticsearch-image-file }}
 

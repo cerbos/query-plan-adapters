@@ -40,8 +40,8 @@ const MYSQL_IMAGE =
  * converts the tables afterwards instead of passing `--collation-server=…` to the container, a
  * flag that would read as doing something and do nothing.
  *
- * Under either insensitive collation `'One' = 'one'` is TRUE, and `cs-eq`, `unicode-eq` and every
- * `hier-*` prefix probe return rows the PDP denies. That is a store misconfiguration rather than a
+ * Under either insensitive collation `'One' = 'one'` is TRUE, and `string/equals/case-sensitive`,
+ * `string/equals/non-ascii-literal` and every `hierarchy/*` prefix probe return rows the PDP denies. That is a store misconfiguration rather than a
  * limitation of this adapter — no Prisma `where` clause could restore byte-exact equality — so the
  * leg pins a byte-exact collation and states the requirement, as every other MySQL leg does.
  * `README.md` says the same thing to consumers, who inherit the same default.

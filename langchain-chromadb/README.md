@@ -108,8 +108,8 @@ carries, so the filter silently selects nothing; map every attribute your polici
 Other adapters take a `nullAttributeRepresentation` option because `R.attr.x == null` produces the
 same plan whether a NULL field is sent to `check()` as an explicit `null` or omitted. **This adapter
 needs none**: Chroma metadata holds only finite numbers, strings and booleans, so every null
-comparison operand is rejected under either convention (`null-eq`, `null-ne`, `vf-null-ne`,
-`null-not-eq`, the `in-null-elem-*` family and `null-eq-missing` all throw). See
+comparison operand is rejected under either convention (every `null/*` corpus case that compares a
+null literal throws, including `null/equals/null-literal-on-missing-attribute`). See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 ## Write membership as `in`, not as a collection macro
@@ -129,9 +129,10 @@ principal with 10 teams and fails for one with 11. `all` is worse: its unrolled 
 `required: true` on the field. The `in` spelling has no threshold, needs no `required`, and an empty
 list folds to `ALWAYS_DENIED`.
 
-The corpus pins both sides: `pv-exists-unrolled` (3 elements) translates and `pv-exists` (11)
-throws; `pv-all-unrolled` and `pv-all` both throw; `pv-in` (11) and `pv-in-unrolled` (3) both emit
-`in(key, [literals])` and are oracle-tested, including records missing the key.
+The corpus pins both sides: `principal/exists/short-list` (3 elements) translates and
+`principal/exists/long-list` (11) throws; `principal/all/short-list` and `principal/all/long-list`
+both throw; `principal/in/long-list` (11) and `principal/in/short-list` (3) both emit
+`in(key, [literals])` and pass, including records missing the key.
 
 ## Supported operators
 
@@ -186,31 +187,27 @@ try {
 A malformed plan or mapper misconfiguration is a plain `Error`, so a fallback keyed on
 `UnsupportedOperatorError` does not swallow it: an invalid plan kind, a non-`PlanExpression`
 operand, wrong operand counts on `and`/`or`/`not`/comparisons, or a mapper resolving to an empty
-field name. Messages match those pinned in `conformance/actions.json`.
+field name.
 
 ## Conformance contract
 
-Select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `=true`; other
-values are rejected. For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial`
-enables strict evaluation for both planning and the `check()` oracle. CI runs both modes for each
-adversarial store and client-version combination.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
+metadata queries over the corpus's 29 seed records. Passed cases on the current PDP, 0.55.0, out of
+every golden case in the tier:
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed documents and real ChromaDB metadata queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
-
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 62 reference actions: directional and inequality comparisons, single/empty membership, Unicode and empty strings, negative numbers, n-ary/double/triple negation, membership on an optional resource field, mapped nested-field equality, case-sensitive equality, the primary key against a literal, and the root-position and bare-operand forms (bare `>`/`<=` on a metadata key, either ordering under a negation, a bare boolean key as the whole condition, a disjunction of two scalar predicates); plus the De Morgan branch over a conjunction, a value-first ordering against a metadata key, the below-cliff unroll of a principal collection, membership in a map literal (folded by the planner to its key list), a double literal beyond int64 on a double field, and a literal of the wrong type against a scalar key (`aNumber == "5"`, `aString == 0`, `aBool == "true"`, `aNumber != "5"`, `aNumber in ["5", 2]`), which Chroma answers as CEL does because its comparisons are type-exact |
-| Fail-closed | 258 reference conformance actions — among them positional access into the number and boolean lists, which has no `Where` form, and membership (`x in list`, `null in list`, `hasIntersection`) in those lists, whose empty lists and null elements the pinned Chroma stack refuses to store — plus regex, ordered indexing/`get-field`, timestamp, cast and non-boolean-macro probes (266 actions total) |
-| Representation-independent | `null-eq-missing` — rejected like every other null comparison operand, so no `nullAttributeRepresentation` option is required |
-| Attribute NULL convention | Also representation-independent: Chroma metadata has no null value, so a NULL column is stored as an absent key and `$ne`/`$nin` match absent records. All five `null-value-*` probes for the explicit convention (cerbos/query-plan-adapters#308) are refused |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 19 / 26 |
+| extended | 13 / 80 |
+| adversarial | 30 / 227 |
 
-Every fail-closed shape's error message is pinned in `conformance/actions.json` and asserted here.
-The translator unit test also pins **where** each of the 270 refusals (the 269 fail-closed actions
-plus `null-eq-missing`) is raised across the adapter's nine rejection sites; `binaryOperands`
-refusing a computed operand accounts for 162 of them, since arithmetic, casts, ternaries,
-projections and above-cap macros all reach the wire as an operand that is neither a key nor a
-literal.
+Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
+records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
+one extended case, `null/has/missing-attribute`: the planner folds `has()` on a missing attribute to
+`ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute documents, so use
+`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
 
 ## Mapping hazards
 
@@ -226,7 +223,7 @@ flat metadata on the record being matched, and every shape that would reach a se
 | Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter never sees the collection, so it cannot check that it is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
 | To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Rejected** — `w1-all-chain`, `w1-not-exists-chain` and the eight other chained shapes are in `adapterUnsupported` and throw | None — Chroma metadata is flat, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Rejected** — `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained shapes are `unsupported` in the ledger and throw | None — Chroma metadata is flat, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Behaviour changes
 
@@ -256,34 +253,7 @@ demo/scripts/run-example.sh langchain-chromadb
 
 | Command | What it does | Needs |
 | --- | --- | --- |
-| `npm test` | Translator unit test: every corpus action classified once as a golden expectation or a pinned throw, plus the refusal sites and the mapper contract no policy can reach (function mappers, `required`, `numericType`, the unmapped fallback, malformed input) | Node only |
+| `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, inequalities only on `required` fields, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, the unmapped fallback) and malformed input | Node only |
 | `npm run typecheck` | Type-checks `src/` and the tests | Node only |
-| `npm run golden:update` | Rewrites `golden/expectations.json` from what the translator emits, preserving each `note`. Review the diff; CI never regenerates | Node only |
-| `npm run test:adversarial` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 and runs the shared corpus against it, with `check()` as the oracle | Cerbos CLI, Docker |
-
-`npm test` reads its plans from `../conformance/wire-fixtures/` and asserts them against
-`golden/expectations.json`. Because a `Where` clause is JSON, each entry is the translator's
-`{ kind, filters? }` result verbatim, keyed by action name; a literal JSON cannot carry fails
-regeneration. A refused action has no entry (its message lives in `conformance/actions.json`) —
-that is 270 of the corpus's 333 shapes. A wire fixture in neither place fails the suite. The suite
-also asserts, across every translated action, that each field is a mapped key, no `$not`/`$nor`
-is emitted, inequalities appear only on `required` fields, and fractional thresholds only on
-`numericType: "float"` fields. See "Golden expectations" in
-[conformance/README.md](../conformance/README.md),
-[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
-[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md).
-
-```jsonc
-{
-  "adapter": "langchain-chromadb",
-  "regenerate": "npm run golden:update",
-  "expectations": {
-    "in-empty": { "kind": "KIND_ALWAYS_DENIED" },
-    "vf-le": {
-      "note": "optional, human, preserved across regeneration",
-      "kind": "KIND_CONDITIONAL",
-      "filters": { "aNumber": { "$gte": 3 } }
-    }
-  }
-}
-```
+| `npm run chroma` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 | Docker |
+| `npm run test:adversarial` | Replays the recorded conformance goldens (`../conformance/golden/`) against the ChromaDB on `CHROMA_URL` (default `http://127.0.0.1:8234`); no PDP | A running ChromaDB |

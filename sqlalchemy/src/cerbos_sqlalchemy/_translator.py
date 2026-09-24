@@ -45,6 +45,7 @@ from cerbos_sqlalchemy.collection_storage import (
     indexed_equality,
     require_index_position,
 )
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import DateTime, and_, case, false, not_, or_, true
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
@@ -69,13 +70,14 @@ def require_boolean(translated: Any, position: str) -> Any:
 
     `InstrumentedAttribute` is accepted alongside `ColumnElement` because a bare boolean
     COLUMN is a legitimate condition: `R.attr.aBool` alone plans to a condition that is a
-    bare `{"variable": ...}` with no expression wrapper at all (`root-bare-bool`). The ORM
-    attribute is a descriptor rather than a Core element, so it fails the ColumnElement check
-    while being exactly what `where()` wants (cerbos/query-plan-adapters#388). This widens
-    nothing a mapper could not already reach: a Core `Column` IS a `ColumnElement`.
+    bare `{"variable": ...}` with no expression wrapper at all
+    (`logic/bare-attribute/boolean`). The ORM attribute is a descriptor rather than a Core
+    element, so it fails the ColumnElement check while being exactly what `where()` wants
+    (cerbos/query-plan-adapters#388). This widens nothing a mapper could not already reach:
+    a Core `Column` IS a `ColumnElement`.
     """
     if not isinstance(translated, (ColumnElement, InstrumentedAttribute, bool)):
-        raise ValueError(
+        raise UnsupportedPlanError(
             f"the plan's {position} translated to {type(translated).__name__!r}, which "
             "is not a boolean SQL expression. filter() and map() return a list, so they "
             "cannot be a condition on their own (only size(filter(...)) has a boolean "
@@ -121,7 +123,7 @@ class Translator:
             return override(left, right)
         default = OPERATOR_FNS.get(operator)
         if default is None:
-            raise ValueError(f"Unrecognised operator: {operator}")
+            raise UnsupportedPlanError(f"Unrecognised operator: {operator}")
         require_lowerable(operator, left)
         require_lowerable(operator, right)
         return default(left, right)
@@ -156,28 +158,28 @@ class Translator:
         the same comparisons.
         """
         if operator not in FOLDABLE_COLLECTION_OPERATORS:
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"{operator} over a literal collection value is not supported. "
                 "Only exists() and all() can be folded into a flat filter."
             )
         if not isinstance(elements, list):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"{operator} over a literal collection requires a list value"
             )
 
         if not isinstance(lambda_operand, Expr) or lambda_operand.operator != "lambda":
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"Second operand of {operator} must be a lambda expression"
             )
         lambda_operands = lambda_operand.operands
         if len(lambda_operands) != 2:
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"{operator} over a literal collection supports single-variable "
                 "lambdas only"
             )
         body, variable = lambda_operands
         if not isinstance(variable, Variable) or not variable.name:
-            raise ValueError("Lambda variable must have a name")
+            raise UnsupportedPlanError("Lambda variable must have a name")
 
         predicates = [
             self.predicate(substitute_lambda_variable(body, variable.name, element))
@@ -245,7 +247,7 @@ class Translator:
             or len(others) != 1
             or not isinstance(others[0], Value)
         ):
-            raise ValueError(INDEXED_VALUE_REFUSAL)
+            raise UnsupportedPlanError(INDEXED_VALUE_REFUSAL)
         equality = indexed_equality(declared, index, others[0].value)
         # NOT keeps the CASE's UNKNOWN for an absent element, so a negated comparison still
         # denies the row CEL's index error denies.
@@ -260,12 +262,14 @@ class Translator:
             # `_indexed_comparison` took -- so `_declared_index` has checked the position and
             # there is nothing left to translate.
             self._declared_index(expression)
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"{INDEXED_VALUE_REFUSAL}; nested value expressions cannot preserve "
                 "element types and index errors"
             )
         if len(expression.operands) != 1:
-            raise ValueError(f"size takes 1 operand, got {len(expression.operands)}")
+            raise UnsupportedPlanError(
+                f"size takes 1 operand, got {len(expression.operands)}"
+            )
         return collection_size(declared)
 
     def _storage_only_collection(
@@ -300,28 +304,28 @@ class Translator:
         if operator == "in":
             needle, collection = operands
             if declared[1] is None or not isinstance(needle, Value):
-                raise ValueError(MEMBERSHIP_REFUSAL)
+                raise UnsupportedPlanError(MEMBERSHIP_REFUSAL)
             if isinstance(needle.value, (list, dict)):
-                raise ValueError(MEMBERSHIP_REFUSAL)
+                raise UnsupportedPlanError(MEMBERSHIP_REFUSAL)
             return collection_membership(declared[1], [needle.value])
         # hasIntersection is symmetric, and the planner keeps the policy's operand order.
         position = 0 if declared[0] is not None else 1
         values = operands[1 - position]
         if not isinstance(values, Value) or not isinstance(values.value, list):
-            raise ValueError(MEMBERSHIP_REFUSAL)
+            raise UnsupportedPlanError(MEMBERSHIP_REFUSAL)
         if any(isinstance(value, (list, dict)) for value in values.value):
-            raise ValueError(MEMBERSHIP_REFUSAL)
+            raise UnsupportedPlanError(MEMBERSHIP_REFUSAL)
         return collection_membership(declared[position], values.value)
 
     @staticmethod
     def _refuse_undeclared_index(collection: Union[Operand, None]) -> NoReturn:
         if isinstance(collection, Variable):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"Index storage shape is undeclared for '{collection.name}': declare it "
                 'in collection_columns with storage "json" or "pgArray"; a relation has '
                 "no positional order"
             )
-        raise ValueError(
+        raise UnsupportedPlanError(
             "Index access requires a collection attribute declared in "
             "collection_columns; a computed collection has no storage to read"
         )
@@ -363,7 +367,7 @@ class Translator:
             # doubles, so a modulus over this arithmetic is a no-overload error
             # that denies every row at check time. Folding it with Python's %
             # would answer a question CEL refused.
-            raise ValueError(
+            raise UnsupportedPlanError(
                 "modulus over a division whose denominator may be zero is not "
                 "supported: CEL's % is integer-only and attribute values are "
                 "always doubles, so the condition can never be satisfied by the PDP"
@@ -419,7 +423,7 @@ class Translator:
 
         if len(operands) < 2:
             # e.g. timestamp(...) — a planner shape with no SQL translation.
-            raise ValueError(f"Unrecognised unary operator: {operator}")
+            raise UnsupportedPlanError(f"Unrecognised unary operator: {operator}")
 
         return self._binary_value(operator, operands)
 
@@ -530,7 +534,7 @@ class Translator:
             isinstance(getattr(column, "type", None), DateTime)
             for column in (left_column, right_column)
         ):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 "Bare temporal attributes compare RFC 3339 strings in CEL; stored "
                 "timestamps lose the original spelling; use timestamp() on both operands"
             )
@@ -544,7 +548,7 @@ class Translator:
         left_explicit = self._is_explicit_null(left.name)
         right_explicit = self._is_explicit_null(right.name)
         if left_explicit != right_explicit and operator in ("eq", "ne"):
-            raise ValueError(
+            raise UnsupportedPlanError(
                 f"Cannot translate `{operator}` between two columns under mixed "
                 "null conventions: cannot compare an attribute declared "
                 "explicit-null with one on the omitted convention: the omitted "

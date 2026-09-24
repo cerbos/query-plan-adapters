@@ -92,14 +92,10 @@ jobs:
         if: matrix.sqlalchemy.constraint == ''
         run: npx -y pyright@1.1.411
 
+      # The unit suites and the conformance harness, which replays conformance/golden/ against
+      # SQLite and a pinned PostgreSQL (testcontainers). No PDP runs here: the plans and the
+      # decisions are recorded. Both SQLAlchemy majors run it.
       - run: pdm run test
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "false"
-
-      - name: Run strict evaluation conformance
-        run: pdm run pytest tests/test_adversarial_conformance.py
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "true"
 
   # The example application: the published distribution, installed from the wheel `pdm build`
   # produced and used the way a consumer uses it, against the shared demo domain. It covers the
@@ -138,8 +134,8 @@ jobs:
 
       # No `pdm install` here: the example builds the adapter and installs its own pinned tree
       # from sqlalchemy/example/pdm.lock, in its own environment. The PDP is a container started
-      # by the runner from demo/docker-compose.yml, pinned to conformance/CERBOS_VERSION and
-      # conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action here, because an example must
-      # reach the PDP the way a deployed application does.
+      # by the runner from demo/docker-compose.yml, pinned to `current` in
+      # conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action here, because an
+      # example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh sqlalchemy

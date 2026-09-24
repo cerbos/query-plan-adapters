@@ -1,0 +1,93 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/self-division-plus-constant-greater-than",
+  "intent": "Addition over a division that can be NaN (aNumber / aNumber + 1.0 > 1.0).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/self-division-plus-constant-greater-than",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber / R.attr.aNumber + 1.0 > 1.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Control: CEL carries NaN through the addition and a NULL lowering yields NULL, and both exclude a7 under an ordering; the not-equals sibling discriminates."
+}

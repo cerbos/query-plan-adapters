@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/boolean-branches",
+  "intent": "A boolean-valued ternary whose branches are predicates, with no wrapping comparison.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/boolean-branches",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBool ? R.attr.aString == \"one\" : R.attr.aNumber < 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The ternary is the whole condition (a three-operand node at the root); translators expecting two operands mishandle it."
+}

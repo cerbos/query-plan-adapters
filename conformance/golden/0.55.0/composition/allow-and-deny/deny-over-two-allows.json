@@ -1,0 +1,180 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "f1",
+    "h1",
+    "h2",
+    "h3"
+  ],
+  "degenerateReason": null,
+  "id": "composition/allow-and-deny/deny-over-two-allows",
+  "intent": "Two conditional ALLOW rules plus a DENY (aNumber > 20), planned as and(not(gt), or(and, and)).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 20
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "value": true
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            },
+                            {
+                              "value": 15
+                            }
+                          ],
+                          "operator": "gt"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "value": false
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            },
+                            {
+                              "value": 7
+                            }
+                          ],
+                          "operator": "lt"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/allow-and-deny/deny-over-two-allows",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "all": {
+            "of": [
+              {
+                "expr": "R.attr.aBool == true"
+              },
+              {
+                "expr": "R.attr.aNumber > 15"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "all": {
+            "of": [
+              {
+                "expr": "R.attr.aBool == false"
+              },
+              {
+                "expr": "R.attr.aNumber < 7"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber > 20"
+        }
+      },
+      "effect": "EFFECT_DENY",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The DENY applies to the whole disjunction; applying it to only one branch lets h5/h6/h7 through."
+}

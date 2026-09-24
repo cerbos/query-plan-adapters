@@ -1,7 +1,7 @@
 """Unit tests for the mapping helpers a caller wires into ``operator_override_fns``.
 
-The adversarial harness is the semantic proof of ``require_hops`` — every chained
-corpus action is an oracle comparison against a real PDP that routes through it.
+The conformance harness is the semantic proof of ``require_hops`` — every chained
+corpus case is compared with the PDP's recorded decisions through it.
 These pin the two structural properties that proof depends on and that a refactor
 could quietly break: the guard is a ``CASE`` with no ``ELSE``, and a direct relation
 gets no guard at all.

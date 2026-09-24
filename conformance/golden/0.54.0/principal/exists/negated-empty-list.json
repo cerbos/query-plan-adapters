@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": "P.attr.emptyTeams is an empty list, so exists() over it is false and its negation true for every seed; the planner folds the plan. The case pins that macro identity and the fold.",
+  "id": "principal/exists/negated-empty-list",
+  "intent": "Negated exists() over an empty principal list.",
+  "oracle": "total",
+  "pdp": "0.54.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_ALLOWED"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/negated-empty-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "!exists() over an empty list is true for every row, missing-attribute rows included; the plan folds to always-allowed."
+}

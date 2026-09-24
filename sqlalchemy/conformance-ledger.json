@@ -1,0 +1,245 @@
+{
+  "adapter": "sqlalchemy",
+  "cases": {
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "The inner division by a constant zero folds to a non-finite value, and arithmetic combining it with a column cannot be carried by SQL."
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so double() is refused rather than lowered to CAST."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so double() is refused rather than lowered to CAST. Negation must not turn CEL's errors into matches."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST. Negation must not turn CEL's errors into matches."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() lowers only an RFC 3339 literal or a SQLAlchemy DateTime column; over a string column a malformed value must stay a CEL error, which no SQL cast preserves."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() lowers only an RFC 3339 literal or a SQLAlchemy DateTime column; over a string column a malformed value must stay a CEL error under negation, which no SQL cast preserves."
+    },
+    "collection/all/nested-exists-over-same-collection": {
+      "status": "unsupported",
+      "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "Two-list except has no operator override or built-in SQL list-difference lowering."
+    },
+    "collection/exists/negated-nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "attr_map gives both macros' lambda scopes the same unaliased table; under negation the self-comparison would over-grant, so the translator refuses the nesting before building SQL (#509)."
+    },
+    "collection/exists/nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean; the override's deferred value reaches `and` unconsumed and is refused rather than dropped."
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so it cannot be the whole condition."
+    },
+    "collection/index/first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Indexed values support only direct eq/ne comparisons with scalar literals; a field read off an indexed object element has no lowering."
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "The declared JSON storage accepts only a constant non-negative 32-bit integer position; CEL raises for this one, so it must not be coerced into a valid element read."
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "The declared JSON storage accepts only a constant non-negative 32-bit integer position; CEL raises for this one, so it must not be coerced into a valid element read."
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() returns a list, not a boolean, so it cannot be the whole condition."
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "The map() override returns a deferred collection for an enclosing hasIntersection or size to consume; compared directly to a literal list it reaches the default equality unconsumed, which cannot lower a collection."
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "The 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`. The adapter cannot tell that from a -0.0 whose sign was dropped (Cerbos's HTTP API renders -0.0 as `-0`, which json.loads decodes to the integer 0), so it refuses an integer zero denominator rather than guess which infinity CEL produced. A double zero, as a gRPC plan carries, translates."
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the descendant LIKE `prefix + delimiter + '%'` would become a bare prefix match that also matches the path itself."
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "The path is constructed by list(), which has no SQL lowering, so the walk refuses it before the hierarchy operators are reached."
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "The path is constructed by list(), which has no SQL lowering, so the walk refuses it before the hierarchy operators are reached."
+    },
+    "null/equals/null-literal-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "aOptionalString is declared `omitted` in attribute_null_representation (a NULL column sends no attribute), so `== null` is a CEL missing-attribute error that denies every row, while IS NULL would return the NULL rows. The adapter refuses a null operand against an omitted attribute (#302)."
+    },
+    "null/not-equals/field-to-field-mixed-null-conventions": {
+      "status": "unsupported",
+      "reason": "One side is declared explicit-null and the other is omitted-when-NULL: the first needs a definite answer for its NULL and the second needs UNKNOWN, and no single SQL predicate gives both (#308)."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "The literal-list fold accepts only exists/all; a principal-list difference with a resource-dependent second list has no SQL lowering."
+    },
+    "principal/exists-one/long-list": {
+      "status": "unsupported",
+      "reason": "Only exists/all have a literal-list fold; exists_one over a principal list has no SQL lowering."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "The planner emits list/struct constructors for the principal's objects, and the literal-list fold accepts only literal value lists."
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "The planner emits list/struct constructors for the principal's objects, and the literal-list fold accepts only literal value lists."
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "Only exists/all have a literal-list fold; filter over a principal list has no SQL lowering."
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "Only exists/all have a literal-list fold; map over a principal list has no SQL lowering."
+    },
+    "regex/matches/anchored-prefix": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/compared-to-true": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/end-anchor-before-final-newline": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/unanchored": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."
+    },
+    "timestamp/greater-than/relative-window-value-first": {
+      "status": "unsupported",
+      "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
+    },
+    "timestamp/less-than/relative-window": {
+      "status": "unsupported",
+      "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "status": "unsupported",
+      "reason": "A relation member is scalar; a list-valued membership needle cannot be bound as one SQL value."
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    }
+  }
+}

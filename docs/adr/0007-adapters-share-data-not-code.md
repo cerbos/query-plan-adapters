@@ -3,6 +3,11 @@
 Accepted. Recorded in
 [#397](https://github.com/cerbos/query-plan-adapters/issues/397).
 
+**Amended by [ADR 0010](0010-conformance-replays-recorded-pdp-decisions.md).** The principle stands.
+The shared data is now the cases, the dataset, `pdp-versions.json` and the recorded goldens. The
+wire fixtures, `actions.json`, the declared-key guards and the golden expectations this ADR
+describes are gone.
+
 ## Context
 
 `conformance/` is shared by every adapter: one hostile policy suite, one set of seed rows, one

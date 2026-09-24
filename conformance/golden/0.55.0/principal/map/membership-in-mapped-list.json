@@ -1,0 +1,90 @@
+{
+  "allowed": [
+    "a9",
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "principal/map/membership-in-mapped-list",
+  "intent": "A resource attribute in a principal list mapped by concatenating each element with another resource attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": [
+                    "set",
+                    "same",
+                    "",
+                    "%_o",
+                    "X",
+                    "Y",
+                    "MIRROR",
+                    "filler-1",
+                    "filler-2",
+                    "filler-3",
+                    "filler-4"
+                  ]
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t"
+                            },
+                            {
+                              "variable": "request.resource.attr.aString"
+                            }
+                          ],
+                          "operator": "add"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "map"
+            }
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/map/membership-in-mapped-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aOptionalString in P.attr.manyTeams.map(t, t + R.attr.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The planner cannot fold map() over a principal list and the mapped values depend on the row; translate the computed list or refuse."
+}

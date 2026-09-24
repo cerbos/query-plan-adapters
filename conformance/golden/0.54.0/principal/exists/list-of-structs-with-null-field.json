@@ -1,0 +1,289 @@
+{
+  "allowed": [],
+  "degenerateReason": "Every element of P.attr.nullableStructs carries a null name, which equals no set aOptionalString, and a NULL aOptionalString is a missing attribute: CEL denies every seed.",
+  "id": "principal/exists/list-of-structs-with-null-field",
+  "intent": "exists() over principal structs whose name fields are all null.",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "name"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                }
+              ],
+              "operator": "list"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/list-of-structs-with-null-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.nullableStructs.exists(t, t.name == R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A null name must not match a missing aOptionalString; SQL-style null equality or an IS NULL lowering over-grants."
+}

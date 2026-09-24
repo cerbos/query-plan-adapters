@@ -1,0 +1,123 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "b1",
+    "b2",
+    "b3",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "collection/all/nested-exists-over-same-collection",
+  "intent": "all() over tags whose body is an exists() over the same tags, requiring a different tag (by id) with the same name.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "u.id"
+                                        },
+                                        {
+                                          "variable": "t.id"
+                                        }
+                                      ],
+                                      "operator": "ne"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "u.name"
+                                        },
+                                        {
+                                          "variable": "t.name"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "u"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "all"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/all/nested-exists-over-same-collection",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.all(t, R.attr.tags.exists(u, u.id != t.id && u.name == t.name))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Self-correlation makes u.id != t.id never true and drops a3; correlating the name but not the id counts a tag as its own duplicate and over-grants every single-tag row."
+}

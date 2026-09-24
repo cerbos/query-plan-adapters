@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/compared-to-true",
+  "intent": "A regex match used as an equality operand (aString.matches(\"^h\") == true).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "^h"
+                }
+              ],
+              "operator": "matches"
+            }
+          },
+          {
+            "value": true
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/compared-to-true",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^h\") == true"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The planner keeps eq(matches(...), true); a translator that handles matches() only as a bare predicate crashes or drops the comparison."
+}

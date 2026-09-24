@@ -1,0 +1,87 @@
+{
+  "allowed": [
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/nested-over-same-collection",
+  "intent": "tags.exists(t, tags.exists(u, u.name != t.name)): some pair of tags differs by name.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "u.name"
+                                  },
+                                  {
+                                    "variable": "t.name"
+                                  }
+                                ],
+                                "operator": "ne"
+                              }
+                            },
+                            {
+                              "variable": "u"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/nested-over-same-collection",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The inner subquery needs a fresh alias correlated to the outer one; reusing one alias compares each tag with itself and drops a6 (#509)."
+}

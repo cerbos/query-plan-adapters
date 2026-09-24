@@ -24,7 +24,6 @@ end
 
 group :test do
   # The trailing `.0` pins each CI leg to one minor series. `~> 7.1` would resolve to 7.2.
-  # golden/expectations.json also names the series it was rendered under.
   gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}.0"
   # The official Cerbos Ruby SDK. The adapter is tested against its output types.
   gem "cerbos", "~> 0.13"

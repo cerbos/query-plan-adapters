@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a3",
+    "a6",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "size/greater-or-equal/fractional-threshold",
+  "intent": "size() of a resource list compared >= a fractional literal (1.5).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1.5
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-or-equal/fractional-threshold",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.tags) >= 1.5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "COUNT is integral, so >= 1.5 must round up to >= 2; truncating to 1 over-grants single-element rows."
+}

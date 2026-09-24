@@ -33,6 +33,7 @@ import { containsCollectionOperator } from "./rewrite";
 import { handleStringOperator } from "./strings";
 import { handleBooleanTernaryOperator, tryHandleTernaryComparison } from "./ternary";
 import { normalizeRfc3339Milliseconds } from "./timestamp";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /**
  * Builds a Prisma filter from a Cerbos expression.
@@ -51,7 +52,7 @@ export function buildPrismaFilterFromCerbosExpression(
   }
 
   if (!isOperatorOperand(expression)) {
-    throw new Error("Invalid Cerbos expression structure");
+    throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
 
   // Every plan operator this adapter translates. Adding an operator is adding a case here;
@@ -74,7 +75,7 @@ export function buildPrismaFilterFromCerbosExpression(
     case "not": {
       const operand = operands[0];
       if (!operand) {
-        throw new Error("not operator requires an operand");
+        throw new UnsupportedQueryPlanError("not operator requires an operand");
       }
       return buildNegatedFilter(operand, context);
     }
@@ -112,7 +113,7 @@ export function buildPrismaFilterFromCerbosExpression(
     case "descendentOf":
       return handleAncestorDescendantOperator(operands, context, "descendant");
     default:
-      throw new Error(`Unsupported operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 }
 
@@ -227,7 +228,7 @@ export function resolveOperand(
     if (folded !== null) return { value: folded };
     return { value: buildPrismaFilterFromCerbosExpression(operand, context) };
   }
-  throw new Error("Operand must have name, value, or be an expression");
+  throw new UnsupportedQueryPlanError("Operand must have name, value, or be an expression");
 }
 
 function resolveTimestampOperand(
@@ -235,7 +236,7 @@ function resolveTimestampOperand(
   context: TranslationContext
 ): ResolvedOperand {
   if (expression.operands.length !== 1) {
-    throw new Error("timestamp() requires exactly one operand");
+    throw new UnsupportedQueryPlanError("timestamp() requires exactly one operand");
   }
 
   const operand = assertDefined(
@@ -245,7 +246,7 @@ function resolveTimestampOperand(
   if (isNamedOperand(operand)) {
     const fieldRef = resolveFieldReference(operand.name, context);
     if (fieldRef.valueType !== "dateTime") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `timestamp() field ${operand.name} must be mapped with valueType: \"dateTime\"`
       );
     }
@@ -253,7 +254,7 @@ function resolveTimestampOperand(
   }
 
   if (!isValueOperand(operand) || typeof operand.value !== "string") {
-    throw new Error("timestamp() requires a field reference or RFC 3339 string");
+    throw new UnsupportedQueryPlanError("timestamp() requires a field reference or RFC 3339 string");
   }
   return { value: normalizeRfc3339Milliseconds(operand.value) };
 }

@@ -16,7 +16,7 @@ module.exports = {
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  // The offline suites. The adversarial harness needs a Cerbos sidecar, a store and a globalSetup
+  // The offline suites. The conformance harness needs a store and a globalSetup
   // to bring the store up, so it has its own config (jest.adversarial.config.js) and is skipped
   // here — `npm test` must stay runnable with nothing installed but node.
   testPathIgnorePatterns: [

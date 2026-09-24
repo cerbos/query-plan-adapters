@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "Heterogeneous operands: CEL has no cross-type equality and denies every seed. A store's implicit coercion would compare them and return rows.",
+  "id": "type-mismatch/equals/string-field-against-number-principal",
+  "intent": "A string attribute compared == a numeric principal attribute (R.attr.aString == P.attr.zero).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/equals/string-field-against-number-principal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString == P.attr.zero"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL has no cross-type equality and denies; a store that coerces '0' to 0, or 0 to '0', returns rows."
+}

@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a4",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/except/equals-list-literal",
+  "intent": "A resource list minus a literal list, compared for equality with a list literal.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": [
+                    "public"
+                  ]
+                }
+              ],
+              "operator": "except"
+            }
+          },
+          {
+            "value": [
+              "private"
+            ]
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/except/equals-list-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.except([\"public\"]) == [\"private\"]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "List equality is ordered and exact; a containment or membership lowering over-grants lists with extra or reordered elements."
+}

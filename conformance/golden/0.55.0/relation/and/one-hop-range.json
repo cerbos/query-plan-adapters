@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/and/one-hop-range",
+  "intent": "Two comparisons on the same parent field (parent.aNumber > 2 && parent.aNumber < 12).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "gt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aNumber"
+                },
+                {
+                  "value": 12
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/and/one-hop-range",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aNumber > 2 && R.attr.parent.aNumber < 12"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Both predicates must share one join; a separate join or EXISTS per conjunct lets two different parent rows satisfy each half."
+}

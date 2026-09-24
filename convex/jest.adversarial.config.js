@@ -17,7 +17,7 @@ module.exports = {
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  // Isolated from the main jest.config.js run: this suite needs a Cerbos sidecar loaded with
-  // conformance/policies (resource kind "adversarial") AND a deployed Convex backend.
+  // Isolated from the main jest.config.js run: this suite replays the conformance goldens against
+  // a deployed Convex backend, and imports the `convex/_generated` API codegen produces for it.
   testMatch: ["<rootDir>/src/adversarial.test.ts"],
 };

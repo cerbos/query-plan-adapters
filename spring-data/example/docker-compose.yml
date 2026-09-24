@@ -7,7 +7,7 @@
 #   docker compose down
 services:
   cerbos:
-    # Must match conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST; validate-corpus.sh
+    # Must match `current` in conformance/pdp-versions.json (tag and digest); validate-corpus.sh
     # checks both.
     image: ghcr.io/cerbos/cerbos:0.55.0@sha256:4b9d3b58c4f11c1b8953bc798d8d086e64f276882253ab169625fddc7f432515
     container_name: cerbos-photos-example

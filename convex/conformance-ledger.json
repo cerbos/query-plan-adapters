@@ -1,0 +1,125 @@
+{
+  "adapter": "convex",
+  "cases": {
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "IEEE keeps the sign of a zero, and the planner does ship it (the wire operand for -0.0 is `-0`), but a query plan is JSON-encoded on its way into a Convex function and JSON.stringify(-0) is \"0\" — the sign bit is gone before the adapter sees it, so it rejects a constant zero denominator rather than guess which infinity CEL produced"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity."
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() one level below the root is still a list in a boolean position; refused for the same reason as `collection/filter/as-whole-condition`"
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean; the post-filter would read it as an evaluation error and deny every row, silently agreeing with the PDP while emitting a filter for a shape with no boolean meaning, so it is refused"
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() returns a list, not a boolean; refused for the same reason as `collection/filter/as-whole-condition`"
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches also carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "The descendant path is CONSTRUCTED by list() from a constant segment and the primary key. `list` is not in the adapter's known-operator set at all — it has never reached the wire from this corpus — so the shape is refused during structural validation, before the hierarchy operators around it are considered"
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Lookahead is outside RE2 and the Convex evaluator’s supported literal, anchor, and trailing wildcard subset."
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "An alternation falls outside the literal, anchor and trailing `.*` subset the post-filter answers without a regex engine, and JavaScript's regex dialect is not RE2, so the pattern is refused rather than evaluated"
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
+    }
+  }
+}

@@ -34,7 +34,7 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a PDP and a store.",
+  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a store; it replays the recorded goldens and starts no PDP.",
   "scripts": {
     "clean": "rimraf lib",
     "build": "tsc --build",
@@ -48,21 +48,20 @@
     "prisma:generate:v7": "bash scripts/generate-clients.sh 7",
     "test": "jest",
     "test:adversarial": "npm run test:adversarial:v7",
-    "test:adversarial:v6": "npm run prisma:generate:v6 && node node_modules/prisma-v6/build/index.js db push --force-reset --skip-generate --schema=prisma/schema.adversarial.v6.prisma && PRISMA_VERSION=6 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
-    "test:adversarial:v7": "npm run prisma:generate:v7 && node node_modules/prisma/build/index.js db push --force-reset --schema=prisma/schema.adversarial.prisma --url=file:./prisma/dev-adversarial.db && PRISMA_VERSION=7 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
+    "test:adversarial:v6": "npm run prisma:generate:v6 && node node_modules/prisma-v6/build/index.js db push --force-reset --skip-generate --schema=prisma/schema.adversarial.v6.prisma && PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
+    "test:adversarial:v7": "npm run prisma:generate:v7 && node node_modules/prisma/build/index.js db push --force-reset --schema=prisma/schema.adversarial.prisma --url=file:./prisma/dev-adversarial.db && PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
     "test:adversarial:postgres": "npm run test:adversarial:postgres:v7",
-    "test:adversarial:postgres:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=6 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
-    "test:adversarial:postgres:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=7 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
+    "test:adversarial:postgres:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
+    "test:adversarial:postgres:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
     "test:adversarial:mysql": "npm run test:adversarial:mysql:v7",
-    "test:adversarial:mysql:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=6 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
-    "test:adversarial:mysql:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js"
+    "test:adversarial:mysql:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
+    "test:adversarial:mysql:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 jest --config jest.adversarial.config.js"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "@cerbos/core": "^0.33.0",
-    "@cerbos/grpc": "^0.29.0",
     "@jest/globals": "^30.2.0",
     "@prisma/adapter-better-sqlite3": "^7.5.0",
     "@prisma/adapter-mariadb": "^7.9.1",

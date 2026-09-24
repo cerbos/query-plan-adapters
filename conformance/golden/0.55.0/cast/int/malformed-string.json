@@ -1,0 +1,52 @@
+{
+  "allowed": [],
+  "degenerateReason": "No seed's aString converts to an integer, so int(R.attr.aString) is a conversion error for every seed and denies.",
+  "id": "cast/int/malformed-string",
+  "intent": "int() over a string attribute compared with a threshold (int(aString) > 50).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "int"
+            }
+          },
+          {
+            "value": 50
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/int/malformed-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aString) > 50"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL requires the whole string to be an integer; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2."
+}

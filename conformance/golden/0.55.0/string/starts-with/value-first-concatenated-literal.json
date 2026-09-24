@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a5",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "string/starts-with/value-first-concatenated-literal",
+  "intent": "startsWith whose receiver is a concatenation of two literals and whose argument is the attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "xaXby-tail"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ],
+        "operator": "startsWith"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/starts-with/value-first-concatenated-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(\"xaX\" + \"by-tail\").startsWith(R.attr.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Folded or not, the concatenation is the haystack; turning it into a column LIKE, or not escaping the column needle, returns the wrong rows."
+}

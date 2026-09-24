@@ -34,7 +34,7 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the translator unit test: it reads its plans from conformance/wire-fixtures/ and its expected SQL from golden/expectations.json, so it needs no Cerbos sidecar, no database and no Docker. Only `test:adversarial*` needs a PDP and a store. `golden:update` rewrites the golden expectations from what the translator emits today — a deliberate act whose safety is the diff a reviewer reads, exactly like conformance/scripts/regenerate-wire-fixtures.sh.",
+  "//test": "`test` is the offline unit suite: caller-supplied options, the refusal type and malformed plans. It needs no Cerbos, no database and no Docker. `test:adversarial*` replays the recorded conformance goldens (../conformance/golden/) against a real store and needs no PDP; the PostgreSQL and MySQL legs need Docker.",
   "scripts": {
     "clean": "rimraf lib",
     "build": "tsc --build",
@@ -43,8 +43,7 @@
     "prepublishOnly": "npm test",
     "version": "git add -A src",
     "test": "jest",
-    "golden:update": "GOLDEN_UPDATE=1 jest src/translator.test.ts",
-    "test:adversarial": "sh scripts/run-adversarial.sh --log-level=error --set=storage.disk.directory=../conformance/policies --set=telemetry.disabled=true -- jest --config jest.adversarial.config.js",
+    "test:adversarial": "jest --config jest.adversarial.config.js",
     "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial",
     "test:adversarial:mysql": "ADAPTER_TEST_DB=mysql npm run test:adversarial"
   },
@@ -53,7 +52,6 @@
   },
   "devDependencies": {
     "@cerbos/core": "^0.33.0",
-    "@cerbos/grpc": "^0.29.0",
     "@testcontainers/mysql": "^12.1.0",
     "@testcontainers/postgresql": "^12.1.0",
     "@types/better-sqlite3": "^7.6.8",

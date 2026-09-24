@@ -6,11 +6,9 @@ import type {
 import { PlanKind } from "../src/index";
 import type { QueryPlanToConvexResult } from "../src/index";
 
-// Shared by the two test backends. Both re-establish a plan's shape after it crosses the Convex
-// boundary as `v.any()`, and both report which half of the adapter's output actually answered the
-// query. One copy each: the guard is what stands between an arbitrary JSON payload and
-// `queryPlanToConvex`, and the path is a claim a harness asserts, so two drifting copies would
-// mean the two backends disagreed about what they had proved.
+// Used by the conformance backend (adversarial.ts): it re-establishes a plan's shape after it
+// crosses the Convex boundary as `v.any()`, and reports which half of the adapter's output
+// actually answered the query.
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -40,10 +38,8 @@ export const isPlanResourcesResponse = (
  * Which half of the adapter's output decided the query.
  *
  * A harness cannot tell `db` from `post` by looking at the ids: both are supposed to return the
- * documents `check()` allows, so a leg that meant to exercise Convex's filter engine and silently
- * fell back to the in-memory evaluator passes its oracle comparison unchanged. Reporting the path
- * FROM THE BACKEND is what makes that assertable — deriving it in the harness instead would only
- * re-run the same translation the harness already trusts, not observe the one that ran.
+ * documents the PDP allowed. Reporting the path FROM THE BACKEND is what lets the harness say how
+ * much of the corpus Convex's own filter engine decided.
  */
 export type ExecutionPath = "db" | "split" | "post" | "unconditional";
 

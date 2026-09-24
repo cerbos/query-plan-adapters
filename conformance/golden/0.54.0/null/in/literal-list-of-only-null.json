@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a8",
+    "c2",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/literal-list-of-only-null",
+  "intent": "Membership in a list whose only element is null (owner in [null]).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "value": null
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/literal-list-of-only-null",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.owner in [null]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The planner folds it to eq(owner, null), which must become IS NULL rather than = NULL."
+}

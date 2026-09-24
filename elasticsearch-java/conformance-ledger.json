@@ -1,0 +1,769 @@
+{
+  "adapter": "elasticsearch-java",
+  "cases": {
+    "arithmetic/add/exact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
+    },
+    "arithmetic/add/field-plus-constant": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/add/inexact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
+    },
+    "arithmetic/add/inexact-fraction-not-equals": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
+    },
+    "arithmetic/add/on-both-sides": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/add/self-division-plus-constant-greater-than": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic composed on a division without scripts"
+    },
+    "arithmetic/add/self-division-plus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/add/self-division-plus-constant-greater-than, reached through an inequality"
+    },
+    "arithmetic/add/value-first": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a second document field without scripts"
+    },
+    "arithmetic/divide/fractional-quotient": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/divide/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/divide/negated-self-division-equals": {
+      "status": "unsupported",
+      "reason": "Same scriptless-division limitation as arithmetic/divide/self-division-greater-than under a negated equality"
+    },
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field division without scripts, whatever the denominator"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "Unexpected div expression in leaf operand"
+    },
+    "arithmetic/divide/self-division-greater-than": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts"
+    },
+    "arithmetic/divide/self-division-not-equals": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts, whatever the enclosing comparison"
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all"
+    },
+    "arithmetic/multiply/inexact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic with fractional values without scripts"
+    },
+    "arithmetic/multiply/negative-multiplier": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/subtract/field-minus-constant": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "double() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL numeric parsing."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "int() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL numeric parsing."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "int() over a numeric field is a computed operand; the Query DSL cannot cast a field without scripts."
+    },
+    "cast/string/from-boolean": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double"
+    },
+    "cast/string/from-double": {
+      "status": "unsupported",
+      "reason": "The Query DSL has no computed operand: a term or range query compares a FIELD against a literal, and there is no place to apply a cast to the field first. Painless runtime scripts could express it, which is the enhancement #226 tracks"
+    },
+    "cast/string/negated-explicit-null": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion."
+    },
+    "cast/string/negated-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion."
+    },
+    "collection/all/empty-collection": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "collection/all/nested-exists-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error); the adapter refuses all() before it reaches the nested comparison collection/exists/nested-over-same-collection refuses"
+    },
+    "collection/all/nested-three-levels-middle": {
+      "status": "unsupported",
+      "reason": "Same one-scope-too-deep refusal as collection/exists/nested-three-levels: the second-level all() over c.subCategories reaches the leaf resolver as a lambda operand inside the outer nested scope, before either the third level or the positive-all emptiness ambiguity is reached"
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/exists-one/several-matches": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot count nested matches to express exists_one without scripts"
+    },
+    "collection/exists/arithmetic-on-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate arithmetic inside a nested predicate without scripts"
+    },
+    "collection/exists/element-contains-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot use an outer document field as a nested string-search needle without scripts"
+    },
+    "collection/exists/element-field-to-element-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare fields within a nested element without scripts"
+    },
+    "collection/exists/element-field-to-outer-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare a nested field with an outer resource field without scripts"
+    },
+    "collection/exists/element-in-literal-list": {
+      "status": "unsupported",
+      "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping"
+    },
+    "collection/exists/negated": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "collection/exists/negated-element-in-literal-list": {
+      "status": "unsupported",
+      "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping"
+    },
+    "collection/exists/negated-empty-collection": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "collection/exists/negated-nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error); the adapter refuses the negation before it reaches the nested comparison collection/exists/nested-over-same-collection refuses"
+    },
+    "collection/exists/negated-nested-three-levels": {
+      "status": "unsupported",
+      "reason": "The negated exists is rejected before the nesting depth matters, for the same reason as collection/exists/negated: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from one whose array holds no match. Three levels of nested scope are inexpressible underneath it either way"
+    },
+    "collection/exists/nested-collection-size": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot express arbitrary nested collection-count thresholds without scripts"
+    },
+    "collection/exists/nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "The inner lambda compares a nested document with the enclosing nested document of the same path. An Elasticsearch nested query scopes its clauses to one nested document and cannot reference a sibling or enclosing one without scripts, so the adapter refuses the inner lambda where it arrives as a leaf operand"
+    },
+    "collection/exists/nested-three-levels": {
+      "status": "unsupported",
+      "reason": "The adapter lowers a collection macro at the top of the walk only: inside a nested lambda scope the walk admits leaves, so the second-level exists() over c.subCategories reaches the leaf resolver as a lambda operand and is refused there, one scope too deep, before the third level is ever seen. Elasticsearch could express a nested query inside a nested query; this adapter does not lower macros below the first scope"
+    },
+    "collection/exists/nested-with-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch nested queries cannot preserve a resource-field correlation across two nested scopes without scripts"
+    },
+    "collection/exists/outer-collection-inside-lambda": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot correlate nested traversal with an outer relation-count predicate without scripts"
+    },
+    "collection/exists/scalar-list-negated-body": {
+      "status": "unsupported",
+      "reason": "A flat scalar array has no per-element query scope: bool.must_not of a term excludes mixed arrays containing both matching and nonmatching elements, whereas CEL exists with a negated body accepts a nonmatching element. This requires nested element documents or scripts, neither supplied by the flat-array mapping."
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so there is no query to emit for that conjunct, and dropping it would over-grant."
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so there is no query to emit."
+    },
+    "collection/index/first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Same positional read as collection/index/first-element-of-string-list, over a list of booleans: a term query on aBoolList matches true at ANY position (a5 [false, true] holds it second), which is a different predicate, so the adapter refuses the computed operand rather than substituting it, before the element's type is ever compared"
+    },
+    "collection/index/first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Same positional read as collection/index/first-element-of-string-list, over a list of numbers: the Query DSL has no form for the element at position 0, and a term query on aNumberList matches the value at ANY position (a4 [3, 2] holds 2 second), which is a different predicate, so the adapter refuses the computed operand rather than substituting it, before the element's type is ever compared"
+    },
+    "collection/index/first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch indexes an array as an unordered set of terms, so a positional read (tags[0].name) has no Query DSL form."
+    },
+    "collection/index/first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it"
+    },
+    "collection/index/first-element-of-string-list-equals-null": {
+      "status": "unsupported",
+      "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it"
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for ordered array indexing."
+    },
+    "collection/index/negated-first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Same positional read as collection/index/first-element-of-boolean-list under negation: the index operand is refused at the same site whatever the polarity, so a must_not over an any-position match is never emitted"
+    },
+    "collection/index/negated-first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Same positional read as collection/index/first-element-of-number-list under negation: the index operand is refused at the same site whatever the polarity, so a must_not over an any-position match is never emitted"
+    },
+    "collection/index/negated-first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it"
+    },
+    "collection/index/negated-out-of-bounds": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for ordered array indexing."
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for ordered array indexing."
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() returns a list, not a boolean, so there is no query to emit."
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "A map() projection is a computed leaf operand with no Query DSL equivalent, and list equality over a nested projection needs a script"
+    },
+    "comparison/equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "eq against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts"
+    },
+    "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts"
+    },
+    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts"
+    },
+    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Unexpected if expression in leaf operand"
+    },
+    "comparison/less-than/nan-from-ternary-value-first": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "ne against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
+    },
+    "conditional/ternary/as-whole-exists-body": {
+      "status": "unsupported",
+      "reason": "if (CEL ternary) cannot be expressed: Elasticsearch Query DSL has no conditional-value expression without scripts"
+    },
+    "conditional/ternary/boolean-branches": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts. The bare ternary is the whole condition rather than a leaf operand, so it is refused by name at the top of the walk rather than by the leaf resolver"
+    },
+    "conditional/ternary/compared-to-literal": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/expression-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/inside-all": {
+      "status": "unsupported",
+      "reason": "The positive all() is rejected before its body is examined, for the same reason as collection/all/empty-collection: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing one (CEL error). The conditional inside it would need scripts too, but the outer macro fails closed first"
+    },
+    "conditional/ternary/inside-exists": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate a conditional value inside a nested predicate without scripts"
+    },
+    "conditional/ternary/missing-attribute-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/negated": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/negated-branch-on-relation": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression for selecting the constant or parent attribute without scripts; the translator refuses the ternary leaf."
+    },
+    "conditional/ternary/negated-missing-attribute-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot preserve CEL null/error semantics through a negated conditional value without scripts"
+    },
+    "conditional/ternary/nested-in-both-branches": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
+    },
+    "conditional/ternary/nested-in-then-branch": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/on-both-sides": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
+    },
+    "conditional/ternary/value-first": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "The hierarchy operand parser refuses an empty delimiter before the relation is lowered: a path cannot be split into segments on an empty string, so there is no segment prefix to compare the stored path against, and the prefix query the descendant test lowers to would match the path itself (a2, never its own descendant)"
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with — the same missing evaluation step that refuses arithmetic and casts here"
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "A hierarchy path constructed by list() from a document field cannot be compared: Elasticsearch Query DSL has no way to concatenate a field into a path without scripts"
+    },
+    "identifier/equals/concatenation": {
+      "status": "unsupported",
+      "reason": "The value side is a concatenation of a constant with the primary key — a computed operand the Query DSL has no form for. The comparison is refused before the second field it names is reached"
+    },
+    "identifier/equals/concatenation-value-first": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as identifier/equals/concatenation, in value-first form"
+    },
+    "identifier/equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Comparing the primary key against another document field is field-to-field, which the Query DSL cannot express without a script"
+    },
+    "identifier/not-equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Same field-to-field limitation as identifier/equals/field-to-field, under negation"
+    },
+    "logic/not/deep-mixed-nesting": {
+      "status": "unsupported",
+      "reason": "This predicate combines field arithmetic and nested-to-outer field comparison, neither expressible by Elasticsearch Query DSL without scripts"
+    },
+    "membership/in/field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts"
+    },
+    "membership/in/negated-field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts"
+    },
+    "null/all/null-element-with-true-sibling": {
+      "status": "unsupported",
+      "reason": "Positive all is unsafe because Elasticsearch cannot distinguish an empty nested collection from a missing collection, in addition to the nullable-element CEL error semantics this action exercises"
+    },
+    "null/equals/field-to-field-both-explicit-null": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached — the same limitation as field-to-field"
+    },
+    "null/equals/negated-explicit-null-against-literal": {
+      "status": "unsupported",
+      "reason": "The negated-equality spelling reaches the same unrepresentable convention as null/not-equals/explicit-null-against-literal"
+    },
+    "null/equals/null-literal": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index explicit null scalar values, so positive equality against null cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel. The negated forms (null/not-equals/null-literal, null/not-equals/null-literal-value-first, null/equals/negated-null-literal) are expressible as exists and stay in the oracle set"
+    },
+    "null/equals/null-literal-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index a JSON null, so `== null` cannot tell a NULL column from a missing field and is refused."
+    },
+    "null/exists-one/negated-null-element": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot count nested matches or preserve exists_one null/error semantics without scripts"
+    },
+    "null/exists/negated-explicit-null-in-principal-list": {
+      "status": "unsupported",
+      "reason": "The value-list fold turns the macro into a chain of equalities against the explicit-null attribute, each of which reaches the same unrepresentable convention as null/not-equals/explicit-null-against-literal"
+    },
+    "null/has-intersection/literal-list-with-null-element": {
+      "status": "unsupported",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so intersection with null cannot be represented faithfully"
+    },
+    "null/has-intersection/literal-list-with-null-element-against-mapped-names": {
+      "status": "unsupported",
+      "reason": "hasIntersection with null requires an explicit null-value mapping"
+    },
+    "null/has-intersection/literal-list-with-null-element-against-mapped-names-value-first": {
+      "status": "unsupported",
+      "reason": "hasIntersection with null requires an explicit null-value mapping"
+    },
+    "null/has-intersection/literal-list-with-null-element-value-first": {
+      "status": "unsupported",
+      "reason": "hasIntersection with null requires an explicit null-value mapping"
+    },
+    "null/in/literal-list-of-only-null": {
+      "status": "unsupported",
+      "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"
+    },
+    "null/in/literal-list-with-null-element": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index explicit null scalar values, so positive membership containing null cannot distinguish an explicit null attribute (true) from a missing attribute (CEL error)"
+    },
+    "null/in/missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "null/in/negated-explicit-null-in-literal-list": {
+      "status": "unsupported",
+      "reason": "The negated membership reaches the same unrepresentable convention as null/not-equals/explicit-null-against-literal"
+    },
+    "null/in/negated-missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "null/in/negated-null-literal-in-number-list": {
+      "status": "unsupported",
+      "reason": "The negation of null/in/null-literal-in-number-list: a bool must_not over the collection would also match a document with no aNumberList at all, which Elasticsearch cannot tell from an empty array, so negated membership in a document collection is refused before the null element is considered"
+    },
+    "null/in/negated-null-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so negated null membership cannot be represented faithfully"
+    },
+    "null/in/null-literal-in-number-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index a JSON null, so a null element of the flat aNumberList array leaves no term behind and a6's [null, 2] cannot be told from [2]. The same missing null-value mapping as null/in/null-literal-in-resource-list, reached through a number list instead of the nested tag names"
+    },
+    "null/in/null-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch nested fields do not retain explicit null array elements, so null membership cannot be represented faithfully"
+    },
+    "null/not-equals/explicit-null-against-literal": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document to every query the DSL can express. Under the explicit convention CEL holds a null VALUE and allows the row, while every Elasticsearch spelling of `!= \"x\"` either requires the field to exist (dropping it) or matches every document missing the field. Neither is the decision, so the comparison is refused rather than answered narrowly"
+    },
+    "null/not-equals/field-to-field-mixed-null-conventions": {
+      "status": "unsupported",
+      "reason": "The Query DSL cannot compare two document fields without scripts."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "principal/exists-one/long-list": {
+      "status": "unsupported",
+      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat query."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "exists over a computed collection cannot be lowered to a nested query"
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "exists over a computed collection cannot be lowered to a nested query"
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "Unsupported size() expression"
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "Unexpected map expression in leaf operand"
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^one"
+    },
+    "regex/matches/compared-to-true": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no script-free computed operand for a regex predicate used as an equality operand."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\d"
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: a.*b"
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{q}[*][?]b"
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Lookahead is outside the RE2/Lucene common regular expression syntax; translating it as a Lucene regexp would change CEL error semantics."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: [[:digit:]]"
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "RE2 reads ^a|b$ as two separately anchored alternatives while Lucene anchors the whole pattern, so a top-level alternation is refused."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "matches regex has a top-level alternation at index 1: RE2 reads ^a|b$ as two separately anchored alternatives, while Lucene matches the whole field against a|b, so the alternation must be parenthesised as ^(a|b)$: a|b"
+    },
+    "regex/matches/unanchored": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix"
+    },
+    "relation/all/to-one-chain": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)"
+    },
+    "relation/exists/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so a negated exists over a chained collection cannot distinguish an absent to-one parent from an empty collection"
+    },
+    "relation/has-intersection/negated-empty-list-on-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch"
+    },
+    "relation/has-intersection/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same missing-versus-empty ambiguity as relation/in/negated-to-one-chain, reached through hasIntersection over the same operand"
+    },
+    "relation/in/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same missing-versus-empty ambiguity as relation/exists/negated-to-one-chain, reached through negated membership: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from a document whose array holds no match"
+    },
+    "relation/size/negated-non-empty-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same missing-versus-empty ambiguity as relation/size/zero-to-one-chain, reached through the negated positive-count spelling rather than the direct zero-count one"
+    },
+    "relation/size/non-negative-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent"
+    },
+    "relation/size/zero-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same missing-versus-empty ambiguity as relation/exists/negated-to-one-chain, reached through a zero-count emptiness check"
+    },
+    "relation/ternary/to-one-chain-condition": {
+      "status": "unsupported",
+      "reason": "Same missing conditional-value expression as conditional/ternary/boolean-branches: the Query DSL has no CEL-ternary equivalent without scripts, so the conditional is rejected at the top of the filter before its chained condition is examined"
+    },
+    "size/equals/filtered-collection": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot count only nested elements matching a predicate without scripts"
+    },
+    "size/equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/greater-or-equal/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare collection counts against arbitrary thresholds without scripts"
+    },
+    "size/greater-or-equal/fractional-threshold-on-relation": {
+      "status": "unsupported",
+      "reason": "Same arbitrary-count-threshold limitation as relation/size/non-negative-to-one-chain, reached through a fractional threshold: >= 1.5 rounds up to >= 2, and the Query DSL expresses only emptiness over nested collections"
+    },
+    "size/greater-than/collection-above-one": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot express arbitrary collection-count thresholds without scripts"
+    },
+    "size/greater-than/huge-threshold": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length: aString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the giant threshold is examined"
+    },
+    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/greater-than/string-length": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare a string's length without scripts, and the adapter is handed a plan rather than a mapping, so it cannot tell size(aString) from size(tagNames): size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
+    "size/greater-than/string-non-empty": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair, reached through the `> 0` spelling a collection-emptiness fast path is keyed on: aString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold is examined — which is exactly what stops the emptiness path from emitting an exists query over a string field"
+    },
+    "size/less-or-equal/fractional-threshold-on-relation": {
+      "status": "unsupported",
+      "reason": "Same arbitrary-count-threshold limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check"
+    },
+    "size/less-than/huge-threshold": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and size/greater-than/huge-threshold, under the opposite ordering"
+    },
+    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/less-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "string/concatenate/field-to-field": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as identifier/equals/concatenation, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks"
+    },
+    "string/concatenate/negated-unsatisfiable-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand"
+    },
+    "string/concatenate/unsatisfiable-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand"
+    },
+    "string/contains/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts"
+    },
+    "string/contains/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script — the same refusal as the positive string/contains/field-to-field, reached before the negation"
+    },
+    "string/contains/value-first": {
+      "status": "unsupported",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
+    },
+    "string/ends-with/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts"
+    },
+    "string/ends-with/value-first": {
+      "status": "unsupported",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
+    },
+    "string/starts-with/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts"
+    },
+    "string/starts-with/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "Same two-document-field comparison as string/contains/negated-field-to-field, reached through startsWith"
+    },
+    "string/starts-with/value-first": {
+      "status": "unsupported",
+      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
+    },
+    "string/starts-with/value-first-concatenated-literal": {
+      "status": "unsupported",
+      "reason": "After constant folding, this value-first predicate still uses a document field as the search needle against a constant haystack, which requires scripts"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "timestamp/greater-than/relative-window-value-first": {
+      "status": "unsupported",
+      "reason": "The value-first runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
+    "timestamp/less-than/relative-window": {
+      "status": "unsupported",
+      "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
+    "type-mismatch/contains/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "type-mismatch/ends-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "type-mismatch/equals/boolean-list-element-against-number-literal": {
+      "status": "unsupported",
+      "reason": "The cross-type question this probe asks is never reached: the positional read of aBoolList is refused as a computed leaf operand before the literal 1 is compared with anything, and a disjunction with one untranslatable branch is refused whole, so the aNumber == 5 branch that keeps the oracle live goes with it"
+    },
+    "type-mismatch/equals/number-list-element-against-boolean-literal": {
+      "status": "unsupported",
+      "reason": "Mirror of type-mismatch/equals/boolean-list-element-against-number-literal: the positional read of aNumberList is refused as a computed leaf operand before the literal true is compared with anything, and the whole disjunction with it"
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "Unexpected struct expression in leaf operand"
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "Unexpected struct expression in leaf operand"
+    },
+    "type-mismatch/equals/string-field-against-number-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "Unexpected list expression in leaf operand"
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "status": "unsupported",
+      "reason": "in with a list element cannot be expressed: a terms query matches scalar terms only"
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "Unexpected list expression in leaf operand"
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate the retained conditional numeric operand without scripts; the translator refuses the ternary before comparing it with the string field."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "Unexpected struct expression in leaf operand"
+    },
+    "type-mismatch/size/boolean-field": {
+      "status": "unsupported",
+      "reason": "size() over a field not declared as a collection: Elasticsearch cannot tell a string's length or a number from an array count, so size(request.resource.attr.aBool) is refused unless 'aBool' is declared in nestedPaths or collectionFields"
+    },
+    "type-mismatch/size/number-field": {
+      "status": "unsupported",
+      "reason": "size() over a field not declared as a collection: Elasticsearch cannot tell a string's length or a number from an array count, so size(request.resource.attr.aNumber) is refused unless 'aNumber' is declared in nestedPaths or collectionFields"
+    },
+    "type-mismatch/starts-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    }
+  }
+}

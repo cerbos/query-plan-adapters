@@ -1,0 +1,73 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a5",
+    "a7",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "cast/timestamp/negated-malformed-string",
+  "intent": "!(timestamp(createdBy) < timestamp(\"2025-01-01T00:00:00Z\")): parsing a string attribute as a timestamp under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.createdBy"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2025-01-01T00:00:00Z"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/timestamp/negated-malformed-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(timestamp(R.attr.createdBy) < timestamp(\"2025-01-01T00:00:00Z\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A string that is not a timestamp (h5) is a conversion error that denies under negation; a lenient parse or a NULL-yielding cast negated to true over-grants it."
+}

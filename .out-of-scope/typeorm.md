@@ -15,9 +15,10 @@ three-valued logic, the same LIKE-metacharacter escaping problem, the same absen
 over-grant, the same collation questions. It would not exercise a query language this
 repository has not already had to reason about.
 
-That matters because the corpus is not free. Adding an adapter means classifying all 140
-actions in `conformance/actions.json` for it, standing up a differential harness and CI
-workflow, and thereafter re-running it on every corpus change. The repository's history is that
+That matters because the corpus is not free. Adding an adapter means running every case in
+`conformance/cases/` through it and keeping a `conformance-ledger.json` of the ones it cannot
+pass, standing up a replay harness and CI workflow, and thereafter re-running it on every corpus
+change and every PDP bump. The repository's history is that
 the *same* semantic bug — value-first operand inversion, LIKE metacharacter leaks, three-valued
 logic under negation — has shipped identically to several adapters at once. Each additional
 adapter over ground already covered multiplies that triage surface without adding coverage of a

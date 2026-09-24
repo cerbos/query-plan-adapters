@@ -32,8 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests on hand-built plans, grouped under the three kinds of material CLAUDE.md allows only in a
- * unit test ("What a translator unit test may pin"). Corpus actions are covered by
- * {@link ElasticsearchTranslatorTest}, which reads real planner output. Needs no Docker.
+ * unit test ("What a translator unit test may pin"). Corpus cases are covered by
+ * {@link ElasticsearchAdversarialConformanceTest}, which replays the recorded planner output
+ * against Elasticsearch. Needs no Docker.
  */
 class ElasticsearchQueryPlanAdapterTest {
 
@@ -213,8 +214,8 @@ class ElasticsearchQueryPlanAdapterTest {
 
     /**
      * CEL has neither function, so the checker fails with {@code undeclared reference} and no
-     * plan can carry them. Existence is spelled {@code R.attr.x != null} instead (corpus action
-     * {@code null-ne}).
+     * plan can carry them. Existence is spelled {@code R.attr.x != null} instead (corpus case
+     * {@code null/not-equals/null-literal}).
      */
     @ParameterizedTest
     @ValueSource(strings = {"unsupported_op", "isSet"})
@@ -582,7 +583,8 @@ class ElasticsearchQueryPlanAdapterTest {
     /**
      * A double outside {@code [-2^63, 2^63)} stays a double, because casting it to {@code long}
      * would saturate and change the value. The corpus covers negative out-of-range literals
-     * ({@code double-huge-lt}, {@code double-huge-gt}) but not these boundaries.
+     * ({@code comparison/less-than/double-below-int64-range},
+     * {@code comparison/greater-than/double-below-int64-range}) but not these boundaries.
      */
     @Test
     void anIntegralLiteralOutsideTheLongRangeStaysADouble() {
@@ -598,8 +600,9 @@ class ElasticsearchQueryPlanAdapterTest {
 
     /**
      * A protobuf value can hold a non-finite number, but JSON cannot, so it is refused. The PDP
-     * cannot serialize such a literal and the corpus's {@code nan-ord-*} actions keep the division
-     * unfolded, so no corpus action reaches this.
+     * cannot serialize such a literal and the corpus's NaN- and infinity-from-ternary comparison
+     * cases (such as {@code comparison/greater-than/nan-from-ternary}) keep the division unfolded,
+     * so no corpus case reaches this.
      */
     @Test
     void aNonFiniteNumericLiteralIsRefusedAtTheLeaf() {
@@ -618,7 +621,7 @@ class ElasticsearchQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Each is tracked by cerbos/query-plan-adapters#509 and deleted when its corpus action lands.
+    // Each is tracked by cerbos/query-plan-adapters#509 and deleted when its corpus case lands.
     // ============================================================================================
 
     /**

@@ -1,0 +1,55 @@
+{
+  "allowed": [],
+  "degenerateReason": "3 * 0.1 is not 0.3 in IEEE double, so the equation holds for no seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds.",
+  "id": "arithmetic/multiply/inexact-fraction-equals",
+  "intent": "Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0.1
+                }
+              ],
+              "operator": "mult"
+            }
+          },
+          {
+            "value": 0.3
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/multiply/inexact-fraction-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber * 0.1 == 0.3"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "3 * 0.1 is not 0.3 in IEEE doubles; exact-decimal store arithmetic (MySQL) or an algebraic solve returns the aNumber = 3 seeds."
+}

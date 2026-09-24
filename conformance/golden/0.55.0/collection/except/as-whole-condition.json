@@ -1,0 +1,47 @@
+{
+  "allowed": [],
+  "degenerateReason": "except() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.",
+  "id": "collection/except/as-whole-condition",
+  "intent": "The two-list except() used as the whole condition, returning a list rather than a boolean.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public"
+            ]
+          }
+        ],
+        "operator": "except"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/except/as-whole-condition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.except([\"public\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Treating a non-empty difference as true, or dropping it, emits a filter where CEL denies every row; the shape must throw."
+}

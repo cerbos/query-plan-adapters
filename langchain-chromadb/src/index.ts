@@ -42,7 +42,7 @@ export type QueryPlanToChromaDBResult =
 /**
  * A well-formed plan asks for something a Chroma metadata filter cannot express. Thrown so a caller
  * can route that case — a broader search, a per-document `check()`, a deny — without matching on
- * the message, which stays the text `conformance/actions.json` pins
+ * the message, which is not a stable contract
  * (cerbos/query-plan-adapters#228). A malformed plan or a mapper misconfiguration is a plain `Error`.
  *
  * `operator` is the plan operator the refusal is about: the one the message names, after mirroring

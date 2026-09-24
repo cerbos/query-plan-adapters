@@ -4,6 +4,7 @@ import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { Param } from "drizzle-orm/sql";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { resolveConstantNumber } from "./arithmetic";
 import {
   isColumn,
@@ -221,7 +222,7 @@ const definiteEquality = (
   const combined =
     leftExplicitNull && rightExplicitNull ? or(bothNull, present) : present;
   if (!combined) {
-    throw new Error("Unable to combine null-aware equality conditions");
+    throw new UnsupportedQueryPlanError("Unable to combine null-aware equality conditions");
   }
   return combined;
 };
@@ -265,7 +266,7 @@ export const applyComparisonWithExpression = (
   // predicate returns rows the PDP refuses; a plain one drops rows the PDP allows. Refuse it
   // rather than pick a direction — declare both attributes, or neither.
   if (isEquality && fieldExplicitNull !== valueExplicitNull) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot translate \`${operator}\` between two columns under mixed null conventions: ` +
         "cannot compare an attribute declared explicit-null with one on the omitted convention: the omitted side is UNKNOWN for a NULL column while the declared side is definite, and no single predicate is both. Declare nullAttributeRepresentation on both mapper entries, or on neither.",
     );
@@ -276,7 +277,7 @@ export const applyComparisonWithExpression = (
   }
   const comparison = binaryComparison(operator, fieldExpr, valueExpr);
   if (!comparison) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Operator '${operator}' is not supported for expression-valued operands`,
     );
   }
@@ -303,7 +304,7 @@ export const assertNullOperandTranslatable = (
   declared?: NullAttributeRepresentation,
 ): void => {
   if ((declared ?? options.nullRepresentation) === "omitted") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL column ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
         "(deny) while a NULL-selecting filter would return those rows. Send NULL columns as " +
@@ -321,7 +322,7 @@ const applyRelationComparison = (operator: ComparisonOperator): SQL => {
     case "ne":
       return TRUE_CONDITION;
     default:
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Unsupported operator '${operator}' for relation comparison`,
       );
   }
@@ -378,13 +379,13 @@ const buildColumnMembership = (
     }
     const present = and(sql`${column} is not null`, membership);
     if (!present) {
-      throw new Error("Unable to combine null-aware membership conditions");
+      throw new UnsupportedQueryPlanError("Unable to combine null-aware membership conditions");
     }
     return present;
   }
   const withNull = or(membership, isNull(column));
   if (!withNull) {
-    throw new Error("Unable to combine null-aware membership conditions");
+    throw new UnsupportedQueryPlanError("Unable to combine null-aware membership conditions");
   }
   return withNull;
 };
@@ -418,7 +419,7 @@ const applyColumnComparison = (
     case "startsWith":
     case "endsWith":
       if (typeof value !== "string") {
-        throw new Error(`The '${operator}' operator requires a string value`);
+        throw new UnsupportedQueryPlanError(`The '${operator}' operator requires a string value`);
       }
       return buildStringMatchCondition(
         operator,
@@ -429,7 +430,7 @@ const applyColumnComparison = (
   }
   const ordering = binaryComparison(operator, column, bound);
   if (!ordering) {
-    throw new Error(`Unsupported operator: ${operator}`);
+    throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
   return ordering;
 };
@@ -477,7 +478,7 @@ export const applyComparison = (
     if (mapping.indexable) {
       // A declared indexable column holds the whole list. Comparing it as one scalar would test
       // the serialized list against an element — never equal, so its negation is always true.
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "A column declared indexable holds a list: it can only be read by constant position, membership or hasIntersection",
       );
     }

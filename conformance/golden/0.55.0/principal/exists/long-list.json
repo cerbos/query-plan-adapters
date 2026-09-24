@@ -1,0 +1,87 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a9",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "principal/exists/long-list",
+  "intent": "exists over an 11-element principal list comparing a resource attribute, which the planner sends as a value list instead of unrolling.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "set",
+              "same",
+              "",
+              "%_o",
+              "X",
+              "Y",
+              "MIRROR",
+              "filler-1",
+              "filler-2",
+              "filler-3",
+              "filler-4"
+            ]
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/long-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.manyTeams.exists(t, R.attr.aOptionalString == t)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Rows missing aOptionalString must deny, so it is not a plain IN; matching is exact and case-sensitive with LIKE metacharacters inert ('%_o', '', 'Set') (cerbos/cerbos#2570, #2817)."
+}

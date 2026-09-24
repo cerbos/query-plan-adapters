@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.",
+  "id": "type-mismatch/ends-with/number-field-receiver",
+  "intent": "endsWith() called on a numeric attribute (R.attr.aNumber.endsWith(\"2\")).",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": "2"
+          }
+        ],
+        "operator": "endsWith"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/ends-with/number-field-receiver",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber.endsWith(\"2\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A string function on a non-string receiver is a CEL error; LIKE '%2' over the number coerced to text returns rows."
+}

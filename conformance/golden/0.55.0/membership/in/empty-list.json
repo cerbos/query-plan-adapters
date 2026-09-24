@@ -1,0 +1,32 @@
+{
+  "allowed": [],
+  "degenerateReason": "Nothing is a member of the empty list, so the planner folds the plan to ALWAYS_DENIED. An adapter emitting an empty IN list that the store matches against nothing agrees by accident, which is why it stays compared.",
+  "id": "membership/in/empty-list",
+  "intent": "String attribute tested for membership in an empty literal list.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/empty-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in []"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Nothing is in the empty list; an emitted IN () may be invalid SQL or match everything instead of nothing."
+}

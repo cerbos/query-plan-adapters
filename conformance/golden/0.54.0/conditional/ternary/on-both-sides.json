@@ -1,0 +1,98 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/on-both-sides",
+  "intent": "Ternaries on both sides of a comparison.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": ""
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "value": 1
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "if"
+            }
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/on-both-sides",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? R.attr.aNumber : 0.0) > (R.attr.aString == \"\" ? 1.0 : 2.0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "A translator that supports a conditional on one side only, or distributes it assuming a constant on the other side, mistranslates it."
+}

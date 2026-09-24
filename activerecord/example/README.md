@@ -25,7 +25,7 @@ against a PDP nobody meant to test.
 This is the ActiveRecord instance of the shared [demo domain](../../demo/README.md). It proves
 **plumbing** — the published gem installs, `require "cerbos/active_record"` resolves from it, and
 the returned relation composes with real query methods. Semantics are proved by
-`../spec/adversarial_conformance_spec.rb` against [`../../conformance/`](../../conformance/).
+`../spec/conformance_spec.rb` against [`../../conformance/`](../../conformance/).
 
 `app.rb` seeds SQLite in memory from `demo/seeds.json`, maps `ownerId` → `owner_id` and
 `public` → `is_public`, then emits the five usage shapes:

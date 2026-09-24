@@ -1,0 +1,47 @@
+{
+  "allowed": [],
+  "degenerateReason": "The needle is a list and tagNames holds only strings, so CEL denies every seed.",
+  "id": "type-mismatch/in/list-literal-in-resource-string-list",
+  "intent": "Membership of a one-element list literal in a string list attribute ([\"public\"] in tagNames).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "public"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/in/list-literal-in-resource-string-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[\"public\"] in R.attr.tagNames"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The needle is a list and tagNames holds strings; unwrapping it into \"public\" in tagNames over-grants."
+}

@@ -1,6 +1,3 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import { describe, expect, test } from "@jest/globals";
 import {
   PlanExpression,
@@ -16,49 +13,33 @@ import type { Where } from "chromadb";
 import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from ".";
 import type { FieldMapper, FieldNameMapperConfig } from ".";
 import {
-  ADAPTER,
   FIELD_NAME_MAPPER,
-  GOLDEN_REGENERATE_COMMAND,
-  classifyActionsForAdapter,
   mappedMetadataKeys,
-  nullRepresentationThrows,
-  parseActionsFile,
-  planFromWireFixture,
-  readCorpusJson,
-  readGoldenExpectations,
-  requireMessage,
+  pdpTags,
+  planOf,
+  readGolden,
+  readGoldens,
   requiredMetadataKeys,
-  wireFixtureActions,
-  writeGoldenExpectations,
 } from "./corpus";
-import type { GoldenExpectation } from "./corpus";
 
 /**
- * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
- * and caller options that the shared corpus cannot vary. The adversarial suite separately
- * executes filters against a store and compares them with the PDP oracle.
- * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
+ * Offline unit tests: the refusal type, the rules every emitted filter obeys, what a caller can
+ * pass that the conformance corpus cannot vary (mapper forms, `required`, `numericType`), and plans
+ * the planner cannot produce.
+ *
+ * Which documents a corpus case returns is the conformance harness's job (`adversarial.test.ts`);
+ * nothing here pins the filter emitted for a corpus case. Plans come from the current PDP's golden
+ * files, read by case id, rather than being typed by hand.
  */
 
-const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
-
-// Refusal messages come from the same classification ledger as the live harness.
-const THROWING_ACTIONS = [
-  ...classifyActionsForAdapter(actionsFile, ADAPTER).throwingActions,
-  // The `nullRepresentationOmitted` group belongs here on this adapter and only on this adapter's
-  // terms: elsewhere it is a refusal under one convention, here it is unconditional, because Chroma
-  // metadata cannot hold a null distinguishably from an absent key (#302). It is a separate corpus
-  // classification, so the harness keeps it separate; the throw suite does not need to.
-  ...nullRepresentationThrows(actionsFile, ADAPTER),
-].sort(([left], [right]) => left.localeCompare(right));
-const THROWING = new Set(THROWING_ACTIONS.map(([action]) => action));
+const CURRENT = pdpTags()[0]!;
 
 function translate(
-  action: string,
-  options: { fieldNameMapper?: FieldMapper; plannedAt?: string } = {},
+  id: string,
+  options: { fieldNameMapper?: FieldMapper; now?: string } = {},
 ): { kind: PlanKind; filters?: Where } {
   return queryPlanToChromaDB({
-    queryPlan: planFromWireFixture(action, options.plannedAt),
+    queryPlan: planOf(readGolden(CURRENT, id), options.now),
     fieldNameMapper: options.fieldNameMapper ?? FIELD_NAME_MAPPER,
   });
 }
@@ -73,34 +54,46 @@ function thrownBy(run: () => unknown): unknown {
   return undefined;
 }
 
-/**
- * A Chroma `Where` clause is JSON already, so the golden entry is the translator's whole result —
- * no rendering step, no dialect, nothing normalised on the way in.
- *
- * The one thing worth checking on the way out is that it really is JSON: `-0` and the non-finite
- * numbers survive a `Where` object but not a `JSON.stringify`, and a plan crosses into a deployed
- * caller's Chroma query as a JSON body. A value the asset cannot record is a value the adapter
- * should not have emitted, so this fails rather than normalising.
- */
-function expectationFor(action: string): GoldenExpectation {
-  const result = translate(action);
-  const roundTripped = JSON.parse(JSON.stringify(result)) as GoldenExpectation;
-  for (const { field, operator, value } of literalsOf(result.filters)) {
-    for (const literal of Array.isArray(value) ? value : [value]) {
-      if (typeof literal === "number" && !Number.isFinite(literal)) {
-        throw Error(
-          `${action} binds a non-finite number to ${field} ${operator}; the golden file cannot record it faithfully`,
-        );
-      }
-      if (Object.is(literal, -0)) {
-        throw Error(
-          `${action} binds a negative zero to ${field} ${operator}; the golden file cannot record it faithfully`,
-        );
-      }
-    }
+/** Every current golden this adapter translates, with the filter it emits. */
+const TRANSLATED = readGoldens(CURRENT).flatMap(({ id }) => {
+  try {
+    return [{ id, ...translate(id) }];
+  } catch {
+    return [];
   }
-  return roundTripped;
-}
+});
+const CONDITIONAL = TRANSLATED.filter(
+  ({ kind }) => kind === PlanKind.CONDITIONAL,
+);
+
+describe("the refusal type", () => {
+  // Every shape this adapter cannot express raises `UnsupportedOperatorError`, which the
+  // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
+  // other side: it is still an `Error`, and it names the operator a caller can branch on (#228).
+  test("a refused shape raises UnsupportedOperatorError, which is an Error", () => {
+    const raised = thrownBy(() =>
+      translate("regex/matches/lookahead-from-principal"),
+    );
+    expect(raised).toBeInstanceOf(UnsupportedOperatorError);
+    expect(raised).toBeInstanceOf(Error);
+    expect((raised as UnsupportedOperatorError).name).toBe(
+      "UnsupportedOperatorError",
+    );
+    expect((raised as UnsupportedOperatorError).operator).toBe("matches");
+  });
+
+  // A collection macro reports itself, never `lambda`, which names nothing a caller wrote.
+  test("no refusal reports the lambda operator", () => {
+    const operators = readGoldens(CURRENT).flatMap((golden) => {
+      const raised = thrownBy(() => translate(golden.id));
+      return raised instanceof UnsupportedOperatorError
+        ? [raised.operator]
+        : [];
+    });
+    expect(operators.length).toBeGreaterThan(0);
+    expect(operators).not.toContain("lambda");
+  });
+});
 
 // -- reading an emitted filter back ---------------------------------------------------------------
 
@@ -156,257 +149,14 @@ function literalsOf(where: Where | undefined): Comparison[] {
   return shapeOf(where).comparisons;
 }
 
-// -- the golden expectations ----------------------------------------------------------------------
-//
-// `npm run golden:update` rewrites the file from what the translator emits today and preserves
-// every `note`. That is the same deliberate act as regenerating the wire fixtures, and the safety
-// is identical: the diff is what a reviewer reads. CI never sets the variable, so a translator
-// change that moves the emitted filter fails there whatever anyone ran locally.
-
-if (process.env["GOLDEN_UPDATE"] === "1") {
-  const regenerated = new Map<string, GoldenExpectation>();
-  for (const action of wireFixtureActions()) {
-    // A throwing action gets no entry: its message is corpus data. Skipping it here is also what
-    // keeps regeneration from papering over a misclassification — an action moved into
-    // `adapterUnsupported` that this adapter still translates fails the throw suite, and one moved
-    // out of it that this adapter still refuses fails regeneration itself.
-    if (THROWING.has(action)) {
-      continue;
-    }
-    regenerated.set(action, expectationFor(action));
-  }
-  writeGoldenExpectations(regenerated);
-}
-
-const RECORDED = readGoldenExpectations();
-
-const RECORDED_ACTIONS = [...RECORDED.keys()];
-
-const CONDITIONAL_ACTIONS = RECORDED_ACTIONS.filter(
-  (action) => RECORDED.get(action)!.expectation.kind === PlanKind.CONDITIONAL,
-);
-
-/** The `Where` clause the asset pins for one action; `undefined` on an unconditional plan kind. */
-const recordedFilters = (action: string): Where | undefined =>
-  (RECORDED.get(action)!.expectation as { filters?: Where }).filters;
-
-describe("corpus shapes", () => {
-  test.each(RECORDED_ACTIONS)("%s emits the golden expectation", (action) => {
-    expect(expectationFor(action)).toEqual(RECORDED.get(action)!.expectation);
-  });
-
-  // The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
-  // `toThrow()` just as well as the limitation the corpus documents (#326). The harness makes the
-  // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
-  // which is what lets the completeness guard below be total.
-  //
-  // And the type, over the same roster: every corpus refusal is a well-formed plan Chroma cannot
-  // express, so a caller catching `UnsupportedOperatorError` must see all of them (#228). A site
-  // that regresses to a plain `Error` keeps its message and fails here.
-  test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
-      expect(() => translate(action)).toThrow(message);
-      expect(() => translate(action)).toThrow(UnsupportedOperatorError);
-    },
-  );
-
-  // Adding a throwing action without pinning its message must fail this suite rather than
-  // silently degrade the throw assertions to a bare "it threw" (#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
-
-  test("every corpus action is accounted for here exactly once", () => {
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
-    const classified = [...RECORDED_ACTIONS, ...throwing].sort();
-
-    // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
-    // rather than as silence. This is the assertion that makes the asset self-maintaining —
-    // adding a hostile shape to the corpus forces someone to look at the filter this adapter emits
-    // for it, and `npm run golden:update` refuses to invent one for a shape that throws.
-    expect(classified).toEqual(wireFixtureActions());
-    // Disjoint: an action carrying a golden expectation AND declared unsupported would satisfy
-    // the union above while asserting two contradictory things.
-    expect(classified).toEqual([...new Set(classified)].sort());
-    // The asset is written sorted, so a translator change reads as the list of shapes it moved.
-    expect(RECORDED_ACTIONS).toEqual([...RECORDED_ACTIONS].sort());
-
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from an asset nobody reads end to end.
-    expect({
-      conditional: CONDITIONAL_ACTIONS.length,
-      unconditional: RECORDED_ACTIONS.length - CONDITIONAL_ACTIONS.length,
-      throwing: throwing.length,
-    }).toEqual({ conditional: 56, unconditional: 7, throwing: 270 });
-  });
-});
-
 /**
- * Where in the walk each rejection happens, and how many corpus shapes reach each site.
- *
- * `actions.json` pins a substring of the message per action, so the throw suite above proves every
- * refusal is the declared one. It cannot say anything about the *shape* of the refusals taken
- * together, and on an adapter that refuses 270 of 333 shapes that is the more interesting property:
- * five sixths of this corpus is rejected, and it matters whether that happens at five sites or at
- * one catch-all.
- *
- * Two things are asserted. **Total**: every refusal matches a site this adapter actually has, so a
- * shape rejected by an accident — a `TypeError`, a mapper lookup that happened to fail — cannot pass
- * as a declared limitation, which is the #326 trap at corpus scale. **Pinned counts**: a translator
- * change that moves a shape from one site to another shows up as a diff even though both sites throw
- * and `actions.json` is unchanged. The distribution below is the honest summary of this adapter:
- * `binaryOperands` rejecting a computed operand is the single mechanism behind 162 of the 270, and
- * every reason in `actions.json` for those shapes — arithmetic, casts, ternaries, projections,
- * macros above the unroll cap — reduces to the same thing at the wire level, an operand that is not
- * a bare metadata key or a literal.
- */
-describe("the rejection sites the corpus reaches", () => {
-  const SITES: [site: string, pattern: RegExp][] = [
-    // `binaryOperands`: an operand slot holds a computed sub-expression, not a key or a literal.
-    ["computed operand", /^Nested expressions are not supported/],
-    // `binaryOperands`: both sides are metadata keys, and a Where clause compares one to a literal.
-    ["field-to-field", /^Variable-to-variable comparisons are not supported/],
-    // `requirePresenceFor`: $ne and $nin match a document missing the key.
-    [
-      "inequality over an optional key",
-      / is unsafe for optional Chroma metadata/,
-    ],
-    // `mirrorOf` / `mapComparison`: the operator has no row in COMPARISONS at all.
-    ["no such operator", /^Unsupported operator /],
-    // `negationOf`: the operator's COMPARISONS row has no negation, so there is nothing to invert.
-    ["not negatable", /^Cannot negate operator /],
-    // `mirrorOf`: value-first `in` asks whether a literal is inside a metadata field.
-    [
-      "mirrored membership",
-      /^ChromaDB filters cannot test whether a literal is contained/,
-    ],
-    // `requireLiteral` / `requireLiteralList`: the literal is null, nested, or an empty list.
-    ["non-scalar literal", / requires a (finite number|list|non-empty)/],
-    // `mapComparison`: a fractional threshold against a field declared integer.
-    ["fractional threshold", / cannot safely compare a fractional threshold/],
-    // `binaryOperands`: the ternary arrives as a three-operand conditional.
-    ["operand arity", /^Expected exactly two operands$/],
-  ];
-
-  const siteOf = (action: string): string => {
-    let raised: string;
-    try {
-      translate(action);
-      return "<did not throw>";
-    } catch (error) {
-      raised = error instanceof Error ? error.message : String(error);
-    }
-    const matched = SITES.filter(([, pattern]) => pattern.test(raised));
-    if (matched.length !== 1) {
-      throw Error(
-        `${action} is refused with "${raised}", which matches ${matched.length} of this adapter's known rejection sites`,
-      );
-    }
-    return matched[0]![0];
-  };
-
-  test("every refused shape lands on exactly one of them, in these numbers", () => {
-    const counts: Record<string, number> = {};
-    for (const [action] of THROWING_ACTIONS) {
-      const site = siteOf(action);
-      counts[site] = (counts[site] ?? 0) + 1;
-    }
-
-    expect(counts).toEqual({
-      "computed operand": 162,
-      "no such operator": 40,
-      "inequality over an optional key": 14,
-      "not negatable": 18,
-      "field-to-field": 17,
-      "mirrored membership": 11,
-      "non-scalar literal": 5,
-      "operand arity": 2,
-      "fractional threshold": 1,
-    });
-    expect(Object.values(counts).reduce((sum, n) => sum + n, 0)).toEqual(
-      THROWING_ACTIONS.length,
-    );
-  });
-
-  /**
-   * The `operator` each refusal reports, which is what a caller catching `UnsupportedOperatorError`
-   * branches on (#228). Neither the pinned messages nor the sites above state it: a change that
-   * reports the enclosing comparison instead of the computed operand, or the raw operator instead
-   * of the negated one, moves this and nothing else.
-   *
-   * A collection macro reports itself whichever site refuses it: `exists(...)` is refused at its
-   * lambda operand, the computed-operand site, and `!exists(...)` before its operands are read, and
-   * both report `exists`. No refusal reports `lambda`, which names nothing a caller wrote.
-   */
-  test("every refusal names the operator it is about, in these numbers", () => {
-    const counts: Record<string, number> = {};
-    for (const [action] of THROWING_ACTIONS) {
-      const raised = thrownBy(() => translate(action));
-      const operator =
-        raised instanceof UnsupportedOperatorError
-          ? raised.operator
-          : "<not an UnsupportedOperatorError>";
-      counts[operator] = (counts[operator] ?? 0) + 1;
-    }
-
-    expect(counts).toEqual({
-      add: 14,
-      all: 9,
-      ancestorOf: 3,
-      contains: 11,
-      descendentOf: 6,
-      div: 8,
-      double: 2,
-      endsWith: 7,
-      eq: 9,
-      except: 2,
-      exists: 33,
-      exists_one: 3,
-      filter: 2,
-      ge: 1,
-      "get-field": 1,
-      hasIntersection: 13,
-      if: 18,
-      in: 16,
-      index: 12,
-      int: 3,
-      list: 1,
-      map: 3,
-      matches: 15,
-      mod: 1,
-      mult: 2,
-      ne: 14,
-      nin: 2,
-      overlaps: 6,
-      size: 27,
-      startsWith: 11,
-      string: 4,
-      struct: 3,
-      sub: 1,
-      timestamp: 7,
-    });
-  });
-});
-
-/**
- * The properties a regenerated asset must not silently accept.
- *
- * Pinned bytes do not survive `npm run golden:update` being run and committed unread; rules do. So
- * each of these is stated over every translated corpus action rather than over a chosen shape, and
- * each carries an anti-vacuity assertion, because every one of them is satisfied by an empty filter.
+ * Rules every emitted filter obeys, stated over every golden plan this adapter translates rather
+ * than pinned per case. Each carries an anti-vacuity assertion, because every one of them is
+ * satisfied by an empty filter.
  */
 describe("what an emitted filter may contain", () => {
-  const ALL_COMPARISONS = CONDITIONAL_ACTIONS.flatMap((action) =>
-    literalsOf(recordedFilters(action)).map((comparison) => ({
-      action,
-      ...comparison,
-    })),
+  const ALL_COMPARISONS = CONDITIONAL.flatMap(({ id, filters }) =>
+    literalsOf(filters).map((comparison) => ({ action: id, ...comparison })),
   );
 
   /**
@@ -434,9 +184,7 @@ describe("what an emitted filter may contain", () => {
    */
   test("no negation operator survives into an emitted filter", () => {
     const logical = new Set(
-      CONDITIONAL_ACTIONS.flatMap(
-        (action) => shapeOf(recordedFilters(action)).logical,
-      ),
+      CONDITIONAL.flatMap(({ filters }) => shapeOf(filters).logical),
     );
 
     expect([...logical].sort()).toEqual(["$and", "$or"]);
@@ -448,14 +196,15 @@ describe("what an emitted filter may contain", () => {
    * corpus that never negates anything.
    */
   test("the corpus still drives the negations that rule polices", () => {
-    for (const action of [
-      "double-negation",
-      "triple-negation",
-      "not-and",
-      "not-lt",
-      "not-gt",
+    const conditional = CONDITIONAL.map(({ id }) => id);
+    for (const id of [
+      "logic/not/double-negation",
+      "logic/not/triple-negation",
+      "logic/not/over-and",
+      "logic/not/less-than",
+      "logic/not/greater-than",
     ]) {
-      expect(CONDITIONAL_ACTIONS).toContain(action);
+      expect(conditional).toContain(id);
     }
     const inverted = ALL_COMPARISONS.filter(({ operator }) =>
       ["$ne", "$nin", "$gte", "$lte"].includes(operator),
@@ -469,8 +218,8 @@ describe("what an emitted filter may contain", () => {
    * Chroma's `$ne`/`$nin` MATCH a document that is missing the metadata key, where CEL raises a
    * missing-attribute error and the PDP denies. So an inequality is only sound over a key the
    * integrator has asserted is present on every document, and the adapter refuses it otherwise.
-   * A regenerated asset that quietly acquired an inequality over an optional key would be an
-   * authorization bug, not a diff.
+   * A translator change that quietly emitted an inequality over an optional key would be an
+   * authorization bug.
    */
   test("an inequality is emitted only over a field declared required", () => {
     const required = new Set(requiredMetadataKeys());
@@ -502,21 +251,16 @@ describe("what an emitted filter may contain", () => {
         ]),
       );
 
-    const nowRefused = CONDITIONAL_ACTIONS.filter((action) => {
-      try {
-        translate(action, { fieldNameMapper: optionalEverywhere });
-        return false;
-      } catch {
-        return true;
-      }
-    });
+    const nowRefused = CONDITIONAL.map(({ id }) => id).filter((id) =>
+      thrownBy(() => translate(id, { fieldNameMapper: optionalEverywhere })),
+    );
     const emitsInequality = [
       ...new Set(
         ALL_COMPARISONS.filter(({ operator }) =>
           ["$ne", "$nin"].includes(operator),
         ).map(({ action }) => action),
       ),
-    ].sort();
+    ];
 
     expect(nowRefused).toEqual(emitsInequality);
     expect(emitsInequality.length).toBeGreaterThan(0);
@@ -546,20 +290,19 @@ describe("what an emitted filter may contain", () => {
 
   /**
    * A `Where` clause leaves this adapter as part of a JSON request body, so a literal JSON cannot
-   * carry is a literal the deployed adapter could not send. `expectationFor` refuses one outright;
-   * this is the assertion that says the refusal is live rather than unreachable, by naming the
-   * corpus actions whose arithmetic produces a non-finite or negatively-signed zero and confirming
-   * every one of them is refused before a literal is ever built.
+   * carry — a non-finite number, a negative zero — is a literal the deployed adapter could not
+   * send faithfully.
    */
-  test("the actions that would bind a value JSON cannot hold are all refused", () => {
-    for (const action of [
-      "cr-div-zero",
-      "cr-div-neg-zero",
-      "nan-ord-inf",
-      "nan-ord-le",
-    ]) {
-      expect(THROWING.has(action)).toBe(true);
-    }
+  test("every emitted literal survives a JSON round trip", () => {
+    const unfaithful = ALL_COMPARISONS.filter(({ value }) =>
+      (Array.isArray(value) ? value : [value]).some(
+        (literal) =>
+          Object.is(literal, -0) ||
+          (typeof literal === "number" && !Number.isFinite(literal)),
+      ),
+    ).map(({ action, field }) => `${action}: ${field}`);
+
+    expect(unfaithful).toEqual([]);
   });
 });
 
@@ -573,7 +316,7 @@ describe("what an emitted filter may contain", () => {
  */
 describe("mapper forms", () => {
   /** A translated shape whose filter names two different metadata keys. */
-  const RECORD_ACTION = "nary-and";
+  const RECORD_ACTION = "logic/and/three-conjuncts";
 
   test("a function mapper resolves the same references as a record mapper", () => {
     const asFunction: FieldMapper = (reference) =>
@@ -585,13 +328,15 @@ describe("mapper forms", () => {
   });
 
   /**
-   * `vf-ne` is the discriminating action for the two tests below: under the corpus mapper, where
-   * `aString` is declared `required: true`, it translates to an inequality over that key. Whether it
-   * still emits its golden expectation is the corpus-shapes suite's job; this pins that the asset
-   * entry is the `$ne` the tests below need, so they cannot pass against some other shape.
+   * `comparison/not-equals/value-first` is the discriminating case for the two tests below: under
+   * the corpus mapper, where `aString` is declared `required: true`, it translates to an inequality
+   * over that key. This pins that precondition, so the tests below cannot pass against some other
+   * shape.
    */
-  test("the discriminating action is an inequality over a required key", () => {
-    expect(literalsOf(recordedFilters("vf-ne"))).toEqual([
+  const VF_NE = "comparison/not-equals/value-first";
+
+  test("the discriminating case is an inequality over a required key", () => {
+    expect(literalsOf(translate(VF_NE).filters)).toEqual([
       { field: "aString", operator: "$ne", value: "one" },
     ]);
   });
@@ -607,7 +352,7 @@ describe("mapper forms", () => {
   ])(
     "%s is optional, so an inequality over it is refused",
     (_label, mapper) => {
-      expect(() => translate("vf-ne", { fieldNameMapper: mapper })).toThrow(
+      expect(() => translate(VF_NE, { fieldNameMapper: mapper })).toThrow(
         /ne is unsafe for optional Chroma metadata because missing fields match the filter/,
       );
     },
@@ -622,39 +367,37 @@ describe("mapper forms", () => {
    * the "every field a filter names is a metadata key the mapper declares" rule above exists.
    */
   test("an unmapped reference becomes a metadata key spelled as the Cerbos path", () => {
-    expect(translate("cs-eq", { fieldNameMapper: {} })).toEqual({
+    expect(
+      translate("string/equals/case-sensitive", { fieldNameMapper: {} }),
+    ).toEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { "request.resource.attr.aString": { $eq: "one" } },
     });
   });
 
   /**
-   * The one operand the wire fixtures cannot pin, and the assertion that it does not matter here.
+   * The one operand a golden file cannot pin, and the assertion that it does not matter here.
    *
-   * `regenerate-wire-fixtures.sh` rewrites `ts-window`'s folded `now() - duration("24h")` literal to
-   * a placeholder, because it differs on every capture — so reading the fixture back means choosing
-   * an instant. On the SQL adapters that choice is load-bearing: the PDP emits nanosecond precision,
-   * which is exactly why they refuse the action, and a tidy millisecond substitution in the loader
-   * would translate cleanly and quietly contradict `actions.json`.
-   *
-   * Here it is inert, because the comparison never reaches a literal — the operand is a computed
-   * expression and `binaryOperands` rejects it first. `corpus.ts` says so; this is what makes it a
-   * fact rather than a claim, and it is why the reader's choice of instant is not a hidden input to
-   * this adapter's classification.
+   * The generator records the folded `now() - duration("24h")` literal as `__NOW_MINUS_24H__`,
+   * because it differs on every capture — so reading the plan back means choosing an instant. On
+   * the SQL adapters that choice is load-bearing: the PDP emits nanosecond precision, and a tidy
+   * millisecond substitute would translate where production refuses. Here it is inert, because the
+   * comparison never reaches a literal — the operand is a computed expression and `binaryOperands`
+   * rejects it first.
    */
-  test.each(["ts-window", "ts-vf"])(
-    "%s is refused for the same reason at either instant precision",
-    (action) => {
-      const message = THROWING_ACTIONS.find(
-        ([candidate]) => candidate === action,
-      )![2];
+  test.each([
+    "timestamp/less-than/relative-window",
+    "timestamp/greater-than/relative-window-value-first",
+  ])("%s is refused for the same reason at either instant precision", (id) => {
+    const nanos = thrownBy(() => translate(id));
+    const millis = thrownBy(() =>
+      translate(id, { now: "2026-08-11T09:13:39.123Z" }),
+    );
 
-      expect(() => translate(action)).toThrow(message);
-      expect(() =>
-        translate(action, { plannedAt: "2026-08-11T09:13:39.123Z" }),
-      ).toThrow(message);
-    },
-  );
+    expect(nanos).toBeInstanceOf(UnsupportedOperatorError);
+    expect(millis).toEqual(nanos);
+    expect((millis as Error).message).toBe((nanos as Error).message);
+  });
 
   /**
    * The same shape the corpus refuses under the declared `integer` mapping translates once the
@@ -662,7 +405,7 @@ describe("mapper forms", () => {
    * adapter's, and it is a declaration the integrator can lift rather than a shape it cannot build.
    */
   test("numericType float admits the fractional threshold the integer declaration refuses", () => {
-    const action = "double-threshold";
+    const action = "comparison/greater-or-equal/fractional-threshold";
     const asFloat = {
       ...FIELD_NAME_MAPPER,
       "request.resource.attr.aNumber": {
@@ -766,19 +509,5 @@ describe("plans the planner cannot produce", () => {
       });
     expect(run).toThrow("Query plan did not contain an expression for operand");
     expectPlainError(run);
-  });
-});
-
-describe("the golden asset", () => {
-  // The asset carries the command that rewrites it, so a reader who opens the file after a failing
-  // assertion is told how to look at the difference. That is only useful while the command exists.
-  test("names a command this package actually defines", () => {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
-    const [runner, run, script] = GOLDEN_REGENERATE_COMMAND.split(" ");
-
-    expect({ runner, run }).toEqual({ runner: "npm", run: "run" });
-    expect(Object.keys(manifest.scripts)).toContain(script);
   });
 });

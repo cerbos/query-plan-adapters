@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "b1"
+  ],
+  "degenerateReason": null,
+  "id": "string/contains/case-sensitive",
+  "intent": "contains with a lower-case needle and a seed that differs only in case.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "one"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/contains/case-sensitive",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.contains(\"one\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "SQLite's LIKE is ASCII-case-insensitive regardless of collation, so a LIKE-based contains matches \"One\"."
+}

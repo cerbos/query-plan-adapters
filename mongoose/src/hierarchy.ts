@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { buildFieldFilter, withNullableGuards } from "./guards";
 import type { Mapper, MongooseFilter } from "./index";
 import { resolveFieldReference, resolveMapperConfig } from "./mapper";
@@ -16,11 +17,11 @@ const parseHierarchyOperand = (
   operand: PlanExpressionOperand,
 ): HierarchyOperand => {
   if (!isExpression(operand) || operand.operator !== "hierarchy") {
-    throw new Error("Hierarchy operators require hierarchy() operands");
+    throw new UnsupportedQueryPlanError("Hierarchy operators require hierarchy() operands");
   }
   const [valueOperand, separatorOperand] = operand.operands;
   if (!valueOperand) {
-    throw new Error("hierarchy operator requires a path operand");
+    throw new UnsupportedQueryPlanError("hierarchy operator requires a path operand");
   }
   // An omitted separator is CEL's default; a present one must be a non-empty string constant.
   let separator = ".";
@@ -30,7 +31,7 @@ const parseHierarchyOperand = (
       typeof separatorOperand.value !== "string" ||
       !separatorOperand.value
     ) {
-      throw new Error("hierarchy separator must be a non-empty string");
+      throw new UnsupportedQueryPlanError("hierarchy separator must be a non-empty string");
     }
     separator = separatorOperand.value;
   }
@@ -40,7 +41,7 @@ const parseHierarchyOperand = (
   if (isValue(valueOperand) && typeof valueOperand.value === "string") {
     return { kind: "value", value: valueOperand.value, separator };
   }
-  throw new Error("hierarchy path must be a field or string value");
+  throw new UnsupportedQueryPlanError("hierarchy path must be a field or string value");
 };
 
 /** `"a.b.c"` → `["a", "a.b"]`: every proper ancestor of the path. */
@@ -59,7 +60,7 @@ export const buildHierarchyFilter = (
 ): MongooseFilter => {
   const [leftOperand, rightOperand] = operands;
   if (!leftOperand || !rightOperand) {
-    throw new Error(`${operator} requires two hierarchy operands`);
+    throw new UnsupportedQueryPlanError(`${operator} requires two hierarchy operands`);
   }
   const left = parseHierarchyOperand(leftOperand);
   const right = parseHierarchyOperand(rightOperand);
@@ -67,14 +68,14 @@ export const buildHierarchyFilter = (
     if (operand.kind === "field") {
       const type = resolveMapperConfig(operand.name, mapper)?.valueType;
       if (type !== undefined && type !== "string") {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix",
         );
       }
     }
   }
   if (left.separator !== right.separator) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} requires one field and one value with the same separator`,
     );
   }
@@ -88,11 +89,11 @@ export const buildHierarchyFilter = (
     field = right;
     value = left;
   } else {
-    throw new Error(`${operator} requires one field and one value`);
+    throw new UnsupportedQueryPlanError(`${operator} requires one field and one value`);
   }
   const { path, relation } = resolveFieldReference(field.name, mapper);
   if (relation?.type === "many") {
-    throw new Error("Hierarchy fields cannot be collection relations");
+    throw new UnsupportedQueryPlanError("Hierarchy fields cannot be collection relations");
   }
 
   const ancestors = hierarchyPrefixes(value.value, value.separator);

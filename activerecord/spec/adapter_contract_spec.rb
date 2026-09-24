@@ -9,16 +9,17 @@
 # * Plans the planner never emits: empty `and`, wrong operand count, unknown kind. The adapter
 #   accepts plans from any source, so these must fail closed.
 # * Cast and division refusals the corpus also covers, kept here to pin which operand type
-#   raises. Not a substitute for the corpus actions.
+#   raises. Not a substitute for the corpus cases.
 #
-# Anything the golden file already pins does not belong here. New shapes go in the corpus.
+# Anything a conformance golden already decides does not belong here. New shapes go in the
+# corpus.
 #
 # No PDP or database server needed (SQLite in memory).
 
 RSpec.describe Cerbos::ActiveRecord do
   # Memoized: the schema is built once.
   before do
-    AdversarialModels.establish!
+    ConformanceStore.establish!
     EdgeCaseModels.establish!
   end
 
@@ -316,7 +317,8 @@ RSpec.describe Cerbos::ActiveRecord do
   # For `R.attr.parent.children`, a missing parent is a missing path and CEL denies. A naive
   # subquery cannot tell that from a parent with no children, so `all`, `!exists` and counts
   # would return denied rows (#309). The nested `fields:` mapping marks the parent hop.
-  # The corpus covers this with w1-*-chain; these tests check each polarity.
+  # The corpus covers this with the `relation/<operator>/*to-one-chain` cases over
+  # `mainCategory`; these tests check each polarity.
   describe "a collection reached through a parent hop" do
     CHAIN_ATTRIBUTES = {
       "request.resource.attr.tag" => described_class.relation(:tags, fields: {
@@ -852,6 +854,66 @@ RSpec.describe Cerbos::ActiveRecord do
 
       expect(sql).to include("(SELECT")
       expect(sql).not_to include("JOIN")
+    end
+  end
+
+  # The per-call `null_attribute_representation: :omitted` (#302, #308). The corpus declares
+  # its conventions per attribute, so only this suite can vary the call's. Runs over the plans
+  # recorded against the current PDP, so new cases are covered automatically.
+  describe "the omitted null representation of the call" do
+    let(:goldens) do
+      ConformanceCorpus.goldens(ConformanceCorpus::PDP_TAGS.first).to_h { |golden| [golden.fetch("id"), golden] }
+    end
+
+    def omitted_call(plan, attributes)
+      described_class.query_plan_to_relation(
+        plan: plan, model: AdvResource, attributes: attributes,
+        null_attribute_representation: :omitted
+      )
+    end
+
+    def carries_null?(node)
+      case node
+      when Hash
+        if node.key?("value")
+          value = node.fetch("value")
+          value.nil? || (value.is_a?(Array) && value.any?(&:nil?))
+        else
+          node.values.any? { |child| carries_null?(child) }
+        end
+      when Array then node.any? { |child| carries_null?(child) }
+      else false
+      end
+    end
+
+    # The refusal keys on the null operand, not on a list of operators:
+    # `hasIntersection(tagNames, ["public", null])` would slip past an eq/ne/in allowlist.
+    it "refuses every recorded plan that carries a null constant" do
+      null_carrying = goldens.values.select { |golden| carries_null?(golden.fetch("plan")) }
+      # The walk still finds nulls, in an equality and inside a list.
+      expect(null_carrying.map { |golden| golden.fetch("id") }).to include(
+        "null/equals/null-literal-on-missing-attribute",
+        "null/has-intersection/literal-list-with-null-element"
+      )
+
+      not_refused = null_carrying.reject do |golden|
+        omitted_call(golden.fetch("plan"), CorpusAttributes::UNDECLARED)
+        false
+      rescue Cerbos::ActiveRecord::UnsupportedOperatorError => e
+        e.message.include?("null constant")
+      end
+      expect(not_refused.map { |golden| golden.fetch("id") }).to be_empty
+    end
+
+    # A per-attribute declaration beats the per-call option, so one policy can mix both.
+    it "lets the declaration of an attribute override the convention of the call" do
+      golden = goldens.fetch("null/equals/null-literal")
+      plan = golden.fetch("plan")
+
+      expect(omitted_call(plan, CorpusAttributes::ATTRIBUTES).pluck(:id).sort)
+        .to eq(golden.fetch("allowed").sort)
+      expect { omitted_call(plan, CorpusAttributes::UNDECLARED) }
+        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /null constant/)
     end
   end
 end

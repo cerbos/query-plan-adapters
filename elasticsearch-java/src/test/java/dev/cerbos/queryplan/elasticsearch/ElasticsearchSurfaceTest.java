@@ -42,12 +42,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Runs emitted clauses against a real Elasticsearch to check how they compose with a caller's
  * query, and measures the store facts behind this adapter's refusals in
- * {@code conformance/actions.json}: an empty array or JSON null is not indexed, an analyzed field
+ * {@code conformance-ledger.json}: an empty array or JSON null is not indexed, an analyzed field
  * is matched per token, and a {@code date} field drops sub-millisecond precision. Needs Docker
  * (Elasticsearch only, no PDP).
  *
- * <p>Clauses always come from the adapter, from a wire fixture where one exists or a hand-built
- * plan otherwise. Refusals are checked against the message {@code actions.json} pins.
+ * <p>Clauses always come from the adapter, from a recorded golden plan where one exists or a
+ * hand-built plan otherwise. A corpus refusal is checked against its {@code unsupported} ledger
+ * entry and the exception type.
  */
 class ElasticsearchSurfaceTest {
 
@@ -64,10 +65,6 @@ class ElasticsearchSurfaceTest {
 
     /** The same timestamps under a {@code date_nanos} mapping, the remedy the refusal names. */
     private static final String DATE_NANOS_INDEX = "date-nanos";
-
-    /** Actions this adapter must refuse, with their pinned messages. */
-    private static final Map<String, String> PINNED_REFUSALS =
-            Corpus.throwingActions(Corpus.actionsFile(), Corpus.ADAPTER);
 
     private static ElasticsearchContainer elasticsearch;
     private static TestElasticsearch es;
@@ -239,12 +236,12 @@ class ElasticsearchSurfaceTest {
     }
 
     /**
-     * The clause the adapter emits for a corpus action. Only the field map differs from
-     * {@link Corpus#OPTIONS}, so refusals happen for the same reason as in the corpus suites.
+     * The clause the adapter emits for a corpus case's recorded plan. Only the field map differs
+     * from {@link Corpus#OPTIONS}, so refusals happen for the same reason as in the harness.
      */
-    private static Map<String, Object> clauseFor(String action, Map<String, String> fieldMap) {
-        return clauseOf(action, ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                Corpus.planFromWireFixture(action),
+    private static Map<String, Object> clauseFor(String caseId, Map<String, String> fieldMap) {
+        return clauseOf(caseId, ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
+                Corpus.plan(caseId),
                 Corpus.OPTIONS.withFieldMap(fieldMap).withScalarTypes(SCALAR_TYPES)));
     }
 
@@ -267,19 +264,17 @@ class ElasticsearchSurfaceTest {
     }
 
     /**
-     * Asserts the adapter refuses a corpus action with the pinned message and the given exception
-     * type.
+     * Asserts the adapter refuses a corpus case the ledger marks {@code unsupported}, with the
+     * given exception type, so the store fact measured here is the one behind that entry.
      */
-    private static IllegalArgumentException assertRefusedAsPinned(
-            String action, Class<? extends IllegalArgumentException> type) {
-        String pinned = PINNED_REFUSALS.get(action);
-        assertNotNull(pinned, () -> action + " is not an action actions.json says this adapter"
-                + " refuses, so there is no pinned message to assert");
+    private static IllegalArgumentException assertRefusedAsLedgered(
+            String caseId, Class<? extends IllegalArgumentException> type) {
+        Corpus.LedgerEntry entry = Corpus.LEDGER.get(caseId);
+        assertNotNull(entry, () -> caseId + " has no entry in conformance-ledger.json");
+        assertEquals("unsupported", entry.status(), caseId);
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> Corpus.translate(action), action);
-        assertTrue(ex.getMessage().contains(pinned), () -> action
-                + " was refused for a reason actions.json does not declare: " + ex.getMessage());
-        assertInstanceOf(type, ex, action);
+                () -> Corpus.translate(caseId), caseId);
+        assertInstanceOf(type, ex, caseId);
         return ex;
     }
 
@@ -295,7 +290,7 @@ class ElasticsearchSurfaceTest {
 
     // -- hand-built plans -----------------------------------------------------------------------
     //
-    // Used only where no wire fixture has the shape needed. The executed clause is still the one
+    // Used only where no golden plan has the shape needed. The executed clause is still the one
     // the adapter emits.
 
     private static PlanResourcesResponse plan(Operand condition) {
@@ -365,7 +360,7 @@ class ElasticsearchSurfaceTest {
     void aClauseInFilterContextScoresNothing() throws Exception {
         List<Map<String, Object>> hits = hits(SURFACE_INDEX, Map.of("query", Map.of(
                 "bool", Map.of("filter",
-                        List.of(clauseFor("cs-eq", Map.of(A_STRING, "aString")))))));
+                        List.of(clauseFor("string/equals/case-sensitive", Map.of(A_STRING, "aString")))))));
 
         assertFalse(hits.isEmpty(), "the filter matched nothing, so there is no score to check");
         for (Map<String, Object> hit : hits) {
@@ -377,7 +372,7 @@ class ElasticsearchSurfaceTest {
     /** The clause composes with a caller's query as a set intersection. */
     @Test
     void aClauseComposesWithACallerQueryAsAnIntersection() throws Exception {
-        Map<String, Object> cerbos = clauseFor("cs-eq", Map.of(A_STRING, "aString"));
+        Map<String, Object> cerbos = clauseFor("string/equals/case-sensitive", Map.of(A_STRING, "aString"));
         Map<String, Object> caller = Map.of("term", Map.of("aBool", Map.of("value", true)));
 
         Set<String> fromCerbos = Set.copyOf(search(SURFACE_INDEX, cerbos));
@@ -425,9 +420,9 @@ class ElasticsearchSurfaceTest {
         assertEquals(List.of("empty", "missing", "present"), search(SEMANTIC_SAFETY_INDEX,
                 notInScenario("collection", Map.of("exists", Map.of("field", "tags")))));
 
-        // So these corpus actions are refused.
-        assertRefusedAsPinned("all-on-empty", UnsupportedPlanShapeException.class);
-        assertRefusedAsPinned("not-exists", UnsupportedPlanShapeException.class);
+        // So these corpus cases are refused.
+        assertRefusedAsLedgered("collection/all/empty-collection", UnsupportedPlanShapeException.class);
+        assertRefusedAsLedgered("collection/exists/negated", UnsupportedPlanShapeException.class);
     }
 
     /**
@@ -468,7 +463,7 @@ class ElasticsearchSurfaceTest {
         assertEquals(List.of("null-only"),
                 search(SEMANTIC_SAFETY_INDEX, notInScenario("flat-null", present)));
 
-        assertRefusedAsPinned("in-null-elem-rel", UnsupportedPlanShapeException.class);
+        assertRefusedAsLedgered("null/in/null-literal-in-resource-list", UnsupportedPlanShapeException.class);
         assertRefused(expression("in", nullValue(), variable(TAG_NAMES)), FLAT_ARRAY_OPTIONS,
                 UnsupportedPlanShapeException.class,
                 "null membership in a document array requires an explicit null-value mapping");
@@ -484,10 +479,10 @@ class ElasticsearchSurfaceTest {
                 notInScenario("null", Map.of("exists", Map.of("field", "owner")))));
 
         // The null-selecting direction is refused...
-        assertRefusedAsPinned("null-eq", UnsupportedPlanShapeException.class);
+        assertRefusedAsLedgered("null/equals/null-literal", UnsupportedPlanShapeException.class);
         // ...and the presence-selecting one translates to `exists`.
         assertEquals(List.of("other-owner"), search(SEMANTIC_SAFETY_INDEX, inScenario("null",
-                clauseFor("null-ne", Map.of("request.resource.attr.owner", "owner")))));
+                clauseFor("null/not-equals/null-literal", Map.of("request.resource.attr.owner", "owner")))));
     }
 
     /**
@@ -528,9 +523,9 @@ class ElasticsearchSurfaceTest {
         assertEquals(List.of("string-empty", "string-value"),
                 search(SEMANTIC_SAFETY_INDEX, inScenario("string", presence)));
 
-        // Undeclared, the same size() is refused, as are the corpus's six size() actions over
+        // Undeclared, the same size() is refused, as are the corpus's size() cases over
         // scalar fields.
-        assertRefusedAsPinned("string-size", UnsupportedPlanShapeException.class);
+        assertRefusedAsLedgered("size/greater-than/string-length", UnsupportedPlanShapeException.class);
         assertRefused(nonEmpty(A_STRING), STRING_OPTIONS, UnsupportedPlanShapeException.class,
                 "size() over a field not declared as a collection");
     }
@@ -545,26 +540,28 @@ class ElasticsearchSurfaceTest {
         // The standard analyzer lowercases "ONE" and splits "several words including one" into
         // tokens, so both match.
         assertEquals(List.of("casing", "exact", "phrase"), search(ANALYZED_MAPPING_INDEX,
-                clauseFor("cs-eq", Map.of(A_STRING, "aString"))));
+                clauseFor("string/equals/case-sensitive", Map.of(A_STRING, "aString"))));
 
         // The remedy: map the field to the exact `keyword` sub-field.
         assertEquals(List.of("exact"), search(ANALYZED_MAPPING_INDEX,
-                clauseFor("cs-eq", Map.of(A_STRING, "aString.keyword"))));
+                clauseFor("string/equals/case-sensitive", Map.of(A_STRING, "aString.keyword"))));
     }
 
     /** The same widening through {@code prefix}, which is per-token on a {@code text} field. */
     @Test
     void anAnalyzedMappingWidensStartsWith() throws Exception {
         assertEquals(List.of("casing", "exact", "phrase", "unrelated"), search(ANALYZED_MAPPING_INDEX,
-                clauseFor("cs-startswith", Map.of(A_STRING, "aString"))));
+                clauseFor("string/starts-with/case-sensitive", Map.of(A_STRING, "aString"))));
         assertEquals(List.of("exact", "unrelated"), search(ANALYZED_MAPPING_INDEX,
-                clauseFor("cs-startswith", Map.of(A_STRING, "aString.keyword"))));
+                clauseFor("string/starts-with/case-sensitive", Map.of(A_STRING, "aString.keyword"))));
     }
 
     /**
      * A {@code date} field stores milliseconds, so a nanosecond value collapses onto the
-     * millisecond and a {@code term} query cannot separate the two. That is why {@code ts-window}
-     * and {@code ts-vf}, whose folded {@code now()} has nanoseconds, are refused.
+     * millisecond and a {@code term} query cannot separate the two. That is why
+     * {@code timestamp/less-than/relative-window} and
+     * {@code timestamp/greater-than/relative-window-value-first}, whose folded {@code now()} has
+     * nanoseconds, are refused.
      */
     @Test
     void anOrdinaryDateMappingCollapsesSubMillisecondPrecision() throws Exception {
@@ -573,7 +570,7 @@ class ElasticsearchSurfaceTest {
                         "term", Map.of("createdAt", Map.of("value", "2024-06-01T00:00:00.123Z"))))));
 
         IllegalArgumentException ex =
-                assertRefusedAsPinned("ts-window", UnsupportedPlanShapeException.class);
+                assertRefusedAsLedgered("timestamp/less-than/relative-window", UnsupportedPlanShapeException.class);
         assertTrue(ex.getMessage().contains("Sub-millisecond timestamp literals"), ex.getMessage());
     }
 
@@ -649,8 +646,9 @@ class ElasticsearchSurfaceTest {
     // -- regex, against real Lucene -------------------------------------------------------------
     //
     // Hand-built plans that execute the Lucene behaviour behind the adapter's regex handling. The
-    // corpus carries the same shapes (`regex-optional-operators`, `regex-dot`, `regex-alternation`,
-    // `regex-grouped`).
+    // corpus carries the same shapes (`regex/matches/lucene-reserved-characters-in-class`,
+    // `regex/matches/dot-excludes-newline`, `regex/matches/top-level-alternation-single-characters`,
+    // `regex/matches/grouped-alternation`).
 
     private static Result translateMatches(String pattern) {
         return ElasticsearchQueryPlanAdapter.toElasticsearchQuery(

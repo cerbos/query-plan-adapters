@@ -300,7 +300,7 @@ whether a NULL column is sent as explicit `null` (allowed) or omitted (a CEL err
 adapter needs none.** Every null-*selecting* direction (`x == null`, `!(x != null)`, positive
 membership in a list containing `null`) already throws, and the directions that translate
 (`x != null`, `!(x == null)`) lower to `exists`, which denies a document without the field under
-either convention. `null-eq` and `null-eq-missing` are fail-closed for the same reason
+either convention. `null/equals/null-literal` and `null/equals/null-literal-on-missing-attribute` are fail-closed for the same reason
 ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
 
 `ne`, negated leaf queries and safe negated membership containing `null` carry an `exists` guard, so
@@ -463,75 +463,32 @@ would change the security and performance profile of every filter.
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions using 29 hostile
-seed documents and real Elasticsearch queries, in both strict evaluation modes: the harness takes
-`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true`, rejects other values, and CI runs both
-against a PDP configured the same way. The Spring Data adapter defines the reference semantics for
-this compatibility snapshot. Each PDP call has a 30-second deadline, so a stalled RPC fails the run.
+The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
+indexes the 29 seed documents in a real Elasticsearch, translates every plan recorded from the
+pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
+the current PDP (0.55.0), where the total is every golden case in the tier:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 139 reference conformance actions plus regex and timestamp probes (141 actions) |
-| Fail-closed | 181 reference actions plus ordered list indexing/`get-field`, `int()`/`double()` casts and `filter()`/`map()` used as a condition or a conjunct (190 actions total) |
-| Representation-independent | `null-eq-missing` — rejected like every other null-selecting comparison, so no NULL-representation option is required |
-| Attribute NULL convention | Declared, in order to REFUSE. An explicitly-null value and a missing field are the same document to every query the DSL can express, so the equality family over attributes in `explicitNullAttributes` throws instead of answering narrowly (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for indexed attributes instead of `has(R.attr.x)` |
+| core | 25 / 26 |
+| extended | 31 / 80 |
+| adversarial | 85 / 227 |
 
-Oracle-tested shapes include value-first comparisons, literal-safe wildcards, safe null/missing
-polarities, positive `exists` and non-empty checks, negated `all`, millisecond-exact timestamp
-ordering, chained nested paths and hierarchy relations against a constant. Fail-closed shapes are
-those in [Unsupported shapes](#unsupported-shapes). Every fail-closed message is pinned in
-`conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
-
-`ElasticsearchTranslatorTest` asserts the same classification offline, plus the **distribution of
-refusals over the sites in the walk that raise them**. 191 of the corpus's 333 shapes are refused
-here — the 190 fail-closed actions plus `null-eq-missing` — across 29 sites, with 83 reaching the
-computed-operand refusal:
-
-| Rejection site | Actions |
-| --- | --- |
-| computed leaf operand | 83 |
-| field-to-field | 22 |
-| count over an undeclared collection | 12 |
-| explicit null | 8 |
-| count threshold | 5 |
-| constant receiver | 4 |
-| negated exists over a collection | 5 |
-| null in an intersection | 4 |
-| positive all over a collection | 5 |
-| regex dialect syntax | 5 |
-| conditional value as a condition | 3 |
-| two-list difference | 4 |
-| collection emptiness | 2 |
-| computed collection macro | 2 |
-| count over a computed collection | 2 |
-| exists_one | 2 |
-| flat scalar collection macro | 3 |
-| hierarchy path built from a field | 2 |
-| negated hasIntersection over a collection | 2 |
-| negated membership in a collection | 3 |
-| sub-millisecond timestamp | 2 |
-| top-level regex alternation | 2 |
-| whole-list comparison | 2 |
-| empty hierarchy delimiter | 1 |
-| list-valued member | 1 |
-| literal exists-one | 1 |
-| null in a document array | 2 |
-| regex brace syntax | 1 |
-| unanchored regex | 1 |
-
-The list is asserted **total** (a shape refused by accident matches no site and fails) and the
-counts are pinned, so a shape moving between sites shows up as a diff even when
-`conformance/actions.json` is unchanged. No refusal is an unmapped field — the accident
-[#326](https://github.com/cerbos/query-plan-adapters/issues/326) was filed for.
+Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
+with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
+[Unsupported shapes](#unsupported-shapes), and
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
+cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
+pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute`: the planner folds
+`has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those documents, so use
+`R.attr.x != null` for indexed attributes instead of `has(R.attr.x)`.
 
 ## Mapping hazards
 
 The conformance contract proves the *plan* side. The other half is the *mapping*: **the documents
 the query reads must be the documents the application built the resource attributes from.** The
-first six rows are the shared corpus's hazards, in its order; the last two are specific to this
-adapter, since no other store rewrites a stored value or coerces a query term before comparing (see
-`conformance/README.md`, "Mapping hazards").
+first six rows are the hazards every adapter's mapping faces; the last two are specific to this
+adapter, since no other store rewrites a stored value or coerces a query term before comparing.
 
 This adapter **builds no subquery**: a collection is a `nested` field on the same document, and the
 emitted DSL has no `has_child`, no `has_parent`, and no terms *lookup* — `terms` always carries an
@@ -544,7 +501,7 @@ inline list.
 | Subtype discrimination | **Caller-owned** | The index or alias you query, and any filtered alias on it. The adapter never sees the index, so it cannot check that the searched documents are the ones the attributes were built from. An alias whose filter differs from your read path, or an index holding several document kinds, needs its discriminator added to your `bool.filter` |
 | To-one relation used as a collection | Not applicable — a `nested` field holds exactly the inner objects the application indexed | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `w1-exists-chain`, `w1-size-chain` and `w1-in-chain` are oracle-tested; `w1-all-chain`, `w1-not-exists-chain`, `w1-size-zero-chain`, `w1-size-nonneg-chain`, `w1-not-in-chain`, `w1-not-hasint-chain` and `w1-not-size-chain` are in `adapterUnsupported` and throw | None — this is the empty-array limitation, not a mapping choice: Elasticsearch cannot tell a document with no parent from one whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Reproduced** for the safe polarities, **rejected** for the rest — `relation/exists/to-one-chain`, `relation/size/non-empty-to-one-chain` and `relation/in/to-one-chain` pass; `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain`, `relation/size/zero-to-one-chain`, `relation/size/non-negative-to-one-chain`, `relation/in/negated-to-one-chain`, `relation/has-intersection/negated-to-one-chain` and `relation/size/negated-non-empty-to-one-chain` are `unsupported` in the ledger and throw | None — this is the empty-array limitation, not a mapping choice: Elasticsearch cannot tell a document with no parent from one whose parent has no children, so the polarities that would read that as an allow are refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 | Analyzed (`text`) field mapping | **Caller-owned** | `GET <index>/_mapping`. Every field in `fieldMap` must be `keyword`, `boolean`, numeric or `date`. On a `text` field the emitted `term`, `terms`, `prefix`, `wildcard` and `regexp` queries match tokens, not the stored value. See below |
 | Type-blind term coercion | **Rejected** without a declaration, **reproduced** with one | `scalarTypes` must state each field's CEL type and agree with the mapping. Elasticsearch coerces a query term onto the field (`"true"` matches a `boolean`, `"5"` a number), while CEL's cross-type equality is `false`. An undeclared field is refused; a declared one is answered as CEL does ([Declaring scalar types](#declaring-scalar-types)). `ElasticsearchSurfaceTest.aTermQueryCoercesItsValueOntoTheMappedTypeWhichIsWhyScalarTypesAreRequired` measures it against a real server ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)) |
 
@@ -555,8 +512,8 @@ precondition is yours and its failure is silent. `R.attr.aString == "string"` be
 `{"term": {"aString": {"value": "string"}}}`, which on a `text` field also matches
 `"a string of words"` (a token is `string`) and `"STRING"` (the analyzer lowercases) — both
 documents `check()` denies. `ElasticsearchSurfaceTest.anAnalyzedMappingWidensEqualityAndTheKeywordSubFieldRestoresIt`
-and `…WidensStartsWith` measure the gap against a real server, using the `cs-eq` / `cs-startswith`
-wire fixtures so only the mapping differs.
+and `…WidensStartsWith` measure the gap against a real server, using the recorded
+`string/equals/case-sensitive` / `string/starts-with/case-sensitive` plans so only the mapping differs.
 
 **Fix the mapping, not the operator.** Give the field a `keyword` sub-field and map to it:
 
@@ -583,8 +540,8 @@ applies to every field, and quietly returns more rows.
 - **Breaking.** `size()` over a field declared in neither `nestedPaths` nor `collectionFields`
   throws. `size(aString) > 0` used to emit `exists` (over-granting the empty string) and
   `size(aNumber) > 0` matched rows where CEL errors. A flat `keyword` array now needs
-  `withCollectionFields(...)`. The pinned messages for `string-size`, `size-huge-gt` and
-  `size-huge-lt` changed. `size(c) != 0` now translates.
+  `withCollectionFields(...)`. The pinned messages for `size/greater-than/string-length`, `size/greater-than/huge-threshold` and
+  `size/less-than/huge-threshold` changed. `size(c) != 0` now translates.
 - **Breaking.** Four shapes that returned a filter now throw: list/map literals where a scalar is
   expected (and a map literal as `in`'s collection); non-finite numbers; a `null` element in a
   `hasIntersection` literal on the first operand, in a `map()` projection, or inside a nested
@@ -604,7 +561,7 @@ applies to every field, and quietly returns more rows.
 - Positive `exists` over a flat scalar collection translates a lambda equality with a literal.
 - `except` throws by name in every position, naming the two-list signature and the `exists`
   equivalent. The old lambda-form translation was unreachable from any real plan.
-- A bare CEL ternary (`ternary-bare`, `w1-ternary-chain-cond`, and a ternary lambda body) is refused
+- A bare CEL ternary (`conditional/ternary/boolean-branches`, `relation/ternary/to-one-chain-condition`, and a ternary lambda body) is refused
   with `if (CEL ternary) cannot be expressed…` instead of `if requires exactly 2 operands, got 3`.
 - An integral double outside `[-2^63, 2^63)` is bound as a double instead of saturating to
   `Long.MAX_VALUE`.
@@ -636,8 +593,8 @@ JDK 17+; sources compile with `options.release = 17`. Gradle comes from the comm
 
 | Suite | What it asserts | Needs |
 |---|---|---|
-| `ElasticsearchTranslatorTest` | the Query DSL for every corpus action against `golden/expectations.json`, and the pinned refusal message for every action this adapter must reject | nothing — plans come from `conformance/wire-fixtures/` |
-| `ElasticsearchAdversarialConformanceTest` | the documents those queries return, against per-row `check()` | a pinned Cerbos PDP and Elasticsearch (Testcontainers) |
+| `ElasticsearchAdversarialConformanceTest` | the conformance harness: every recorded golden plan, for both pinned PDPs, returns exactly the documents `check()` allowed, or throws `UnsupportedPlanShapeException` where the ledger says `unsupported` | Elasticsearch (Testcontainers); no PDP |
+| `ElasticsearchTranslatorTest` | what can be asked without a store: the null-convention and timestamp-precision refusals, that an unmapped field is not a refusal, and rules over every emitted query (fields mapped, nested scopes, no null literal, escaped wildcards, plain JDK values) | nothing — plans come from `conformance/golden/` |
 | `ElasticsearchSurfaceTest` | what a real server does with emitted clauses, and the store facts the corpus reasons cite — unindexed empty arrays (nested and flat), JSON nulls and null elements, an indexed empty string, analyzed fields, Lucene regex including whole-field alternation, wildcard escaping, `date` vs `date_nanos` precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a few labelled shapes the corpus does not carry yet | nothing |
 
@@ -648,17 +605,3 @@ example does not do (its client must match the baseline major):
 ```bash
 ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE ./gradlew test
 ```
-
-### Regenerating the golden expectations
-
-`golden/expectations.json` holds the Query DSL this adapter is pinned to emit per corpus action —
-the translator's return value verbatim (plan kind, plus the query for a conditional plan), with
-object keys sorted because `Map.of` iteration order varies per JVM run. There is no rendering step,
-so it declares no generator version. It is reviewed as a diff, never hand-edited, and CI never
-regenerates it:
-
-```bash
-./gradlew goldenUpdate
-```
-
-Format and rationale: `conformance/README.md`, "Golden expectations".

@@ -1,0 +1,102 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: logic
+description: 'Boolean composition inside one condition: and, or, not, bare boolean attributes.'
+cases:
+- id: 'logic/and/three-conjuncts'
+  tier: core
+  intent: 'A match.all of three conditions (bool, numeric >=, string !=).'
+  trap: 'The planner may emit an n-ary and; an adapter that assumes exactly two operands drops a conjunct.'
+  condition:
+    match:
+      all:
+        of:
+        - expr: R.attr.aBool
+        - expr: 'R.attr.aNumber >= 0'
+        - expr: 'R.attr.aString != "one"'
+- id: 'logic/bare-attribute/boolean'
+  tier: core
+  intent: The whole condition is a bare boolean attribute (R.attr.aBool) with no operator.
+  trap: 'The plan root is a variable, not an operator node; a translator that expects an operator at the root fails.'
+  condition:
+    match:
+      expr: R.attr.aBool
+- id: 'logic/not/bare-boolean-attribute'
+  tier: core
+  intent: 'Negation of a bare boolean attribute at the root (!R.attr.aBool).'
+  trap: Rows where aBool is missing must stay denied; NOT col or col = false must not treat missing as false.
+  condition:
+    match:
+      expr: '!R.attr.aBool'
+- id: 'logic/not/deep-mixed-nesting'
+  tier: extended
+  intent: 'A negation over five or more levels of and/or/not mixing arithmetic, startsWith with a metacharacter, exists and a field-to-field comparison.'
+  trap: 'Precedence and three-valued logic must survive deep nesting under NOT; a NULL leaf that becomes FALSE leaks rows once negated.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool && (R.attr.aNumber + 1.0 > 2.0 || R.attr.aString.startsWith("100%"))) || (!R.attr.aBool && R.attr.tags.exists(t, t.name == "public" || t.name == R.attr.aString)))'
+- id: 'logic/not/double-negation'
+  tier: adversarial
+  intent: 'A boolean attribute under two nested negations (!(!aBool)).'
+  trap: 'Mis-flattening nested NOTs, or NOT over a NULL column under three-valued logic, admits or drops rows where aBool is missing.'
+  condition:
+    match:
+      expr: '!(!R.attr.aBool)'
+- id: 'logic/not/greater-than'
+  tier: core
+  intent: 'not over a bare ordering: !(aNumber > 1).'
+  trap: Dropping the negation swaps the allowed and denied sets.
+  condition:
+    match:
+      expr: '!(R.attr.aNumber > 1)'
+- id: 'logic/not/less-than'
+  tier: core
+  intent: 'not over a bare ordering: !(aNumber < 2).'
+  trap: Dropping the negation swaps the two halves of the 17/5 split.
+  condition:
+    match:
+      expr: '!(R.attr.aNumber < 2)'
+- id: 'logic/not/over-and'
+  tier: core
+  intent: 'not over a conjunction, the shape a DENY rule produces.'
+  trap: 'Distributing the negation wrongly (De Morgan) drops a1, which is allowed only because the second conjunct fails.'
+  condition:
+    match:
+      expr: '!(R.attr.aBool && R.attr.aString != "one")'
+- id: 'logic/not/triple-negation'
+  tier: adversarial
+  intent: 'A boolean attribute under three nested negations (!(!(!aBool))).'
+  trap: 'Collapsing an odd number of NOTs wrongly, or NOT over NULL, returns rows with a missing aBool that CEL denies.'
+  condition:
+    match:
+      expr: '!(!(!R.attr.aBool))'
+- id: 'logic/or/at-root'
+  tier: core
+  intent: A disjunction at the root of the condition (match.any of two comparisons).
+  trap: Dropping either disjunct changes the answer (a2 and a5 come only from aNumber < 0).
+  condition:
+    match:
+      any:
+        of:
+        - expr: R.attr.aBool
+        - expr: R.attr.aNumber < 0
+- id: 'logic/or/comparison-or-exists'
+  tier: adversarial
+  intent: A comparison OR an exists() over the related tags.
+  trap: A subquery emitted as an inner join is fine under and but drops rows under or; keeping only the left side returns 14 rows against an oracle of 16.
+  condition:
+    match:
+      any:
+        of:
+        - expr: R.attr.aBool
+        - expr: 'R.attr.tags.exists(t, t.name == "public")'
+- id: 'logic/or/comparison-or-in-resource-list'
+  tier: adversarial
+  intent: 'A comparison OR "public" in R.attr.tagNames, the membership spelling of the related exists.'
+  trap: Joining the related table instead of a correlated subquery drops rows that only the comparison allows.
+  condition:
+    match:
+      any:
+        of:
+        - expr: R.attr.aBool
+        - expr: '"public" in R.attr.tagNames'

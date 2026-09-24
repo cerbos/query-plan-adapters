@@ -1,0 +1,75 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a6",
+    "b1",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "g1",
+    "h2",
+    "h5",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/modulo/negative-dividend",
+  "intent": "Integer modulo compared with 1 (int(aNumber) % 2 == 1).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "mod"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/modulo/negative-dividend",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aNumber) % 2 == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "CEL truncates toward zero so -5 % 2 is -1 and denies; a floored modulo yields 1 and over-grants a5. int() is needed because % has no double overload."
+}

@@ -1,0 +1,47 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: timestamp
+description: 'Timestamp comparisons, now(), durations.'
+cases:
+- id: 'timestamp/equals/field-to-field-without-conversion'
+  tier: adversarial
+  intent: Equality between two timestamp attributes without timestamp() wrappers (R.attr.createdAt == R.attr.updatedAt).
+  trap: 'Bare attributes compare as RFC 3339 strings in CEL; native timestamp columns compare instants, so two spellings of one instant match in the store while CEL denies.'
+  condition:
+    match:
+      expr: R.attr.createdAt == R.attr.updatedAt
+- id: 'timestamp/equals/literal-instant'
+  tier: extended
+  intent: timestamp(field) == a literal UTC timestamp.
+  trap: 'Equality must compare parsed instants, not raw strings; a4 is the exact-match witness.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T00:00:00Z")'
+- id: 'timestamp/equals/literal-instant-non-utc-offset'
+  tier: adversarial
+  intent: 'timestamp(field) == the same instant written with a +02:00 offset.'
+  trap: 'CEL compares instants, so a4 must still match; a string comparison against the offset spelling drops it.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) == timestamp("2024-06-01T02:00:00+02:00")'
+- id: 'timestamp/greater-than/relative-window-value-first'
+  tier: adversarial
+  intent: 'now() - duration("24h") > timestamp(field), the constant instant on the left.'
+  trap: The planner keeps source order; reading operands positionally inverts the comparison and flips the whole set.
+  condition:
+    match:
+      expr: 'now() - duration("24h") > timestamp(R.attr.createdAt)'
+- id: 'timestamp/less-than/relative-window'
+  tier: extended
+  intent: 'timestamp(field) < now() - duration("24h"), which the planner folds to a constant instant.'
+  trap: 'The folded timestamp literal must be compared as an instant, not a string; a3 has no createdAt and must deny.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) < now() - duration("24h")'
+- id: 'timestamp/not-equals/literal-instant'
+  tier: extended
+  intent: 'timestamp(field) != a literal UTC timestamp.'
+  trap: 'Returns every row except a4 and a3, whose missing createdAt errors in CEL; a negation that admits NULL over-grants a3.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")'

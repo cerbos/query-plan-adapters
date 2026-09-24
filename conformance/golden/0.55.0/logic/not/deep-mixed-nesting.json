@@ -1,0 +1,179 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a7",
+    "b2",
+    "b3",
+    "c2",
+    "d2",
+    "g1",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "logic/not/deep-mixed-nesting",
+  "intent": "A negation over five or more levels of and/or/not mixing arithmetic, startsWith with a metacharacter, exists and a field-to-field comparison.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "request.resource.attr.aNumber"
+                                        },
+                                        {
+                                          "value": 1
+                                        }
+                                      ],
+                                      "operator": "add"
+                                    }
+                                  },
+                                  {
+                                    "value": 2
+                                  }
+                                ],
+                                "operator": "gt"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "100%"
+                                  }
+                                ],
+                                "operator": "startsWith"
+                              }
+                            }
+                          ],
+                          "operator": "or"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tags"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "variable": "t.name"
+                                              },
+                                              {
+                                                "value": "public"
+                                              }
+                                            ],
+                                            "operator": "eq"
+                                          }
+                                        },
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "variable": "t.name"
+                                              },
+                                              {
+                                                "variable": "request.resource.attr.aString"
+                                              }
+                                            ],
+                                            "operator": "eq"
+                                          }
+                                        }
+                                      ],
+                                      "operator": "or"
+                                    }
+                                  },
+                                  {
+                                    "variable": "t"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "exists"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "logic/not/deep-mixed-nesting",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aBool && (R.attr.aNumber + 1.0 > 2.0 || R.attr.aString.startsWith(\"100%\"))) || (!R.attr.aBool && R.attr.tags.exists(t, t.name == \"public\" || t.name == R.attr.aString)))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Precedence and three-valued logic must survive deep nesting under NOT; a NULL leaf that becomes FALSE leaks rows once negated."
+}

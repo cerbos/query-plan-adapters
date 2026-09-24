@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/contains/negated-one-hop",
+  "intent": "Negated contains() on a parent field (!parent.aString.contains(\"done\")).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                },
+                {
+                  "value": "done"
+                }
+              ],
+              "operator": "contains"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/contains/negated-one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.parent.aString.contains(\"done\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "NOT LIKE over a missing parent or parent string must stay UNKNOWN and deny; a negation that is true for absent parents over-grants (#430)."
+}

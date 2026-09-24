@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "cast/int/negated-malformed-string",
+  "intent": "!(int(aString) > 50): a string-to-int conversion under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 50
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/int/negated-malformed-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(int(R.attr.aString) > 50)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix or yields 0, so the negation turns those errors into matches."
+}

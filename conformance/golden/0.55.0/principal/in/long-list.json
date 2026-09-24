@@ -1,0 +1,67 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a9",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "principal/in/long-list",
+  "intent": "An optional resource attribute in an 11-value principal list, sent by the planner as one list operand (aOptionalString in P.attr.manyTeams).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "value": [
+              "set",
+              "same",
+              "",
+              "%_o",
+              "X",
+              "Y",
+              "MIRROR",
+              "filler-1",
+              "filler-2",
+              "filler-3",
+              "filler-4"
+            ]
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/in/long-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aOptionalString in P.attr.manyTeams"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A missing needle is a CEL error that denies and must not be dropped (#411); the list holds \"\" and \"%_o\", so coercing missing to '' or an unescaped LIKE over-grants."
+}

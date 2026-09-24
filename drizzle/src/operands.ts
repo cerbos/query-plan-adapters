@@ -1,4 +1,5 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /** Shape tests over the planner's operand union, and the lambda-unpacking every macro shares. */
 
@@ -59,19 +60,19 @@ export const extractLambdaComponents = (
   context: string,
 ): { variable: NamedOperand; expression: PlanExpressionOperand } => {
   if (!isOperatorCall(lambdaOperand, "lambda")) {
-    throw new Error(`${context} must be a lambda expression`);
+    throw new UnsupportedQueryPlanError(`${context} must be a lambda expression`);
   }
   if (lambdaOperand.operands.length !== 2) {
-    throw new Error("Lambda operand requires exactly two operands");
+    throw new UnsupportedQueryPlanError("Lambda operand requires exactly two operands");
   }
   const [first, second] = lambdaOperand.operands;
   if (!first || !second) {
-    throw new Error("Lambda operand is missing operands");
+    throw new UnsupportedQueryPlanError("Lambda operand is missing operands");
   }
 
   if (!isNameOperand(second)) {
     if (!isNameOperand(first)) {
-      throw new Error("Lambda operand requires a variable operand");
+      throw new UnsupportedQueryPlanError("Lambda operand requires a variable operand");
     }
     return { variable: first, expression: second };
   }

@@ -1,0 +1,91 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a9",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "principal/except/size-after-removing-resource-value",
+  "intent": "size of a principal list minus a one-element list holding a resource attribute, compared with the list's own size.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": [
+                          "set",
+                          "same",
+                          "",
+                          "%_o",
+                          "X",
+                          "Y",
+                          "MIRROR",
+                          "filler-1",
+                          "filler-2",
+                          "filler-3",
+                          "filler-4"
+                        ]
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aOptionalString"
+                            }
+                          ],
+                          "operator": "list"
+                        }
+                      }
+                    ],
+                    "operator": "except"
+                  }
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 11
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/except/size-after-removing-resource-value",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(P.attr.manyTeams.except([R.attr.aOptionalString])) < size(P.attr.manyTeams)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Removal is exact and case-sensitive: a1 (\"set\") and b2 (\"%_o\") shrink the list, c1 (\"Set\") does not; LIKE or case-folding comparisons and missing-attribute rows (a2) over-grant."
+}

@@ -1,0 +1,163 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: principal
+description: 'Macros and membership over principal-side collections (P.attr.*).'
+cases:
+- id: 'principal/all/empty-list'
+  tier: adversarial
+  intent: all() over an empty principal list compared with a resource attribute.
+  trap: 'all() over an empty list is vacuously true for every row; the plan folds to always-allowed.'
+  condition:
+    match:
+      expr: '(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
+  degenerate:
+    oracle: total
+    reason: 'P.attr.emptyTeams is an empty list, so all() over it is true for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/all/long-list'
+  tier: adversarial
+  intent: 'all() with != over an 11-element principal list, sent by the planner as a value list.'
+  trap: True only for a present value that matches no element; a plain NOT IN admits the rows whose attribute is missing.
+  condition:
+    match:
+      expr: 'P.attr.manyTeams.all(t, R.attr.aOptionalString != t)'
+- id: 'principal/all/negated-empty-list'
+  tier: adversarial
+  intent: Negated all() over an empty principal list.
+  trap: '!all() over an empty list is false for every row; the plan folds to always-denied.'
+  condition:
+    match:
+      expr: '!(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
+  degenerate:
+    oracle: empty
+    reason: 'P.attr.emptyTeams is an empty list, so all() over it is true and its negation false for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/all/negated-long-list'
+  tier: adversarial
+  intent: 'Negated all() over an 11-element principal list compared with an optional resource attribute.'
+  trap: Rows missing aOptionalString error in CEL and must stay denied rather than be granted by a negated null comparison.
+  condition:
+    match:
+      expr: '!(P.attr.manyTeams.all(t, t == R.attr.aOptionalString))'
+- id: 'principal/all/short-list'
+  tier: extended
+  intent: 'all() with != over a 3-element principal list, unrolled by the planner into an and-chain of inequalities.'
+  trap: 'Rows missing the attribute must deny and present non-matching rows allow; a NOT IN rewrite admits the missing rows.'
+  condition:
+    match:
+      expr: 'P.attr.fewTeams.all(t, R.attr.aOptionalString != t)'
+- id: 'principal/except/size-after-removing-resource-value'
+  tier: adversarial
+  intent: 'size of a principal list minus a one-element list holding a resource attribute, compared with the list''s own size.'
+  trap: 'Removal is exact and case-sensitive: a1 ("set") and b2 ("%_o") shrink the list, c1 ("Set") does not; LIKE or case-folding comparisons and missing-attribute rows (a2) over-grant.'
+  condition:
+    match:
+      expr: 'size(P.attr.manyTeams.except([R.attr.aOptionalString])) < size(P.attr.manyTeams)'
+- id: 'principal/exists-one/long-list'
+  tier: extended
+  intent: 'exists_one() over an 11-element principal list compared with a resource attribute.'
+  trap: 'The planner cannot fold exists_one; lowering it like exists() ignores the exactly-one count, so translate it faithfully or refuse.'
+  condition:
+    match:
+      expr: 'P.attr.manyTeams.exists_one(t, t == R.attr.aOptionalString)'
+- id: 'principal/exists/empty-list'
+  tier: adversarial
+  intent: exists() over an empty principal list compared with a resource attribute.
+  trap: 'exists() over an empty list is false for every row; the planner folds the plan to always-denied and the adapter must honour the fold.'
+  condition:
+    match:
+      expr: '(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
+  degenerate:
+    oracle: empty
+    reason: 'P.attr.emptyTeams is an empty list, so exists() over it is false for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/exists/list-of-structs'
+  tier: extended
+  intent: 'exists() over 11 principal structs comparing each struct''s name with a resource attribute.'
+  trap: 'The planner emits list/struct/field-select expressions, not a literal value list; a fold that assumes plain values cannot project .name.'
+  condition:
+    match:
+      expr: 'P.attr.manyStructs.exists(t, t.name == R.attr.aOptionalString)'
+- id: 'principal/exists/list-of-structs-missing-field'
+  tier: adversarial
+  intent: exists() over principal structs that all lack the name field.
+  trap: 'Every comparison is a missing-field error; reading the absent field as null or empty string emits a matching filter instead of always-denied.'
+  condition:
+    match:
+      expr: 'P.attr.missingStructs.exists(t, t.name == R.attr.aOptionalString)'
+  degenerate:
+    oracle: empty
+    reason: 'Every element of P.attr.missingStructs lacks name, so every comparison is a missing-field error: the planner folds the plan to always-denied.'
+- id: 'principal/exists/list-of-structs-with-null-field'
+  tier: adversarial
+  intent: exists() over principal structs whose name fields are all null.
+  trap: 'A null name must not match a missing aOptionalString; SQL-style null equality or an IS NULL lowering over-grants.'
+  condition:
+    match:
+      expr: 'P.attr.nullableStructs.exists(t, t.name == R.attr.aOptionalString)'
+  degenerate:
+    oracle: empty
+    reason: 'Every element of P.attr.nullableStructs carries a null name, which equals no set aOptionalString, and a NULL aOptionalString is a missing attribute: CEL denies every seed.'
+- id: 'principal/exists/long-list'
+  tier: adversarial
+  intent: 'exists over an 11-element principal list comparing a resource attribute, which the planner sends as a value list instead of unrolling.'
+  trap: 'Rows missing aOptionalString must deny, so it is not a plain IN; matching is exact and case-sensitive with LIKE metacharacters inert (''%_o'', '''', ''Set'') (cerbos/cerbos#2570, #2817).'
+  condition:
+    match:
+      expr: 'P.attr.manyTeams.exists(t, R.attr.aOptionalString == t)'
+- id: 'principal/exists/negated-empty-list'
+  tier: adversarial
+  intent: Negated exists() over an empty principal list.
+  trap: '!exists() over an empty list is true for every row, missing-attribute rows included; the plan folds to always-allowed.'
+  condition:
+    match:
+      expr: '!(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
+  degenerate:
+    oracle: total
+    reason: 'P.attr.emptyTeams is an empty list, so exists() over it is false and its negation true for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/exists/negated-long-list'
+  tier: adversarial
+  intent: 'Negated exists() over an 11-element principal list compared with an optional resource attribute.'
+  trap: 'Rows missing aOptionalString error in CEL and must stay denied; SQL NOT IN or NOT over NULL over-grants them.'
+  condition:
+    match:
+      expr: '!(P.attr.manyTeams.exists(t, t == R.attr.aOptionalString))'
+- id: 'principal/exists/shadowed-lambda-variable'
+  tier: adversarial
+  intent: 'exists() over a principal list whose body is a resource-list exists() rebinding the same variable name.'
+  trap: 'Substituting principal values for the outer t inside the inner lambda, instead of letting the inner t shadow it, rewrites t.name against the wrong binding.'
+  condition:
+    match:
+      expr: 'P.attr.manyTeams.exists(t, R.attr.tags.exists(t, t.name == "public"))'
+- id: 'principal/exists/short-list'
+  tier: extended
+  intent: 'exists over a 3-element principal list, which the planner unrolls into an or-chain of equalities.'
+  trap: 'Rows missing aOptionalString must deny; the unrolled chain must match the long-list value-list semantics exactly.'
+  condition:
+    match:
+      expr: 'P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)'
+- id: 'principal/filter/size-of-filtered-long-list'
+  tier: extended
+  intent: 'size() of a principal list filtered by equality with a resource attribute, compared > 0.'
+  trap: The planner cannot fold filter() over a principal list; size() lowerings that expect a named resource collection must refuse rather than guess.
+  condition:
+    match:
+      expr: 'size(P.attr.manyTeams.filter(t, t == R.attr.aOptionalString)) > 0'
+- id: 'principal/in/long-list'
+  tier: adversarial
+  intent: 'An optional resource attribute in an 11-value principal list, sent by the planner as one list operand (aOptionalString in P.attr.manyTeams).'
+  trap: 'A missing needle is a CEL error that denies and must not be dropped (#411); the list holds "" and "%_o", so coercing missing to '''' or an unescaped LIKE over-grants.'
+  condition:
+    match:
+      expr: R.attr.aOptionalString in P.attr.manyTeams
+- id: 'principal/in/short-list'
+  tier: adversarial
+  intent: 'An optional resource attribute in a 3-value principal list, which takes the small-list plan (aOptionalString in P.attr.fewTeams).'
+  trap: 'As with the long list, a missing needle must deny (#411), and the "" and "%_o" elements punish coercing missing to '''' and LIKE metacharacter leaks.'
+  condition:
+    match:
+      expr: R.attr.aOptionalString in P.attr.fewTeams
+- id: 'principal/map/membership-in-mapped-list'
+  tier: extended
+  intent: A resource attribute in a principal list mapped by concatenating each element with another resource attribute.
+  trap: The planner cannot fold map() over a principal list and the mapped values depend on the row; translate the computed list or refuse.
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString in P.attr.manyTeams.map(t, t + R.attr.aString)'

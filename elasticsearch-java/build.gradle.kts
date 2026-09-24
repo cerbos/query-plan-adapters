@@ -41,7 +41,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     testImplementation("org.testcontainers:testcontainers-elasticsearch:2.0.5")
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
-    // JsonFormat decodes conformance/wire-fixtures/*.json (see Corpus.planFromWireFixture).
+    // JsonFormat decodes the recorded plans in conformance/golden/ (see Corpus.goldens).
     testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
@@ -49,22 +49,14 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    val strictEvaluation = providers.environmentVariable("ADAPTER_TEST_STRICT_EVALUATION")
-        .getOrElse("false")
-    require(strictEvaluation in listOf("false", "true")) {
-        "ADAPTER_TEST_STRICT_EVALUATION must be false or true"
-    }
-    inputs.property("strictEvaluation", strictEvaluation)
-    systemProperty("adapter.test.strictEvaluation", strictEvaluation)
-
     // The suites read these at runtime, so Gradle cannot see them unless they are declared.
-    // Without this, `:test` stays UP-TO-DATE after a corpus or golden edit.
+    // Without this, `:test` stays UP-TO-DATE after a corpus or ledger edit.
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    inputs.dir(project.file("golden"))
+    inputs.file(project.file("conformance-ledger.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("goldenExpectations")
+        .withPropertyName("conformanceLedger")
     // The file naming the Elasticsearch image the container-backed suites start. CI sets
     // ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE for the next-major leg.
     val elasticsearchImageFile = System.getProperty("elasticsearch.test.image.file")
@@ -75,28 +67,6 @@ tasks.test {
     inputs.file(project.file(elasticsearchImageFile))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("elasticsearchImage")
-}
-
-// Rewrites golden/expectations.json from what the translator emits, then checks it.
-// CI never runs this, so a changed translation fails `test` until someone regenerates and reviews
-// the diff. See conformance/README.md, "Golden expectations".
-tasks.register<Test>("goldenUpdate") {
-    group = "verification"
-    description = "Rewrite elasticsearch-java/golden/expectations.json from what the translator emits."
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    useJUnitPlatform()
-    filter { includeTestsMatching("dev.cerbos.queryplan.elasticsearch.ElasticsearchTranslatorTest") }
-    systemProperty("golden.update", "true")
-    // The asset is an input of `test`, so it is not declared as an output here.
-    outputs.upToDateWhen { false }
-    inputs.dir(project.file("../conformance"))
-        .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("conformanceCorpus")
-    testLogging {
-        events("failed")
-        showStandardStreams = true
-    }
 }
 
 // publishToMavenLocal only: no Maven Central release is configured yet, so there is no signing.

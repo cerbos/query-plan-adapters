@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/anchored-prefix",
+  "intent": "matches() with an anchored regex (^h).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^h"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/anchored-prefix",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^h\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "CEL uses RE2; SQL regex dialects differ in syntax and semantics, so a translated pattern can accept different strings than the PDP."
+}

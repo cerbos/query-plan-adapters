@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a2"
+  ],
+  "degenerateReason": null,
+  "id": "string/starts-with/concatenated-literal-needle",
+  "intent": "startsWith whose needle is a literal concatenation the planner folds to \"100%\".",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "100%"
+          }
+        ],
+        "operator": "startsWith"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/starts-with/concatenated-literal-needle",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.startsWith(\"100\" + \"%\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The folded needle ends in %, which must be escaped in a LIKE prefix match or every string starting with \"100\" matches."
+}

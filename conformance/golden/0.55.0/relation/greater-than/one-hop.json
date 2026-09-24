@@ -1,0 +1,55 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "b6",
+    "c1",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/greater-than/one-hop",
+  "intent": "parent.aNumber > 2 through the to-one parent.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aNumber"
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/greater-than/one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aNumber > 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "None beyond joining the parent and reading its column, not the root's; parentless rows must deny."
+}

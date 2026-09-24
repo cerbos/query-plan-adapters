@@ -48,8 +48,10 @@ supports and what it refuses.
 
 Every adapter is tested against two shared corpora in this repository:
 
-- [`conformance/`](conformance/): hostile policy shapes and seed rows. Each adapter's filter runs
-  against a real store and must return exactly the rows a real Cerbos PDP allows via `check()`.
+- [`conformance/`](conformance/): hostile policy shapes, written as cases, and seed rows. The plans
+  and `check()` decisions of two pinned Cerbos PDP releases (the current one and the one before) are
+  recorded per case. Each adapter translates every recorded plan, runs it against a real store, and
+  must return exactly the rows the PDP allowed, or throw.
 - [`demo/`](demo/): one realistic domain. Each adapter's example app installs the **packaged**
   adapter and uses it with its ORM's real query methods. The Go adapters use a local `replace`
   directive, so their examples cover usage but not packaging.

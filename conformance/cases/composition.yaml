@@ -1,0 +1,143 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: composition
+description: 'Several rules for one action: ALLOW plus DENY, derived roles, policy variables.'
+importDerivedRoles:
+- conformance_compose
+variables:
+  compose_teamed: R.attr.aOptionalString in P.attr.fewTeams
+  compose_large: 'R.attr.aNumber > 10'
+cases:
+- id: 'composition/allow-and-deny/conditional-deny'
+  tier: extended
+  intent: 'A conditional ALLOW (aBool == true) plus a conditional DENY (aNumber > 10), planned as and(allow, not(deny)).'
+  trap: The DENY arrives as a negated subtree; dropping it or mishandling NULL under the not() grants rows the DENY removes.
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: R.attr.aBool == true
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: 'R.attr.aNumber > 10'
+- id: 'composition/allow-and-deny/deny-over-two-allows'
+  tier: extended
+  intent: 'Two conditional ALLOW rules plus a DENY (aNumber > 20), planned as and(not(gt), or(and, and)).'
+  trap: The DENY applies to the whole disjunction; applying it to only one branch lets h5/h6/h7 through.
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        all:
+          of:
+          - expr: R.attr.aBool == true
+          - expr: 'R.attr.aNumber > 15'
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        all:
+          of:
+          - expr: R.attr.aBool == false
+          - expr: R.attr.aNumber < 7
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: 'R.attr.aNumber > 20'
+- id: 'composition/allow-and-deny/two-deny-rules'
+  tier: extended
+  intent: 'A conditional ALLOW (aNumber >= 0) plus two DENY rules, planned as and(not(or(eq, gt)), ge).'
+  trap: 'Both DENYs sit under one negation; De Morgan mistakes, or applying only one DENY, over-grant.'
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: 'R.attr.aNumber >= 0'
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: R.attr.aBool == false
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: 'R.attr.aNumber > 18'
+- id: 'composition/allow-and-deny/unconditional-allow-conditional-deny'
+  tier: extended
+  intent: 'An unconditional ALLOW plus a conditional DENY (aNumber < 0), planned as not(lt): the most common real policy.'
+  trap: 'The whole filter is a bare negation; a translator that expects a positive root, or drops the DENY, returns every row.'
+  rules:
+  - effect: EFFECT_ALLOW
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: R.attr.aNumber < 0
+- id: 'composition/derived-role/conditional-derived-role'
+  tier: extended
+  intent: 'An ALLOW for a derived role whose condition reads the resource (aBool == true), plus aNumber < 5, planned as and(lt, eq).'
+  trap: 'The derived role''s condition must be conjoined with the rule''s; dropping it grants a2/a5.'
+  rules:
+  - effect: EFFECT_ALLOW
+    derivedRoles:
+    - compose_flagged
+    condition:
+      match:
+        expr: R.attr.aNumber < 5
+- id: 'composition/derived-role/unconditional-deny-for-derived-role'
+  tier: extended
+  intent: 'An ALLOW on aNumber < 12 plus an unconditional DENY for a derived role conditioned on aBool == true, planned as and(not(eq), lt).'
+  trap: 'The unconditional DENY becomes conditional through the derived role; ignoring it grants aBool-true rows.'
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: R.attr.aNumber < 12
+  - effect: EFFECT_DENY
+    derivedRoles:
+    - compose_flagged
+- id: 'composition/multiple-allow/none-of-condition'
+  tier: extended
+  intent: 'An ALLOW on aNumber > 20 plus an ALLOW whose condition is match.none (aBool == true), planned as or(gt, not(eq)).'
+  trap: The match.none rule arrives as a negation inside a disjunction; losing the not() swaps which aBool rows are granted.
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: 'R.attr.aNumber > 20'
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        none:
+          of:
+          - expr: R.attr.aBool == true
+- id: 'composition/multiple-allow/two-conditional-rules'
+  tier: extended
+  intent: 'Two conditional ALLOW rules, each an all-of pair, planned as or(and, and).'
+  trap: 'Mixing conjuncts across the two rules over-grants rows (a1, b4) that satisfy half of each.'
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        all:
+          of:
+          - expr: R.attr.aBool == true
+          - expr: 'R.attr.aNumber > 15'
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        all:
+          of:
+          - expr: R.attr.aBool == false
+          - expr: R.attr.aNumber < 7
+- id: 'composition/variable/allow-and-deny-through-variables'
+  tier: extended
+  intent: 'ALLOW on V.compose_teamed (aOptionalString in P.attr.fewTeams) and DENY on V.compose_large (aNumber > 10), planned as and(not(gt), in).'
+  trap: The planner expands variables; a wrong expansion or a dropped DENY lets h1/h2/h3/h5 through.
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: V.compose_teamed
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: V.compose_large

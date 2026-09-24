@@ -1,0 +1,52 @@
+{
+  "allowed": [],
+  "degenerateReason": "No seed holds a mainCategory with zero subCategories, and every seed without one is a missing-path error. The non-negative size sibling carries the discriminating oracle for the same chain.",
+  "id": "relation/size/zero-to-one-chain",
+  "intent": "size(mainCategory.subCategories) == 0 where most rows have no mainCategory.",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subCategories"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/zero-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.mainCategory.subCategories) == 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An unguarded chain counts 0 for parentless rows and over-grants them; CEL denies the missing path (#309)."
+}

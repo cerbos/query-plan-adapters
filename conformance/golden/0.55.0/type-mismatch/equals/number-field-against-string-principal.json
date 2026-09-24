@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "Heterogeneous operands: CEL has no cross-type equality and denies every seed. A store's implicit coercion would compare them and return rows.",
+  "id": "type-mismatch/equals/number-field-against-string-principal",
+  "intent": "A numeric attribute compared == a string principal attribute (R.attr.aNumber == P.attr.context).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": "projects:f1"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/equals/number-field-against-string-principal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber == P.attr.context"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL denies mixed-type equality; a store that casts the string to a number, or the number to text, returns rows."
+}

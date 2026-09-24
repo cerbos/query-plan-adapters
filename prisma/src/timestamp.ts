@@ -1,5 +1,7 @@
 // RFC 3339 timestamp literals, validated to CEL's instant range and Prisma's millisecond precision.
 
+import { UnsupportedQueryPlanError } from "./errors";
+
 const RFC3339_MILLISECOND_TIMESTAMP =
   /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const MIN_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
@@ -21,10 +23,10 @@ export function normalizeRfc3339Milliseconds(value: string): string {
   const dayText = match?.[3];
   const fraction = match?.[4] ?? "";
   if (!yearText || !monthText || !dayText) {
-    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+    throw new UnsupportedQueryPlanError(`Invalid RFC 3339 timestamp value: ${value}`);
   }
   if ([...fraction.slice(3)].some((digit) => digit !== "0")) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Timestamp value exceeds millisecond precision: ${value}`
     );
   }
@@ -40,18 +42,18 @@ export function normalizeRfc3339Milliseconds(value: string): string {
     calendarDate.getUTCMonth() !== month - 1 ||
     calendarDate.getUTCDate() !== day
   ) {
-    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+    throw new UnsupportedQueryPlanError(`Invalid RFC 3339 timestamp value: ${value}`);
   }
 
   const milliseconds = Date.parse(value);
   if (Number.isNaN(milliseconds)) {
-    throw new Error(`Invalid RFC 3339 timestamp value: ${value}`);
+    throw new UnsupportedQueryPlanError(`Invalid RFC 3339 timestamp value: ${value}`);
   }
   if (
     milliseconds < MIN_RFC3339_TIMESTAMP_MILLISECONDS ||
     milliseconds > MAX_RFC3339_TIMESTAMP_MILLISECONDS
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Timestamp value is outside CEL's supported instant range: ${value}`
     );
   }

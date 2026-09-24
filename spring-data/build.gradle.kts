@@ -29,9 +29,8 @@ repositories {
 }
 
 // The ORM versions to build and test against, chosen by ADAPTER_TEST_ORM (or -Dadapter.test.orm).
-// `baseline` is the Hibernate 6.6 line golden/expectations.json was rendered under. `next` is the
-// next major (Hibernate 7 / Spring Data JPA 4), a test-only leg on which SpringDataTranslatorTest
-// checks a pinned divergence list instead of the golden bytes. An unknown value fails.
+// `baseline` is the Hibernate 6.6 line; `next` is the next major (Hibernate 7 / Spring Data JPA 4),
+// a test-only leg that runs every suite again. An unknown value fails.
 val ormVersionSets = mapOf(
     "baseline" to mapOf(
         "springDataJpa" to "3.5.13",
@@ -80,7 +79,7 @@ dependencies {
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
     testImplementation("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
     testImplementation("com.h2database:h2:2.4.240")
-    // Reads the shared ../conformance/ corpus.
+    // Reads the shared ../conformance/ corpus (golden plans are protobuf JSON).
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -89,26 +88,19 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    val strictEvaluation = providers.environmentVariable("ADAPTER_TEST_STRICT_EVALUATION")
-        .getOrElse("false")
-    require(strictEvaluation in listOf("false", "true")) {
-        "ADAPTER_TEST_STRICT_EVALUATION must be false or true"
-    }
-    inputs.property("strictEvaluation", strictEvaluation)
-    systemProperty("adapter.test.strictEvaluation", strictEvaluation)
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = false
     }
 
     // The suites read these at runtime, so Gradle cannot see them unless they are declared.
-    // Without this, `:test` stays UP-TO-DATE after a corpus, golden or image-pin edit.
+    // Without this, `:test` stays UP-TO-DATE after a corpus, ledger or image-pin edit.
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    inputs.dir(project.file("golden"))
+    inputs.file(project.file("conformance-ledger.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("goldenExpectations")
+        .withPropertyName("conformanceLedger")
     inputs.file(project.file("POSTGRES_IMAGE"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("postgresImage")
@@ -116,8 +108,6 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("mysqlImage")
 
-    // Lets SpringDataTranslatorTest check the Hibernate on the classpath is the selected one.
-    systemProperty("adapter.test.orm", adapterTestOrm)
     inputs.property("adapterTestOrm", adapterTestOrm)
 
     // AdversarialConformanceTest's database: h2 (default), postgres or mysql. The MySQL collation
@@ -137,30 +127,6 @@ tasks.test {
         ?: System.getenv("ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS")
     if (mysqlServerPrep != null) {
         systemProperty("adapter.test.mysql.serverPrepStmts", mysqlServerPrep)
-    }
-}
-
-// Rewrites golden/expectations.json from what the translator emits, then checks it.
-// CI never runs this, so a changed translation fails `test` until someone regenerates and reviews
-// the diff. See conformance/README.md, "Golden expectations".
-tasks.register<Test>("goldenUpdate") {
-    group = "verification"
-    description = "Rewrite spring-data/golden/expectations.json from what the translator emits."
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    useJUnitPlatform()
-    filter { includeTestsMatching("dev.cerbos.queryplan.springdata.SpringDataTranslatorTest") }
-    systemProperty("golden.update", "true")
-    // Under the `next` set the write is refused: the asset records the Hibernate that rendered it.
-    systemProperty("adapter.test.orm", adapterTestOrm)
-    // The asset is an input of `test`, so it is not declared as an output here.
-    outputs.upToDateWhen { false }
-    inputs.dir(project.file("../conformance"))
-        .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("conformanceCorpus")
-    testLogging {
-        events("failed")
-        showStandardStreams = true
     }
 }
 

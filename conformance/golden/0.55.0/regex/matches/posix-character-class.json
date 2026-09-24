@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "b2",
+    "f1",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/posix-character-class",
+  "intent": "matches() with a POSIX bracket class [[:digit:]].",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "[[:digit:]]"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/posix-character-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"[[:digit:]]\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dialects without POSIX classes read [[:digit:]] as a plain set of the characters :dgit."
+}

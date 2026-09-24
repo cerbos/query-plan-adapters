@@ -1,0 +1,32 @@
+{
+  "allowed": [],
+  "degenerateReason": "P.attr.emptyTeams is an empty list, so exists() over it is false for every seed; the planner folds the plan. The case pins that macro identity and the fold.",
+  "id": "principal/exists/empty-list",
+  "intent": "exists() over an empty principal list compared with a resource attribute.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/empty-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "exists() over an empty list is false for every row; the planner folds the plan to always-denied and the adapter must honour the fold."
+}

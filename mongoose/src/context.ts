@@ -1,3 +1,4 @@
+import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, NullAttributeRepresentation } from "./index";
 
 /** What every translation step can see: the caller's choices, and whether it is inside a lambda. */
@@ -26,7 +27,7 @@ export const assertNullOperandTranslatable = (
   context: string,
 ): void => {
   if (ctx.nullRepresentation === "omitted") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL field ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
         "(deny) while a null-selecting filter would return those documents. Send NULL fields " +
@@ -45,7 +46,7 @@ export const assertCollectionScopedReference = (
     reference !== ctx.scope.variable &&
     !reference.startsWith(`${ctx.scope.variable}.`)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Outer reference ${reference} inside a collection predicate is unsupported`,
     );
   }

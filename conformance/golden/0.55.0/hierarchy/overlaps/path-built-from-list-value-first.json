@@ -1,0 +1,91 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/overlaps/path-built-from-list-value-first",
+  "intent": "A literal hierarchy overlapping a hierarchy built from a list of a literal segment and a field (hierarchy(\"dept\", \".\").overlaps(hierarchy([\"dept\", R.attr.scope]))).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept"
+                },
+                {
+                  "value": "."
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "dept"
+                      },
+                      {
+                        "variable": "request.resource.attr.scope"
+                      }
+                    ],
+                    "operator": "list"
+                  }
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "overlaps"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/overlaps/path-built-from-list-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(\"dept\", \".\").overlaps(hierarchy([\"dept\", R.attr.scope]))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The path is built from segments at runtime with the literal on the left; joining segments as text, dropping the field segment, or allowing rows missing scope (a CEL error) mismatches."
+}

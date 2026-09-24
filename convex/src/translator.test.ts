@@ -1,21 +1,12 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import { describe, expect, test } from "@jest/globals";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
 } from "@cerbos/core";
 
-// The mapper the adversarial harness and the Convex backend both read, so the filters pinned here
-// describe a mapping that is actually executed against seeded documents somewhere.
-import {
-  MAPPER,
-  PUSHDOWN_DEMOTED_FIELDS,
-  PUSHDOWN_MAPPER,
-} from "../convex/adversarialMapper";
-import { executionPathOf } from "../convex/planExecution";
-import { PlanKind, queryPlanToConvex } from ".";
+// The mapper the Convex backend translates every conformance case with.
+import { MAPPER } from "../convex/adversarialMapper";
+import { PlanKind, queryPlanToConvex, UnsupportedQueryPlanError } from ".";
 import type {
   Mapper,
   MapperConfig,
@@ -23,52 +14,45 @@ import type {
   QueryPlanToConvexResult,
 } from ".";
 import {
-  ADAPTER,
-  GOLDEN_REGENERATE_COMMAND,
-  classifyActionsForAdapter,
-  nullRepresentationOmittedFor,
-  parseActionsFile,
-  planCarriesNullLiteral,
-  planFromWireFixture,
+  pdpTags,
+  planOf,
   readCorpusJson,
-  readGoldenExpectations,
-  requireMessage,
-  wireFixtureActions,
-  writeGoldenExpectations,
+  readGolden,
+  readGoldens,
 } from "./corpus";
-import type { FilterNode, GoldenExpectation } from "./corpus";
 
 /**
- * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
- * and caller options that the shared corpus cannot vary. The adversarial suite separately
- * executes filters against a store and compares them with the PDP oracle.
- * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
+ * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
+ * `allowPostFilter`, `nullAttributeRepresentation`), the refusal type, invariants of the filter
+ * handed to Convex's engine, and plans the planner cannot produce.
+ *
+ * Which documents a corpus case returns is the conformance harness's job (`adversarial.test.ts`);
+ * nothing here pins the filter emitted for a corpus case. Plans come from the current PDP's golden
+ * files, read by case id, rather than being typed by hand.
  */
 
-const actionsFile = parseActionsFile(readCorpusJson("actions.json"));
-
-// Refusal messages come from the same classification ledger as the live harness.
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  ADAPTER,
+const CURRENT = pdpTags()[0]!;
+const GOLDENS = readGoldens(CURRENT).filter(
+  (golden) => !golden.plannerDivergence,
 );
-const THROWING = new Set(THROWING_ACTIONS.map(({ action }) => action));
+const golden = (id: string) => readGolden(CURRENT, id);
 
 // -- recording what the adapter asks Convex to do -------------------------------------------------
 
 /**
- * A `FilterBuilder` that records rather than evaluates.
- *
- * The adapter's filter is a function of the builder Convex hands it, so handing it a recorder is
- * the only way to see what it emits without a Convex deployment. Every call becomes a node; the
- * result is JSON, which is what makes it a golden asset a reviewer reads as a diff.
- *
- * Membership is tracked in a `WeakSet` rather than sniffed from the object's shape, so a plan
- * literal can never be mistaken for a recorded call — CEL map literals are JSON objects too.
+ * A `FilterBuilder` that records rather than evaluates: the adapter's filter is a function of the
+ * builder Convex hands it, so a recorder is the only way to see what it emits without a Convex
+ * deployment. Membership is tracked in a `WeakSet`, so a plan literal can never be mistaken for a
+ * recorded call.
  */
+interface FilterNode {
+  op: string;
+  args: unknown[];
+}
+
 const RECORDED_NODES = new WeakSet<object>();
 
-const record = (op: FilterNode["op"], args: unknown[]): FilterNode => {
+const record = (op: string, args: unknown[]): FilterNode => {
   const node: FilterNode = { op, args };
   RECORDED_NODES.add(node);
   return node;
@@ -92,73 +76,19 @@ const RECORDER = {
 
 type Recorder = typeof RECORDER;
 
-/**
- * A literal the adapter binds into a filter has to survive a JSON round trip, or the golden file
- * records something other than what Convex is handed — and unlike every SQL adapter, that is not
- * merely an asset-fidelity concern here: a query plan crosses into a Convex function as `v.any()`,
- * which is JSON, so a value this rejects is a value the deployed adapter could not carry either.
- *
- * `-0` and the non-finite doubles are exactly why `cr-div-neg-zero` and `nan-ord-inf` are
- * `adapterUnsupported` for this adapter. Stating the boundary as a rule over every recorded
- * literal, rather than as those two action names, means a THIRD shape that reached it fails here
- * instead of arriving as an unexplained diff.
- */
-function assertRecordable(label: string, value: unknown, at: string): void {
-  if (isRecordedNode(value)) {
-    value.args.forEach((arg, index) =>
-      assertRecordable(label, arg, `${at}.${value.op}[${index}]`),
-    );
-    return;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || Object.is(value, -0)) {
-      throw new Error(
-        `${label} binds ${Object.is(value, -0) ? "-0" : String(value)} at ${at}: a query plan reaches a Convex function as JSON, which carries neither`,
-      );
-    }
-    return;
-  }
-  if (value === null || ["string", "boolean"].includes(typeof value)) return;
-  if (Array.isArray(value)) {
-    value.forEach((element, index) =>
-      assertRecordable(label, element, `${at}[${index}]`),
-    );
-    return;
-  }
-  if (typeof value === "object") {
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "op") {
-        throw new Error(
-          `${label} binds a literal carrying an "op" key at ${at}: it would read back out of the golden file as a builder call that never happened`,
-        );
-      }
-      assertRecordable(label, nested, `${at}.${key}`);
-    }
-    return;
-  }
-  throw new Error(
-    `${label} binds a ${typeof value} at ${at}, which the golden file cannot record faithfully`,
-  );
-}
-
-// -- translating one corpus action ----------------------------------------------------------------
-
 interface TranslateOptions {
   mapper?: Mapper;
-  /**
-   * Defaults to `true`. The corpus is mostly post-filtered, so a golden run without the opt-in
-   * would throw before recording anything; the option's own gate is asserted as a rule below.
-   */
+  /** Defaults to `true`: most of the corpus is post-filtered. */
   allowPostFilter?: boolean;
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
 function translate(
-  action: string,
+  id: string,
   options: TranslateOptions = {},
 ): QueryPlanToConvexResult<Recorder, unknown> {
   return queryPlanToConvex<Recorder, unknown>({
-    queryPlan: planFromWireFixture(action),
+    queryPlan: planOf(golden(id)),
     mapper: options.mapper ?? MAPPER,
     allowPostFilter: options.allowPostFilter ?? true,
     ...(options.nullAttributeRepresentation
@@ -167,157 +97,89 @@ function translate(
   });
 }
 
-/** The calls the emitted filter makes against Convex's builder, validated on the way out. */
-function recordFilter(
-  label: string,
-  filter: (q: Recorder) => unknown,
-): FilterNode {
+/** Translates a case, or reports that the adapter refused it. */
+function translated(
+  id: string,
+  options: TranslateOptions = {},
+): QueryPlanToConvexResult<Recorder, unknown> | "refused" {
+  try {
+    return translate(id, options);
+  } catch (error) {
+    if (error instanceof UnsupportedQueryPlanError) return "refused";
+    throw error;
+  }
+}
+
+/** The calls the emitted filter makes against Convex's builder. */
+function recordFilter(label: string, filter: (q: Recorder) => unknown) {
   const emitted = filter(RECORDER);
   if (!isRecordedNode(emitted)) {
     throw new Error(
       `${label} returned something other than a builder call: ${JSON.stringify(emitted)}`,
     );
   }
-  assertRecordable(label, emitted, "filter");
   return emitted;
 }
 
-/** The whole translator output for one corpus action, in the shape the golden file records. */
-function expectationFor(
-  action: string,
-  options: TranslateOptions = {},
-): GoldenExpectation {
-  const result = translate(action, options);
-  if (result.kind !== PlanKind.CONDITIONAL) return { kind: result.kind };
+/** Each translatable golden, with the part Convex's own engine is handed, if any. */
+const TRANSLATED = GOLDENS.flatMap((g) => {
+  const result = translated(g.id);
+  return result === "refused" ? [] : [{ id: g.id, result }];
+});
+const PUSHED = TRANSLATED.filter(({ result }) => result.filter !== undefined);
 
-  const path = executionPathOf(result);
-  if (path === "unconditional") {
-    throw new Error(`${action} is conditional but reports no execution path`);
+// The documents as the PDP saw them (conformance/resources.json), which is also exactly what the
+// conformance harness stores — so a post-filter can be run against them offline.
+const DOCUMENTS = (
+  readCorpusJson("resources.json") as {
+    resources: { id: string; attr: Record<string, unknown> }[];
   }
-  if (path === "post") return { kind: PlanKind.CONDITIONAL, path };
+).resources.map(({ id, attr }) => ({ id, ...attr }));
 
-  // Not a formality: `db` and `split` are DEFINED by a filter being present, so an output that
-  // reports one without carrying it would silently record `{path: "db"}` with nothing under it.
-  const { filter } = result;
-  if (!filter) {
-    throw new Error(`${action} reports path "${path}" but emitted no filter`);
-  }
-  return {
-    kind: PlanKind.CONDITIONAL,
-    path,
-    filter: recordFilter(action, filter),
-  };
-}
-
-/** Where the translator routes an action, for the rules that only care about the split. */
-function pathFor(action: string, options: TranslateOptions = {}): string {
-  const expectation = expectationFor(action, options);
-  return expectation.kind === PlanKind.CONDITIONAL
-    ? expectation.path
-    : "unconditional";
-}
-
-// -- the golden expectations -----------------------------------------------------------------------
-//
-// `npm run golden:update` rewrites the file from what the translator emits today and preserves
-// every `note`. That is the same deliberate act as regenerating the wire fixtures, and the safety
-// is identical: the diff is what a reviewer reads. CI never sets the variable, so a translator
-// change that moves the emitted filter fails there whatever anyone ran locally.
-
-if (process.env["GOLDEN_UPDATE"] === "1") {
-  const regenerated = new Map<string, GoldenExpectation>();
-  for (const action of wireFixtureActions()) {
-    // A throwing action gets no entry: its message is corpus data. Skipping it here is also what
-    // keeps regeneration from papering over a misclassification — an action moved into
-    // `adapterUnsupported` that this adapter still translates fails the throw suite, and one moved
-    // out of it that this adapter still refuses fails regeneration itself.
-    if (THROWING.has(action)) {
-      continue;
+describe("the refusal type", () => {
+  // Every shape this adapter cannot express raises `UnsupportedQueryPlanError`, which the
+  // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
+  // other side: it is still an `Error`, and a mapper mistake or a missing opt-in is NOT a refusal.
+  test("a refused shape raises UnsupportedQueryPlanError, which is an Error", () => {
+    let thrown: unknown;
+    try {
+      translate("regex/matches/lookahead-from-principal");
+    } catch (error) {
+      thrown = error;
     }
-    regenerated.set(action, expectationFor(action));
-  }
-  writeGoldenExpectations(regenerated);
-}
-
-const RECORDED = readGoldenExpectations();
-
-const RECORDED_ACTIONS = [...RECORDED.keys()];
-
-const byPath = (want: string): string[] =>
-  RECORDED_ACTIONS.filter((action) => {
-    const expectation = RECORDED.get(action)!.expectation;
-    return (
-      expectation.kind === PlanKind.CONDITIONAL && expectation.path === want
-    );
+    expect(thrown).toBeInstanceOf(UnsupportedQueryPlanError);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).name).toBe("UnsupportedQueryPlanError");
   });
 
-/** The actions Convex's own filter engine sees at all — `db` in full, `split` in part. */
-const PUSHED_ACTIONS = [...byPath("db"), ...byPath("split")].sort();
-const POST_ACTIONS = byPath("post");
-const UNCONDITIONAL_ACTIONS = RECORDED_ACTIONS.filter(
-  (action) => RECORDED.get(action)!.expectation.kind !== PlanKind.CONDITIONAL,
-);
-
-describe("corpus shapes", () => {
-  test.each(RECORDED_ACTIONS)("%s emits the golden expectation", (action) => {
-    expect(expectationFor(action)).toEqual(RECORDED.get(action)!.expectation);
+  test("an unmapped reference is a plain Error, not a refusal", () => {
+    let thrown: unknown;
+    try {
+      queryPlanToConvex({
+        queryPlan: planOf(golden("string/equals/case-sensitive")),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
   });
 
-  // The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
-  // `toThrow()` just as well as the limitation the corpus documents (#326). The harness makes the
-  // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
-  // which is what lets the completeness guard below be total.
-  test.each(THROWING_ACTIONS)(
-    "$action is refused with the message actions.json pins ($reason)",
-    ({ action, message }) => {
-      expect(() => translate(action)).toThrow(message);
-    },
-  );
-
-  // Adding a throwing action without pinning its message must fail this suite rather than
-  // silently degrade the throw assertions to a bare "it threw" (#326).
-  test("a throwing action with no pinned message fails classification", () => {
-    expect(() => requireMessage("synthetic-entry", undefined)).toThrow(
-      /pins no throw message/,
-    );
-    expect(() => requireMessage("synthetic-entry", "")).toThrow(
-      /pins no throw message/,
-    );
-  });
-
-  test("every corpus action is accounted for here exactly once", () => {
-    const throwing = THROWING_ACTIONS.map(({ action }) => action);
-    const classified = [...RECORDED_ACTIONS, ...throwing].sort();
-
-    // Total: a corpus action with no golden expectation and no pinned throw lands as a failure
-    // rather than as silence. This is the assertion that makes the asset self-maintaining —
-    // adding a hostile shape to the corpus forces someone to look at the filter this adapter
-    // emits for it, and `npm run golden:update` refuses to invent one for a shape that throws.
-    expect(classified).toEqual(wireFixtureActions());
-    // Disjoint: an action carrying a golden expectation AND declared unsupported would satisfy
-    // the union above while asserting two contradictory things.
-    expect(classified).toEqual([...new Set(classified)].sort());
-    // The asset is written sorted, so a translator change reads as the list of shapes it moved.
-    expect(RECORDED_ACTIONS).toEqual([...RECORDED_ACTIONS].sort());
-
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from an asset nobody reads end to end. `pushed` moving is the one worth
-    // arguing about — it is the size of the corpus Convex's query engine decides rather than the
-    // adapter's own evaluator, quoted in the README.
-    expect({
-      pushed: PUSHED_ACTIONS.length,
-      post: POST_ACTIONS.length,
-      unconditional: UNCONDITIONAL_ACTIONS.length,
-      throwing: throwing.length,
-    }).toEqual({ pushed: 44, post: 252, unconditional: 7, throwing: 30 });
+  test("a missing allowPostFilter opt-in is a plain Error, not a refusal", () => {
+    let thrown: unknown;
+    try {
+      translate("regex/matches/anchored-prefix", { allowPostFilter: false });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
   });
 });
 
-// -- rules over every pushed-down filter -----------------------------------------------------------
+// -- rules over every filter handed to Convex's engine ---------------------------------------------
 //
-// Rules rather than pinned bytes on purpose: a rule holds for a corpus action nobody has added
-// yet, and each of these polices a property the pinned nodes are individually consistent with but
-// could drift on collectively.
+// Rules rather than pinned filters: each holds for a corpus case nobody has added yet.
 
 describe("what the adapter asks Convex to do", () => {
   const fieldsNamedBy = (node: FilterNode): string[] =>
@@ -327,129 +189,56 @@ describe("what the adapter asks Convex to do", () => {
           isRecordedNode(arg) ? fieldsNamedBy(arg) : [],
         );
 
-  const pushedFilter = (action: string, options: TranslateOptions = {}) => {
-    const result = translate(action, options);
-    if (result.kind !== PlanKind.CONDITIONAL || !result.filter) {
-      throw new Error(`${action} pushes nothing down`);
-    }
-    return recordFilter(action, result.filter);
-  };
+  const configs = Object.values(MAPPER);
+  const fieldsWhere = (keep: (config: MapperConfig) => boolean) =>
+    new Set(
+      configs
+        .filter(keep)
+        .map((config) => config.field)
+        .filter((field): field is string => field !== undefined),
+    );
+  const declaredFields = fieldsWhere(() => true);
+  const nullableFields = fieldsWhere((config) => config.nullable === true);
 
-  const declaredFields = new Set(
-    Object.values(MAPPER)
-      .map((config: MapperConfig) => config.field)
-      .filter((field): field is string => field !== undefined),
-  );
+  // Anti-vacuity: the rules below say nothing if no case reaches the engine.
+  test("some cases reach Convex's filter engine", () => {
+    expect(PUSHED.length).toBeGreaterThan(0);
+  });
 
-  const nullableFields = new Set(
-    Object.values(MAPPER)
-      .filter((config: MapperConfig) => config.nullable === true)
-      .map((config) => config.field)
-      .filter((field): field is string => field !== undefined),
-  );
-
-  test.each(PUSHED_ACTIONS)(
-    "%s names only fields the mapper declares",
-    (action) => {
-      // The corpus mapper declares every reference the corpus uses, and a reference with no
-      // entry is refused before translation (see "mapper forms"). So a `request.resource.attr.…`
-      // name in a pushed-down filter means resolution silently missed a reference the caller DID
+  test.each(PUSHED.map(({ id, result }) => [id, result] as const))(
+    "%s names only mapped, non-nullable fields",
+    (id, result) => {
+      // A `request.resource.attr.…` name would mean resolution missed a reference the caller DID
       // map — a path no document stores, which a negation reads as a match on every document.
-      const undeclared = fieldsNamedBy(pushedFilter(action)).filter(
-        (field) => !declaredFields.has(field),
-      );
-      expect({ action, undeclared }).toEqual({ action, undeclared: [] });
+      // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
+      // a false one, so it has to stay with the post-filter (#375).
+      const fields = fieldsNamedBy(recordFilter(id, result.filter!));
+      expect({
+        undeclared: fields.filter((field) => !declaredFields.has(field)),
+        nullable: fields.filter((field) => nullableFields.has(field)),
+      }).toEqual({ undeclared: [], nullable: [] });
     },
   );
-
-  test.each(PUSHED_ACTIONS)("%s pushes down no nullable field", (action) => {
-    // `nullable: true` means "this path may be absent", which is CEL's missing-attribute case.
-    // Convex's engine cannot tell an absent path from a false one, so a comparison over such a
-    // field has to stay with the adapter's own evaluator — this is `canPushToDb`'s core
-    // invariant, and violating it readmits rows the PDP denies under negation (#375).
-    const pushed = fieldsNamedBy(pushedFilter(action)).filter((field) =>
-      nullableFields.has(field),
-    );
-    expect({ action, pushed }).toEqual({ action, pushed: [] });
-  });
-
-  /**
-   * The pushdown mapper's whole purpose, asserted as the set of actions it moves.
-   *
-   * `PUSHDOWN_MAPPER` clears `nullable` on a field the seeded documents always carry, which hands
-   * the null-comparison family to Convex's engine — the one place Convex's own `q.eq(field, null)`
-   * semantics get a say. The rule above is satisfied by a mapper that pushes nothing at all, so
-   * this is also its anti-vacuity guard: `nullable` is read in exactly one place in the adapter,
-   * and if it stopped being read these two mappers would agree everywhere.
-   */
-  test("clearing nullable on an always-present field moves exactly these actions", () => {
-    const moved = RECORDED_ACTIONS.filter(
-      (action) =>
-        pathFor(action) !== pathFor(action, { mapper: PUSHDOWN_MAPPER }),
-    );
-
-    expect(moved).toEqual([
-      "in-null-elem-mixed",
-      "in-null-elem-neg",
-      "in-null-elem-only",
-      "in-null-elem-only-neg",
-      "null-eq",
-      "null-ne",
-      "null-not-eq",
-      "null-value-ne-const",
-      "null-value-not-eq-const",
-      "null-value-not-in-const",
-      "vf-null-ne",
-    ]);
-    // Every one of them moves INTO the engine, never out of it: demoting a field can only widen
-    // what `canPushToDb` accepts, so a move in the other direction is a bug in the mapper rather
-    // than a coverage gain.
-    for (const action of moved) {
-      expect({ action, before: pathFor(action) }).toEqual({
-        action,
-        before: "post",
-      });
-    }
-    expect(
-      PUSHDOWN_DEMOTED_FIELDS.every((field) => nullableFields.has(field)),
-    ).toBe(true);
-  });
 });
 
 /**
- * `allowPostFilter` is a call-level opt-in, so no policy can reach it and the corpus has no action
- * for it — but every corpus action reaches one side of it. The gate exists because a post-filter
- * is a promise the CALLER has to keep: Convex returns the documents the filter matched, and unless
- * the caller applies `postFilter` to each one before it is serialised, the untranslatable half of
- * the policy simply does not run.
- *
- * Stating it over the whole corpus rather than as two hand-built plans is what makes it a rule: an
- * action that changed sides would fail here, in both directions.
+ * `allowPostFilter` is a call-level opt-in, so no policy can reach it — but every corpus case
+ * reaches one side of it. A post-filter is a promise the CALLER has to keep: unless it is applied
+ * to every candidate before it is serialised, the untranslatable half of the policy does not run.
  */
 describe("the allowPostFilter gate", () => {
-  test.each([...POST_ACTIONS, ...byPath("split")])(
-    "%s is refused without the opt-in",
-    (action) => {
-      expect(() => translate(action, { allowPostFilter: false })).toThrow(
-        "allowPostFilter",
-      );
-    },
-  );
-
-  test.each(byPath("db"))("%s needs no opt-in", (action) => {
-    const result = translate(action, { allowPostFilter: false });
-    expect({
-      filter: result.filter !== undefined,
-      postFilter: result.postFilter !== undefined,
-    }).toEqual({ filter: true, postFilter: false });
-  });
-
-  test.each(UNCONDITIONAL_ACTIONS)(
-    "%s needs no opt-in either, having no condition to split",
-    (action) => {
-      expect(translate(action, { allowPostFilter: false }).kind).not.toEqual(
-        PlanKind.CONDITIONAL,
-      );
+  test.each(TRANSLATED.map(({ id, result }) => [id, result] as const))(
+    "%s needs the opt-in exactly when it carries a post-filter",
+    (id, result) => {
+      if (result.postFilter !== undefined) {
+        expect(() => translate(id, { allowPostFilter: false })).toThrow(
+          "allowPostFilter",
+        );
+      } else {
+        expect(translate(id, { allowPostFilter: false }).kind).toBe(
+          result.kind,
+        );
+      }
     },
   );
 });
@@ -457,28 +246,26 @@ describe("the allowPostFilter gate", () => {
 // -- the mapper contract, which no policy can reach ------------------------------------------------
 
 describe("mapper forms", () => {
-  // A deep relation shape, so the equivalence covers references resolved through several hops
-  // rather than one lookup off the root.
-  const DEEP_ACTION = "macro-depth3-exists";
+  // A deep relation shape, so the equivalence covers references resolved through several hops.
+  const DEEP_CASE = "collection/exists/nested-three-levels";
 
   test("a function mapper resolves the same references as a record mapper", () => {
     const asFunction: Mapper = (reference) => MAPPER[reference] ?? {};
-
-    expect(expectationFor(DEEP_ACTION, { mapper: asFunction })).toEqual(
-      expectationFor(DEEP_ACTION),
-    );
+    const decisions = (mapper: Mapper) => {
+      const { postFilter } = translate(DEEP_CASE, { mapper });
+      if (!postFilter) throw new Error(`${DEEP_CASE} emitted no postFilter`);
+      return DOCUMENTS.map((doc) => postFilter(doc));
+    };
+    const byRecord = decisions(MAPPER);
+    expect(byRecord).toContain(true);
+    expect(decisions(asFunction)).toEqual(byRecord);
   });
 
   /**
-   * A reference with no entry is refused rather than read verbatim as a document path. It used to
-   * fall through — the README stated it as a feature — on the belief that a caller whose documents
-   * are not shaped like the plan paths gets a filter that matches nothing. That holds for `eq` and
-   * fails under negation: the path is absent from every document, Convex reads an absent field as
-   * `undefined`, and `undefined != "x"` is true, so `R.attr.status != "x"` with a missing entry
-   * matched every document (cerbos/query-plan-adapters#492).
-   *
-   * A caller shape rather than a policy shape: the corpus fixes one mapper that declares every
-   * reference its policies reach, so no corpus action can ask about a name it leaves out.
+   * A reference with no entry is refused rather than read verbatim as a document path. Read
+   * verbatim, the path is absent from every document, Convex reads an absent field as `undefined`,
+   * and `undefined != "x"` is true, so `R.attr.status != "x"` matched every document
+   * (cerbos/query-plan-adapters#492).
    */
   const without = (reference: string): Mapper =>
     Object.fromEntries(
@@ -486,13 +273,16 @@ describe("mapper forms", () => {
     );
 
   test.each([
-    // `ne` pushed down, `not` pushed down, and a comparison answered by the post-filter: the
-    // refusal is made over the plan, before either half of the output exists.
-    ["cs-eq", "request.resource.attr.aString"],
-    ["not-gt", "request.resource.attr.aNumber"],
-    ["optional-ne", "request.resource.attr.aOptionalString"],
-  ])("%s is refused when %s has no entry", (action, reference) => {
-    expect(() => translate(action, { mapper: without(reference) })).toThrow(
+    // pushed down, pushed down under `not`, and answered by the post-filter: the refusal is made
+    // over the plan, before either half of the output exists.
+    ["string/equals/case-sensitive", "request.resource.attr.aString"],
+    ["logic/not/greater-than", "request.resource.attr.aNumber"],
+    [
+      "null/not-equals/missing-attribute-against-literal",
+      "request.resource.attr.aOptionalString",
+    ],
+  ])("%s is refused when %s has no entry", (id, reference) => {
+    expect(() => translate(id, { mapper: without(reference) })).toThrow(
       `No mapper entry for ${reference}: an unmapped reference is not used verbatim`,
     );
   });
@@ -502,33 +292,24 @@ describe("mapper forms", () => {
       reference === "request.resource.attr.aNumber"
         ? undefined
         : MAPPER[reference]) as Mapper;
-    expect(() => translate("not-gt", { mapper })).toThrow(
+    expect(() => translate("logic/not/greater-than", { mapper })).toThrow(
       "No mapper entry for request.resource.attr.aNumber",
     );
   });
 
-  test("an unmapped reference is refused under the default mapper", () => {
-    expect(() =>
-      queryPlanToConvex({
-        queryPlan: planFromWireFixture("cs-eq"),
-        allowPostFilter: true,
-      }),
-    ).toThrow("No mapper entry for request.resource.attr.aString");
-  });
-
   // A lambda's own variable is bound by the macro, not by the mapper, and must not be refused.
   test("a lambda variable needs no entry", () => {
-    expect(() => translate(DEEP_ACTION)).not.toThrow();
+    expect(() => translate(DEEP_CASE)).not.toThrow();
   });
 
   // The opt-in: an entry that names no `field` keeps the plan path.
   test("an empty entry keeps the plan path verbatim", () => {
-    const { filter } = translate("cs-eq", {
+    const { filter } = translate("string/equals/case-sensitive", {
       mapper: { "request.resource.attr.aString": {} },
     });
     if (!filter)
-      throw new Error("cs-eq emitted no filter under an empty-entry mapper");
-    expect(recordFilter("cs-eq (empty entry)", filter)).toEqual({
+      throw new Error("emitted no filter under an empty-entry mapper");
+    expect(recordFilter("empty entry", filter)).toEqual({
       op: "eq",
       args: [{ op: "field", args: ["request.resource.attr.aString"] }, "one"],
     });
@@ -536,66 +317,60 @@ describe("mapper forms", () => {
 });
 
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
-  // attribute the caller OMITS when the field is NULL. The two conventions are indistinguishable
-  // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
-  // be told, and the whole behaviour is a translator property with no store in it.
-  const OMITTED_MESSAGE = requireMessage(
-    "nullRepresentationOmitted.null-eq-missing.messages.convex",
-    nullRepresentationOmittedFor(actionsFile, ADAPTER).find(
-      (entry) => entry.action === "null-eq-missing",
-    )?.message,
-  );
+  // The corpus expresses the omitted convention through the mapping (`nullable: true`) and the
+  // document shape, and the harness runs every case under the default. The option is for a caller
+  // whose documents store a NULL field as an explicit null while omitting the attribute from
+  // check(): the plan cannot reveal that, so the adapter has to be told.
+  const MISSING = "null/equals/null-literal-on-missing-attribute";
 
-  test("explicit is the default, and keeps the null-matching translation", () => {
-    expect(
-      expectationFor("null-eq-missing", {
-        nullAttributeRepresentation: "explicit",
-      }),
-    ).toEqual(expectationFor("null-eq-missing"));
+  test("explicit is the default", () => {
+    const explicit = translate(MISSING, {
+      nullAttributeRepresentation: "explicit",
+    });
+    const byDefault = translate(MISSING);
+    expect(DOCUMENTS.map((doc) => explicit.postFilter!(doc))).toEqual(
+      DOCUMENTS.map((doc) => byDefault.postFilter!(doc)),
+    );
   });
 
   test("omitted: the same plan is refused rather than translated", () => {
-    // A NULL field sends no attribute, so check() denies on a missing-attribute error while the
-    // filter would return exactly those documents (#302).
     expect(() =>
-      translate("null-eq-missing", {
-        nullAttributeRepresentation: "omitted",
-      }),
-    ).toThrow(OMITTED_MESSAGE);
+      translate(MISSING, { nullAttributeRepresentation: "omitted" }),
+    ).toThrow(UnsupportedQueryPlanError);
   });
+
+  const carriesNullLiteral = (node: unknown): boolean => {
+    if (Array.isArray(node)) return node.some(carriesNullLiteral);
+    if (typeof node !== "object" || node === null) return false;
+    if ("value" in node) {
+      const { value } = node as { value: unknown };
+      return value === null || (Array.isArray(value) && value.includes(null));
+    }
+    return Object.values(node).some(carriesNullLiteral);
+  };
 
   /**
    * The rejection is deliberately wider than the shapes that over-grant — negation is applied
    * around the built predicate, so a leaf cannot tell whether an enclosing `not` will flip it —
-   * but it is not unbounded: a null-free comparison must still translate under `omitted`, or the
-   * option would be a way to turn the adapter off. Asserted over the whole corpus, so the set of
-   * actions the option rejects is a fact this file reports rather than one it assumes.
+   * but it keys off the null OPERAND, never off an operator list, and a null-free plan must still
+   * translate, or the option would be a way to turn the adapter off.
    */
-  test("omitted rejects exactly the actions whose plan carries a null literal", () => {
-    const rejected: string[] = [];
-    const translated: string[] = [];
-    for (const action of RECORDED_ACTIONS) {
-      try {
-        translate(action, { nullAttributeRepresentation: "omitted" });
-        translated.push(action);
-      } catch {
-        rejected.push(action);
-      }
-    }
-
-    const carrying = RECORDED_ACTIONS.filter((action) => {
-      const plan = planFromWireFixture(action);
-      return (
-        plan.kind === PlanKind.CONDITIONAL &&
-        planCarriesNullLiteral(plan.condition)
-      );
-    });
+  test("omitted rejects exactly the plans that carry a null literal", () => {
+    const rejected = TRANSLATED.filter(
+      ({ id }) =>
+        translated(id, { nullAttributeRepresentation: "omitted" }) ===
+        "refused",
+    ).map(({ id }) => id);
+    const carrying = TRANSLATED.filter(({ id }) =>
+      carriesNullLiteral(golden(id).plan.condition ?? null),
+    ).map(({ id }) => id);
 
     expect(rejected).toEqual(carrying);
-    // Anti-vacuity in both directions: the option has to reject something and leave something.
-    expect(rejected.length).toBeGreaterThan(0);
-    expect(translated.length).toBeGreaterThan(0);
+    expect(rejected).toContain(MISSING);
+    expect(rejected).toContain(
+      "null/has-intersection/literal-list-with-null-element",
+    );
+    expect(rejected.length).toBeLessThan(TRANSLATED.length);
   });
 });
 
@@ -616,8 +391,8 @@ const plan = (condition: unknown): PlanResourcesResponse =>
 
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function, not policy shapes. Every other assertion in this file
-  // reads its plan from a fixture precisely because a typed plan is a belief about the planner —
-  // but these are malformed by construction, so there is no fixture to read and nothing to
+  // reads its plan from a golden file precisely because a typed plan is a belief about the planner —
+  // but these are malformed by construction, so there is no golden file to read and nothing to
   // believe. They exist so a caller who hands the adapter a hand-rolled or half-decoded plan gets
   // an error rather than a filter.
   //
@@ -671,7 +446,7 @@ describe("plans the planner cannot produce", () => {
 // -- shapes the corpus does not reach yet ----------------------------------------------------------
 
 /**
- * A bridge, not a home. Everything below asserts a translator branch that no corpus action drives
+ * A bridge, not a home. Everything below asserts a translator branch that no corpus case drives
  * today, which is exactly the situation `CLAUDE.md` says a per-adapter unit test must not be
  * allowed to settle into: a unit test pins the filter one adapter emits, and only a corpus action
  * asks the same question of every other adapter.
@@ -679,17 +454,18 @@ describe("plans the planner cannot produce", () => {
  * The remaining gaps are tracked below; delete these tests when their corpus coverage lands:
  *
  * - backreferences and trailing-wildcard/end-anchor combinations — #396.
- * - the value-list macro machinery past `exists`/`all` — cerbos/query-plan-adapters#394. The
- *   corpus drives `pv-exists`, `pv-all` and their unrolled forms; `exists_one`, the empty
- *   collection and element-field paths it does not.
+ * - the value-list macro machinery past what `principal/*` drives — cerbos/query-plan-adapters#394.
+ *   The corpus drives `exists`, `all` and `exists_one` over a list of distinct strings; a
+ *   duplicate element under `exists_one`, an empty collection that is not folded away, and
+ *   element-field paths it does not.
  *
  * The plans here are hand-built for the same reason the sections above never are: there is no
- * fixture, because there is no action. That is the argument for the issue rather than a
+ * golden file, because there is no case. That is the argument for the issue rather than a
  * licence to keep writing them.
  */
 describe("shapes the corpus does not reach yet", () => {
-  // Corpus gap (#396): regex-lookahead now covers lookahead rejection, but these distinct
-  // backreference and trailing-wildcard/end-anchor combinations still have no corpus action.
+  // Corpus gap (#396): `regex/matches/lookahead-from-principal` covers lookahead rejection, but
+  // these backreference and trailing-wildcard/end-anchor combinations still have no corpus case.
   // Keep their refusal contract until those exact shapes are planned and replayed.
   test.each([
     ["a backreference", "(a)\\1"],
@@ -785,20 +561,6 @@ describe("shapes the corpus does not reach yet", () => {
       expect(postFilter({ aString: "beta" })).toBe(true);
       expect(postFilter({ aString: "gamma" })).toBe(false);
     });
-  });
-});
-
-describe("the golden asset", () => {
-  // The asset carries the command that rewrites it, so a reader who opens the file after a failing
-  // assertion is told how to look at the difference. That is only useful while the command exists.
-  test("names a command this package actually defines", () => {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
-    const [runner, run, script] = GOLDEN_REGENERATE_COMMAND.split(" ");
-
-    expect({ runner, run }).toEqual({ runner: "npm", run: "run" });
-    expect(Object.keys(manifest.scripts)).toContain(script);
   });
 });
 

@@ -1,0 +1,1085 @@
+{
+  "adapter": "langchain-chromadb",
+  "cases": {
+    "arithmetic/add/exact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/add/field-plus-constant": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/add/inexact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/add/inexact-fraction-not-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/add/on-both-sides": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/add/self-division-plus-constant-greater-than": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`, with addition composed on the division"
+    },
+    "arithmetic/add/self-division-plus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/add/self-division-plus-constant-greater-than`, reached through an inequality"
+    },
+    "arithmetic/add/value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`, with a second metadata key as the denominator — Chroma has neither arithmetic nor a field-to-field operand"
+    },
+    "arithmetic/divide/fractional-quotient": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/divide/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/divide/negated-self-division-equals": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than` under a negated equality"
+    },
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`: Chroma compares a stored field against a literal only, so a division operand cannot be translated whatever its denominator"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "arithmetic/divide/self-division-greater-than": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/divide/self-division-not-equals": {
+      "status": "unsupported",
+      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`: the arithmetic operand cannot be translated at all, whatever the enclosing comparison"
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "Every Chroma comparison operand must be a bare metadata key or a literal. `int(aNumber) % 2` is a computed operand, so it is refused as a nested expression before the modulo semantics matter"
+    },
+    "arithmetic/multiply/inexact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/multiply/negative-multiplier": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/subtract/field-minus-constant": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "cast/string/from-boolean": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `cast/string/from-double`"
+    },
+    "cast/string/from-double": {
+      "status": "unsupported",
+      "reason": "Every Chroma comparison operand must be a bare metadata field or a literal. string() wraps the field in an expression, and Chroma's Where model has no computed operand at all — there is no cast, and no place to put one"
+    },
+    "cast/string/negated-explicit-null": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "cast/string/negated-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "collection/all/empty-collection": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/all/nested-exists-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Same as `collection/exists/nested-over-same-collection`, reached through all()"
+    },
+    "collection/all/nested-three-levels-middle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no except operator; the adapter refuses that operation."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "collection/exists-one/several-matches": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/arithmetic-on-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/element-contains-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/element-field-to-element-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/element-field-to-outer-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/element-in-literal-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "collection/exists/element-in-principal-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/empty-collection": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/negated": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "collection/exists/negated-element-in-literal-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no equivalent scalar metadata predicate."
+    },
+    "collection/exists/negated-empty-collection": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "collection/exists/negated-nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "collection/exists/negated-nested-three-levels": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "collection/exists/nested-collection-size": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "collection/exists/nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so a collection macro — let alone one nested inside another — has no Where form"
+    },
+    "collection/exists/nested-three-levels": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/nested-with-outer-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/exists/outer-collection-inside-lambda": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "collection/exists/scalar-list-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare scalar fields with literals; the projection collection lambda is a nested expression with no collection-query representation."
+    },
+    "collection/exists/scalar-list-negated-body": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare scalar fields with literals; the projection collection lambda is a nested expression with no collection-query representation."
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "collection/has-intersection/mapped-names-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "collection/has-intersection/mapped-names-with-metacharacters": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "collection/has-intersection/value-first": {
+      "status": "unsupported",
+      "reason": "hasIntersection is not in the adapter's operator set: Chroma metadata values are scalars, so there is no list-valued field for a set intersection to test, and mirroring the operands does not change that"
+    },
+    "collection/index/first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a boolean list"
+    },
+    "collection/index/first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no positional element access. The pinned server stores a homogeneous list as metadata but filters it only by position-blind membership ($contains matches [3, 2] as readily as [2]), and rejects the empty lists and null elements these seeds carry. The index() node is a computed operand where the comparison walk expects a bare metadata key, so it is refused as a nested expression before the element's JSON type could matter"
+    },
+    "collection/index/first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "collection/index/first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+    },
+    "collection/index/first-element-of-string-list-equals-null": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "collection/index/negated-first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Same missing positional access as `collection/index/first-element-of-boolean-list`: the negation is pushed down to the comparison, which refuses the index() operand before choosing an inverted operator"
+    },
+    "collection/index/negated-first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Same missing positional access as `collection/index/first-element-of-number-list`: the negation is pushed down to the comparison, which refuses the index() operand before choosing an inverted operator"
+    },
+    "collection/index/negated-first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+    },
+    "collection/index/negated-out-of-bounds": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "A map() projection is a nested expression in an operand position, and Chroma has no relation to project from"
+    },
+    "comparison/equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated"
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "eq requires a finite number, string, or boolean literal."
+    },
+    "comparison/greater-or-equal/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Chroma distinguishes integer and floating-point metadata; a fractional threshold against this integer field is not faithful"
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated"
+    },
+    "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated"
+    },
+    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated"
+    },
+    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "comparison/less-than/nan-from-ternary-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have neither conditional nor arithmetic operands, so a ternary whose branches are IEEE-754 division results cannot be translated"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "ne is unsafe for optional Chroma metadata because missing fields match the filter."
+    },
+    "conditional/ternary/as-whole-exists-body": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "conditional/ternary/boolean-branches": {
+      "status": "unsupported",
+      "reason": "The bare ternary plans as a three-operand conditional at the top of the filter; Chroma's Where model only takes two-operand field-vs-literal comparisons"
+    },
+    "conditional/ternary/compared-to-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/expression-condition": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/inside-all": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "conditional/ternary/inside-exists": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "conditional/ternary/missing-attribute-condition": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/negated": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/negated-branch-on-relation": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot evaluate a conditional operand or traverse the selected parent relation."
+    },
+    "conditional/ternary/negated-missing-attribute-condition": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/nested-in-both-branches": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/nested-in-then-branch": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/on-both-sides": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "conditional/ternary/value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no conditional operand: the plan's ternary must be evaluated per record before comparison, which a static Where document cannot express"
+    },
+    "hierarchy/ancestor-of/constant-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/ancestor-of/constant-path-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/ancestor-of/like-metacharacters-in-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/descendent-of/bracket-in-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/descendent-of/constant-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/descendent-of/constant-path-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Same missing nested-expression form as every other `hierarchy/*` case here: hierarchy(...) is an expression where the comparison walk expects a field, and Chroma's `Where` has no prefix match to lower a hierarchy relation onto anyway"
+    },
+    "hierarchy/descendent-of/like-metacharacters-in-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/overlaps/constant-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/overlaps/constant-path-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/overlaps/like-metacharacters-in-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and both hierarchy(...) operands are computed — one of them from a list() built around the primary key — so neither side reduces to the bare field or literal a Where clause requires"
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "identifier/equals/concatenation": {
+      "status": "unsupported",
+      "reason": "The value side is a concatenation of a constant with the primary key — a computed operand, which the Where model has no form for. The comparison is refused before the second metadata key it names is reached"
+    },
+    "identifier/equals/concatenation-value-first": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `identifier/equals/concatenation`, in value-first form"
+    },
+    "identifier/equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Comparing the primary key against a metadata field is variable-to-variable: a Chroma Where clause compares one metadata key against a LITERAL, and has no form that names a second key on the value side"
+    },
+    "identifier/not-equals/field-to-field": {
+      "status": "unsupported",
+      "reason": "Same variable-to-variable limitation as `identifier/equals/field-to-field`, under negation"
+    },
+    "logic/not/deep-mixed-nesting": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "logic/or/comparison-or-exists": {
+      "status": "unsupported",
+      "reason": "Same missing nested-operand form as `relation/or/two-hops-or-collection-exists`, without the relation hop that masked it: the disjunction's left branch IS a bare boolean metadata field Chroma can take, and the right branch is an exists macro over a collection, which it cannot. A Where clause has no way to hold one of the two, so the whole disjunction is refused"
+    },
+    "logic/or/comparison-or-in-resource-list": {
+      "status": "unsupported",
+      "reason": "The membership spelling of `logic/or/comparison-or-exists`. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and Chroma metadata values are scalars anyway, so the right branch is refused before the disjunction is built"
+    },
+    "membership/in/field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated"
+    },
+    "membership/in/literal-in-resource-number-list": {
+      "status": "unsupported",
+      "reason": "Value-first membership in a list-valued attribute. The adapter models metadata as scalars and refuses `literal in field` when mirroring it, because Chroma's $in tests a field against a literal list, not the reverse. The pinned stack's list metadata and its $contains cannot stand in for it here: it rejects an empty list and a null element outright, and these seeds carry both (a2 [], a6 [null, 2]), so the list cannot be stored as the PDP sees it"
+    },
+    "membership/in/negated-field-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated"
+    },
+    "null/all/negated-null-element": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "null/all/negated-null-element-with-false-sibling": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "null/all/null-element-with-true-sibling": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "null/equals/field-to-field-both-explicit-null": {
+      "status": "unsupported",
+      "reason": "Chroma Where documents compare a metadata field against a literal only, so the field-to-field operand is rejected before the null convention on either side is reached — the same limitation as `comparison/equals/field-to-field`"
+    },
+    "null/equals/negated-explicit-null-against-literal": {
+      "status": "unsupported",
+      "reason": "The negated-equality spelling lowers to the same $ne absent-key mismatch as `null/not-equals/explicit-null-against-literal`"
+    },
+    "null/equals/negated-null-literal": {
+      "status": "unsupported",
+      "reason": "Negating the null equality routes through the same $ne absent-key mismatch as `null/not-equals/null-literal`"
+    },
+    "null/equals/null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma $eq accepts only a finite number, string or boolean literal, and Chroma metadata has no null value, so an equality against null cannot be represented"
+    },
+    "null/equals/null-literal-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused: an absent key cannot be told apart from a stored null."
+    },
+    "null/exists-one/negated-null-element": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
+    },
+    "null/exists/negated-explicit-null-in-principal-list": {
+      "status": "unsupported",
+      "reason": "The value-list fold puts a collection macro under a negation, and Chroma has no negation for `exists` — the macro is refused before the comparison leaves it folds into are reached, the same limitation as `principal/exists/long-list` reaches from the positive side"
+    },
+    "null/has-intersection/literal-list-with-null-element": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are scalars with no list-intersection operator, so hasIntersection has no Where equivalent"
+    },
+    "null/has-intersection/literal-list-with-null-element-against-mapped-names": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "null/has-intersection/literal-list-with-null-element-against-mapped-names-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "null/has-intersection/literal-list-with-null-element-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no hasIntersection operator; the adapter refuses that operation."
+    },
+    "null/in/literal-list-of-only-null": {
+      "status": "unsupported",
+      "reason": "The planner folds membership in [null] to an equality against null; Chroma metadata has no null value, so the comparison cannot be represented"
+    },
+    "null/in/literal-list-with-null-element": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are non-null scalars, so a membership list containing null cannot be represented and the adapter refuses to silently drop the null element"
+    },
+    "null/in/missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "null/in/negated-explicit-null-in-literal-list": {
+      "status": "unsupported",
+      "reason": "The negated membership lowers to $nin, which matches records whose metadata key is absent for the same reason $ne does"
+    },
+    "null/in/negated-literal-list-of-only-null": {
+      "status": "unsupported",
+      "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required"
+    },
+    "null/in/negated-literal-list-with-null-element": {
+      "status": "unsupported",
+      "reason": "Chroma $nin matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required"
+    },
+    "null/in/negated-missing-attribute-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "null/in/negated-null-literal-in-number-list": {
+      "status": "unsupported",
+      "reason": "The negation of `null/in/null-literal-in-number-list`: `in` negates to $nin, but the operands still have to be mirrored first, and value-first membership is refused at the same site whatever the polarity. A $nin over a stored list would also match every document missing the key"
+    },
+    "null/in/negated-null-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+    },
+    "null/in/null-literal-in-number-list": {
+      "status": "unsupported",
+      "reason": "Value-first membership in a list-valued attribute, refused when mirroring the operands as `membership/in/literal-in-resource-number-list` is: Chroma's $in tests a field against a literal list, not the reverse. The null literal is not what stops it, but it could not be answered either: Chroma metadata has no null value, and the pinned stack's list metadata rejects a6's [null, 2] outright, so the one row the oracle allows cannot be stored as the PDP sees it"
+    },
+    "null/in/null-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+    },
+    "null/not-equals/explicit-null-against-literal": {
+      "status": "unsupported",
+      "reason": "Chroma $ne matches records whose metadata key is absent, and `owner` is stored as absent for a NULL column because Chroma metadata has no null value. The explicit-null convention this action probes therefore cannot even be represented in the store, let alone compared"
+    },
+    "null/not-equals/field-to-field-mixed-null-conventions": {
+      "status": "unsupported",
+      "reason": "A Chroma `Where` clause compares one metadata key with a literal; it has no form that compares two keys."
+    },
+    "null/not-equals/missing-attribute-against-literal": {
+      "status": "unsupported",
+      "reason": "Chroma $ne includes records with missing metadata, unlike Cerbos missing-attribute error semantics"
+    },
+    "null/not-equals/null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics, and this field is not declared required"
+    },
+    "null/not-equals/null-literal-value-first": {
+      "status": "unsupported",
+      "reason": "Value-first form of `null/not-equals/null-literal`; the same $ne absent-key mismatch applies after the planner mirrors the operands"
+    },
+    "principal/all/long-list": {
+      "status": "unsupported",
+      "reason": "Same missing collection-macro operator as `principal/exists/long-list`; additionally the unrolled form is a chain of $ne, which Chroma can only express safely when the mapper declares the metadata key required, since a document missing the key matches $ne"
+    },
+    "principal/all/negated-long-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot negate the retained all expression; there is no equivalent scalar metadata predicate."
+    },
+    "principal/all/short-list": {
+      "status": "unsupported",
+      "reason": "The unrolled all() is a conjunction of `ne` comparisons against an optional metadata key. A Chroma $ne matches documents that do not carry the key at all, so the NULL-aOptionalString rows the PDP denies as missing-attribute errors would be returned — the same guard that refuses `principal/all/long-list`"
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/exists-one/long-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/exists/long-list": {
+      "status": "unsupported",
+      "reason": "Chroma has no collection-macro operator to fold the lambda into: above the planner's 10-element unroll cap the collection arrives as a literal value list with a lambda body, and $in matches a field against a list rather than evaluating a per-element predicate. Write membership as `R.attr.x in P.attr.xs`, which the planner emits as `in` + value list at every collection size and maps to a single $in"
+    },
+    "principal/exists/negated-long-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no equivalent scalar metadata predicate."
+    },
+    "principal/exists/shadowed-lambda-variable": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "regex/matches/anchored-prefix": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no regular-expression operator."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/compared-to-true": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/end-anchor-before-final-newline": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no regular-expression operator."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/unanchored": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "relation/all/to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so the chained collection lambda cannot be translated"
+    },
+    "relation/and/one-hop-and-root-attribute": {
+      "status": "unsupported",
+      "reason": "The conjunction itself is expressible, but its second conjunct is a contains against the chain key, which Chroma has no substring operator for — the walk reaches that limitation before the conjunction is assembled"
+    },
+    "relation/bare-attribute/negated-one-hop-boolean": {
+      "status": "unsupported",
+      "reason": "Chroma lowers a negated boolean to $ne, and a document whose to-one parent is absent carries no parent.aBool key at all — a missing metadata key MATCHES $ne, which is exactly the parentless rows the PDP denies. The mapping therefore leaves every chain key optional and the adapter refuses $ne over an optional field rather than emitting the over-grant"
+    },
+    "relation/contains/negated-one-hop": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no string-contains predicate or its negation; the raw contains operator is rejected before field resolution."
+    },
+    "relation/contains/one-hop": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators — there is no substring operator — so contains has no faithful Where equivalent, through a chain key exactly as at the root"
+    },
+    "relation/equals/negated-one-hop": {
+      "status": "unsupported",
+      "reason": "A missing parent is stored as an absent metadata key, and Chroma $ne matches absent keys. Negated equality cannot exclude the parentless rows that CEL denies."
+    },
+    "relation/exists/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate, and no relation model to reach the chained collection with in the first place"
+    },
+    "relation/exists/to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+    },
+    "relation/has-intersection/negated-empty-list-on-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot negate the retained hasIntersection expression; there is no equivalent scalar metadata predicate."
+    },
+    "relation/has-intersection/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma has no operator that intersects a list-valued metadata field with a literal list, so hasIntersection has no Where equivalent to negate; the adapter refuses to invert it"
+    },
+    "relation/in/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same literal-in-field limitation as `relation/in/to-one-chain`, reached under a negation: the adapter rejects the membership direction before the negation is even considered"
+    },
+    "relation/in/to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+    },
+    "relation/not-equals/one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/bare-attribute/negated-one-hop-boolean`, reached through the null comparison: `!= null` over a chain key lowers to $ne, which a document missing that key satisfies. Both flavours of absence — no parent at all, and a parent whose optional column is NULL — are stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/or/two-hops-or-collection-exists": {
+      "status": "unsupported",
+      "reason": "Every Chroma comparison operand must be a bare metadata field or a literal, and the disjunction's second branch is an exists macro over a relation — a nested expression the Where model has no form for. The two-level hop in the first branch is never reached"
+    },
+    "relation/overlaps/negated-one-hop": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no hierarchy overlap predicate or its negation; the raw overlaps operator is rejected before hierarchy operand resolution."
+    },
+    "relation/size/negated-non-empty-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma comparison operands must be a bare field or literal, so the negated size(...) collection count is rejected as a nested expression — the same missing relation model and count function as `relation/size/zero-to-one-chain`"
+    },
+    "relation/size/non-empty-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "relation/size/non-negative-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same missing relation model and count function as `relation/size/zero-to-one-chain`"
+    },
+    "relation/size/zero-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "relation/starts-with/two-hops": {
+      "status": "unsupported",
+      "reason": "Same missing pattern-operator limitation as `string/starts-with/percent-in-needle`, reached two levels out: Chroma has no prefix operator for the flattened parent.inner.aString key"
+    },
+    "relation/ternary/to-one-chain-condition": {
+      "status": "unsupported",
+      "reason": "Same three-operand conditional as `conditional/ternary/boolean-branches`: Chroma's Where model takes only two-operand field-vs-literal comparisons, so the ternary is rejected at the top of the filter before its chained condition is examined"
+    },
+    "size/equals/filtered-collection": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "size/equals/negated-collection-zero": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "size/equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "size/greater-or-equal/collection-at-least-one": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "size/greater-or-equal/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "size/greater-or-equal/fractional-threshold-on-relation": {
+      "status": "unsupported",
+      "reason": "Same missing relation model and count function as `relation/size/zero-to-one-chain`, reached through a fractional threshold"
+    },
+    "size/greater-than/collection-above-one": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+    },
+    "size/greater-than/huge-threshold": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand"
+    },
+    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "size/greater-than/string-length": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand"
+    },
+    "size/greater-than/string-non-empty": {
+      "status": "unsupported",
+      "reason": "A Chroma `Where` clause compares a metadata key against a literal and has no length function, so size() has no lowering; the size() node is an expression where the comparison walk expects a field, and is refused there as a nested expression"
+    },
+    "size/less-or-equal/fractional-threshold-on-relation": {
+      "status": "unsupported",
+      "reason": "Same missing relation model and count function as `size/greater-or-equal/fractional-threshold-on-relation` under the opposite ordering"
+    },
+    "size/less-than/huge-threshold": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no string-length function, and every comparison operand must be a bare field or literal, so size(field) cannot be an operand"
+    },
+    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "size/less-than/negated-huge-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "size/less-than/value-first": {
+      "status": "unsupported",
+      "reason": "size() over a collection is a computed operand with no Chroma equivalent — there is no count function and no relation to count — so it is refused as a nested expression, in this operand position as in the collection-first one"
+    },
+    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "Same string-length limitation as `size/greater-than/huge-threshold`: Chroma has no string-length function and size(field) cannot be a comparison operand"
+    },
+    "string/concatenate/field-to-field": {
+      "status": "unsupported",
+      "reason": "The comparison's left operand is a concatenation of two metadata fields — a computed operand, which the Where model has no form for. Chroma never reaches the question of which `+` overload the plan means"
+    },
+    "string/concatenate/negated-unsatisfiable-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "string/concatenate/unsatisfiable-not-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "string/contains/case-sensitive": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no substring operator — so the case-sensitivity this action probes is never reached: the operator is refused first, exactly as for `string/contains/underscore-in-needle`"
+    },
+    "string/contains/field-to-field": {
+      "status": "unsupported",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible"
+    },
+    "string/contains/glob-wildcards-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no contains operator; the adapter refuses that operation."
+    },
+    "string/contains/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "Chroma's Where model has no string-matching operator to negate: `contains` is not in the adapter's negation table because it is not expressible positively either"
+    },
+    "string/contains/underscore-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no substring or pattern operator, so contains has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/contains/value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no substring or pattern operator, so contains has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/ends-with/backslash-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no suffix or pattern operator, so endsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/ends-with/case-sensitive": {
+      "status": "unsupported",
+      "reason": "Same missing pattern-operator limitation as `string/ends-with/backslash-in-needle`: Chroma has no suffix operator, so the comparison whose case-sensitivity this action probes is never built"
+    },
+    "string/ends-with/field-to-field": {
+      "status": "unsupported",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible"
+    },
+    "string/ends-with/glob-wildcards-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no endsWith operator; the adapter refuses that operation."
+    },
+    "string/ends-with/value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no suffix or pattern operator, so endsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/starts-with/bracket-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/starts-with/case-sensitive": {
+      "status": "unsupported",
+      "reason": "Same missing pattern-operator limitation as `string/starts-with/percent-in-needle`: Chroma has no prefix operator, so the comparison whose case-sensitivity this action probes is never built"
+    },
+    "string/starts-with/concatenated-literal-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/starts-with/field-to-field": {
+      "status": "unsupported",
+      "reason": "Chroma has no field-to-field operand and no substring or pattern operator, so a column-valued needle is doubly inexpressible"
+    },
+    "string/starts-with/negated-field-to-field": {
+      "status": "unsupported",
+      "reason": "Same missing string-matching operator as `string/contains/negated-field-to-field`, reached through startsWith"
+    },
+    "string/starts-with/percent-in-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/starts-with/value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "string/starts-with/value-first-concatenated-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "timestamp/equals/literal-instant": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated"
+    },
+    "timestamp/equals/literal-instant-non-utc-offset": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated"
+    },
+    "timestamp/greater-than/relative-window-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated"
+    },
+    "timestamp/less-than/relative-window": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated"
+    },
+    "timestamp/not-equals/literal-instant": {
+      "status": "unsupported",
+      "reason": "Chroma metadata values are strings, numbers, and booleans only — there is no temporal type and no timestamp(...) operand — so the plan's instant comparison cannot be translated"
+    },
+    "type-mismatch/contains/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "type-mismatch/contains/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no contains operator; the adapter refuses that operation."
+    },
+    "type-mismatch/descendent-of/number-field-as-path": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/ends-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "type-mismatch/ends-with/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no endsWith operator; the adapter refuses that operation."
+    },
+    "type-mismatch/equals/boolean-list-element-against-number-literal": {
+      "status": "unsupported",
+      "reason": "Same missing positional access as `collection/index/first-element-of-boolean-list`, in the left disjunct. A Where clause cannot hold one disjunct without the other, so the translatable aNumber == 5 branch is refused with it, and the cross-type question the probe asks is never reached"
+    },
+    "type-mismatch/equals/number-list-element-against-boolean-literal": {
+      "status": "unsupported",
+      "reason": "The mirror of `type-mismatch/equals/boolean-list-element-against-number-literal`: the index() into a number list in the left disjunct is refused as a nested expression, and the whole disjunction with it"
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/equals/string-field-against-number-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "type-mismatch/exists/element-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "The exists() over the tags collection arrives as a lambda operand, which a Chroma `Where` clause has no form for: tags are not stored as metadata at all, and there is no per-element predicate to fold the lambda into. The cross-type question the probe asks (a string name against 0) is never reached, and a disjunction with one untranslatable branch is refused whole, so the aNumber == 5 branch goes with it"
+    },
+    "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
+      "status": "unsupported",
+      "reason": "The map() projection of tag names is a nested expression in an operand position, refused before the mixed literal list [\"public\", 0] is examined; Chroma has no relation to project from and no list-valued field for a set intersection to test"
+    },
+    "type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list": {
+      "status": "unsupported",
+      "reason": "Same missing hasIntersection operator as `type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list`, over a boolean list, in the left disjunct; the whole disjunction is refused with it, so the aNumber == 5 branch is not emitted either"
+    },
+    "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection is not in the adapter's operator set: metadata is modelled as scalars, and the pinned stack's list metadata rejects the empty lists and null elements these seeds carry, so there is no stored list for an intersection to test. The walk refuses the operator before the mixed literal list [\"2\", 3] is examined"
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "status": "unsupported",
+      "reason": "ChromaDB filters cannot test whether a literal is contained in a metadata field."
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/in/string-literal-in-resource-boolean-list": {
+      "status": "unsupported",
+      "reason": "The boolean mirror of `type-mismatch/in/string-literal-in-resource-number-list`: value-first membership refused when mirroring the operands, taking the aNumber == 5 disjunct with it. The pinned server's $contains does not match \"true\" against a stored [true], but rejects a4's [null, true] and the empty lists"
+    },
+    "type-mismatch/in/string-literal-in-resource-number-list": {
+      "status": "unsupported",
+      "reason": "Same value-first membership refusal as `membership/in/literal-in-resource-number-list`, in the left disjunct; the whole disjunction is refused with it, so the aNumber == 5 branch is not emitted either. The cross-type hazard is not what stops it: the pinned server's $contains is type-exact (\"2\" does not match a stored [2]), so a lowering would not coerce, but the seeds' empty lists and null elements still cannot be stored"
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot evaluate the retained ternary and arithmetic operands of this comparison."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/size/boolean-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/size/number-field": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
+    },
+    "type-mismatch/starts-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters cannot compare two metadata fields; this shape retains a field on both sides."
+    },
+    "type-mismatch/starts-with/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no startsWith operator; the adapter refuses that operation."
+    }
+  }
+}

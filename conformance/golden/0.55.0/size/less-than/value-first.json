@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/value-first",
+  "intent": "size() of a related collection on the right of an ordering (0 < size(tags)).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 0
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                }
+              ],
+              "operator": "size"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "0 < size(R.attr.tags)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Operand inversion: rendering size(tags) < 0 returns nothing instead of the 13 rows with at least one tag."
+}
