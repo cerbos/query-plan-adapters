@@ -6,7 +6,7 @@ import { PgColumn } from "drizzle-orm/pg-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
-import { ARITHMETIC_OPERATORS } from "./arithmetic";
+import { ARITHMETIC_OPERATORS, resolveConstantNumber } from "./arithmetic";
 import { buildFilteredCount } from "./collections";
 import { buildFilterFromExpression } from "./filter";
 import { resolveIndexedColumn } from "./indexed";
@@ -48,8 +48,8 @@ import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
  * INTEGER)` is `100` on SQLite, `0` on MySQL and a hard error on PostgreSQL — so a direct lowering
  * returns rows the PDP denies. The numeric direction is no safer: CEL's `int()` truncates toward
  * zero, SQLite's CAST truncates, but PostgreSQL and MySQL round to nearest, so `int(-0.6)` is `0`
- * to CEL and `-1` to those engines. Nothing in the plan says what type the column holds, so the
- * adapter cannot pick a faithful lowering per row.
+ * to CEL and `-1` to those engines. The one `int()` that needs no CAST is over a column whose
+ * Drizzle type holds only whole numbers (`buildIntegerConversion`); every other is refused.
  *
  * `string()` (cerbos/query-plan-adapters#340): there is no cast TARGET the three stores share.
  * `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on MySQL 8.4, which
@@ -136,6 +136,84 @@ const booleanStringColumn = (
   }
   const column = columnForOperand(inner, mapper);
   return column?.dataType === "boolean" ? column : undefined;
+};
+
+/**
+ * The Drizzle column types that can only hold whole numbers inside int64's range, keyed by
+ * `columnType`. A `bigint` column in `bigint` mode is not among them: its values are not numbers.
+ */
+const INTEGER_COLUMN_TYPES = new Set([
+  "SQLiteInteger",
+  "PgInteger",
+  "PgSmallInt",
+  "PgBigInt53",
+  "PgSerial",
+  "PgSmallSerial",
+  "PgBigSerial53",
+  "MySqlInt",
+  "MySqlTinyInt",
+  "MySqlSmallInt",
+  "MySqlMediumInt",
+  "MySqlBigInt53",
+  "MySqlSerial",
+]);
+
+/**
+ * The integer column an `int()` operand converts, if it converts one. CEL's `int()` over a whole
+ * number is that number, so no CAST is needed and the rounding every other `int()` would inherit
+ * from PostgreSQL and MySQL never arises.
+ */
+const integerConversionColumn = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): AnyColumn | undefined => {
+  if (!isOperatorCall(operand, "int") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  if (operand.operands.length !== 1 || inner === undefined) return undefined;
+  const column = columnForOperand(inner, mapper);
+  return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType)
+    ? column
+    : undefined;
+};
+
+/**
+ * `int()` over an integer column. On PostgreSQL and MySQL the column's type guarantees a whole
+ * number, so it is the column itself. SQLite's INTEGER affinity does not: a value with a fraction
+ * is kept as a REAL, so the conversion is spelled `CAST(… AS INTEGER)`, which on SQLite (and only
+ * there) truncates toward zero exactly as CEL's `int()` does.
+ */
+const buildIntegerConversion = (column: AnyColumn, expr: SQL): SQL =>
+  is(column, SQLiteColumn) ? sql`cast(${expr} as integer)` : expr;
+
+/**
+ * CEL's `%` is integer-only: over a double it is a no-overload error, which denies the row, so
+ * only an `int()` over an integer column is a dividend it can take. The divisor must be a non-zero
+ * whole constant: CEL's `x % 0` is an error, which SQLite and MySQL answer NULL but PostgreSQL
+ * raises. SQLite, PostgreSQL and MySQL all give the remainder the dividend's sign — truncated
+ * division, as CEL does — so `-5 % 2` is `-1` on each.
+ */
+const buildModulo = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const dividend = integerConversionColumn(leftOperand, mapper);
+  const divisor = resolveConstantNumber(rightOperand);
+  if (
+    dividend === undefined ||
+    divisor === undefined ||
+    !Number.isInteger(divisor) ||
+    divisor === 0
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate '%': CEL's modulo is defined only over integers, so the adapter lowers " +
+        "it only for int() of an integer column by a non-zero whole constant. A double operand " +
+        "is a no-overload error in CEL, and a zero divisor raises on PostgreSQL",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  return sql`(${left} % ${bindConstant(divisor)})`;
 };
 
 /**
@@ -258,6 +336,9 @@ const buildArithmeticExpression = (
   }
   if (operator === "add" && isStringConcatenation(operands, mapper)) {
     return buildConcatenation(leftOperand, rightOperand, mapper, options);
+  }
+  if (operator === "mod") {
+    return buildModulo(leftOperand, rightOperand, mapper, options);
   }
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);
@@ -397,6 +478,14 @@ export const buildValueExpression = (
     ) {
       return buildValueExpression(inner, mapper, options);
     }
+  }
+
+  const integerColumn = integerConversionColumn(operand, mapper);
+  if (integerColumn !== undefined) {
+    return buildIntegerConversion(
+      integerColumn,
+      buildValueExpression(operands[0]!, mapper, options),
+    );
   }
 
   const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];

@@ -345,7 +345,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 62 / 80 |
+| extended | 63 / 80 |
 | adversarial | 189 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
@@ -404,6 +404,13 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- `int()` over an integer column (`integer`, `smallint`, `int`, `serial`, `bigint` in `number`
+  mode, …) now translates, as the column itself (`CAST(… AS INTEGER)` on SQLite, whose INTEGER
+  affinity can keep a fraction). `int()` of any other column still throws.
+- **Breaking:** `%` translates only as `int(<integer column>) % <non-zero whole constant>`, and
+  throws otherwise. It used to be emitted for any operands, but CEL's `%` has no double overload —
+  `R.attr.aNumber % 2` is an error the PDP denies, which the old filter answered — and a zero
+  divisor raises on PostgreSQL.
 - String `+` now translates instead of throwing: `||` on SQLite and PostgreSQL, `CONCAT()` on
   MySQL, where `||` is logical OR. As for `size()` and indexed storage, the dialect is read off the
   Drizzle class of a column among the operands, so a concatenation reaching no Drizzle column

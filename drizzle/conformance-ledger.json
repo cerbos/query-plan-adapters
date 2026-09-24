@@ -5,10 +5,6 @@
       "status": "unsupported",
       "reason": "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards."
     },
-    "arithmetic/modulo/negative-dividend": {
-      "status": "unsupported",
-      "reason": "int() is required to give `%` an integer operand and has no faithful SQL lowering — CAST rounds where CEL truncates toward zero. The cast is refused before the modulo operator is reached, exactly as for cast/int/negative-fraction."
-    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as the int() cast over a string: Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
