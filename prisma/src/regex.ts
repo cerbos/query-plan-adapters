@@ -161,6 +161,12 @@ class Parser {
       case "+":
       case "?":
         throw new InvalidRegexError("missing argument to repetition operator");
+      case "{":
+        // A count with nothing before it to repeat; a brace that is not a count stays a literal.
+        if (REPEAT.test(`{${this.rest()}`)) {
+          throw new InvalidRegexError("missing argument to repetition operator");
+        }
+        return this.literal(char);
       default:
         return this.literal(char);
     }

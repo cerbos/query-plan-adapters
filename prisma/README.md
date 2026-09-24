@@ -380,7 +380,7 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
-queries over the corpus's 29 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+queries over the corpus's 38 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
 `utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
 out of every golden case in the tier:
 
@@ -388,7 +388,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 63 / 80 |
-| adversarial | 181 / 227 |
+| adversarial | 195 / 250 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -541,6 +541,13 @@ vacuously true, matching the empty list your application would send to `check()`
   to-one hop (`!R.attr.parent.aBool` with `type: "one"`) no longer returns rows whose relation is
   absent. It emits `AND: [{ parent: { is: {} } }, { NOT: … }]` and returns fewer rows (over-grant
   fix).
+- **Fix:** a negated `&&`/`||` that reads a single to-one hop is pushed down with De Morgan, so each
+  operand requires only the hops it reads. `!(!aBool && parent.aString == "one")` used to require
+  the parent around the whole negation and denied a parentless row with `aBool` true, which CEL
+  allows because `!aBool` is false and decides the `&&` (under-grant fix).
+- **Breaking:** a `matches()` pattern opening with a repetition count (`{2}a`, or one right after
+  `(` or `|`) is a pattern RE2 rejects, and settles as a CEL error on every row. It used to be read
+  as a literal brace, so its negation matched every row (over-grant fix).
 - Projection relations resolve the scalar lambda variable to the mapped column. Negated equality in
   `tagNames.exists(name, !(name == "public"))` now includes null list elements, as CEL does.
   Function mappers may call `queryPlanToPrisma` recursively without clobbering the outer call's
