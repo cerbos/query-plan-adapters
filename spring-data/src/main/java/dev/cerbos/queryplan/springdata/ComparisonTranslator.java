@@ -13,11 +13,14 @@ import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
+import com.google.protobuf.Value;
+
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.Temporal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -295,6 +298,12 @@ final class ComparisonTranslator {
                             PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                 return solveAddComparison(op, fpc, other, scope);
             }
+            if (isAddRooted(left) || isAddRooted(right)) {
+                Predicate concat = tryConcatComparison(op, operands, scope);
+                if (concat != null) {
+                    return concat;
+                }
+            }
             if (isArithmeticRooted(left) || isArithmeticRooted(right)) {
                 return arithmetic.numericComparison(op, operands, scope);
             }
@@ -469,6 +478,107 @@ final class ComparisonTranslator {
 
     private static String kindWord(Object value) {
         return value instanceof List<?> ? "list" : "map";
+    }
+
+    /**
+     * A comparison whose {@code add} is CEL string concatenation, or {@code null} when no string
+     * is involved and the comparison is numeric. The plan does not say which {@code +} it is, so
+     * the operand types decide: a string constant or a {@link String} column anywhere under the
+     * {@code add} makes it concatenation, and every other leaf must then be a string too.
+     *
+     * <p>{@code "a" + null} is a CEL error, so a NULL column under the concatenation keeps the
+     * comparison UNKNOWN under both polarities; {@code CONCAT} alone would not, since some
+     * dialects skip NULL arguments. A column compared with the concatenation keeps its own null
+     * convention: declared EXPLICIT, {@code ==} and {@code !=} are definite on a NULL.
+     */
+    private Predicate tryConcatComparison(String op, List<Operand> operands, Scope scope) {
+        if (!isStringTyped(operands.get(0), scope) && !isStringTyped(operands.get(1), scope)) {
+            return null;
+        }
+        List<Path<?>> nullable = new ArrayList<>();
+        // At most one side is a bare column; the other holds the add.
+        int explicitSide = -1;
+        for (int side = 0; side < 2; side++) {
+            Operand o = operands.get(side);
+            if (("eq".equals(op) || "ne".equals(op))
+                    && o.getNodeCase() == Operand.NodeCase.VARIABLE
+                    && leaf.isExplicitNull(o.getVariable(), scope)) {
+                explicitSide = side;
+            }
+        }
+        List<Expression<String>> sides = new ArrayList<>(2);
+        for (int side = 0; side < 2; side++) {
+            Operand o = operands.get(side);
+            sides.add(side == explicitSide
+                    ? stringPath(o.getVariable(), op, operands, scope)
+                    : concatOperand(o, op, operands, scope, nullable));
+        }
+        Predicate base = explicitSide >= 0
+                ? leaf.definiteEquality(op, sides.get(0), sides.get(1),
+                        explicitSide == 0, explicitSide == 1)
+                : comparePredicate(op, sides.get(0), sides.get(1));
+        return nullable.isEmpty() ? base : tri.baseUnlessUnknown(base,
+                () -> cb.or(nullable.stream().map(cb::isNull).toArray(Predicate[]::new)));
+    }
+
+    /** Whether a string constant or {@link String} column is anywhere under {@code o}. */
+    private boolean isStringTyped(Operand o, Scope scope) {
+        return switch (o.getNodeCase()) {
+            case VALUE -> o.getValue().getKindCase() == Value.KindCase.STRING_VALUE;
+            case VARIABLE -> String.class.equals(scope.path(o.getVariable()).getJavaType());
+            case EXPRESSION -> "add".equals(o.getExpression().getOperator())
+                    && o.getExpression().getOperandsList().stream()
+                            .anyMatch(child -> isStringTyped(child, scope));
+            default -> false;
+        };
+    }
+
+    /**
+     * Lowers {@code o} to a string expression, adding each column it reads to {@code nullable}.
+     * A leaf that is not a string makes the {@code +} a type error CEL has no overload for; it is
+     * refused rather than guessed.
+     */
+    private Expression<String> concatOperand(Operand o, String op, List<Operand> operands,
+                                             Scope scope, List<Path<?>> nullable) {
+        switch (o.getNodeCase()) {
+            case VALUE -> {
+                if (PlanValues.protoValueToJava(o.getValue()) instanceof String text) {
+                    return cb.literal(text);
+                }
+            }
+            case VARIABLE -> {
+                Expression<String> path = stringPath(o.getVariable(), op, operands, scope);
+                nullable.add((Path<?>) path);
+                return path;
+            }
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression e = o.getExpression();
+                if ("add".equals(e.getOperator()) && e.getOperandsCount() == 2) {
+                    return cb.concat(
+                            concatOperand(e.getOperands(0), op, operands, scope, nullable),
+                            concatOperand(e.getOperands(1), op, operands, scope, nullable));
+                }
+            }
+            default -> { }
+        }
+        throw Refusals.unsupported("String concatenation under " + op + " requires every operand"
+                + " to be a string constant or a String column: got "
+                + Refusals.describeOperand(operands.get(0)) + " and "
+                + Refusals.describeOperand(operands.get(1)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Expression<String> stringPath(String variable, String op, List<Operand> operands,
+                                          Scope scope) {
+        Path<?> path = scope.path(variable);
+        if (!String.class.equals(path.getJavaType())) {
+            throw Refusals.unsupported("String concatenation under " + op + " requires every"
+                    + " operand to be a string constant or a String column: '" + variable
+                    + "' is " + path.getJavaType().getSimpleName() + " (operands "
+                    + Refusals.describeOperand(operands.get(0)) + " and "
+                    + Refusals.describeOperand(operands.get(1)) + ")");
+        }
+        return (Path<String>) path;
     }
 
     /**

@@ -125,10 +125,6 @@
       "status": "unsupported",
       "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the reference lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is resolved, before that LIKE is built"
     },
-    "identifier/equals/concatenation": {
-      "status": "unsupported",
-      "reason": "The comparison is a_optional_string against a concatenation of a constant with the primary key. The reference lowers CEL's `+` as arithmetic, which requires numeric operands; CEL's string overload has no arithmetic meaning and is refused rather than rendered as a numeric addition"
-    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
@@ -212,10 +208,6 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "Unsupported operator: matches"
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "The same arithmetic-only lowering of `+`, reached with both operands columns instead of one being a constant. The reference refuses every string `+`, so it needs no type information to reject the two-column form"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
