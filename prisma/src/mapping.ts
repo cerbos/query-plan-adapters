@@ -52,6 +52,11 @@ export type ResolvedFieldReference = {
 
 export type ResolvedValue = {
   value: any;
+  /**
+   * The value is a timestamp literal between two milliseconds, bound as the next millisecond: a
+   * comparison against it must go through roundSubMillisecond.
+   */
+  subMillisecond?: boolean;
 };
 
 export type ResolvedOperand = ResolvedFieldReference | ResolvedValue;

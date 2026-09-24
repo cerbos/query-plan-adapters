@@ -19,7 +19,11 @@ import {
   isResolvedValue,
   resolveFieldReference,
 } from "./mapping";
-import type { ResolvedFieldReference, TranslationContext } from "./mapping";
+import type {
+  ResolvedFieldReference,
+  ResolvedValue,
+  TranslationContext,
+} from "./mapping";
 import {
   CERBOS_TO_PRISMA_OPERATOR,
   assertDefined,
@@ -32,6 +36,7 @@ import {
 import type { OperatorOperand } from "./plan";
 import { relationFilter, wrapInRelations } from "./relations";
 import { tryHandleTernaryComparison } from "./ternary";
+import { roundSubMillisecond } from "./timestamp";
 import { resolveOperand, tryFoldValueExpression } from "./translate";
 import { UnsupportedQueryPlanError } from "./errors";
 
@@ -91,16 +96,18 @@ export function handleRelationalOperator(
     );
   }
 
-  const left = resolveOperand(leftOperand, context);
-  const right = resolveOperand(rightOperand, context);
+  // Only a comparison between a column and one constant can absorb a sub-millisecond instant.
+  const oneColumn = isColumnOperand(leftOperand) !== isColumnOperand(rightOperand);
+  const left = resolveOperand(leftOperand, context, oneColumn);
+  const right = resolveOperand(rightOperand, context, oneColumn);
 
   if (isResolvedValue(left)) {
     if (isResolvedFieldReference(right)) {
-      return buildComparisonFilter(
+      return buildValueComparisonFilter(
         context,
         right,
         mirrorOperator(operator),
-        left.value
+        left
       );
     }
     return evaluateConstantComparison(operator, left.value, right.value)
@@ -135,7 +142,43 @@ export function handleRelationalOperator(
     );
   }
 
-  return buildComparisonFilter(context, left, operator, right.value);
+  return buildValueComparisonFilter(context, left, operator, right);
+}
+
+/** A column reference, bare or wrapped in timestamp(). */
+function isColumnOperand(operand: PlanExpressionOperand): boolean {
+  if (isNamedOperand(operand)) return true;
+  return (
+    isOperatorOperand(operand) &&
+    operand.operator === "timestamp" &&
+    operand.operands.length === 1 &&
+    isNamedOperand(operand.operands[0]!)
+  );
+}
+
+/** buildComparisonFilter, for a resolved constant that may be a sub-millisecond timestamp. */
+function buildValueComparisonFilter(
+  context: TranslationContext,
+  fieldRef: ResolvedFieldReference,
+  operator: string,
+  constant: ResolvedValue
+): PrismaFilter {
+  if (!constant.subMillisecond) {
+    return buildComparisonFilter(context, fieldRef, operator, constant.value);
+  }
+  const rounded = roundSubMillisecond(operator);
+  if (rounded !== null) {
+    return buildComparisonFilter(context, fieldRef, rounded, constant.value);
+  }
+  // No whole millisecond equals the instant. Spelled as a contradiction on the column, so a NULL
+  // stays UNKNOWN under both polarities — timestamp() of a missing attribute is an error.
+  const never: PrismaFilter = {
+    AND: [
+      buildComparisonFilter(context, fieldRef, "lt", constant.value),
+      buildComparisonFilter(context, fieldRef, "ge", constant.value),
+    ],
+  };
+  return operator === "eq" ? never : { NOT: never };
 }
 
 /**

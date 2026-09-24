@@ -393,14 +393,6 @@
       "status": "unsupported",
       "reason": "Prisma DateTime values retain instants but discard RFC-3339 lexical spelling; raw field equality cannot reproduce CEL string equality, so both operands require timestamp wrappers."
     },
-    "timestamp/greater-than/relative-window-value-first": {
-      "status": "unsupported",
-      "reason": "Same sub-millisecond now() limitation in value-first form"
-    },
-    "timestamp/less-than/relative-window": {
-      "status": "unsupported",
-      "reason": "The planner emits a sub-millisecond now() literal that Prisma DateTime cannot represent without changing the CEL instant"
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-boolean-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its boolean element meets the number literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"

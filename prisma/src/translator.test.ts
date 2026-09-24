@@ -261,13 +261,13 @@ describe("timestamp literals", () => {
       model: MODEL,
     });
 
-  test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why the two relative-window cases are `unsupported` in the
-    // ledger. A tidy millisecond substitution in the loader would translate cleanly and quietly
-    // contradict it.
-    expect(() => translate("timestamp/less-than/relative-window")).toThrow(
-      "Timestamp value exceeds millisecond precision"
-    );
+  test("a nanosecond instant — what the PDP actually folds — compares against the next millisecond", () => {
+    // A DateTime attribute is a whole millisecond, so `a < T` for a T between two milliseconds is
+    // `a < ceil(T)`. The corpus loader substitutes a nanosecond instant for the same reason.
+    expect(at("2026-08-11T09:13:39.123456789Z")).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { createdAt: { lt: "2026-08-11T09:13:39.124Z" } },
+    });
   });
 
   test("the same plan at millisecond precision translates", () => {
@@ -291,7 +291,6 @@ describe("timestamp literals", () => {
     ["a date with no time part", "2024-01-01"],
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
-    ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
     ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
   ])("%s fails closed", (_label, value) => {
     expect(() => at(value)).toThrow(/RFC 3339|millisecond|instant range/);

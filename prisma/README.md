@@ -171,8 +171,12 @@ queryPlanToPrisma({ queryPlan, mapper, model: "Resource" });
 Mark `DateTime` columns with `valueType: "dateTime"` and compare them with `timestamp()`.
 `timestamp()` over an untyped or string mapping throws, and so does a bare comparison between two
 mapped `DateTime` columns (use `timestamp()` on both sides). Literals must be strict RFC 3339
-instants in CEL's year 0001–9999 range and exactly representable in milliseconds (digits after the
-third fractional digit must be zero). Your column must preserve millisecond precision.
+instants in CEL's year 0001–9999 range. Your column must preserve millisecond precision, and the
+attribute you send must be the millisecond Prisma returns for it. An instant between two
+milliseconds — what the planner folds `now()` into — is compared against the next millisecond,
+which is exact for a whole-millisecond attribute: `a < T` and `a <= T` become `< ceil(T)`, `a > T`
+and `a >= T` become `>= ceil(T)`, and `a == T` never holds. Anywhere else (a list, arithmetic, two
+literals) such an instant still throws.
 
 ## NULL attribute representation
 
@@ -341,7 +345,7 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   fractional addition (not reversible in IEEE-754).
 - **Other malformed shapes:** the two-list `except` function compared or counted, `all()` over a
   multi-hop chain, an empty hierarchy delimiter,
-  sub-millisecond `now()` thresholds, non-scalar comparison literals, empty `and`/`or`, and
+  non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
 
 #### Operators Prisma `where` cannot express
@@ -382,8 +386,8 @@ out of every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 50 / 80 |
-| adversarial | 153 / 227 |
+| extended | 51 / 80 |
+| adversarial | 154 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -446,6 +450,9 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A timestamp literal with digits past the millisecond — what the planner folds `now()` into — is
+  no longer refused when compared against a column: it is compared against the next millisecond
+  (see [Timestamps](#timestamps)).
 - A list-valued `filter()`, `map()` or `except()` where a boolean is required is a CEL error, and
   settles as one: a whole condition that is one returns `ALWAYS_DENIED` rather than throwing. Under
   `nullAttributeRepresentation: "omitted"`, `x == null` outside any `!` (and `!(x != null)`)
