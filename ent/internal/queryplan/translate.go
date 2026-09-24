@@ -1035,6 +1035,13 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		}
 	}
 
+	if op == OpMod && (isAttribute(lv) || isAttribute(rv)) {
+		return nil, errors.New(
+			"modulus over an attribute is a CEL no-overload error: Cerbos sends every attribute " +
+				"number as a double and CEL's % is integer-only, so the PDP denies every row",
+		)
+	}
+
 	lExpr, err := asExpr(lv)
 	if err != nil {
 		return nil, err
@@ -1044,6 +1051,18 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		return nil, err
 	}
 	return Arith{Op: op, L: lExpr, R: rExpr}, nil
+}
+
+// isAttribute reports whether an operand is an attribute read straight from storage — a column or a
+// scalar read through a to-one hop — as opposed to a computed value such as size().
+func isAttribute(v value) bool {
+	switch t := v.(type) {
+	case Column:
+		return true
+	case Subquery:
+		return t.Kind == SubqueryScalar
+	}
+	return false
 }
 
 // foldArithmetic evaluates a binary operation over two constants, returning nil when the operator
@@ -1137,8 +1156,9 @@ func addValue(lv, rv value) (value, error) {
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
 //
-// A numeric or text operand is cast as it stands: every engine this module targets formats the
-// shortest decimal that round-trips, as CEL does. A BOOLEAN column cannot be — SQLite and MySQL
+// A text operand is cast as it stands. A column declared ValueNumber is not: CEL spells a double
+// with Go's %g, which no engine's CAST prints, so it is held as numberText for the comparison that
+// consumes it. A constant or undeclared operand is cast as it stands. A BOOLEAN column cannot be — SQLite and MySQL
 // have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say
 // 'true' (#376). Nothing in the plan names the operand's type, so the caller declares it with
 // ValueBool, and the column is spelled through boolText before it is cast.
@@ -1146,6 +1166,9 @@ func castValue(v value) (value, error) {
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
+	}
+	if _, constant := v.(float64); !constant && scalarKind(v) == "number" {
+		return numberText{x: e}, nil
 	}
 	if c, ok := v.(Column); ok && c.Type == ValueBool {
 		e = boolText(c)

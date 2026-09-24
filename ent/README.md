@@ -230,7 +230,7 @@ and counts toward the total but not toward passed — on 0.55.0 that is one exte
 | --- | --- |
 | core | 26 / 26 |
 | extended | 59 / 80 |
-| adversarial | 183 / 227 |
+| adversarial | 188 / 250 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
@@ -245,7 +245,6 @@ Real but unfixed; each needs a corpus case first. Treat them as constraints on y
 | Gap | Effect |
 | --- | --- |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering, not CEL's IEEE semantics. Only NaNs the adapter folds itself are exact. |
-| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`, so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is exact (`arithmetic/divide/negative-zero-divisor`). |
 | `!=` / `not in` against an explicit null, on an attribute not declared `NullConventionExplicit` | CEL says `null != "x"` is true; SQL leaves it UNKNOWN and excludes the row. Under-grants (fails closed). See cerbos/query-plan-adapters#308. |
 
 ## Mapping hazards
@@ -324,6 +323,21 @@ tags := &cerbosent.Relation{
   `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text, giving CEL's
   words on every dialect; a NULL column stays NULL and the row is excluded. On MySQL the cast
   carries `COLLATE utf8mb4_0900_bin`.
+- **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
+  disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
+  attribute number is a double — so the PDP denies every row
+  (`arithmetic/modulo/negated-double-operand`). A comparison decided by the sign of an infinity
+  from a zero column denominator (`R.attr.a / R.attr.b > 0.0`) is refused, since CEL's `x / -0.0` is
+  the opposite infinity from `x / 0.0` and the sign of a stored zero cannot be read
+  (`arithmetic/divide/field-by-field`); a self-division, and a comparison both signs answer alike,
+  still translate. `string()` over a `ValueNumber` column translates only as `==`/`!=` against a
+  string constant, lowered to a numeric comparison with the double CEL spells that way (Go's `%g`:
+  `"1e+06"`, `"2"`), and a zero spelling is refused (`cast/string/from-double-spellings`,
+  `cast/string/from-negative-zero-double`).
+- A list literal compared with a column declared `ValueString`, `ValueNumber` or `ValueBool` is
+  unequal wherever the column is present (`type-mismatch/equals/string-field-against-list-literal`);
+  against an undeclared column it fails closed. It used to bind the list as a parameter, which the
+  driver rejected at execution.
 - Cerbos 0.55: folded NaN ordered comparisons return false (so their negation returns true),
   matching the updated CEL evaluator; this differs from Cerbos 0.54. Missing attributes still
   propagate errors.

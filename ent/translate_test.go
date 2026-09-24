@@ -313,14 +313,22 @@ func TestOperatorSymbols(t *testing.T) {
 	t.Run("arithmetic", func(t *testing.T) {
 		t.Parallel()
 
-		// A column dividend keeps `div` and `mod` from folding to a constant, and the division
+		// A non-constant dividend keeps `div` and `mod` from folding to a constant, and the division
 		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
-		// assert the operator appears rather than pinning the whole surrounding CASE.
+		// assert the operator appears rather than pinning the whole surrounding CASE. `mod` takes
+		// size(), CEL's one integer an attribute yields: `%` over the double attribute itself is a
+		// no-overload error and refused.
+		dividend := func(operator string) *operand {
+			if operator == "mod" {
+				return expr("size", variable("request.resource.attr.name"))
+			}
+			return variable("request.resource.attr.count")
+		}
 		for operator, symbol := range map[string]string{
 			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
 		} {
 			query, _ := translateWith(t, testMapper(), expr("gt",
-				expr(operator, variable("request.resource.attr.count"), val(t, 2)), val(t, 1)))
+				expr(operator, dividend(operator), val(t, 2)), val(t, 1)))
 			require.Contains(t, query, " "+symbol+" ", operator+": "+query)
 		}
 	})
