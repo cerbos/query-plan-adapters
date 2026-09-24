@@ -101,10 +101,6 @@
       "status": "unsupported",
       "reason": "map() translates only as the collection operand of hasIntersection, where the projection becomes the inner select of an EXISTS. Comparing the ordered projection itself to a literal list has no Criteria form"
     },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the reference lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is resolved, before that LIKE is built"
-    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."

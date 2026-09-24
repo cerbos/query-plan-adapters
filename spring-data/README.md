@@ -355,7 +355,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | String `+` in comparisons (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`) | `cb.concat` when a string constant or `String` column sits under the `add`, any other leaf refused; UNKNOWN when a concatenated column is NULL |
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
-| `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants |
+| `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
 | Bare boolean variable | `cb.equal(path, true)` |
 
 ## Not yet supported
@@ -390,10 +390,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 64 / 80 |
-| adversarial | 190 / 227 |
+| adversarial | 191 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 52 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 51 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -670,8 +670,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 - **Breaking** — macro-depth bound now counts literal-list folds; a plan past the limit throws
   instead of emitting a filter. Default still 5
   ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).
-- **Breaking** — `hierarchy(R.attr.scope, "")` (empty delimiter) throws. The old `LIKE` also matched
-  the path itself (`hierarchy/descendent-of/empty-delimiter` returned a row the PDP denies).
+- `hierarchy(R.attr.scope, "")` (empty delimiter) between a column and a constant is a
+  per-character string prefix: `descendentOf` is `LIKE prefix || '_%'`, so the path itself no
+  longer matches as the old `LIKE` did (`hierarchy/descendent-of/empty-delimiter` returned a row the
+  PDP denies). Any other empty-delimiter shape throws.
 - **Breaking** — bare comparisons between temporal columns throw; use `timestamp()`.
 - A negated column-needle match (`!R.attr.a.contains(R.attr.b)`) no longer returns rows whose needle
   is NULL — an over-grant fix, fewer rows
