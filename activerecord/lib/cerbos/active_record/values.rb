@@ -21,6 +21,10 @@ module Cerbos
       # a list of segments with no delimiter, as `hierarchy(["a", R.id])` makes.
       Hierarchy = Struct.new(:value, :segments, :delimiter)
 
+      # `string()` of a value CEL holds as a double, held until `eq` or `ne` compares it with
+      # a literal. See {Translator::Casts#compare_double_text}.
+      DoubleText = Struct.new(:value)
+
       # A resolved collection: the correlated subquery scope from a relation mapping. Used by
       # macros and membership tests.
       Collection = Struct.new(:scope)

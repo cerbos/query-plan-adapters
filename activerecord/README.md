@@ -99,7 +99,7 @@ Errors, all subclasses of `Cerbos::ActiveRecord::Error`:
 | --- | --- |
 | `UnmappedAttributeError` | A plan variable is missing from the map, or used where its mapping cannot go (e.g. a relation where a column is needed) |
 | `UnsupportedOperatorError` | An operator or operand shape has no exact SQL translation |
-| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, an empty hierarchy delimiter) |
+| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, a hierarchy delimiter that is not a string) |
 | `UnsupportedAssociationError` | An attribute maps to an association the adapter cannot turn into a correlated subquery |
 
 ## Mapping attributes
@@ -316,7 +316,8 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `collection/filter/as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `hierarchy/descendent-of/empty-delimiter` | An empty hierarchy delimiter turns `descendentOf` into a prefix test whose `LIKE` would also match the path itself. |
+| `arithmetic/modulo/negated-double-operand` | `%` over an attribute that has not gone through `int()`. Every number in a request attribute is a double and CEL's `%` has no double overload, so the row errors; SQL would compute a remainder. |
+| `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
 number of operands. The planner never emits these, but the adapter accepts plans from any source.
@@ -333,7 +334,7 @@ in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 61 / 80 |
-| adversarial | 171 / 227 |
+| adversarial | 182 / 250 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

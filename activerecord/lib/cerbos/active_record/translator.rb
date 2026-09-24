@@ -203,6 +203,7 @@ module Cerbos
         # Keyed by identity: each resolved column is a fresh Arel node passed through unchanged.
         @column_types = {}.compare_by_identity
         @timestamp_operands = {}.compare_by_identity
+        @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
@@ -286,6 +287,8 @@ module Cerbos
             "such as filter() and map() evaluate to a list, not to a boolean"
         end
 
+        reject_double_text("a condition", value)
+
         # A bare boolean column is valid CEL, but `where` rejects a bare column and PostgreSQL
         # wants a boolean expression. `= TRUE` gives the same result, NULL included.
         return ArelSupport.comparison("eq", value, true) if column_type(value) == :boolean
@@ -327,6 +330,9 @@ module Cerbos
         then_value = evaluate(operands[1], environment)
         else_value = evaluate(operands[2], environment)
 
+        reject_double_text("if", then_value)
+        reject_double_text("if", else_value)
+
         # A non-finite arm must not reach SQL, so defer to the enclosing comparison.
         if deferred_value?(then_value) || deferred_value?(else_value)
           return Values::ConditionalValue.new(
@@ -352,6 +358,8 @@ module Cerbos
         assert_uniform_null_conventions(operator, values)
 
         override = operator_overrides[operator]
+        # Only the built-in eq and ne can resolve string() of a double.
+        values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)
         plain = override ? override.call(*values) : dispatch(operator, values)
 
         with_null_conventions(operator, values, plain, overridden: !override.nil?)
@@ -427,6 +435,7 @@ module Cerbos
         when Values::FilteredCollection then "a filtered relation"
         when Values::MappedCollection then "a projected relation"
         when Values::Hierarchy then "a hierarchy"
+        when Values::DoubleText then "string() of a double"
         else "#{value.inspect} (#{value.class})"
         end
       end
