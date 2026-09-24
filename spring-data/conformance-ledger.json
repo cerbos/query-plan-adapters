@@ -9,14 +9,6 @@
       "status": "unsupported",
       "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
     },
-    "cast/int/malformed-string": {
-      "status": "unsupported",
-      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, so int() over a string column is refused rather than lowered to CAST."
-    },
-    "cast/int/negated-malformed-string": {
-      "status": "unsupported",
-      "reason": "The Criteria API has no portable CEL numeric parsing expression that preserves conversion errors under negation."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, which is mapped to a String column: a String does not pin an absolute instant, and a malformed value must stay a CEL error, which no SQL cast preserves, so the adapter refuses to compare it."

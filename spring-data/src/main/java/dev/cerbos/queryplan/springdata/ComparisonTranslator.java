@@ -485,27 +485,126 @@ final class ComparisonTranslator {
                                            List<Operand> operands, Scope scope) {
         Path<?> path = scope.path(field.variable());
         Class<?> type = path.getJavaType();
-        if (!Double.class.equals(type) && !Integer.class.equals(type)) {
+        if (!Double.class.equals(type) && !Integer.class.equals(type)
+                && !String.class.equals(type)) {
             throw leafOperandError(op, operands);
         }
         if (Double.isNaN(c) || Math.abs(c) >= 0x1p53) {
             throw Refusals.unsupported("int() compared with " + c + " is not supported: the"
                     + " bound is not an exactly representable integer");
         }
+        if (String.class.equals(type)) {
+            @SuppressWarnings("unchecked")
+            IntText text = new IntText((Expression<String>) path);
+            return tri.baseUnlessUnknown(intBounds(op, c, text::atLeast, text::atMost),
+                    text::unparsable);
+        }
         Expression<Double> d = path.as(Double.class);
+        return tri.baseUnlessUnknown(
+                intBounds(op, c, m -> atLeast(d, m), m -> atMost(d, m)),
+                () -> cb.or(cb.isNull(path), cb.le(d, -INT64_LIMIT), cb.ge(d, INT64_LIMIT)));
+    }
+
+    /** {@code int(x) op c} from the integral bounds {@code int(x) >= m} and {@code <= m}. */
+    private Predicate intBounds(String op, double c,
+                                java.util.function.DoubleFunction<Predicate> atLeast,
+                                java.util.function.DoubleFunction<Predicate> atMost) {
         boolean integral = c == Math.rint(c);
-        Predicate base = switch (op) {
-            case "gt" -> atLeast(d, Math.floor(c) + 1);
-            case "ge" -> atLeast(d, Math.ceil(c));
-            case "lt" -> atMost(d, Math.ceil(c) - 1);
-            case "le" -> atMost(d, Math.floor(c));
-            case "eq" -> integral ? cb.and(atLeast(d, c), atMost(d, c)) : cb.disjunction();
-            case "ne" -> integral ? tri.not(cb.and(atLeast(d, c), atMost(d, c)))
+        return switch (op) {
+            case "gt" -> atLeast.apply(Math.floor(c) + 1);
+            case "ge" -> atLeast.apply(Math.ceil(c));
+            case "lt" -> atMost.apply(Math.ceil(c) - 1);
+            case "le" -> atMost.apply(Math.floor(c));
+            case "eq" -> integral ? cb.and(atLeast.apply(c), atMost.apply(c)) : cb.disjunction();
+            case "ne" -> integral ? tri.not(cb.and(atLeast.apply(c), atMost.apply(c)))
                     : cb.conjunction();
             default -> throw Refusals.internal("Unsupported int() comparison operator: " + op);
         };
-        return tri.baseUnlessUnknown(base, () -> cb.or(cb.isNull(path),
-                cb.le(d, -INT64_LIMIT), cb.ge(d, INT64_LIMIT)));
+    }
+
+    /**
+     * {@code int(s)} over a String column, which CEL parses with Go's
+     * {@code strconv.ParseInt(s, 10, 64)}: an optional {@code +} or {@code -}, then one or more
+     * ASCII digits, within int64. SQL {@code CAST} accepts other spellings or fails the query,
+     * so the value is compared without one: its sign, then its digits with leading zeros
+     * trimmed, which order by length and then lexicographically. Every expression is built
+     * fresh, so none is shared between polarities.
+     */
+    private final class IntText {
+        private static final String INT64_MAX = "9223372036854775807";
+        private static final String INT64_MIN_MAGNITUDE = "9223372036854775808";
+
+        private final Expression<String> s;
+
+        IntText(Expression<String> s) {
+            this.s = s;
+        }
+
+        private Predicate negative() {
+            return cb.like(s, "-%");
+        }
+
+        /** The string without its sign. */
+        private Expression<String> body() {
+            return cb.<String>selectCase()
+                    .when(cb.or(cb.like(s, "+%"), cb.like(s, "-%")), cb.substring(s, 2))
+                    .otherwise(s);
+        }
+
+        /** The magnitude's digits, without leading zeros: {@code ''} for zero. */
+        private Expression<String> digits() {
+            return cb.trim(CriteriaBuilder.Trimspec.LEADING, '0', body());
+        }
+
+        /** {@code |value| op k} for a magnitude {@code k} spelled without leading zeros. */
+        private Predicate magnitude(String op, String k) {
+            Expression<Integer> length = cb.length(digits());
+            Predicate longer = "ge".equals(op) || "gt".equals(op)
+                    ? cb.gt(length, k.length()) : cb.lt(length, k.length());
+            Predicate sameLength = cb.equal(cb.length(digits()), k.length());
+            Predicate lexical = switch (op) {
+                case "ge" -> cb.greaterThanOrEqualTo(digits(), k);
+                case "gt" -> cb.greaterThan(digits(), k);
+                case "le" -> cb.lessThanOrEqualTo(digits(), k);
+                default -> throw Refusals.internal("Unsupported magnitude comparison: " + op);
+            };
+            return cb.or(longer, cb.and(sameLength, lexical));
+        }
+
+        private static String spelled(double magnitude) {
+            long m = (long) Math.abs(magnitude);
+            return m == 0 ? "" : Long.toString(m);
+        }
+
+        /** {@code int(s) >= m}. */
+        Predicate atLeast(double m) {
+            if (m <= 0) {
+                return cb.or(tri.not(negative()), magnitude("le", spelled(m)));
+            }
+            return cb.and(tri.not(negative()), magnitude("ge", spelled(m)));
+        }
+
+        /** {@code int(s) <= m}. */
+        Predicate atMost(double m) {
+            if (m >= 0) {
+                return cb.or(negative(), magnitude("le", spelled(m)));
+            }
+            return cb.and(negative(), magnitude("ge", spelled(m)));
+        }
+
+        /** NULL, not a base-10 integer, or outside int64: CEL's int() errors. */
+        Predicate unparsable() {
+            Expression<String> rest = body();
+            for (char digit = '0'; digit <= '9'; digit++) {
+                rest = cb.function("replace", String.class, rest,
+                        cb.literal(String.valueOf(digit)), cb.literal(""));
+            }
+            Predicate malformed = cb.or(cb.equal(body(), ""), cb.notEqual(rest, ""));
+            Predicate outOfRange = cb.or(
+                    cb.and(tri.not(negative()), magnitude("gt", INT64_MAX)),
+                    cb.and(negative(), magnitude("gt", INT64_MIN_MAGNITUDE)));
+            return cb.or(cb.isNull(s), malformed, outOfRange);
+        }
     }
 
     /** {@code trunc(d) >= m} for an integral {@code m}. */
