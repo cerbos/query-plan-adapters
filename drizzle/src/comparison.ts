@@ -17,7 +17,11 @@ import {
 import type { LeafComparisonOperator } from "./arithmetic";
 import { parseCelDoubleString } from "./conversion";
 import { buildFilterFromExpression } from "./filter";
-import { buildIndexedComparison } from "./indexed";
+import {
+  buildIndexedComparison,
+  indexedListEquality,
+  resolveIndexedList,
+} from "./indexed";
 import {
   exceedsMillisecondPrecision,
   formatRfc3339Nanoseconds,
@@ -669,6 +673,23 @@ export const buildComparisonFilter = (
     return constantCondition(result !== negated);
   }
 
+  const listField = isNameOperand(left) ? left : isNameOperand(right) ? right : undefined;
+  const listLiteral = [left, right].find(
+    (operand) => isValueOperand(operand) && Array.isArray(operand.value),
+  );
+  if (
+    listField !== undefined && listLiteral !== undefined && isValueOperand(listLiteral) &&
+    (operator === "eq" || operator === "ne")
+  ) {
+    const indexed = resolveIndexedList(listField.name, mapper);
+    if (indexed) {
+      const equality = indexedListEquality({
+        ...indexed,
+        values: listLiteral.value as Value[],
+      });
+      return withPolarity(equality, (operator === "ne") !== negated);
+    }
+  }
   if (
     (isNameOperand(left) || isNameOperand(right)) &&
     [left, right].some(

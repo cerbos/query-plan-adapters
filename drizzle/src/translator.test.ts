@@ -114,7 +114,7 @@ describe("the refusal type", () => {
   });
 
   test("a shape the adapter cannot express raises it", () => {
-    expect(() => translate("postgresql", "comparison/equals/whole-list-literal")).toThrow(
+    expect(() => translate("postgresql", "collection/map/equals-list-literal")).toThrow(
       UnsupportedQueryPlanError,
     );
   });

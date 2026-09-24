@@ -211,7 +211,10 @@ const mapper = {
 | `"pgArray"` | PostgreSQL arrays of `text`, `varchar`, `boolean`, `integer`, `smallint` |
 
 - Supported: `==` / `!=` against a scalar literal (string, finite number, boolean, null), in either
-  operand order, under any logical operator. The index must be a constant non-negative 32-bit
+  operand order, under any logical operator. The whole list compared with a list literal
+  (`R.attr.tags == ["a", "b"]`) is CEL's ordered equality — the same length and each position
+  equal — and reads the declared column even when the mapping also has a relation, which has no
+  order. The index must be a constant non-negative 32-bit
   integer. Positions are zero-based, including PostgreSQL arrays with a nonstandard lower bound.
   Values and paths are bound parameters. A negative or fractional position is an error in CEL and
   becomes an UNKNOWN condition.
@@ -381,7 +384,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 216 / 227 |
+| adversarial | 218 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
