@@ -349,17 +349,9 @@
       "status": "unsupported",
       "reason": "every() applies to a single relation; a multi-hop chain would need the universal to be evaluated against the flattened tail while still requiring the intermediate hop, which nested every/some cannot express — the adapter throws"
     },
-    "relation/size/non-negative-to-one-chain": {
-      "status": "unsupported",
-      "reason": "Prisma where-filters express only empty/non-empty via none/some, so a >= 0 relation-count threshold — which is TRUE exactly when the to-one parent exists — has no equivalent; same limitation as size/greater-than/collection-above-one"
-    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
-    },
-    "size/equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
@@ -373,45 +365,9 @@
       "status": "unsupported",
       "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)"
     },
-    "size/greater-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter, so a giant size threshold remains inexpressible"
-    },
-    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/greater-than/string-length": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter"
-    },
-    "size/greater-than/string-non-empty": {
-      "status": "unsupported",
-      "reason": "Prisma has no string-length filter, and the adapter lowers size() only over a NAMED relation (none/some for emptiness); aString is a scalar column with no relation mapping, so the emptiness spelling is refused one step before the threshold is examined — the same gap as size/greater-than/string-length, reached through the `> 0` form a collection fast path would otherwise claim"
-    },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still an arbitrary count threshold none/some cannot express"
-    },
-    "size/less-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold"
-    },
-    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/less-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
-    },
-    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same string-length limitation as size/greater-than/huge-threshold, under a negation"
     },
     "string/concatenate/field-to-field": {
       "status": "unsupported",

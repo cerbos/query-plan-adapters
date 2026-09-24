@@ -139,8 +139,89 @@ export function handleRelationalOperator(
 }
 
 /**
- * `size(collection) CMP n`, for the thresholds that mean "is empty" or "is non-empty" — the only
- * counts a relation filter can express.
+ * A size is a non-negative integer, so every `size(x) CMP n` — fractional, negative or huge `n`
+ * included — is one of: at least `k`, exactly `k`, or the negation of either. `at least 0` is
+ * true whenever `x` can be evaluated at all.
+ */
+type CountPredicate = {
+  kind: "atLeast" | "exactly";
+  count: number;
+  negated: boolean;
+};
+
+function countPredicate(operator: string, n: number): CountPredicate {
+  const atLeast = (count: number, negated = false): CountPredicate => ({
+    kind: "atLeast",
+    count: Math.max(count, 0),
+    negated,
+  });
+  switch (operator) {
+    case "gt":
+      return atLeast(Math.floor(n) + 1);
+    case "ge":
+      return atLeast(Math.ceil(n));
+    case "lt":
+      return atLeast(Math.ceil(n), true);
+    case "le":
+      return atLeast(Math.floor(n) + 1, true);
+    case "eq":
+    case "ne": {
+      const negated = operator === "ne";
+      // A fractional size never equals anything; a negative one never exists.
+      return Number.isInteger(n) && n >= 0
+        ? { kind: "exactly", count: n, negated }
+        : atLeast(0, !negated);
+    }
+    default:
+      throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
+  }
+}
+
+/**
+ * No store holds a string of 2^32 characters: PostgreSQL caps a value at 1 GB, SQLite at
+ * 2^31 - 1 bytes and MySQL's LONGTEXT at 2^32 - 1 bytes. A length threshold at or past it is
+ * decided without a pattern.
+ */
+const STRING_LENGTH_CEILING = 2 ** 32;
+
+/** Past this, a length threshold short of the ceiling is refused rather than spelled out. */
+const MAX_LENGTH_PATTERN = 1024;
+
+/**
+ * `size(column) CMP n` over a string column, as `LIKE` patterns of `_`: Prisma does not escape
+ * the wildcards in a `startsWith` needle, so `startsWith: "_____"` is `LIKE '_____%'`, true exactly
+ * when the value holds at least five characters. Each store's `_` matches one character — a code
+ * point in a UTF-8 database — which is what CEL's size() counts. `startsWith: ""` is `LIKE '%'`,
+ * true for every non-NULL value. Every filter built here is therefore UNKNOWN on a NULL column
+ * under both polarities, as size() of a missing attribute is an error in CEL.
+ */
+function buildStringLengthFilter(
+  fieldRef: ResolvedFieldReference,
+  predicate: CountPredicate
+): PrismaFilter {
+  const atLeast = (count: number): PrismaFilter => {
+    if (count >= STRING_LENGTH_CEILING) {
+      return { NOT: buildFieldFilter(fieldRef, "startsWith", "") };
+    }
+    if (count > MAX_LENGTH_PATTERN) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot translate a string length threshold of ${count}: the LIKE pattern it needs ` +
+          `exceeds the ${MAX_LENGTH_PATTERN}-character limit`
+      );
+    }
+    return buildFieldFilter(fieldRef, "startsWith", "_".repeat(count));
+  };
+  const filter =
+    predicate.kind === "atLeast"
+      ? atLeast(predicate.count)
+      : { AND: [atLeast(predicate.count), { NOT: atLeast(predicate.count + 1) }] };
+  return predicate.negated ? { NOT: filter } : filter;
+}
+
+/**
+ * `size(collection) CMP n`. Over a relation, only the thresholds that mean "is empty", "is
+ * non-empty" or "the chain reaching it exists" — the only counts a relation filter can express.
+ * Over a string column, any threshold (see buildStringLengthFilter).
  */
 function handleSizeComparison(
   operator: string,
@@ -158,17 +239,35 @@ function handleSizeComparison(
   }
 
   const count = valueOperand.value;
-  if (typeof count !== "number") {
+  if (typeof count !== "number" || !Number.isFinite(count)) {
     throw new UnsupportedQueryPlanError("size comparison requires a numeric value");
   }
+  const predicate = countPredicate(operator, count);
 
+  const fieldRef = resolveFieldReference(collectionOperand.name, context);
+  const { relations } = fieldRef;
+  if (!relations || relations.length === 0) {
+    if (fieldRef.valueType === "string") {
+      return buildStringLengthFilter(fieldRef, predicate);
+    }
+    throw new UnsupportedQueryPlanError("size operator requires a relation mapping");
+  }
+
+  // The count applies to the deepest relation; every relation before it is a hop to reach it.
+  const hops = relations.slice(0, -1);
+  const deepest = relations[relations.length - 1]!;
+  const { kind, count: k, negated } = predicate;
+  // `size >= 0` holds whenever the collection can be reached. Only a chain can fail to reach it;
+  // a direct relation would be an unconditional `{}`, which no negation could then express.
+  if (kind === "atLeast" && k === 0 && !negated && hops.length > 0) {
+    return wrapInRelations(hops, {});
+  }
   const isNonEmpty =
-    (operator === "gt" && count === 0) || (operator === "ge" && count === 1);
-
+    (kind === "atLeast" && k === 1 && !negated) ||
+    (kind === "exactly" && k === 0 && negated);
   const isEmpty =
-    (operator === "eq" && count === 0) ||
-    (operator === "lt" && count === 1) ||
-    (operator === "le" && count === 0);
+    (kind === "atLeast" && k === 1 && negated) ||
+    (kind === "exactly" && k === 0 && !negated);
 
   if (!isNonEmpty && !isEmpty) {
     throw new UnsupportedQueryPlanError(
@@ -176,15 +275,8 @@ function handleSizeComparison(
     );
   }
 
-  const { relations } = resolveFieldReference(collectionOperand.name, context);
-  if (!relations || relations.length === 0) {
-    throw new UnsupportedQueryPlanError("size operator requires a relation mapping");
-  }
-
-  // The count applies to the deepest relation; every relation before it is a hop to reach it.
-  const deepest = relations[relations.length - 1]!;
   return wrapInRelations(
-    relations.slice(0, -1),
+    hops,
     relationFilter(deepest, isNonEmpty ? "some" : "none", {})
   );
 }

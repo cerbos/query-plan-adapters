@@ -331,8 +331,8 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   prefixes (`ancestorOf`, `descendentOf`, `overlaps`) throw on `%`, `_`, `\` or `[` (SQL Server
   opens a character class on `[` even with `ESCAPE`). If you match on backslashes, compare the
   whole value with `==`.
-- **Counting.** `exists_one`, `size()` other than empty/non-empty on a mapped relation, and string
-  length.
+- **Counting.** `exists_one`, and `size()` of a mapped relation other than empty, non-empty or (on
+  a chain) reachable.
 - **Cross-model column comparisons**, including membership between an outer scalar column and a
   related collection column.
 - **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
@@ -355,7 +355,7 @@ or a same-model field reference, never an expression. These shapes throw:
 | `matches` | `regex/matches/*` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
 | List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
 | `int()`, `double()`, `string()` | `cast/*` | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). |
-| `size()` of a string, or of a list that isn't a mapped relation | `size/greater-than/string-non-empty`, `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
+| `size()` of a list that isn't a mapped relation | `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
 Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
 5–7 has no raw predicate inside `where` ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
@@ -363,7 +363,7 @@ Raw SQL fragments, an id subquery and an in-memory post-filter were considered a
 the result being a composable where-input.
 
 **Workaround: a derived column.** Compute the value when you write the row and have the policy read
-it: `isEven` instead of `R.attr.n % 2 == 0`, `nameLength` instead of `size(R.attr.name) > 0`,
+it: `isEven` instead of `R.attr.n % 2 == 0`, `tagCount` instead of `size(R.attr.tags) > 1`,
 `primaryTag` instead of `R.attr.tags[0]`.
 
 Prisma 8 (a release candidate as of September 2026) replaces `findMany({ where })` with a new client
@@ -380,8 +380,8 @@ out of every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 49 / 80 |
-| adversarial | 138 / 227 |
+| extended | 50 / 80 |
+| adversarial | 148 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -444,6 +444,11 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- `size()` of a `valueType: "string"` column translates for any threshold, as `LIKE` patterns of
+  `_` (`size(x) > 4` is `startsWith: "_____"`). A threshold of 2^32 or more, which no store can
+  hold, needs no pattern; one past 1024 characters short of that is refused. Fractional and
+  negative thresholds are normalised to the integer count they mean for relations too, and
+  `size(chain) >= 0` on a multi-hop chain is "the chain exists".
 - A comparison whose outcome the declared `valueType` settles is no longer refused. CEL's
   heterogeneous equality answers `==` false and `!=` true across types, so `aNumber == "5"`,
   `aString == {"a": 1}` and `"2" in aNumberList` fold to constants, and an `in`/`hasIntersection`
