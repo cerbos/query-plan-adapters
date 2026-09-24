@@ -154,6 +154,10 @@ See [Mapping hazards](#mapping-hazards).
 - `hasIntersection(map(R.attr.tags, t, t.name), ["a"])` becomes `column IN (...)` over the mapped
   field. Either operand order works; a pair with no literal list throws.
 - `exists`, `exists_one` and `all` over a relation-mapped attribute become correlated subqueries.
+  Over a literal list (a principal attribute the planner folded) each element is substituted into
+  the lambda: `exists` and `all` become an `OR` / `AND` of the results, and `exists_one` a count of
+  the TRUE ones that is NULL if any element's condition is UNKNOWN, since CEL's `exists_one`
+  absorbs no error.
 - `filter()` is supported inside `size(filter(...))`. On its own it returns a list, not a boolean,
   and throws.
 - For a relation that stores scalar values, set `collectionValueType: "scalar"` and the relation's
@@ -341,7 +345,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
+| extended | 62 / 80 |
 | adversarial | 189 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns

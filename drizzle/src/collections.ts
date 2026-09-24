@@ -264,10 +264,10 @@ const buildKnownValueCollectionFilter = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
-  if (operator !== "exists" && operator !== "all") {
+  if (operator !== "exists" && operator !== "all" && operator !== "exists_one") {
     throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection value is not supported. ` +
-        "Only exists() and all() can be folded into a flat filter.",
+        "Only exists(), all() and exists_one() can be folded into a flat filter.",
     );
   }
   if (!Array.isArray(collectionValue)) {
@@ -279,6 +279,13 @@ const buildKnownValueCollectionFilter = (
     lambdaOperand,
     `'${operator}' lambda operand`,
   );
+
+  if (operator === "exists_one") {
+    return withPolarity(
+      buildKnownValueExistsOne(collectionValue, variable.name, bodyOperand, mapper, options),
+      negated,
+    );
+  }
 
   // Push negation through the macro rather than applying a SQL NOT around it:
   // !exists(body) == all(!body), and !all(body) == exists(!body). This keeps
@@ -303,6 +310,40 @@ const buildKnownValueCollectionFilter = (
     );
   }
   return combined;
+};
+
+/**
+ * `exists_one` over a literal list: exactly one element's condition is TRUE. Unlike `exists` and
+ * `all`, CEL's `exists_one` evaluates every element and absorbs no error — any erroring element
+ * makes the whole macro an error — so a single UNKNOWN element condition makes the result NULL,
+ * excluded under both polarities, before the matches are counted.
+ */
+const buildKnownValueExistsOne = (
+  elements: Value[],
+  variableName: string,
+  bodyOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (elements.length === 0) {
+    return FALSE_CONDITION;
+  }
+  const conditions = elements.map((element) =>
+    buildFilterFromExpression(
+      substituteLambdaVariable(bodyOperand, variableName, element),
+      mapper,
+      options,
+    ),
+  );
+  const anyUnknown = sql.join(
+    conditions.map((condition) => sql`(${condition}) is null`),
+    sql` or `,
+  );
+  const matches = sql.join(
+    conditions.map((condition) => sql`(case when ${condition} then 1 else 0 end)`),
+    sql` + `,
+  );
+  return sql`(case when ${anyUnknown} then null when (${matches}) = 1 then true else false end)`;
 };
 
 /**

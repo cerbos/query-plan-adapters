@@ -109,10 +109,6 @@
       "status": "unsupported",
       "reason": "'size' operator requires a field reference or filter expression."
     },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "'exists_one' over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
       "reason": "Collection operand must be a field reference."
