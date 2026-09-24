@@ -11,6 +11,7 @@ import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
+import { formatCelDouble, parseCelDoubleString } from "./conversion";
 import type {
   Mapper,
   MapperEntry,
@@ -493,6 +494,39 @@ describe("what the stores cannot show", () => {
     });
     expect(offenders.map((g) => g.id)).toEqual([]);
   });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `string(R.attr.aDouble) == "1e+06"` is
+// policy-reachable, but the corpus's one `string()`-of-a-double case has a single witness, -0.6,
+// so no case proves the exponent layout or the refusal of a spelling CEL never produces. Delete
+// this block when cases carrying those spellings land.
+describe("CEL's string() of a double", () => {
+  // Every expected string is Go's own `fmt.Sprintf("%g", d)`, cel-go's spelling of the conversion.
+  test.each([
+    [-0.6, "-0.6"],
+    [2, "2"],
+    [123456, "123456"],
+    [1e6, "1e+06"],
+    [1234567, "1.234567e+06"],
+    [1e21, "1e+21"],
+    [0.0001, "0.0001"],
+    [0.00001, "1e-05"],
+    [1.5e-5, "1.5e-05"],
+    [0.1 + 0.2, "0.30000000000000004"],
+    [100000.5, "100000.5"],
+    [Number.MAX_VALUE, "1.7976931348623157e+308"],
+    [5e-324, "5e-324"],
+  ])("Corpus gap. %p is spelled %p", (value, spelling) => {
+    expect(formatCelDouble(value)).toBe(spelling);
+    expect(parseCelDoubleString(spelling)).toBe(value);
+  });
+
+  test.each(["2.0", "1e6", "1E+06", " 2", "+2", "0x10", "", ".5", "Infinity"])(
+    "Corpus gap. no double is spelled %p, so equality with it matches no row",
+    (spelling) => {
+      expect(parseCelDoubleString(spelling)).toBeUndefined();
+    },
+  );
 });
 
 describe("plans the planner cannot produce", () => {

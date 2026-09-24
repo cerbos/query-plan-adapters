@@ -34,15 +34,14 @@ import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
 
 /**
  * Operands in VALUE position — the sides of a comparison: constants, columns, arithmetic,
- * ternaries, `size()`, `timestamp()` and the one conversion the adapter can lower.
+ * ternaries, `size()`, `timestamp()` and the `string()` shapes that need no cast.
  */
 
 /**
- * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. Only one is lowered — `string()`
- * over a boolean column, which needs no cast at all (see `buildBooleanString`). The adapter renders
- * through whichever Drizzle dialect the CALLER hands its query to, which is what lets one
- * translation serve SQLite, PostgreSQL and MySQL — and a cast is exactly the place where those
- * three disagree.
+ * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. No conversion is lowered to a
+ * CAST: the adapter renders through whichever Drizzle dialect the CALLER hands its query to, which
+ * is what lets one translation serve SQLite, PostgreSQL and MySQL — and a cast is exactly the place
+ * where those three disagree. The `string()` shapes that translate need none (see below).
  *
  * `int()` / `double()` (cerbos/query-plan-adapters#311): CEL reads a WHOLE string or raises an
  * error, and an error denies the row. SQL reads whatever prefix parses — `CAST('100%_done' AS
@@ -53,18 +52,17 @@ import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
  * adapter cannot pick a faithful lowering per row.
  *
  * `string()` (cerbos/query-plan-adapters#340): there is no cast TARGET the three stores share.
- * This one used to be lowered to `CAST(... AS TEXT)` for numeric and text columns, on the stated
- * grounds that the rendering was "measured against the pinned images" — it was measured against
- * two of them. `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on
- * MySQL 8.4, which spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR`
- * is `character(1)` on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'` — a filter that silently
- * matches nothing rather than failing. A BOOLEAN column is the exception, and it is not a cast:
- * SQLite and MySQL hold a boolean as 1/0, so any CAST renders `"1"` where CEL renders `"true"`,
- * but a CASE spells CEL's two words on every store (cerbos/query-plan-adapters#418).
+ * `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on MySQL 8.4, which
+ * spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR` is `character(1)`
+ * on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'`. Even a per-dialect target would render a
+ * number in the store's format, not CEL's: SQLite's `CAST(2.0 AS TEXT)` is `'2.0'`, CEL's is `"2"`.
+ * So three shapes are lowered WITHOUT a cast, and every other `string()` is refused:
  *
- * `ent` translates `string()` and is not a counter-example: its `render.go` branches on a dialect
- * the caller declares through `WithDialect`, so it emits `CHAR` on MySQL and `TEXT` elsewhere. The
- * limitation here is the absent dialect, not the absent cast.
+ * - over a string column it is the identity;
+ * - over a boolean column it is a CASE spelling CEL's two words (`buildBooleanString`, #418);
+ * - over a number column compared for (in)equality with a string constant, the comparison is
+ *   inverted into a numeric one against the one double CEL spells that way
+ *   (`buildNumberStringComparison` in `comparison.ts`).
  */
 const NUMERIC_CONVERSION_REFUSAL =
   "SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL " +
@@ -75,10 +73,11 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
   int: NUMERIC_CONVERSION_REFUSAL,
   double: NUMERIC_CONVERSION_REFUSAL,
   string:
-    "no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are " +
-    "syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where " +
-    "the cast would silently match nothing. The adapter does not know its dialect by design, so " +
-    "it rejects the shape instead of emitting a filter that is correct on one store only",
+    "only string() over a string or boolean column, or string() over a number column compared " +
+    "for equality with a string constant, is lowered — each without a CAST. A CAST would render " +
+    "the number in the store's own format rather than CEL's (SQLite spells 2.0 as '2.0' where " +
+    "CEL spells it '2'), and no cast target is shared by every store: TEXT is a syntax error on " +
+    "MySQL, whose CHAR is character(1) on PostgreSQL",
 };
 
 /**
@@ -386,6 +385,17 @@ export const buildValueExpression = (
         column,
         buildValueExpression(operands[0]!, mapper, options),
       );
+    }
+    // `string()` of a string is the string itself: no cast, so no cast target to disagree on. A
+    // NULL column stays NULL, leaving the comparison UNKNOWN under both polarities, as CEL's
+    // error over a missing attribute or a null value denies it.
+    const [inner] = operands;
+    if (
+      operands.length === 1 &&
+      inner !== undefined &&
+      columnForOperand(inner, mapper)?.dataType === "string"
+    ) {
+      return buildValueExpression(inner, mapper, options);
     }
   }
 

@@ -29,18 +29,6 @@
       "status": "unsupported",
       "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest: Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
-    "cast/string/from-double": {
-      "status": "unsupported",
-      "reason": "No SQL CAST TARGET spells string() on every store this adapter is executed against. TEXT and VARCHAR are both syntax errors on MySQL (ERROR 1064 on MySQL 8.4), which spells the conversion CHAR; CHAR is character(1) on PostgreSQL, where CAST(a_double AS CHAR) is '-' for -0.6 and the filter silently matches nothing. The adapter does not know its dialect by design — it renders through whichever Drizzle dialect the caller hands the query to, which is what lets one translation serve all three stores — so it cannot pick per store the way ent's WithDialect-driven render.go does. Reclassified from oracle-compared when the MySQL leg first executed the emitted cast (cerbos/query-plan-adapters#340): it was proved on SQLite and PostgreSQL only, and the numeric rendering claim had been measured against two of the three pinned images."
-    },
-    "cast/string/negated-explicit-null": {
-      "status": "unsupported",
-      "reason": "Cannot translate string(): no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where the cast would silently match nothing. The adapter does not know its dialect by design, so it rejects the shape instead of emitting a filter that is correct on one store only."
-    },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Cannot translate string(): no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where the cast would silently match nothing. The adapter does not know its dialect by design, so it rejects the shape instead of emitting a filter that is correct on one store only."
-    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() comparison over an ISO-date string column: 'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."

@@ -307,7 +307,7 @@ and PostgreSQL literals carry no collation.
 | String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
-| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean column |
+| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
 filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
@@ -341,8 +341,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 60 / 80 |
-| adversarial | 187 / 227 |
+| extended | 61 / 80 |
+| adversarial | 189 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -432,9 +432,13 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 - **Breaking** (Cerbos 0.55): ordered comparisons involving NaN evaluate to false, so their negation
   can allow a row. Cerbos 0.54 denied it. Use Cerbos 0.55 if policies can produce NaN in a negated
   comparison.
-- **Breaking:** `string()` over a number or text column (e.g. `string(R.attr.aDouble) == "-0.6"`)
-  throws. It used to emit `CAST(… AS TEXT)`, a syntax error on MySQL. Compare the underlying column,
-  or store the text in its own column ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)).
+- **Breaking:** `string()` over a number or text column no longer emits `CAST(… AS TEXT)`, a syntax
+  error on MySQL ([#340](https://github.com/cerbos/query-plan-adapters/issues/340)). It translates
+  without a cast where it can: over a text column it is the column itself, and over a number column
+  compared with `==` / `!=` against a string (`string(R.attr.aDouble) == "-0.6"`) it becomes a
+  numeric comparison against the one double CEL spells that way — so `"1e+06"` matches `1000000`,
+  and `"2.0"`, which CEL never produces, matches no row. Any other `string()` of a number (an
+  ordering, `"0"`, `"NaN"`, a column-valued other side) throws.
 - `string()` over a **boolean** column now translates instead of throwing, as a `CASE` whose
   `IS NULL` arm keeps NULL rows excluded under both polarities
   ([#418](https://github.com/cerbos/query-plan-adapters/issues/418)).

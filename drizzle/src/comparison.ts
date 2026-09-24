@@ -11,6 +11,7 @@ import {
   resolveConstantNumber,
 } from "./arithmetic";
 import type { LeafComparisonOperator } from "./arithmetic";
+import { parseCelDoubleString } from "./conversion";
 import { buildFilterFromExpression } from "./filter";
 import { buildIndexedComparison } from "./indexed";
 import {
@@ -33,6 +34,7 @@ import {
   applyComparisonWithExpression,
   buildNullGuard,
   constantCondition,
+  bindConstant,
   operandExpression,
   withPolarity,
 } from "./predicates";
@@ -294,6 +296,62 @@ const buildMixedTypeComparison = (
 };
 
 /**
+ * `string(x) == "lit"` / `!=` over a number column, lowered without a CAST (which would render the
+ * number in the store's format, not CEL's — see `UNSUPPORTED_CONVERSIONS` in `values.ts`).
+ *
+ * CEL's `string()` over a double is a function, so the equality holds exactly when `x` is the one
+ * double CEL spells `lit` (`parseCelDoubleString`), and a numeric comparison against that double
+ * says so. When no double is spelled `lit` — `"2.0"`, `"1e6"`, `"abc"` — equality is false for
+ * every present row and inequality true. A NULL column is a missing attribute or a null value, for
+ * which CEL's `string()` raises, so it is UNKNOWN under both polarities either way.
+ *
+ * Zero is refused: CEL spells `-0.0` as `"-0"`, and SQL's `x = 0` cannot tell it from `0.0`. So is
+ * a non-finite spelling (`"NaN"`), which no SQL comparison reproduces on every store.
+ */
+const buildNumberStringComparison = (
+  context: ComparisonContext,
+  conversion: ExpressionOperand,
+  literal: string,
+): SQL => {
+  const { operator, mapper, options, negated } = context;
+  const inner = conversion.operands[0]!;
+  const target = parseCelDoubleString(literal);
+  if (target !== undefined && (target === 0 || !Number.isFinite(target))) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot translate string() of a number compared with "${literal}": SQL cannot tell the ` +
+        "doubles CEL spells differently here apart (0 from -0), or has no comparison for them " +
+        "(NaN)",
+    );
+  }
+  const dynamic = resolveScalarOperand(inner, mapper, options);
+  const present =
+    target === undefined
+      ? sql`(case when ${dynamic.expr} is null then null else ${constantCondition(operator === "ne")} end)`
+      : operator === "eq"
+        ? sql`(${dynamic.expr} = ${bindConstant(target)})`
+        : sql`(${dynamic.expr} <> ${bindConstant(target)})`;
+  const reference = isNameOperand(inner) ? inner.name : "'string' operand";
+  return withPolarity(
+    wrapRelationChain(dynamic.relations, present, reference, options),
+    negated,
+  );
+};
+
+/** A `string()` over one number column, if `operand` is one. */
+const numberStringConversion = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): ExpressionOperand | undefined => {
+  if (!isStringConversion(operand) || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  return operand.operands.length === 1 &&
+    inner !== undefined &&
+    columnForOperand(inner, mapper)?.dataType === "number"
+    ? operand
+    : undefined;
+};
+
+/**
  * The CEL type of an operand where the plan or the mapping settles it, or `undefined`. A
  * transform owns its own comparison, so its column's type is not the operand's.
  */
@@ -469,6 +527,17 @@ export const buildComparisonFilter = (
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value",
     );
+  }
+
+  if (operator === "eq" || operator === "ne") {
+    const leftConversion = numberStringConversion(left, mapper);
+    const rightConversion = numberStringConversion(right, mapper);
+    if (leftConversion && isValueOperand(right) && typeof right.value === "string") {
+      return buildNumberStringComparison(context, leftConversion, right.value);
+    }
+    if (rightConversion && isValueOperand(left) && typeof left.value === "string") {
+      return buildNumberStringComparison(context, rightConversion, left.value);
+    }
   }
 
   const leftType = scalarType(left, mapper);
