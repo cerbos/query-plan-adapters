@@ -158,8 +158,10 @@ See [Mapping hazards](#mapping-hazards).
   the lambda: `exists` and `all` become an `OR` / `AND` of the results, and `exists_one` a count of
   the TRUE ones that is NULL if any element's condition is UNKNOWN, since CEL's `exists_one`
   absorbs no error.
-- `filter()` is supported inside `size(filter(...))`. On its own it returns a list, not a boolean,
-  and throws.
+- `filter()` is supported inside `size(filter(...))`. On its own — like `map()`, or `except()` with
+  a list argument — it returns a list, not a boolean, which CEL evaluates to an error: it becomes
+  an UNKNOWN condition, denied under both polarities and absorbed by `||` / `&&` as CEL absorbs
+  the error.
 - For a relation that stores scalar values, set `collectionValueType: "scalar"` and the relation's
   `field`. This enables membership such as `R.attr.owner in R.attr.tagNames`, including explicit
   `null` elements.
@@ -205,8 +207,9 @@ const mapper = {
 - Supported: `==` / `!=` against a scalar literal (string, finite number, boolean, null), in either
   operand order, under any logical operator. The index must be a constant non-negative 32-bit
   integer. Positions are zero-based, including PostgreSQL arrays with a nonstandard lower bound.
-  Values and paths are bound parameters.
-- Throws: dynamic or negative indexes, object-field projection (`get-field`), ordered comparisons,
+  Values and paths are bound parameters. A negative or fractional position is an error in CEL and
+  becomes an UNKNOWN condition.
+- Throws: dynamic indexes, object-field projection (`get-field`), ordered comparisons,
   indexes nested inside other value expressions, a mapping with a `transform`, and undeclared
   storage (a related table does not define list order).
 - Refused array types: numeric, bigint, temporal and custom decoders (their application values can
@@ -353,7 +356,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 65 / 80 |
-| adversarial | 191 / 227 |
+| adversarial | 197 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -411,6 +414,10 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A shape CEL always evaluates to an error now translates to an UNKNOWN condition instead of
+  throwing: a list-valued `filter()`, `map()` or `except()` where a boolean belongs, and a negative
+  or fractional index position (`R.attr.tags[-1]`). UNKNOWN is excluded under both polarities, and
+  `err || x` is `x` in both CEL and SQL.
 - A timestamp constant finer than a millisecond — the planner's `now()` — now translates against a
   PostgreSQL, MySQL or SQLite-text timestamp column, compared with a grid point of the column's
   declared precision (see [Timestamps](#timestamps)), instead of throwing.

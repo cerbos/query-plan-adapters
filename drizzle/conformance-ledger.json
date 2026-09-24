@@ -33,10 +33,6 @@
       "status": "unsupported",
       "reason": "'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "'except' lambda operand must be a lambda expression."
-    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Unsupported value-expression operator: except."
@@ -45,29 +41,9 @@
       "status": "unsupported",
       "reason": "'size' operator requires a field reference or filter expression."
     },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down: Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. Only size(filter(...)) has a boolean meaning."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() used as the whole condition — it returns a list, not a boolean: Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. Only size(filter(...)) has a boolean meaning."
-    },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
       "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
-    },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "Declared indexed storage only accepts constant non-negative 32-bit integer positions; this position is invalid and must not be coerced into a valid array access."
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "Declared indexed storage only accepts constant non-negative 32-bit integer positions; this position is invalid and must not be coerced into a valid array access."
-    },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() used as the whole condition — it returns a list, not a boolean: Unsupported operator: map."
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",

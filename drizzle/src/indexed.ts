@@ -9,6 +9,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mapper";
 import { isNameOperand, isValueOperand } from "./operands";
 import type { BuildFilterOptions, Mapper } from "./types";
+import { UNKNOWN_CONDITION } from "./predicates";
 
 /**
  * Constant positional access — `R.attr.list[0] == x` — over a column whose ordered storage the
@@ -241,6 +242,19 @@ export const buildIndexedComparison = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
+  // A negative or fractional position is an error in CEL whatever the collection holds — out of
+  // bounds for a list, a key no JSON-sourced map carries — and an error denies under both
+  // polarities, exactly as the UNKNOWN every out-of-bounds position already yields below.
+  const [collection, position] = indexed.operands;
+  if (
+    collection !== undefined && isNameOperand(collection) &&
+    position !== undefined && isValueOperand(position) &&
+    typeof position.value === "number" &&
+    (position.value < 0 || !Number.isInteger(position.value))
+  ) {
+    resolveFieldReference(collection.name, mapper);
+    return UNKNOWN_CONDITION;
+  }
   const resolved = resolveIndexedColumn(indexed.operands, mapper, options);
   if (
     (operator !== "eq" && operator !== "ne") || !isValueOperand(other) ||

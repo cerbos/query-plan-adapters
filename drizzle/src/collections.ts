@@ -17,6 +17,7 @@ import type { ExpressionOperand } from "./operands";
 import {
   FALSE_CONDITION,
   TRUE_CONDITION,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import {
@@ -415,14 +416,11 @@ export const buildCollectionOperatorFilter = (
 
   switch (operator) {
     // filter() yields a list, not a boolean. Reaching it here means the plan used it as a
-    // predicate, and there is no meaning to pick: `filter(...)` is not
-    // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
-    // use — `size(filter(coll, lambda))` — is handled by buildFilteredCount before this.
+    // predicate, which CEL evaluates to a no-overload error: denied under both polarities, and
+    // absorbed by `||` / `&&` exactly as SQL absorbs UNKNOWN. It is NOT `size(filter(...)) > 0`
+    // (cerbos/query-plan-adapters#313); that use is handled by buildFilteredCount before this.
     case "filter":
-      throw new UnsupportedQueryPlanError(
-        "Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. " +
-          "Only size(filter(...)) has a boolean meaning",
-      );
+      return UNKNOWN_CONDITION;
     case "exists": {
       const trueWitness = wrapAll(sql`(${rowCondition}) is true`);
       const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);

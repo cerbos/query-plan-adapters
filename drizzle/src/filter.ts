@@ -26,6 +26,7 @@ import {
 import {
   isExpressionOperand,
   isNameOperand,
+  isOperatorCall,
   isValueOperand,
 } from "./operands";
 import {
@@ -35,6 +36,7 @@ import {
   characterLength,
   constantCondition,
   operandExpression,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import type { StringMatchOperator } from "./predicates";
@@ -393,6 +395,16 @@ export const buildFilterFromExpression = (
         buildMembershipFilter(operands, mapper, options),
         negated,
       );
+    case "map":
+      // map() returns a list, and a list where CEL needs a boolean is a no-overload error at
+      // evaluation, denied under both polarities — which UNKNOWN spells exactly. The same
+      // holds for filter() (see `collections.ts`) and the list-valued except().
+      return UNKNOWN_CONDITION;
+    case "except":
+      if (operands.length === 2 && !isOperatorCall(operands[1]!, "lambda")) {
+        return UNKNOWN_CONDITION;
+      }
+      return buildCollectionOperatorFilter(operator, operands, mapper, negated, options);
     case "matches":
       throw new UnsupportedQueryPlanError(
         "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics",

@@ -32,6 +32,13 @@ export const TRUE_CONDITION = sql`1 = 1`;
 export const withPolarity = (filter: SQL, negated: boolean): SQL =>
   negated ? not(filter) : filter;
 
+/**
+ * A boolean UNKNOWN on every dialect — CEL's evaluation error, which denies under both polarities
+ * and which `||` / `&&` absorb exactly as SQL's OR / AND absorb NULL (`err || true` is true,
+ * `err && false` is false). A bare NULL is inferred as text by PostgreSQL, where NOT rejects it.
+ */
+export const UNKNOWN_CONDITION = sql`(null = true)`;
+
 /** A plan-time boolean, as the constant condition that spells it. */
 export const constantCondition = (value: boolean): SQL =>
   value ? TRUE_CONDITION : FALSE_CONDITION;
