@@ -484,6 +484,8 @@ const scalarType = (
   return columnForOperand(operand, mapper)?.dataType;
 };
 
+const SCALAR_TYPES = new Set(["string", "number", "boolean"]);
+
 /** Two fields, each possibly behind a relation. */
 const buildFieldToFieldComparison = (
   context: ComparisonContext,
@@ -669,6 +671,16 @@ export const buildComparisonFilter = (
 
   const leftType = scalarType(left, mapper);
   const rightType = scalarType(right, mapper);
+  // A map literal equals no string, number or boolean — but a JSON column may hold a map equal to
+  // it, so the heterogeneous answer is only given against a scalar column.
+  if (
+    [leftType, rightType].includes("object") &&
+    ![leftType, rightType].some((type) => type && SCALAR_TYPES.has(type))
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "A map literal can only be compared with a string, number or boolean attribute",
+    );
+  }
   if (leftType && rightType && leftType !== rightType) {
     return buildMixedTypeComparison(context, left, right);
   }

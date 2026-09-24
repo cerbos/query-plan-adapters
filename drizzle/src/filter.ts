@@ -1,6 +1,6 @@
-import type { PlanExpressionOperand } from "@cerbos/core";
+import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
@@ -35,13 +35,14 @@ import {
   buildStringMatchCondition,
   characterLength,
   constantCondition,
+  FALSE_CONDITION,
   operandExpression,
   UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import type { StringMatchOperator } from "./predicates";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BaseMapperEntry, BuildFilterOptions, Mapper } from "./types";
 import { resolveScalarOperand } from "./values";
 
 /**
@@ -220,6 +221,16 @@ const buildVariableMembershipFilter = (
  * the planner emits both `R.attr.x in [..]` (name, values) and `"v" in R.attr.list`
  * (value, name), and both mean membership against the column.
  */
+const SCALAR_ELEMENT_TYPES = new Set(["string", "number", "boolean"]);
+
+/** A list or map constant, as opposed to a scalar or null. */
+const isCompositeValue = (value: Value): value is Value[] | { [key: string]: Value } =>
+  value !== null && typeof value === "object";
+
+/** The column a mapping entry reads, if it reads one. */
+const columnOfMapping = (mapping: BaseMapperEntry): AnyColumn | undefined =>
+  isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+
 const buildMembershipFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
@@ -236,17 +247,39 @@ const buildMembershipFilter = (
   if (!valueOperand) {
     throw new UnsupportedQueryPlanError("Comparison operator missing value operand");
   }
-  if (isValueOperand(operands[0]!) && Array.isArray(operands[0]!.value)) {
-    throw new UnsupportedQueryPlanError(
-      "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
-    );
+  const [element] = operands;
+  if (isValueOperand(element!) && isCompositeValue(element.value)) {
+    // A list or map element equals no string, number or boolean, so over a collection of those it
+    // is never a member. Anything else — a JSON column that may hold lists — has no such answer.
+    const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+    const elementColumn = isScalarCollection(getMappingEntry(fieldOperand.name, mapper))
+      ? columnOfMapping(resolveRelationDefaultField(unresolved, fieldOperand.name).mapping)
+      : undefined;
+    if (
+      elementColumn === undefined ||
+      !SCALAR_ELEMENT_TYPES.has(elementColumn.dataType) ||
+      unresolved.relations.length > 1
+    ) {
+      throw new UnsupportedQueryPlanError(
+        "List-element membership is supported only over a collection of strings, numbers or " +
+          "booleans, which a list or map element can never equal",
+      );
+    }
+    return FALSE_CONDITION;
   }
+  // `x in {"a": 1}` tests the map's KEYS, as CEL's `in` over a map does.
+  const collection =
+    operands[1] === valueOperand && isCompositeValue(valueOperand.value) &&
+    !Array.isArray(valueOperand.value)
+      ? Object.keys(valueOperand.value)
+      : valueOperand.value;
   // `"2" in R.attr.list` over a list held in one declared JSON or array column: the column is the
   // collection, not an element, so it is searched element by element rather than compared whole.
   const indexed = resolveIndexedMembership(fieldOperand.name, mapper, options);
   if (indexed) {
     return indexedMembership({ ...indexed, values: [valueOperand.value] });
   }
+
   const unresolved = resolveFieldReference(fieldOperand.name, mapper);
   const resolved = isScalarCollection(
     getMappingEntry(fieldOperand.name, mapper),
@@ -255,7 +288,7 @@ const buildMembershipFilter = (
     : unresolved;
   return wrapRelationChain(
     resolved.relations,
-    applyComparison(resolved.mapping, "in", valueOperand.value, options),
+    applyComparison(resolved.mapping, "in", collection, options),
     fieldOperand.name,
     options,
   );

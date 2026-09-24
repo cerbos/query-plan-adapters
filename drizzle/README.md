@@ -355,8 +355,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 65 / 80 |
-| adversarial | 197 / 227 |
+| extended | 66 / 80 |
+| adversarial | 203 / 227 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -414,6 +414,14 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- `list(...)` and map (`{"a": 1}`) constructors whose leaves are all constants are folded into the
+  literal they build before translation. A map or list literal compared with a string, number or
+  boolean attribute is CEL's heterogeneous equality — `==` false and `!=` true for a present value —
+  and against any other column throws. `x in {"a": 1}` tests the map's keys. A list or map element
+  is never a member of a collection of scalars (`["a"] in R.attr.tagNames` is false).
+- An `in` list or `hasIntersection` list now also drops list and map elements against a string,
+  number or boolean column, as it already dropped scalars of another type: `aString in [["one"]]`
+  used to bind the nested list, which the driver expanded into `'one'` and matched.
 - A shape CEL always evaluates to an error now translates to an UNKNOWN condition instead of
   throwing: a list-valued `filter()`, `map()` or `except()` where a boolean belongs, and a negative
   or fractional index position (`R.attr.tags[-1]`). UNKNOWN is excluded under both polarities, and

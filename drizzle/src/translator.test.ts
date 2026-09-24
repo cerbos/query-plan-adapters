@@ -576,6 +576,37 @@ describe("CEL's string() of a double", () => {
   );
 });
 
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `R.attr.aString in {"one": 1}` is
+// policy-reachable, and no case asks it: CEL's `in` over a map tests its keys. Delete this block
+// when a case carrying a map literal as the collection of `in` lands.
+describe("membership in a map literal", () => {
+  test("Corpus gap. tests the map's keys, not its values", () => {
+    const queryPlan = {
+      kind: PlanKind.CONDITIONAL,
+      condition: {
+        operator: "in",
+        operands: [
+          { name: "request.resource.attr.aString" },
+          {
+            operator: "struct",
+            operands: [
+              { operator: "set-field", operands: [{ value: "one" }, { value: 1 }] },
+              { operator: "set-field", operands: [{ value: "two" }, { value: "three" }] },
+            ],
+          },
+        ],
+      } as unknown as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    } as PlanResourcesResponse;
+    const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql });
+    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    expect(render("postgresql", result.filter).params).toEqual(["one", "two"]);
+  });
+});
+
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function: malformed by construction, so there is no golden to
   // read. A shape CEL *can* express belongs in the corpus instead.

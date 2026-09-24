@@ -338,11 +338,12 @@ const applyRelationComparison = (operator: ComparisonOperator): SQL => {
 /** Drizzle's scalar data types, each of which holds exactly one CEL type. */
 const SCALAR_DATA_TYPES = new Set(["string", "number", "boolean"]);
 
-/** A string, number or boolean constant that a column of another of those types cannot equal. */
+/**
+ * A non-null constant a string, number or boolean column cannot equal: a scalar of another of those
+ * types, or a list or map, which equals no scalar at all.
+ */
 const isCrossTypeScalar = (dataType: string, value: Value): boolean =>
-  SCALAR_DATA_TYPES.has(dataType) &&
-  SCALAR_DATA_TYPES.has(typeof value) &&
-  typeof value !== dataType;
+  SCALAR_DATA_TYPES.has(dataType) && value !== null && typeof value !== dataType;
 
 /** `column IN (values)`, with CEL's reading of a null element and of an explicit-null column. */
 const buildColumnMembership = (

@@ -66,6 +66,10 @@ const resolveSegments = (
   listOperand: PlanExpressionOperand,
   mapper: Mapper,
 ): Segment[] | "error" => {
+  if (isValueOperand(listOperand) && Array.isArray(listOperand.value)) {
+    if (listOperand.value.some((segment) => typeof segment !== "string")) return "error";
+    return listOperand.value.map((value) => ({ kind: "constant", value: value as string }));
+  }
   if (!isOperatorCall(listOperand, "list")) {
     throw new UnsupportedQueryPlanError(
       "Segmented hierarchy expressions are supported only as a list() of constants and columns",
@@ -137,7 +141,7 @@ const resolveHierarchy = (
     delimiter = delimiterOperand.value;
   }
 
-  if (isValueOperand(pathOperand)) {
+  if (isValueOperand(pathOperand) && !Array.isArray(pathOperand.value)) {
     if (typeof pathOperand.value !== "string") {
       throw new UnsupportedQueryPlanError(
         "Hierarchy path must be a string value or field reference",

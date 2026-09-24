@@ -73,10 +73,6 @@
       "status": "unsupported",
       "reason": "'size' operator requires a field reference or filter expression."
     },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
       "reason": "Collection operand must be a field reference."
@@ -152,30 +148,6 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "'hasIntersection' requires a literal list as one of its operands."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "Comparison operator missing value operand."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
     }
   }
 }
