@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "h3",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/unanchored-quantifiers",
+  "intent": "matches(\"x*a+b\"), unanchored: an optional x run and a one-or-more a run before b.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "x*a+b"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/unanchored-quantifiers",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"x*a+b\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Unanchored, x* can match nothing, so this is \"contains ab\" (h3, h5); reading + or * as literals, or requiring the x, under-grants."
+}

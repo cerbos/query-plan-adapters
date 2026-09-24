@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a8",
+    "i8"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/whitespace-class",
+  "intent": "matches(\"^\\\\s*$\"): a string of RE2 whitespace, the empty string included.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^\\s*$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/whitespace-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^\\\\s*$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2's \\s is [\\t\\n\\f\\r ], so a8 \"\" and i8 (a tab and a space) match; dropping \\s, or lowering it to a space alone, under-grants i8."
+}

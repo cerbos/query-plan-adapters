@@ -51,6 +51,13 @@ cases:
   condition:
     match:
       expr: 'size(P.attr.manyTeams.except([R.attr.aOptionalString])) < size(P.attr.manyTeams)'
+- id: 'principal/exists-one/duplicate-elements'
+  tier: adversarial
+  intent: 'exists_one over a principal list that repeats an element (duplicateTeams, "set" twice).'
+  trap: '"set" matches twice, so exists_one is false for a1 and every other "set" row; only a9 "same" is allowed. Reading exists_one as membership over the distinct values over-grants them.'
+  condition:
+    match:
+      expr: 'P.attr.duplicateTeams.exists_one(t, t == R.attr.aOptionalString)'
 - id: 'principal/exists-one/long-list'
   tier: extended
   intent: 'exists_one() over an 11-element principal list compared with a resource attribute.'

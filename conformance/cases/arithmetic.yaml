@@ -118,6 +118,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / R.attr.aNumber != 1.0'
+- id: 'arithmetic/modulo/column-divisor-negative-and-zero'
+  tier: adversarial
+  intent: 'Integer modulo by a column expression that is negative on most rows and zero on a1 (int(aNumber) % (int(aNumber) - 5) == 1).'
+  trap: 'CEL truncates toward zero, so 1 % -4 is 1 and 3 % -2 is 1 (a4, a6 allowed); a floored modulo gives -3 and -1 and under-grants them. a1''s divisor is zero, an error that must deny, not fail the query.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1'
+- id: 'arithmetic/modulo/negated-double-operand'
+  tier: adversarial
+  intent: '!(aNumber % 2 == 1) || aNumber == 5, with no int(): CEL''s % has no double overload.'
+  trap: 'aNumber is a double, so % is a no-such-overload error on every row and only a1 is allowed; an integer or floating modulo in the store makes the negation true for most rows and over-grants.'
+  condition:
+    match:
+      expr: '!(R.attr.aNumber % 2 == 1) || R.attr.aNumber == 5'
 - id: 'arithmetic/modulo/negative-dividend'
   tier: extended
   intent: 'Integer modulo compared with 1 (int(aNumber) % 2 == 1).'
@@ -127,14 +141,21 @@ cases:
       expr: 'int(R.attr.aNumber) % 2 == 1'
 - id: 'arithmetic/multiply/inexact-fraction-equals'
   tier: adversarial
-  intent: 'Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3).'
-  trap: '3 * 0.1 is not 0.3 in IEEE doubles; exact-decimal store arithmetic (MySQL) or an algebraic solve returns the aNumber = 3 seeds.'
+  intent: 'Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3 || aDouble * 3.0 == 3.9).'
+  trap: '3 * 0.1 is not 0.3 and 1.3 * 3.0 is 3.9000000000000004 in IEEE doubles; exact-decimal store arithmetic (MySQL) returns the aNumber = 3 seeds, and solving to aDouble == 3.9 / 3.0, which is exactly 1.3, returns a4.'
   condition:
     match:
-      expr: 'R.attr.aNumber * 0.1 == 0.3'
+      expr: 'R.attr.aNumber * 0.1 == 0.3 || R.attr.aDouble * 3.0 == 3.9'
   degenerate:
     oracle: empty
-    reason: '3 * 0.1 is not 0.3 in IEEE double, so the equation holds for no seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds.'
+    reason: 'Neither product is exact in IEEE double, so neither equation holds for any seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds, and an algebraic solve a4.'
+- id: 'arithmetic/multiply/nan-times-zero-plus-column'
+  tier: adversarial
+  intent: 'A self-division times zero, plus a column (aNumber / aNumber * 0.0 + aDouble > 0.2).'
+  trap: '0/0 is NaN and NaN * 0.0 stays NaN, so a7 and h4 are denied; simplifying x * 0.0 to 0.0 turns the sum into aDouble > 0.2 and over-grants them.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / R.attr.aNumber * 0.0 + R.attr.aDouble > 0.2'
 - id: 'arithmetic/multiply/negative-multiplier'
   tier: adversarial
   intent: 'Attribute times a negative constant under an inequality (aNumber * -2.0 < 3.0).'

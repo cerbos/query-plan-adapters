@@ -67,6 +67,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/negated-on-missing-attribute'
+  tier: adversarial
+  intent: '!(aDouble == "x") || !(string(aDouble) == "zzz"): two comparisons settled by type or spelling, negated, over an attribute missing on a3.'
+  trap: 'Both are false for every present double, so their negations are true, but a missing aDouble is an error under both; folding either comparison to a constant false turns its negation true and over-grants a3.'
+  condition:
+    match:
+      expr: '!(R.attr.aDouble == "x") || !(string(R.attr.aDouble) == "zzz")'
 - id: 'type-mismatch/equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber == "5" OR aNumber == 2: a number attribute compared with a numeric string.'
@@ -91,6 +98,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumberList[0] == true || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/string-field-against-list-literal'
+  tier: adversarial
+  intent: 'A string attribute compared with a one-element list literal, OR''d with aNumber == 5.'
+  trap: 'A string never equals a list, so only a1 is allowed; unwrapping the one-element list compares aString with "same" and over-grants a9.'
+  condition:
+    match:
+      expr: 'R.attr.aString == ["same"] || R.attr.aNumber == 5'
 - id: 'type-mismatch/equals/string-field-against-map-literal'
   tier: adversarial
   intent: 'Equality between a string attribute and a map literal (aString == {"a": 1}).'

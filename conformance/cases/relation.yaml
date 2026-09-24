@@ -3,6 +3,13 @@
 area: relation
 description: 'The real to-one relation (parent, parent.inner) and the mainCategory join chain.'
 cases:
+- id: 'relation/all/negated-to-one-chain'
+  tier: adversarial
+  intent: '!all() over the flattened mainCategory chain.'
+  trap: 'i9''s one category holds finance and legal, so all() is false and its negation true; negating the some-wrapped chain (some { NOT some P }) denies it, and a category with no elements would be admitted.'
+  condition:
+    match:
+      expr: '!R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
 - id: 'relation/all/to-one-chain'
   tier: adversarial
   intent: all() over mainCategory.subCategories where most rows have no mainCategory.
@@ -10,6 +17,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
+- id: 'relation/and/negated-conjunction-short-circuits-absent-parent'
+  tier: adversarial
+  intent: 'A negated && whose root operand decides the row before the to-one hop is read.'
+  trap: 'Where aBool is true, !aBool && ... is false without reading parent, so the negation is true even with no parent (a6, a8, b3, b5, h1-h7); requiring the parent hop around the whole negation denies them.'
+  condition:
+    match:
+      expr: '!(!R.attr.aBool && R.attr.parent.aString == "one")'
 - id: 'relation/and/one-hop-and-root-attribute'
   tier: extended
   intent: 'A root predicate AND a parent predicate (aBool == true && parent.aString.contains("re")).'

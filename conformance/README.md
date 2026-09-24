@@ -177,6 +177,21 @@ a vacuous pass.
 
   The `string/*/case-sensitive` and soft-hyphen cases witness this.
 
+## Mapping hazards
+
+A harness maps each attribute so that the row, read back, is the resource in `resources.json`. Some
+mappings can only hold that if the store keeps what the attribute says, and no translation can repair
+a value the store has already lost:
+
+- **Precision finer than the column's.** a5's `createdAt` is `2020-03-15T10:30:00.123456Z`. A
+  millisecond column (Prisma's `DateTime(3)`, MySQL `DATETIME(3)`) stores `.123`, so
+  `timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.123Z")` over-grants a5 and `>`
+  under-grants it, whatever the literal's precision. The attribute must be the value the store
+  returns: map a column at least as precise as the values an application writes to it, or send the
+  PDP the stored (truncated) value. The corpus carries no case for this, because the fault is in the
+  mapping, not the translation, and every millisecond store would ledger it
+  ([#519](https://github.com/cerbos/query-plan-adapters/issues/519)).
+
 ## Changing the corpus
 
 1. Edit or add a case in `cases/<area>.yaml`. If it needs a new column or principal attribute, add
