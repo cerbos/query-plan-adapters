@@ -34,6 +34,10 @@ public class BoolListElementEntity {
     @JoinColumn(name = "resource_id")
     private ResourceEntity resource;
 
+    /** The element's index in the list the corpus sends to check(). */
+    @Column(name = "list_position")
+    private Integer position;
+
     public BoolListElementEntity() {}
 
     public BoolListElementEntity(Boolean element, ResourceEntity resource) {
@@ -45,5 +49,7 @@ public class BoolListElementEntity {
     public Boolean getElement() { return element; }
     public void setElement(Boolean element) { this.element = element; }
     public ResourceEntity getResource() { return resource; }
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
     public void setResource(ResourceEntity resource) { this.resource = resource; }
 }

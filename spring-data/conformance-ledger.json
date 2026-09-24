@@ -49,50 +49,6 @@
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a bare filter() in boolean position is refused."
     },
-    "collection/index/first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list of booleans: the same missing index() form as collection/index/first-element-of-number-list, refused in the leaf operand before aBoolList is resolved"
-    },
-    "collection/index/first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list of numbers. The reference lowers a list attribute only as a JPA collection, a joined table whose rows carry no order a plan can name, so the leaf resolver has no index() form and refuses the operand before the list attribute is resolved. The element's type never comes into it, and neither does the mapping: the corpus maps aNumberList as a related table of element rows, which the membership actions (membership/in/literal-in-resource-number-list, type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list) read and this refusal never reaches"
-    },
-    "collection/index/first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "A positional read of a to-many relation (tags[0].name) has no Criteria form: the relation has no order the adapter can index."
-    },
-    "collection/index/first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/first-element-of-string-list-equals-null": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
-    "collection/index/negated-first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "The collection/index/first-element-of-boolean-list read under negation, refused in the same leaf operand below the not"
-    },
-    "collection/index/negated-first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "The collection/index/first-element-of-number-list read under negation. The refusal is raised in the leaf operand, below the not, so the negated form throws the same error rather than a NOT around a filter that could readmit a6's null element or an empty list's index error"
-    },
-    "collection/index/negated-first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a JPA collection and row order in a SQL relation is not defined, so index() has no Criteria form and is refused in the leaf operand"
-    },
-    "collection/index/negated-out-of-bounds": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "A relational collection has no declared order for positional indexing."
-    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() translates only as the collection operand of hasIntersection; used as the whole condition it is a list, not a boolean, and is refused."
@@ -176,14 +132,6 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
-    },
-    "type-mismatch/equals/boolean-list-element-against-number-literal": {
-      "status": "unsupported",
-      "reason": "The first disjunct is the collection/index/first-element-of-boolean-list read, refused in its leaf operand before the element's type is compared with the literal 1. The whole condition throws: keeping only the aNumber == 5 branch would agree with this oracle solely because CEL answers the cross-type branch false for every row"
-    },
-    "type-mismatch/equals/number-list-element-against-boolean-literal": {
-      "status": "unsupported",
-      "reason": "The first disjunct is the collection/index/first-element-of-number-list read, refused in its leaf operand before the element's type is compared with the literal true. The whole condition throws rather than keeping only the aNumber == 5 branch"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",

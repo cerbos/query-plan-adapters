@@ -157,17 +157,22 @@ public class ResourceEntity {
     public List<BoolListElementEntity> getaBoolList() { return aBoolList; }
 
     public ResourceEntity addNumberListElement(Double element) {
-        aNumberList.add(new NumberListElementEntity(element, this));
+        NumberListElementEntity e = new NumberListElementEntity(element, this);
+        e.setPosition(aNumberList.size());
+        aNumberList.add(e);
         return this;
     }
 
     public ResourceEntity addBoolListElement(Boolean element) {
-        aBoolList.add(new BoolListElementEntity(element, this));
+        BoolListElementEntity e = new BoolListElementEntity(element, this);
+        e.setPosition(aBoolList.size());
+        aBoolList.add(e);
         return this;
     }
 
     public ResourceEntity addTag(String tagId, String tagName) {
         TagEntity t = new TagEntity(tagId, tagName, this);
+        t.setPosition(tags.size());
         tags.add(t);
         return this;
     }

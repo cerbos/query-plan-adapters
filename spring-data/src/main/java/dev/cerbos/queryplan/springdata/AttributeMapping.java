@@ -39,6 +39,9 @@ import java.util.Objects;
  *   <tr><td>{@link #relation(String, String, Map) relation("tags", "name", Map.of(...))}</td>
  *       <td>Both: a default member field for bare-value operators plus nested mappings for
  *           lambda bodies</td></tr>
+ *   <tr><td>{@link Relation#withPositionField relation(...).withPositionField("position")}</td>
+ *       <td>Any of the relations above, with the member field holding each element's list
+ *           index, for positional reads such as {@code R.attr.tags[0]}</td></tr>
  * </table>
  *
  * <p>A variable that is missing from the map, or mapped in a way the operator cannot use,
@@ -152,15 +155,41 @@ public sealed interface AttributeMapping permits AttributeMapping.Field, Attribu
     }
 
     /**
-     * Collection mapping. {@code defaultMemberField} may be null; {@code fields} is copied.
-     * Create via the {@code relation(...)} factory methods.
+     * Collection mapping. {@code defaultMemberField} and {@code positionField} may be null;
+     * {@code fields} is copied. Create via the {@code relation(...)} factory methods, and
+     * {@link #withPositionField} to declare the element order.
      */
-    record Relation(String joinAttribute, String defaultMemberField, Map<String, AttributeMapping> fields)
+    record Relation(String joinAttribute, String defaultMemberField,
+                    Map<String, AttributeMapping> fields, String positionField)
             implements AttributeMapping {
         public Relation {
             Objects.requireNonNull(joinAttribute, "joinAttribute");
             Objects.requireNonNull(fields, "fields");
             fields = Map.copyOf(fields);
+        }
+
+        /** A relation with no declared element order. */
+        public Relation(String joinAttribute, String defaultMemberField,
+                        Map<String, AttributeMapping> fields) {
+            this(joinAttribute, defaultMemberField, fields, null);
+        }
+
+        /**
+         * Declares the member-entity field holding each element's zero-based position in the
+         * list the application sends to {@code check()}, so a positional read such as
+         * {@code R.attr.tags[0] == "x"} can be translated. Without it, a relation has no order a
+         * plan can name and positional reads throw {@link UnsupportedPlanShapeException}.
+         *
+         * <p>The field must hold exactly the list index: {@code 0} for the first element, one
+         * row per position, no gaps. A read past the last position is a CEL error, which
+         * denies.
+         *
+         * @param positionField member-entity field holding the element's list index
+         * @return the relation mapping with its order declared
+         */
+        public Relation withPositionField(String positionField) {
+            return new Relation(joinAttribute, defaultMemberField, fields,
+                    Objects.requireNonNull(positionField, "positionField"));
         }
     }
 }

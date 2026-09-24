@@ -191,7 +191,8 @@ final class HierarchyTranslator {
         Hierarchy field = fieldFirst ? first : second;
         Hierarchy other = fieldFirst ? second : first;
         if (!isPerCharacter(first) || !isPerCharacter(second)
-                || !(field instanceof Hierarchy.FieldRef) || !(other instanceof Hierarchy.Constant)) {
+                || !(field instanceof Hierarchy.FieldRef)
+                || !(other instanceof Hierarchy.Constant)) {
             throw Refusals.unsupported(opName + ": a hierarchy with an empty delimiter is only"
                     + " supported between a column and a constant that both split per character");
         }

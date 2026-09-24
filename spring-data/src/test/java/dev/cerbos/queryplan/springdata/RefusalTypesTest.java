@@ -27,6 +27,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -104,6 +105,20 @@ class RefusalTypesTest {
                 () -> SpringDataQueryPlanAdapter.toSpecification(plan, callLevelOmitted));
         assertInstanceOf(UnsupportedPlanShapeException.class, ex);
         assertTrue(ex.getMessage().contains("NullAttributeRepresentation.OMITTED"), ex.getMessage());
+    }
+
+    /**
+     * A positional read needs the relation to declare its position field. The corpus mapping
+     * declares one on every list, so only a caller's mapping can leave it out.
+     */
+    @Test
+    void aPositionalReadWithoutADeclaredOrderIsAnUnsupportedShape() {
+        Map<String, AttributeMapping> unordered = new HashMap<>(Corpus.MAPPING);
+        unordered.put("request.resource.attr.tagNames", AttributeMapping.relation("tags", "name"));
+        IllegalArgumentException ex = refusal(
+                Corpus.plan("collection/index/first-element-of-string-list"),
+                Options.of(unordered));
+        assertInstanceOf(UnsupportedPlanShapeException.class, ex);
     }
 
     // -- hand-built plans: the shapes a fixture cannot supply ------------------------------------

@@ -130,11 +130,16 @@ final class PlanWalker {
             case "eq", "ne" -> {
                 Operand rewritten = wholeListEquality(op, operands, scope);
                 yield rewritten != null
-                        ? traverse(rewritten, scope)
-                        : comparisons.translate(op, operands, scope);
+                        ? traverse(rewritten, scope) : leafComparison(op, operands, scope);
             }
-            default -> comparisons.translate(op, operands, scope);
+            default -> leafComparison(op, operands, scope);
         };
+    }
+
+    /** A leaf comparison: a positional list read if an operand is one, else the comparison. */
+    private Predicate leafComparison(String op, List<Operand> operands, Scope scope) {
+        Predicate positional = collections.tryPositionalRead(op, operands, scope);
+        return positional != null ? positional : comparisons.translate(op, operands, scope);
     }
 
     /** A lambda variable no plan names, for the element of a rewritten list equality. */

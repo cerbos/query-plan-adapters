@@ -140,6 +140,7 @@ Map each `request.resource.attr.<name>` to a JPA path or an association:
 | `AttributeMapping.relation("tags", "name")` | `@OneToMany<Tag>` where `name` stands in for the element in `in` / `hasIntersection` |
 | `AttributeMapping.relation("tags", Map.of("name", field("name")))` | `@OneToMany<Tag>` with member fields for lambda bodies (`t.name`); nested values may be `relation(...)` for multi-hop chains |
 | `AttributeMapping.relation("tags", "name", Map.of(...))` | Both a default member field and nested member fields |
+| `AttributeMapping.relation(...).withPositionField("position")` | Any relation, declaring the member field that holds each element's zero-based index in the list sent to `check()`, so positional reads (`R.attr.tags[0]`) translate |
 
 `relation(...)` names a JPA association, so the correlated subquery is a criteria association join
 and Hibernate applies that association's own `@SQLRestriction` and discriminator (see
@@ -183,7 +184,7 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod` outside `int()` of an `Integer` column, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
 | `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
@@ -341,6 +342,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
 | Field-to-field comparisons | `cb.equal(pathA, pathB)` and friends, including inside lambdas |
 | `R.attr.coll == ["x"]`, `== []`, and `!=` over a relation | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare |
+| `R.attr.list[i] <op> v`, `R.attr.list[i].f <op> v` (relation with `withPositionField`) | `list.exists(e, e.position = i && e <op> v)` as a three-valued score subquery; UNKNOWN when no element sits at `i` or `i` is not a non-negative integer, as CEL errors |
 | `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
 | `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
 | `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined; over a literal list, the same per-element `CASE` sum as `exists_one` |
@@ -369,7 +371,7 @@ consulted.
 |---|---|---|---|
 | `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
 | Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
-| List indexing | `R.attr.tags[0] == "x"` | no | JPA collections are unordered |
+| List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
 | Type casts (`int()`, `double()`, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
@@ -389,11 +391,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 64 / 80 |
-| adversarial | 191 / 227 |
+| extended | 68 / 80 |
+| adversarial | 200 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 51 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -434,6 +436,11 @@ drop rows the PDP permits. **Do not re-declare them.**
 | To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key has no unique constraint. Add the constraint |
 | Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns; Hibernate resolves `@JoinColumns` |
 | Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/or/two-hops-or-collection-exists` and siblings) | None — a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)); a dotted to-one `jpaPath` is a LEFT join so a disjunction's other branch still holds |
+
+One more is this adapter's own. `withPositionField` asserts that the member field holds exactly the
+element's index in the list sent to `check()`: `0` first, no gaps or duplicates. A column that
+drifts from that order silently reads the wrong element, so derive the attribute list and the column
+from one ordering.
 
 The "Reproduced by Hibernate" rows are claims about Hibernate — see the
 [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where)
@@ -619,6 +626,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- `AttributeMapping.Relation#withPositionField` declares a relation's element order, and positional
+  reads over such a relation (`R.attr.tags[0] == "x"`, `R.attr.tags[0].name == "x"`) now
+  translate. `Relation` gains a `positionField` record component; the three-argument constructor
+  is kept.
 - `exists_one` and `size(filter(...))` over a literal list (a principal attribute longer than the
   planner unrolls), and membership in a `map()` over one, now translate instead of throwing.
 - `==`/`!=` between a relation and a list constant of at most one element now translates instead of
