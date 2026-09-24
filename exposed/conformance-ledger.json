@@ -1,0 +1,349 @@
+{
+  "adapter": "exposed",
+  "cases": {
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "A division as the DIVISOR: the inner division can be a zero-denominator NaN or infinity, SQL has no literal for either, and against a column the sign of the result depends on that column. Refused rather than binding a non-finite double, which PostgreSQL orders above every number"
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "CEL `%` is integer-only while an attribute value is always a double at check time, so a satisfiable policy has to cast with int() first, and int() has no faithful SQL lowering: CAST rounds to nearest on PostgreSQL and MySQL where CEL truncates toward zero. The modulo is refused by name before its operands are read, on the same ground that refuses `cast/int/negative-fraction`"
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "Cannot translate double(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() comparison requires a column that stores an absolute instant — an exposed-java-time or exposed-kotlin-datetime timestamp() or timestampWithTimeZone() column — but 'request.resource.attr.createdBy' maps to a VarCharColumnType column. A local date-time, a date and a string are all ambiguous about which instant they hold; remap the column."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() needs a column that stores an absolute instant; createdBy is the varchar the corpus deliberately maps it to, and a string column is ambiguous about which instant it holds, so the conversion failure CEL raises for a malformed string has no SQL counterpart. Refused when the timestamp() operand is resolved"
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
+    },
+    "collection/index/first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Cannot translate get-field(): it projects a member out of a single element, and a relation subquery has no single element to project from."
+    },
+    "collection/index/first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a scalar list. tagNames is a related table read through a correlated subquery, and the rows a SQL relation returns carry no order for a position to index into, so there is no first element to read. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-string-list-equals-null": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-out-of-bounds": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() returns a list, not a boolean, so it cannot be a condition on its own; only hasIntersection(map(...), [...]) gives the list a scalar meaning"
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "map() is held as a deferred projection until hasIntersection() gives it a scalar meaning, as the inner select of an EXISTS; that is the only consumer this adapter has for one, and size(map(...)) is refused as well. Comparing the ORDERED projection itself to a literal list gives it no scalar meaning, and a correlated subquery cannot be compared to a list value"
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "hierarchy/descendent-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test. The adapter lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter is a bare prefix LIKE that also matches the path itself. The delimiter is refused when the hierarchy operand is parsed, before any LIKE is built"
+    },
+    "null/equals/null-literal-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "aOptionalString is omitted from the resource when its column is NULL, so the mapping declares NullAttributeRepresentation.OMITTED: `== null` is then a CEL missing-attribute error that denies every row, while SQL `IS NULL` returns exactly those rows. The planner emits the same eq(var, null) node for an explicit null, so the adapter refuses a null operand against an OMITTED attribute rather than guess"
+    },
+    "null/not-equals/field-to-field-mixed-null-conventions": {
+      "status": "unsupported",
+      "reason": "Cannot translate `ne` between two columns under mixed null conventions: one attribute declares NullAttributeRepresentation.EXPLICIT and the other does not, so the declared side needs a definite answer for its NULL while the undeclared side needs UNKNOWN, and no single predicate is both. Declare the convention on both mappings, or on neither."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "principal/exists-one/long-list": {
+      "status": "unsupported",
+      "reason": "exists_one over a principal literal list has no flat form: it needs a count of matching elements, and only exists() and all() fold a literal list into a disjunction or conjunction"
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "The collection is a principal value computed by another macro (a filter, a map or a struct projection), not a mapped relation or a literal list, so there is no table for a correlated subquery to range over"
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "The collection is a principal value computed by another macro (a filter, a map or a struct projection), not a mapped relation or a literal list, so there is no table for a correlated subquery to range over"
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "The collection is a principal value computed by another macro (a filter, a map or a struct projection), not a mapped relation or a literal list, so there is no table for a correlated subquery to range over"
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "The membership pair has no column-and-constant reading: the container is a literal list whose elements are themselves lists or maps, or a map() over a principal value, and a scalar column can equal neither"
+    },
+    "regex/matches/anchored-prefix": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/compared-to-true": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/end-anchor-before-final-newline": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/unanchored": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
+    },
+    "type-mismatch/contains/number-field-needle": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/contains/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/descendent-of/number-field-as-path": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/ends-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/ends-with/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/equals/boolean-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "eq compares 'request.resource.attr.aBool' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/equals/boolean-list-element-against-number-literal": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "type-mismatch/equals/number-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "eq compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/equals/number-field-against-string-principal": {
+      "status": "unsupported",
+      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/equals/number-list-element-against-boolean-literal": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "type-mismatch/equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
+    },
+    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
+      "status": "unsupported",
+      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
+    },
+    "type-mismatch/equals/string-field-against-number-field": {
+      "status": "unsupported",
+      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/equals/string-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "eq compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/equals/string-field-against-number-principal": {
+      "status": "unsupported",
+      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/exists/element-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "eq compares 't.name' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
+      "status": "unsupported",
+      "reason": "in compares 't.name' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list": {
+      "status": "unsupported",
+      "reason": "in compares 'request.resource.attr.aBoolList' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
+      "status": "unsupported",
+      "reason": "in compares 'request.resource.attr.aNumberList' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a literal list whose elements are maps: each element of a mapped collection is one scalar column value, which SQL equality cannot compare with a map"
+    },
+    "type-mismatch/in/list-literal-in-resource-string-list": {
+      "status": "unsupported",
+      "reason": "The member is a list constant: `[\"public\"] in tagNames` asks whether the list is itself an element, which a scalar element column never holds. Spreading it into its elements would answer `\"public\" in tagNames` and return every row holding that tag"
+    },
+    "type-mismatch/in/number-field-in-mixed-literal-list": {
+      "status": "unsupported",
+      "reason": "eq compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/in/string-field-in-list-of-lists": {
+      "status": "unsupported",
+      "reason": "The membership pair has no column-and-constant reading: the container is a literal list whose elements are themselves lists or maps, or a map() over a principal value, and a scalar column can equal neither"
+    },
+    "type-mismatch/in/string-literal-in-resource-boolean-list": {
+      "status": "unsupported",
+      "reason": "in compares 'request.resource.attr.aBoolList' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/in/string-literal-in-resource-number-list": {
+      "status": "unsupported",
+      "reason": "in compares 'request.resource.attr.aNumberList' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/not-equals/number-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "ne compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/not-equals/string-field-against-map-literal": {
+      "status": "unsupported",
+      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
+    },
+    "type-mismatch/size/boolean-field": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/size/number-field": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/starts-with/number-field-needle": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    },
+    "type-mismatch/starts-with/number-field-receiver": {
+      "status": "unsupported",
+      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
+    }
+  }
+}

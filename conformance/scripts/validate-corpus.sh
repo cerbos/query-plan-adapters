@@ -80,8 +80,8 @@ done < <(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.js
 # Markdown is excluded: a README telling consumers how to run their own PDP is not a test input.
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
-  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
+  --include='*.json' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
@@ -102,6 +102,10 @@ source_grep() {
 }
 source_grep -rl '' "${REPO_ROOT}" 2>/dev/null | grep -q '/lib/.*\.rb$' \
   || fail "the source scan reaches no .rb file under lib/: restore the Ruby scan pass"
+# `*.kts` matches build.gradle.kts and nothing under src/, so without `*.kt` a Kotlin adapter's
+# source is invisible to every scan below.
+source_grep -rl '' "${REPO_ROOT}" 2>/dev/null | grep -q '\.kt$' \
+  || fail "the source scan reaches no .kt file: restore --include='*.kt'"
 
 expected_image="ghcr.io/cerbos/cerbos:${current_tag}@${current_digest}"
 while IFS=: read -r file _ match; do
