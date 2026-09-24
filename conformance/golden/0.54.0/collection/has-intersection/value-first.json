@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-intersection/value-first",
+  "intent": "hasIntersection with the literal list first and the resource list second.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "public",
+              "other"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "hasIntersection"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-intersection/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hasIntersection([\"public\", \"other\"], R.attr.tagNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The answer is symmetric but the query is not: one side is a column and the other a parameter list, so swapping roles breaks; matching stays case-sensitive (c1's \"Public\")."
+}

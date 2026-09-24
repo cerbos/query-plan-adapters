@@ -283,8 +283,8 @@ doesn't carry. Macros over a column or relation (`R.attr.tags.exists(...)`) need
 
 `get_query` accepts the HTTP client's `PlanResourcesResponse` or the gRPC client's protobuf one.
 They behave identically except for a constant zero divisor (`x / -0.0`): only gRPC keeps the sign of
-the zero, so only gRPC translates it; over HTTP it raises (see
-[Conformance contract](#conformance-contract)).
+the zero, so only gRPC translates it; over HTTP, whose JSON renders `-0.0` as `-0` and decodes it to
+the integer `0`, it raises `UnsupportedPlanError`.
 
 ### Async
 
@@ -347,30 +347,34 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `check()` decisions in both strict
-evaluation modes, using 29 hostile seed rows and executed SQLAlchemy queries. The Spring Data adapter
-defines the reference semantics for this compatibility snapshot. The harness takes
-`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true` and rejects anything else; CI runs both,
-each against a PDP in the same mode.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
+recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is translated with one mapping, executed on SQLite
+(through a `Connection` and through an `AsyncSession`), and the returned ids are compared with the
+decisions the PDP recorded. The cases that read a collection declared in `collection_columns` also
+run on PostgreSQL under both storage shapes, `json` and `pgArray`. Results for the current PDP,
+0.55.0, where the total is every golden case recorded in that tier:
 
-The oracle comparison runs on four legs, each varying one caller-side choice: the baseline (HTTP
-client, `declarative_base()` models, synchronous `Connection`), the **gRPC** client, SQLAlchemy 2.0
-**`DeclarativeBase`** models (skipped on 1.4), and an **`AsyncSession`** over aiosqlite. Every oracle
-action runs on every leg, and every fail-closed shape is asserted as a throw over both transports
-([#321](https://github.com/cerbos/query-plan-adapters/issues/321)).
-
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 265 reference conformance actions, of which the 28 that read a declared collection also run on PostgreSQL under both storage shapes |
-| Transport-dependent | `cr-div-neg-zero` and `nan-ord-inf` — a constant zero divisor. Refused over HTTP, whose JSON renders `-0.0` as `-0` and decodes it to integer `0`, losing the sign that picks CEL's infinity; **translated over gRPC**, where the protobuf double keeps it, and compared against the oracle there. Both count among the 57 fail-closed actions below, which classify the HTTP transport |
-| Fail-closed corpus shapes | Nanosecond `now()` thresholds; regex `matches()`; a negative or fractional index and an indexed object projection (`get-field`); `timestamp()` over an ambiguous string column; `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero); `filter()`/`map()` used as a condition (both return a list); a constant zero divisor whose sign HTTP discards; a hierarchy path built by `list()` rather than read from a column; `mod` (reached through the `int()` cast); list equality over a `map()` projection, whose deferred intermediate no override consumes; a hierarchy with an empty delimiter (Cerbos splits per character, and the prefix `LIKE` would match the path itself); two-list `except` with resource-list and principal-list receivers; constructor expressions and structured membership needles; unsupported principal-list macros; conditional divisors; bare temporal-column comparisons (57 actions) |
-| Representation-dependent | `null-eq-missing` — raises under `null_attribute_representation="omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute sent as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says so. Declare it with `attribute_null_representation={reference: "explicit"}`, or the old rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `check()` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 61 / 80 |
+| adversarial | 185 / 227 |
 
-The harness uses the same public `operator_override_fns` mechanism applications do for
-schema-specific collection translations. Every fail-closed shape's error message is pinned in
-`conformance/actions.json` and asserted, so each throw is proved to name its declared mechanism.
+Every case that does not pass is either refused with `UnsupportedPlanError` (60 cases) or is
+skipped because its golden file records a planner divergence: under 0.55.0 that is the one case
+`null/has/missing-attribute` (`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the
+planner), which no adapter can pass and the harness does not compare.
+[`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
+rules it out.
+
+### Refusals
+
+A plan shape the adapter cannot express raises `cerbos_sqlalchemy.UnsupportedPlanError`, never a
+best-effort filter. It subclasses `ValueError`, which these refusals raised before it existed; the
+refusal for a relation-mapped attribute that no operator override consumes is also a `TypeError`, as
+it was before. Invalid configuration (an unknown null representation, an unmapped attribute, a missing
+`table_mapping`) keeps raising `ValueError`, `KeyError` or `TypeError`. An operator override that
+cannot translate what it was handed should raise `UnsupportedPlanError` too.
 
 ## Mapping hazards
 
@@ -386,7 +390,7 @@ hazard below is yours. Which ones apply depends on how you write it:
   `select(...).join(Model.rel)`), SQLAlchemy applies the `primaryjoin` and, for a
   single-table-inheritance target, the
   [discriminator](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings).
-- Through a **hand-written correlated `select()`** over columns (what the adversarial harness does),
+- Through a **hand-written correlated `select()`** over columns (what the conformance harness does),
   none of that applies.
 
 Check both against the SQLAlchemy version you run.
@@ -398,7 +402,7 @@ Check both against the SQLAlchemy version you run.
 | Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees sibling subtypes |
 | To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing makes the database enforce the single row the application saw — add the constraint |
 | Composite association key | **Caller-owned** | A multi-column foreign key. An override is arbitrary SQLAlchemy, so a composite key *is* expressible — and nothing stops you writing half of it. Conjoin every column pair |
-| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is SQL NULL, excluded under both polarities. `attr_map` accepts any column expression for this, and it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is SQL NULL, excluded under both polarities. `attr_map` accepts any column expression for this, and it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ### `require_hops`: the one hazard with a library helper
 
@@ -445,6 +449,15 @@ chain.
 
 ## Behaviour changes
 
+- Translation refusals now raise `cerbos_sqlalchemy.UnsupportedPlanError`, a `ValueError` subclass
+  (also a `TypeError` where the refusal raised one before), so existing handlers keep catching them.
+  Not breaking.
+- **Breaking** ([#509](https://github.com/cerbos/query-plan-adapters/issues/509)): a collection macro
+  nested over the collection an enclosing macro iterates, whose body reads the enclosing element
+  (`tags.exists(t, tags.exists(u, u.name != t.name))`), now raises. `attr_map` binds a lambda
+  variable's fields by name and an override never sees the scope, so both subqueries range over the
+  one unaliased table and the body would compare each element with itself — under negation, an
+  over-grant — for any caller that mapped the inner variable.
 - A literal list member the column's type cannot equal is dropped from `in` (`R.attr.aNumber in
   ["5", 2]` compares `2` alone), as `==` already answered it, where it used to be bound into
   `IN (...)` and converted by the store (`'5' = 5` is TRUE on SQLite) — an over-grant, since CEL's
@@ -490,14 +503,13 @@ demo/scripts/run-example.sh sqlalchemy
 
 | Suite | Checks | Needs |
 | --- | --- | --- |
-| `tests/test_translator.py` | the SQL `get_query` emits for each corpus plan | nothing — plans from `conformance/wire-fixtures/`, expectations from `golden/expectations.json` |
+| `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match `check()` | Docker: a pinned Cerbos PDP, in-memory SQLite, and PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) for declared collection storage |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) (declared collection storage) |
 
 ```bash
 pdm install -G :all
 pdm run test            # all three
-pdm run golden:update   # rewrite golden/expectations.json, then review the diff
 pdm run format          # isort + ruff format
 pdm run lint            # ruff check --fix
 ```
@@ -506,11 +518,3 @@ Without PDM installed, run the same commands through the [pyprojectx](https://py
 wrapper, `./pw` (`pw.bat` on Windows), which installs PDM, ruff and isort into `.pyprojectx/` on
 first use: `./pw install`, `./pw test`, `./pw format`, `./pw lint`, or `./pw pdm <command>`. CI runs
 `format` and `lint` on the SQLAlchemy 2.x leg and fails if they leave a diff.
-
-`golden/expectations.json` records, for every corpus action this adapter translates, the `WHERE`
-clause it emits on SQLite and on PostgreSQL plus the bound parameters. The whole `Select` is compiled
-(a correlated subquery only renders correctly inside its enclosing SELECT) and the part after
-`WHERE` is recorded. CI never regenerates the file. SQL text depends on SQLAlchemy's compiler, so the
-file is generated under 2.x, `golden:update` refuses to run under 1.4, and the 1.4 leg asserts a
-pinned list of shapes that render differently, in both directions. The format is described under
-"Golden expectations" in [`conformance/README.md`](../conformance/README.md).

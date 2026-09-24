@@ -39,7 +39,7 @@ jobs:
       # version the corpus pins is the one the package was proved against.
       - name: Read pinned Cerbos version
         id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(jq -r .current.tag ../conformance/pdp-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cerbos
         uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1

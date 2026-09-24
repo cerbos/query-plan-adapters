@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a3",
+    "a4",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/negated-first-element-of-boolean-list",
+  "intent": "!(aBoolList[0] == true): the negated first-element comparison over a boolean list.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBoolList"
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "index"
+                  }
+                },
+                {
+                  "value": true
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/negated-first-element-of-boolean-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.aBoolList[0] == true)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Empty lists error and must deny under negation while a null first element (a4) must allow; a must_not over an any-position match is a different predicate."
+}

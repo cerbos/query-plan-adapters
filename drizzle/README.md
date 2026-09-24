@@ -279,7 +279,7 @@ See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 - **MySQL / PlanetScale:** use `utf8mb4_0900_bin` (MySQL 8.0.17+), which is byte-exact and NO PAD.
   Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­ne' = 'one'`),
   and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '`). Replaying the corpus on `mysql:8.4`, the default
-  `utf8mb4_0900_ai_ci` makes **61 of the 236 oracle-tested actions** disagree with the PDP, and
+  `utf8mb4_0900_ai_ci` makes **62 of the 268 compared cases** disagree with the PDP, and
   `utf8mb4_0900_as_cs` makes **16** disagree, all on the soft-hyphen seed `h6`
   ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
 - **PostgreSQL:** the default is fine. Do not use nondeterministic ICU collations or `citext` for
@@ -309,31 +309,46 @@ and PostgreSQL literals carry no collation.
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
 | Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean column |
 
-Shapes the adapter cannot express throw an `Error` rather than emit a broader filter. The full list
-is in the fail-closed row below; each message is pinned in `conformance/actions.json`.
+Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
+filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
+
+```ts
+import { queryPlanToDrizzle, UnsupportedQueryPlanError } from "@cerbos/orm-drizzle";
+
+try {
+  const result = queryPlanToDrizzle({ queryPlan, mapper });
+} catch (error) {
+  if (error instanceof UnsupportedQueryPlanError) {
+    // The policy uses a shape this adapter cannot translate faithfully: deny, or fall back to
+    // per-row check() calls.
+  }
+  throw error;
+}
+```
+
+A mapper misconfiguration, such as a reference with no mapping or a column of the wrong type for
+its declaration, stays a plain `Error`. The shapes this adapter refuses are listed, with reasons, in
+[`conformance-ledger.json`](conformance-ledger.json).
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows and real Drizzle queries, executed on SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Drizzle
+queries over the corpus's 29 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+Passed cases on the current PDP, 0.55.0, identical on all three stores. The total is every golden
+case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 259 reference conformance actions |
-| Fail-closed corpus shapes | Sub-millisecond `now()` thresholds, regex `matches()` (SQL regex dialects do not follow CEL/RE2), indexed object projection (`get-field`), `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list), `string()` over a number or text column (no `CAST` target works on all three stores: MySQL rejects `TEXT`/`VARCHAR` and PostgreSQL's `CHAR` is `character(1)`), CEL's `+` over strings (`\|\|` is logical OR on MySQL, and numeric `+` coerces strings to 0), a hierarchy path built by `list()` rather than read from a column, `mod` (reached through the `int()` cast), list equality over a `map()` projection, and a hierarchy with an empty delimiter (the prefix `LIKE` would match the path itself) (63 actions) |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `nullAttributeRepresentation: "explicit"` on its mapper entry renders definitely, so a NULL row is included where CEL's null *value* says so. Undeclared, `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 59 / 80 |
+| adversarial | 183 / 227 |
 
-Oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
-relation counts, nested collection macros, null/error propagation, arithmetic and ternaries,
-hierarchy operations, typed timestamps, multi-hop relations, and `string()` over a boolean column
-(`CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` on every store).
-
-The corpus runs on SQLite, PostgreSQL (real `boolean`, `timestamptz`, division-by-zero errors and
-column-typed parameters) and MySQL (under `utf8mb4_0900_bin`). Choose the PDP engine mode with
-`ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `true`; other values are rejected, and CI runs
-both modes on every store. The SQL each action emits is pinned separately by `npm test` — see
-[Testing](#testing).
+Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
+wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
+reason. One extended case, `null/has/missing-attribute`, is a known Cerbos planner divergence and is
+skipped: the planner folds it to `ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute
+rows, so use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
 
 ## Mapping hazards
 
@@ -353,7 +368,7 @@ detect a missing one.
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `eq(table.type, "…")` |
 | To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative and emits the same `EXISTS` either way, so add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires each to-one hop, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375), [#430](https://github.com/cerbos/query-plan-adapters/issues/430)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and the rest of the `relation/*` cases) | None — every operator reached through a relation requires each to-one hop, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375), [#430](https://github.com/cerbos/query-plan-adapters/issues/430)) |
 
 ### Declaring the application's own predicate
 
@@ -385,12 +400,24 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
+  `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
+  misconfiguration stays a plain `Error`.
+- [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
+  the relation an enclosing macro iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
+  now gives the inner subquery its own alias (`cerbos_<table>_<n>`), so the lambda compares its
+  element with the enclosing one. Both subqueries used to range over the bare table name, SQL
+  resolved `t.name` to the inner row, and the body compared each element with itself: an
+  under-grant, and an over-grant under negation. An inner element read that cannot be rebound to
+  the alias — a transform, a further relation hop, or a relation carrying a `subqueryFilter` —
+  now throws, as does testing an enclosing element's column for membership in a collection stored
+  in the same table.
 - An `in` list or `hasIntersection` list against a string, number or boolean column now drops the
   constants of another type before binding them, because CEL's `5 in ["5", 2]` never matches the
   `"5"`. The store used to convert it: SQLite and PostgreSQL read `'5'` as 5, and MySQL reads a
   non-numeric string as 0, so `aNumber in ["5", 2]` returned rows with `aNumber` 5, and
   `hasIntersection(tags.map(t, t.name), ["public", 0])` returned every tag on MySQL. Both were
-  over-grants (`in-scalar-number-vs-string`, `hasint-map-vs-number`). A list left with no
+  over-grants (`type-mismatch/in/number-field-in-mixed-literal-list`, `type-mismatch/has-intersection/mapped-names-against-mixed-literal-list`). A list left with no
   constant of the column's type is false.
 - **Breaking:** membership in an `indexable` column without a `relation` used to compare the whole
   column with the literal as one scalar, so `2 in R.attr.list` matched no row and its negation
@@ -409,14 +436,14 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   instead of becoming `FALSE`; an operand pair with no literal list now throws
   ([#387](https://github.com/cerbos/query-plan-adapters/issues/387)).
 - **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) throws. Its old
-  filter matched the path itself (`hier-empty-delim` returned a denied row).
+  filter matched the path itself (`hierarchy/descendent-of/empty-delimiter` returned a denied row).
 - **Breaking:** bare temporal field comparisons, whole-list equality, list-valued membership
   needles, and nested division where an inner zero divisor could be evaluated before the outer
   guard now throw before returning SQL. They previously emitted incorrect filters or failed in the
   database.
 - On MySQL columns, string lengths use `CHAR_LENGTH` instead of `LENGTH` (`size()` over a string,
   and the `SUBSTR` bounds for `startsWith`/`endsWith` and hierarchy prefixes). `LENGTH` counts
-  bytes; this fixed an over-grant in `not-startswith`
+  bytes; this fixed an over-grant in `string/starts-with/negated-field-to-field`
   ([#473](https://github.com/cerbos/query-plan-adapters/issues/473),
   [#474](https://github.com/cerbos/query-plan-adapters/issues/474)). A non-column mapping keeps
   `length()`.
@@ -445,20 +472,12 @@ demo/scripts/run-example.sh drizzle
 
 | Command | What it proves | What it needs |
 | --- | --- | --- |
-| `npm test` | The SQL this adapter emits: every corpus action is either a golden expectation or a pinned throw, plus bound parameters per dialect, mapper forms (functions, `transform`, `subqueryFilter`), the `nullAttributeRepresentation` boundary, the timestamp literal contract and malformed input | Node only — no Cerbos, database or Docker |
-| `npm run test:adversarial` | The rows that SQL returns, on real SQLite, with `check()` as the oracle | Cerbos CLI |
-| `npm run test:adversarial:postgres` | The same corpus on real PostgreSQL | Cerbos CLI, Docker |
-| `npm run test:adversarial:mysql` | The same corpus on real MySQL under `utf8mb4_0900_bin`. Set `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` to measure MySQL's default | Cerbos CLI, Docker |
-| `npm run golden:update` | — | Rewrites `golden/expectations.json` from what the translator emits today. Review the diff |
+| `npm test` | Caller-supplied options the corpus cannot vary (mapper forms, `transform`, `subqueryFilter`, declared index storage, `nullAttributeRepresentation`), the refusal type, the timestamp literal contract and malformed input | Node only — no Cerbos, database or Docker |
+| `npm run test:adversarial` | The rows each recorded plan returns on real SQLite equal the recorded `check()` decisions, for both pinned PDPs | Node only |
+| `npm run test:adversarial:postgres` | The same corpus on real PostgreSQL, plus the list cases under `pgArray` and plain `json` storage | Docker |
+| `npm run test:adversarial:mysql` | The same corpus on real MySQL under `utf8mb4_0900_bin`. Set `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` to measure MySQL's default | Docker |
 
-Prefix any adversarial command with `ADAPTER_TEST_STRICT_EVALUATION=true` to run it in strict
-evaluation mode.
-
-`npm test` reads its plans from `../conformance/wire-fixtures/` and compares them with
-`golden/expectations.json`: one entry per corpus action, holding the plan kind and, for a
-conditional plan, the rendered SQL and parameters on each of `postgresql`, `sqlite` and `mysql`. An
-action the adapter refuses has no entry (its message is pinned in `conformance/actions.json`), and a
-fixture in neither place fails the suite. See "Golden expectations" in
-[conformance/README.md](../conformance/README.md),
-[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
-[ADR 0007](../docs/adr/0007-adapters-share-data-not-code.md).
+No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
+[`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the
+recorded allowed ids, and an `unsupported` case must throw `UnsupportedQueryPlanError`. See
+"The harness contract" in [conformance/README.md](../conformance/README.md).

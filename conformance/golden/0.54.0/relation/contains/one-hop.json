@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a1",
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "relation/contains/one-hop",
+  "intent": "Substring test on a parent field (parent.aString.contains(\"done\")).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aString"
+          },
+          {
+            "value": "done"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/contains/one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aString.contains(\"done\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "No metacharacter or case trap, only the join: reading the root's aString gives a2/a3 instead of a1/a4."
+}

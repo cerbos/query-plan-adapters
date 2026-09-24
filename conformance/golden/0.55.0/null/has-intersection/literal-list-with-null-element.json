@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8",
+    "b5",
+    "b6",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/has-intersection/literal-list-with-null-element",
+  "intent": "hasIntersection of tagNames with a literal list containing a null element.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public",
+              null
+            ]
+          }
+        ],
+        "operator": "hasIntersection"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has-intersection/literal-list-with-null-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hasIntersection(R.attr.tagNames, [\"public\", null])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The null element behaves like in and must match null-named tags (b5/b6) through IS NULL; a raw IN (..., NULL) drops them."
+}

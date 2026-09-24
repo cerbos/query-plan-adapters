@@ -4,6 +4,7 @@ import type {
   PlanExpressionVariable,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper } from "./index";
 import {
   isExpression,
@@ -114,7 +115,7 @@ const comparisonRule: PushdownRule = {
   emit: (operands, q, mapper, operator) => {
     const pair = fieldAndLiteral(operands);
     if (!pair) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `${operator} operator requires one field and one value operand`,
       );
     }
@@ -175,7 +176,9 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
     emit: (operands, q, mapper) => {
       const membership = fieldInList(operands);
       if (!membership) {
-        throw new Error("in operator requires one field and one array value");
+        throw new UnsupportedQueryPlanError(
+          "in operator requires one field and one array value",
+        );
       }
       const field = resolveField(membership.field.name, mapper);
       const { values } = membership;
@@ -219,17 +222,19 @@ export const translateExpression = (
     if (typeof expression.value === "boolean") {
       return q.eq(true, expression.value);
     }
-    throw new Error("Unexpected bare value in expression");
+    throw new UnsupportedQueryPlanError("Unexpected bare value in expression");
   }
   if (isVariable(expression)) {
     return q.eq(q.field(resolveField(expression.name, mapper)), true);
   }
   if (!isExpression(expression)) {
-    throw new Error("Invalid Cerbos expression structure");
+    throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
   const rule = ruleFor(expression.operator);
   if (!rule) {
-    throw new Error(`Unsupported operator: ${expression.operator}`);
+    throw new UnsupportedQueryPlanError(
+      `Unsupported operator: ${expression.operator}`,
+    );
   }
   return rule.emit(expression.operands, q, mapper, expression.operator);
 };

@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/convex.yaml"
       - ".github/workflows/convex-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
@@ -33,10 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No Cerbos sidecar: `npm test` is the translator unit test, which reads its plans from
-      # conformance/wire-fixtures/ — replanned against the pinned PDP and diffed by the
-      # `Conformance Corpus` workflow — and its expected filters from golden/expectations.json.
-      # No PDP, no Convex backend, no Docker.
+      # No Cerbos and no Convex backend: `npm test` is the offline unit suite (caller-supplied
+      # options, the refusal type, malformed plans), which reads the few plans it needs from
+      # conformance/golden/. No Docker.
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -56,7 +58,8 @@ jobs:
       - run: npm run test
 
   # The backend-dependent leg: corpus validation, Convex codegen, the type-check that needs the
-  # generated API, and the adversarial suite. Convex is the one adapter where that cannot share a
+  # generated API, and the conformance harness, which replays the recorded goldens
+  # (conformance/golden/) against the deployed backend and needs no PDP. Convex is the one adapter where that cannot share a
   # job with `npm test` — the harness imports `convex/_generated`, which only exists after a live
   # backend has been deployed to, so folding it into `unit-test` would put Docker and a Convex
   # deploy on every Node leg. The job id is left as `integration-test` deliberately: the suite it
@@ -72,18 +75,6 @@ jobs:
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
-
-      - name: Read pinned Cerbos version
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
-        with:
-          # Without a token the action fetches the release under GitHub's stricter anonymous
-          # rate limit, and that download is the step that has failed a run with no code change.
-          github_token: ${{ github.token }}
-          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -134,17 +125,10 @@ jobs:
       - name: Type-check (including the backend-dependent harness)
         run: npm run typecheck
 
-      - name: Run adversarial conformance tests
+      - name: Run conformance harness
         env:
           CONVEX_URL: http://127.0.0.1:3210
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial
 
       - name: Stop Convex backend
         if: always()
@@ -195,7 +179,7 @@ jobs:
       - run: npm install
 
       # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh convex

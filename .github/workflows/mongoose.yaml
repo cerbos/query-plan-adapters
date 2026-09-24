@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
@@ -27,7 +30,7 @@ defaults:
 jobs:
   test:
     strategy:
-      # The adversarial suite now shares this matrix, so the default fail-fast would let an
+      # The conformance harness shares this matrix, so the default fail-fast would let an
       # unrelated Node leg cancel a baseline leg mid-corpus and report it as "cancelled" —
       # neither a pass nor a failure for the repo's load-bearing signal.
       fail-fast: false
@@ -57,7 +60,7 @@ jobs:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE
         node-version: ["22", "24"]
-        # The server dimension only discriminates the adversarial suite, which is gated to the
+        # The server dimension only discriminates the conformance harness, which is gated to the
         # baseline Node leg — so off that leg the two server legs would run byte-identical work
         # (a typecheck and an offline unit test that never opens a connection). Excluding it
         # keeps the coverage and drops a runner.
@@ -71,24 +74,9 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
-      # Only the adversarial suite needs a PDP and a server: the translator unit test reads its
-      # plans from conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and
-      # diffs against this same pinned version. Both are therefore gated to the baseline Node leg,
-      # the one the adversarial step below runs on.
-      - name: Read pinned Cerbos version
-        if: matrix.node-version == '22'
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        if: matrix.node-version == '22'
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
-        with:
-          # Without a token the action fetches the release under GitHub's stricter anonymous
-          # rate limit, and that download is the step that has failed a run with no code change.
-          github_token: ${{ github.token }}
-          version: v${{ steps.cerbos.outputs.version }}
-
+      # Only the conformance harness needs a server: it replays the recorded goldens
+      # (conformance/golden/) against MongoDB and needs no PDP. It is gated to the baseline Node
+      # leg, the one the conformance step below runs on.
       - name: Start MongoDB
         if: matrix.node-version == '22'
         run: |
@@ -119,19 +107,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
 
-      # The adversarial corpus discriminates MongoDB server behaviour, not the Node runtime, so
-      # it runs in both evaluation modes per server version on the baseline Node leg. Each mode
-      # starts its own PDP so planning and the Check oracle share the engine configuration.
-      - name: Run adversarial differential suite
+      # The conformance corpus discriminates MongoDB server behaviour, not the Node runtime, so it
+      # runs once per server version on the baseline Node leg.
+      - name: Run conformance harness
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial
 
       - name: Stop MongoDB
         if: always() && matrix.node-version == '22'
@@ -184,7 +164,7 @@ jobs:
       - run: npm install
 
       # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh mongoose

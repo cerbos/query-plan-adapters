@@ -1,13 +1,13 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 /**
- * The CEL string-match methods — {@code contains}, {@code startsWith}, {@code endsWith} — and
- * where each puts the {@code LIKE} wildcards around its needle.
- *
- * <p>The one place those three operators are named: the constant-needle leaf
- * ({@link LeafTranslator#defaultLeaf}), the column-needle form and the constant-receiver form
- * ({@link ComparisonTranslator}) all read the wildcard layout from here. The methods are
- * RECEIVER-SENSITIVE, which is why {@link NormalizedBinary} never reorders their operands.
+ * The CEL string-match methods and where each puts the {@code LIKE} wildcards around its needle.
+ * The receiver matters, so {@link NormalizedBinary} never reorders their operands.
  */
 enum StringMatch {
     CONTAINS("contains", true, true),
@@ -24,7 +24,7 @@ enum StringMatch {
         this.trailingWildcard = trailingWildcard;
     }
 
-    /** The string-match method a Cerbos operator names, or {@code null} for any other operator. */
+    /** The method {@code operator} names, or {@code null} for any other operator. */
     static StringMatch of(String operator) {
         for (StringMatch match : values()) {
             if (match.operator.equals(operator)) {
@@ -34,7 +34,7 @@ enum StringMatch {
         return null;
     }
 
-    /** {@code needle} (already LIKE-escaped) wrapped in this method's wildcards. */
+    /** Wraps an already LIKE-escaped needle in this method's wildcards. */
     String pattern(String escapedNeedle) {
         return (leadingWildcard ? "%" : "") + escapedNeedle + (trailingWildcard ? "%" : "");
     }

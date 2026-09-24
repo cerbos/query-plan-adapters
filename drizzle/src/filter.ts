@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildCollectionOperatorFilter,
   isCollectionOperator,
@@ -14,6 +15,7 @@ import {
   buildColumnExpression,
   columnForOperand,
   getMappingEntry,
+  isColumn,
   isMappingConfig,
   isRelationValue,
   isScalarCollection,
@@ -58,11 +60,11 @@ const buildStringMatchFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error(`'${operator}' operator requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
   const [receiverOperand, needleOperand] = operands;
   if (!receiverOperand || !needleOperand) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' operator requires receiver and needle operands`,
     );
   }
@@ -90,7 +92,7 @@ const buildStringMatchFilter = (
     isValueOperand(needleOperand) &&
     typeof needleOperand.value !== "string"
   ) {
-    throw new Error(`The '${operator}' operator requires a string value`);
+    throw new UnsupportedQueryPlanError(`The '${operator}' operator requires a string value`);
   }
   // A string operator over a non-string column is a CEL no-overload error: UNKNOWN.
   for (const operand of [receiverOperand, needleOperand]) {
@@ -129,7 +131,7 @@ const buildVariableMembershipFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error("'in' operator requires exactly two operands");
+    throw new UnsupportedQueryPlanError("'in' operator requires exactly two operands");
   }
   const [memberOperand, collectionOperand] = operands;
   if (
@@ -138,7 +140,7 @@ const buildVariableMembershipFilter = (
     !isNameOperand(memberOperand) ||
     !isNameOperand(collectionOperand)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Variable membership requires scalar and collection field references",
     );
   }
@@ -147,20 +149,43 @@ const buildVariableMembershipFilter = (
   if (
     member.relations.some((relation) => !options.skipRelations?.has(relation))
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Variable membership requires its first operand to resolve to a scalar field",
     );
   }
   if (!isScalarCollection(getMappingEntry(collectionOperand.name, mapper))) {
-    throw new Error("Variable membership requires a scalar collection mapping");
+    throw new UnsupportedQueryPlanError("Variable membership requires a scalar collection mapping");
   }
   const collection = resolveRelationDefaultField(
     resolveFieldReference(collectionOperand.name, mapper),
     collectionOperand.name,
   );
   if (collection.relations.length === 0) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Variable membership requires its second operand to resolve to a collection",
+    );
+  }
+
+  // An enclosing lambda's element read against a collection stored in the SAME table renders
+  // as the same `"table"."column"` the membership subquery ranges over, so SQL would test each
+  // row against itself rather than against the enclosing element (#509).
+  const memberColumn = isMappingConfig(member.mapping)
+    ? member.mapping.column
+    : isColumn(member.mapping)
+      ? member.mapping
+      : undefined;
+  if (
+    memberColumn !== undefined &&
+    collection.relations.some(
+      (relation) =>
+        !options.skipRelations?.has(relation) &&
+        relation.table === memberColumn.table,
+    )
+  ) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot test '${memberOperand.name}' for membership in '${collectionOperand.name}': ` +
+        "both are stored in the same table, so the membership subquery would compare each " +
+        "row with itself instead of with the enclosing element",
     );
   }
 
@@ -175,7 +200,7 @@ const buildVariableMembershipFilter = (
   );
   const match = or(sql`${memberExpr} = ${elementExpr}`, nullMatch);
   if (!match) {
-    throw new Error("Unable to combine variable membership conditions");
+    throw new UnsupportedQueryPlanError("Unable to combine variable membership conditions");
   }
   const membership = wrapRelationChain(
     collection.relations,
@@ -203,14 +228,14 @@ const buildMembershipFilter = (
   }
   const fieldOperand = operands.find(isNameOperand);
   if (!fieldOperand) {
-    throw new Error("Comparison operator missing field operand");
+    throw new UnsupportedQueryPlanError("Comparison operator missing field operand");
   }
   const valueOperand = operands.find(isValueOperand);
   if (!valueOperand) {
-    throw new Error("Comparison operator missing value operand");
+    throw new UnsupportedQueryPlanError("Comparison operator missing value operand");
   }
   if (isValueOperand(operands[0]!) && Array.isArray(operands[0]!.value)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
     );
   }
@@ -244,11 +269,11 @@ const buildTernaryFilter = (
   // An UNKNOWN condition leaves BOTH arms UNKNOWN — excluded under either polarity —
   // matching the CEL error → deny.
   if (operands.length !== 3) {
-    throw new Error("'if' operator requires exactly three operands");
+    throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
   }
   const [condOperand, thenOperand, elseOperand] = operands;
   if (!condOperand || !thenOperand || !elseOperand) {
-    throw new Error("'if' operator is missing operands");
+    throw new UnsupportedQueryPlanError("'if' operator is missing operands");
   }
   const cond = buildFilterFromExpression(condOperand, mapper, options);
   const thenFilter = buildFilterFromExpression(
@@ -265,7 +290,7 @@ const buildTernaryFilter = (
   );
   const combined = or(and(cond, thenFilter), and(not(cond), elseFilter));
   if (!combined) {
-    throw new Error("'if' operator produced an empty filter");
+    throw new UnsupportedQueryPlanError("'if' operator produced an empty filter");
   }
   return combined;
 };
@@ -300,7 +325,7 @@ export const buildFilterFromExpression = (
     return constantCondition(Boolean(expression.value) !== negated);
   }
   if (!isExpressionOperand(expression)) {
-    throw new Error("Invalid expression operand");
+    throw new UnsupportedQueryPlanError("Invalid expression operand");
   }
 
   const { operator, operands } = expression;
@@ -309,7 +334,7 @@ export const buildFilterFromExpression = (
     case "and":
     case "or": {
       if (operands.length === 0) {
-        throw new Error(`'${operator}' operator requires at least one operand`);
+        throw new UnsupportedQueryPlanError(`'${operator}' operator requires at least one operand`);
       }
       const filters = operands.map((operand) =>
         buildFilterFromExpression(operand, mapper, options, negated),
@@ -318,17 +343,17 @@ export const buildFilterFromExpression = (
       const combineWithAnd = (operator === "and") !== negated;
       const combined = combineWithAnd ? and(...filters) : or(...filters);
       if (!combined) {
-        throw new Error(`'${operator}' operator produced an empty filter`);
+        throw new UnsupportedQueryPlanError(`'${operator}' operator produced an empty filter`);
       }
       return combined;
     }
     case "not": {
       if (operands.length !== 1) {
-        throw new Error("'not' operator requires exactly one operand");
+        throw new UnsupportedQueryPlanError("'not' operator requires exactly one operand");
       }
       const operand = operands[0];
       if (!operand) {
-        throw new Error("'not' operator is missing operand");
+        throw new UnsupportedQueryPlanError("'not' operator is missing operand");
       }
       return buildFilterFromExpression(operand, mapper, options, !negated);
     }
@@ -341,11 +366,11 @@ export const buildFilterFromExpression = (
     case "gt":
     case "ge": {
       if (operands.length !== 2) {
-        throw new Error(`'${operator}' operator requires exactly two operands`);
+        throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
       }
       const [left, right] = operands;
       if (!left || !right) {
-        throw new Error("Comparison operator requires two operands");
+        throw new UnsupportedQueryPlanError("Comparison operator requires two operands");
       }
       return buildComparisonFilter(
         operator,
@@ -369,7 +394,7 @@ export const buildFilterFromExpression = (
         negated,
       );
     case "matches":
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics",
       );
     case "hasIntersection":
@@ -397,7 +422,7 @@ export const buildFilterFromExpression = (
           options,
         );
       }
-      throw new Error(`Unsupported operator: ${operator}`);
+      throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 };
 

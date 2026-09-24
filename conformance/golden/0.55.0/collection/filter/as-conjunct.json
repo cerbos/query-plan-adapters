@@ -1,0 +1,84 @@
+{
+  "allowed": [],
+  "degenerateReason": "The filter() conjunct returns a list, not a boolean, so the conjunction is not evaluable and CEL denies every seed. Dropping that conjunct leaves a bare-boolean filter that returns rows.",
+  "id": "collection/filter/as-conjunct",
+  "intent": "A list-valued filter() as one conjunct of an and, beside a boolean attribute.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "filter"
+            }
+          },
+          {
+            "variable": "request.resource.attr.aBool"
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/filter/as-conjunct",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "all": {
+            "of": [
+              {
+                "expr": "R.attr.tags.filter(t, t.name == \"public\")"
+              },
+              {
+                "expr": "R.attr.aBool"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Dropping the untranslatable filter() conjunct leaves aBool alone and returns the 14 aBool rows; CEL denies every row because the conjunct is not a boolean."
+}

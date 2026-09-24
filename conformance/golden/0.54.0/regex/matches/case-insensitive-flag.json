@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a1",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/case-insensitive-flag",
+  "intent": "matches() with RE2's inline (?i) flag on an anchored literal.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "(?i)^one$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/case-insensitive-flag",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"(?i)^one$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dialects without inline flags reject (?i) or read it literally, and a case-sensitive store match under-grants \"One\"."
+}

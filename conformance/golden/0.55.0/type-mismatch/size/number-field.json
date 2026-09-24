@@ -1,0 +1,52 @@
+{
+  "allowed": [],
+  "degenerateReason": "size() is not defined on numbers, so every seed is a CEL error and denies. A store that measures the stored value would return rows.",
+  "id": "type-mismatch/size/number-field",
+  "intent": "size() of a numeric attribute (size(R.attr.aNumber) > 0).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/size/number-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aNumber) > 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "size() is not defined on numbers, so CEL denies; LENGTH(CAST(number AS TEXT)) or similar returns rows."
+}

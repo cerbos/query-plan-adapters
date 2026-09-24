@@ -1,5 +1,6 @@
 import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MongooseFilter } from "./index";
 import { relationOfReference, resolveFieldReference } from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
@@ -46,7 +47,7 @@ export const buildAggregationExpression = (
   if (isExpression(operand)) {
     return buildAggregationExpressionFromExpression(operand, mapper);
   }
-  throw new Error("Invalid operand structure");
+  throw new UnsupportedQueryPlanError("Invalid operand structure");
 };
 
 type AggregationOperator = {
@@ -96,7 +97,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       // it has always had — the divisions and ternaries that reach here are numeric by
       // construction, and narrowing them would refuse shapes this adapter already answers.
       if (operands.every(isVariable)) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "Cannot tell numeric addition from string concatenation in '+' between two fields: " +
             "CEL overloads '+' on strings and the query plan carries no field types, so neither " +
             "$add nor $concat can be chosen",
@@ -114,7 +115,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         typeof denominator.value !== "number" ||
         denominator.value === 0
       ) {
-        throw new Error(
+        throw new UnsupportedQueryPlanError(
           "div operator requires a non-zero constant denominator",
         );
       }
@@ -127,7 +128,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const operand = operands[0];
       if (!operand) {
-        throw new Error("not operator requires an operand");
+        throw new UnsupportedQueryPlanError("not operator requires an operand");
       }
       return { $not: [buildAggregationExpression(operand, mapper)] };
     },
@@ -136,7 +137,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const operand = operands[0];
       if (!operand) {
-        throw new Error("string conversion requires an operand");
+        throw new UnsupportedQueryPlanError("string conversion requires an operand");
       }
       const input = buildAggregationExpression(operand, mapper);
       return {
@@ -168,7 +169,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const [ifOp, thenOp, elseOp] = operands;
       if (!ifOp || !thenOp || !elseOp) {
-        throw new Error("if operator requires three operands");
+        throw new UnsupportedQueryPlanError("if operator requires three operands");
       }
       return {
         $cond: {
@@ -186,7 +187,8 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       // literal to the schema type of a PATH on the other side, and it treats `$first`/`$last`
       // as one: over a `[Boolean]` array, `$first == 1` is cast to `== true`, which CEL denies.
       // `$arrayElemAt` takes an array operand, so the literal reaches the server uncast
-      // (`index-bool-list-vs-number` and `index-number-list-vs-bool` fail otherwise).
+      // (`type-mismatch/equals/boolean-list-element-against-number-literal` and
+      // `type-mismatch/equals/number-list-element-against-boolean-literal` fail otherwise).
       return {
         $arrayElemAt: [buildAggregationExpression(collection, mapper), index],
       };
@@ -210,7 +212,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const [inputOperand, fieldOperand] = operands;
       if (!inputOperand || !fieldOperand || !isVariable(fieldOperand)) {
-        throw new Error("get-field requires an input and a field name");
+        throw new UnsupportedQueryPlanError("get-field requires an input and a field name");
       }
       return {
         $getField: {
@@ -224,7 +226,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const operand = operands[0];
       if (!operand) {
-        throw new Error("size operator requires an operand");
+        throw new UnsupportedQueryPlanError("size operator requires an operand");
       }
       const inner = buildAggregationExpression(operand, mapper);
       // Works for both arrays and strings: $size for arrays, $strLenCP otherwise.
@@ -268,7 +270,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         !isValue(patternOp) ||
         typeof patternOp.value !== "string"
       ) {
-        throw new Error("matches operator requires two operands");
+        throw new UnsupportedQueryPlanError("matches operator requires two operands");
       }
       return {
         $regexMatch: {
@@ -280,7 +282,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     guard: ({ operands }, mapper) => {
       const inputOperand = operands[0];
       if (!inputOperand) {
-        throw new Error("matches operator requires an input operand");
+        throw new UnsupportedQueryPlanError("matches operator requires an input operand");
       }
       return {
         $expr: {
@@ -336,14 +338,14 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const operand = operands[0];
       if (!operand) {
-        throw new Error("timestamp operator requires an operand");
+        throw new UnsupportedQueryPlanError("timestamp operator requires an operand");
       }
       if (isValue(operand)) {
         if (
           typeof operand.value !== "string" ||
           !isRfc3339Timestamp(operand.value)
         ) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
           );
         }
@@ -374,7 +376,7 @@ export const buildAggregationExpressionFromExpression = (
 ): unknown => {
   const definition = aggregationOperator(expression.operator);
   if (!definition) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Unsupported operator inside aggregation expression: ${expression.operator}`,
     );
   }
@@ -422,7 +424,7 @@ function notNullGuard(
 }
 
 function refuseNumericConversion({ operator }: PlanExpression): never {
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     `'${operator}()' cannot be translated: $convert parses a numeric prefix where CEL ` +
       "requires the whole string and raises otherwise, and rounds where CEL truncates " +
       "toward zero",
@@ -437,7 +439,7 @@ function buildStringPredicate(
 ): MongooseFilter {
   const [receiverOperand, needleOperand] = operands;
   if (!receiverOperand || !needleOperand) {
-    throw new Error(`${operator} requires two operands`);
+    throw new UnsupportedQueryPlanError(`${operator} requires two operands`);
   }
   const receiver = buildAggregationExpression(receiverOperand, mapper);
   const needle = buildAggregationExpression(needleOperand, mapper);
@@ -508,7 +510,7 @@ export function parseConstantIndexOperands(
 ): readonly [collection: PlanExpressionOperand, index: number] {
   const [collectionOperand, indexOperand] = operands;
   if (!collectionOperand || !indexOperand) {
-    throw new Error("index operator requires two operands");
+    throw new UnsupportedQueryPlanError("index operator requires two operands");
   }
   if (
     !isValue(indexOperand) ||
@@ -516,7 +518,7 @@ export function parseConstantIndexOperands(
     !Number.isInteger(indexOperand.value) ||
     indexOperand.value < 0
   ) {
-    throw new Error("index operator requires a non-negative integer constant");
+    throw new UnsupportedQueryPlanError("index operator requires a non-negative integer constant");
   }
   return [collectionOperand, indexOperand.value];
 }

@@ -1,0 +1,96 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: hierarchy
+description: 'The Cerbos hierarchy() functions: ancestorOf, descendentOf, overlaps.'
+cases:
+- id: 'hierarchy/ancestor-of/constant-path'
+  tier: extended
+  intent: 'hierarchy(field).ancestorOf(hierarchy(constant)): the field must be a strict ancestor of the constant path.'
+  trap: 'Must become an IN list of the constant''s strict prefixes (dept, dept.eng); a string-prefix test matches non-path prefixes like dept.engineering or includes the equal path.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("dept.eng.platform"))'
+- id: 'hierarchy/ancestor-of/constant-path-value-first'
+  tier: extended
+  intent: 'hierarchy(constant).ancestorOf(hierarchy(field)): the field must be a strict descendant.'
+  trap: 'Must become LIKE ''dept.eng.%'' with the separator; dropping it matches dept.engineering, and ancestorOf is strict so the equal path is excluded.'
+  condition:
+    match:
+      expr: 'hierarchy("dept.eng").ancestorOf(hierarchy(R.attr.scope))'
+- id: 'hierarchy/ancestor-of/like-metacharacters-in-path'
+  tier: adversarial
+  intent: 'ancestorOf against a constant path containing % and _ (''50%.a_b.x'').'
+  trap: 'Strict prefixes must be compared by equality (an IN list), not by pattern; a LIKE prefix test lets the wildcards match other rows.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
+- id: 'hierarchy/descendent-of/bracket-in-path'
+  tier: adversarial
+  intent: 'descendentOf with a '':'' delimiter against a constant path containing ''['' (''[env]:prod'').'
+  trap: '''['' must be escaped for SQL Server LIKE character classes; an unescaped class matches d2 instead of only the literal-bracket descendant d1.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("[env]:prod", ":"))'
+- id: 'hierarchy/descendent-of/constant-path'
+  tier: extended
+  intent: 'hierarchy(field).descendentOf(hierarchy(constant)): the field must be a strict descendant.'
+  trap: 'Must become LIKE ''dept.eng.%''; a missing separator matches non-path prefixes, and the equal path must be excluded.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope).descendentOf(hierarchy("dept.eng"))'
+- id: 'hierarchy/descendent-of/constant-path-value-first'
+  tier: extended
+  intent: 'hierarchy(constant).descendentOf(hierarchy(field)): the field is the ancestor.'
+  trap: 'Swapping operand roles emits a descendant LIKE instead of the IN list of the constant''s strict prefixes.'
+  condition:
+    match:
+      expr: 'hierarchy("dept.eng.platform").descendentOf(hierarchy(R.attr.scope))'
+- id: 'hierarchy/descendent-of/empty-delimiter'
+  tier: adversarial
+  intent: 'descendentOf with an empty-string delimiter, which splits one segment per character.'
+  trap: 'Defaulting the delimiter to "." drops a5; LIKE prefix + delimiter + ''%'' with an empty delimiter also matches the path itself (a2), never its own descendant.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, "").descendentOf(hierarchy("dept.eng", ""))'
+- id: 'hierarchy/descendent-of/like-metacharacters-in-path'
+  tier: adversarial
+  intent: 'descendentOf with a '':'' delimiter against a constant path containing % and _ (''50%:a_b'').'
+  trap: 'The prefix LIKE must escape % and _; unescaped wildcards match b2/b3, and the equal path b4 must be excluded.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("50%:a_b", ":"))'
+- id: 'hierarchy/overlaps/constant-path'
+  tier: extended
+  intent: 'hierarchy(field).overlaps(hierarchy(constant)): ancestor, equal or descendant.'
+  trap: 'overlaps is inclusive and needs IN (strict prefixes) OR = path OR LIKE ''path.%''; dropping any branch or the separator under- or over-grants.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope).overlaps(hierarchy("dept.eng"))'
+- id: 'hierarchy/overlaps/constant-path-value-first'
+  tier: extended
+  intent: 'hierarchy(constant).overlaps(hierarchy(field)), the mirrored operand order.'
+  trap: 'Must produce the same inclusive union as the field-first spelling; an order-sensitive translation emits a different set.'
+  condition:
+    match:
+      expr: 'hierarchy("dept.eng").overlaps(hierarchy(R.attr.scope))'
+- id: 'hierarchy/overlaps/like-metacharacters-in-path'
+  tier: adversarial
+  intent: 'overlaps with a '':'' delimiter against ''50%:a_b'', emitting the IN list, the equality and the escaped LIKE at once.'
+  trap: 'The only route to the LIKE branch through the union: unescaped % or _ over-grants b2/b3, and b6 (''50%.a_b'') is one segment under '':'' and must not match.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, ":").overlaps(hierarchy("50%:a_b", ":"))'
+- id: 'hierarchy/overlaps/path-built-from-identifier'
+  tier: extended
+  intent: 'hierarchy(principal attribute, '':'').overlaps(hierarchy(["projects", R.id])): a path built by a list from the resource id.'
+  trap: 'The path is constructed, not read from a column; an adapter that assumes a hierarchy operand is a single column, or ignores R.id, mistranslates it (oracle {f1}).'
+  condition:
+    match:
+      expr: 'hierarchy(P.attr.context, ":").overlaps(hierarchy(["projects", R.id]))'
+- id: 'hierarchy/overlaps/path-built-from-list-value-first'
+  tier: adversarial
+  intent: 'A literal hierarchy overlapping a hierarchy built from a list of a literal segment and a field (hierarchy("dept", ".").overlaps(hierarchy(["dept", R.attr.scope]))).'
+  trap: 'The path is built from segments at runtime with the literal on the left; joining segments as text, dropping the field segment, or allowing rows missing scope (a CEL error) mismatches.'
+  condition:
+    match:
+      expr: 'hierarchy("dept", ".").overlaps(hierarchy(["dept", R.attr.scope]))'

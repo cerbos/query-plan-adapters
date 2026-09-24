@@ -16,14 +16,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The {@code size()} comparisons: recognising one in a comparison's operands, the rule that the
- * field must be DECLARED a collection, and the two emptiness polarities that are the only
- * thresholds a presence query can answer.
- *
- * <p>A seam of its own because it is the one leaf shape whose operand is a computed value the
- * adapter does translate, and the reason it can is narrow — a count against zero is a presence
- * test — so the recognition and the refusals are easier to audit beside each other than inside
- * the general leaf path, which they run ahead of.
+ * Translates {@code size()} comparisons. Only emptiness checks are supported, as a presence query
+ * over a field declared as a collection.
  */
 final class SizeTranslator {
 
@@ -44,10 +38,7 @@ final class SizeTranslator {
             double value,
             SizeThreshold threshold) {}
 
-    /**
-     * The presence query a {@code size()} comparison lowers to under {@code polarity}, or
-     * {@code null} when neither operand is a {@code size()} and the leaf path should have it.
-     */
+    /** The query for a {@code size()} comparison, or {@code null} if neither operand is one. */
     Map<String, Object> tryTranslate(String operator, List<Operand> operands, Polarity polarity) {
         SizeComparison comparison = resolveSizeComparison(operator, operands);
         if (comparison == null) return null;
@@ -69,11 +60,7 @@ final class SizeTranslator {
     private SizeComparison resolveSizeComparison(String operator, List<Operand> operands) {
         Expression sizeExpression = null;
         Double value = null;
-        // The planner preserves policy source order, so `0 < size(coll)` arrives with the VALUE
-        // first. Scanning the operands for whichever one is the size() discards that order; the
-        // operator then has to be mirrored, exactly as the leaf path already does, or `0 < size`
-        // is read as `size < 0` and a supported emptiness check is refused as an unsupported
-        // threshold (cerbos/query-plan-adapters#387).
+        // `0 < size(c)` arrives value-first, so the operator is mirrored when size() is second.
         boolean sizeFirst = true;
         for (int i = 0; i < operands.size(); i++) {
             Operand operand = operands.get(i);
@@ -109,8 +96,6 @@ final class SizeTranslator {
         }
 
         String variable = sizeOperands.get(0).getVariable();
-        // `size(c) != 0` is the third spelling of non-emptiness, beside `size(c) > 0` and
-        // `size(c) >= 1`; CEL's size() is a count, so the three are the same predicate.
         boolean nonEmpty = (normalizedOperator.equals("gt") && value == 0.0)
                 || (normalizedOperator.equals("ge") && value == 1.0)
                 || (normalizedOperator.equals("ne") && value == 0.0);
@@ -126,15 +111,9 @@ final class SizeTranslator {
     }
 
     /**
-     * The presence query a {@code size()} emptiness check lowers to, or a refusal when the caller
-     * has not said the field is a collection at all.
-     *
-     * <p>The adapter is handed a plan, never a mapping, so it cannot tell {@code size(aString)}
-     * — a string length — from {@code size(tagNames)} — an array count: the plan looks identical
-     * either way. {@code exists} over a string field matches the indexed empty string, whose CEL
-     * size is 0, and over a numeric field matches every document where CEL would raise a
-     * no-overload error. So a field declared neither in {@code nestedPaths} nor in
-     * {@code collectionFields} is refused, before the threshold is examined.
+     * The "collection is non-empty" query, or a refusal if the field is not declared as a
+     * collection. The plan cannot tell a string length from an array count, and {@code exists}
+     * would match an empty string or a number, which CEL would not.
      */
     private Map<String, Object> collectionPresentQuery(SizeComparison comparison) {
         String field = comparison.field();

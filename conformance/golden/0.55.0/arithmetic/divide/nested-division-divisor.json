@@ -1,0 +1,88 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/divide/nested-division-divisor",
+  "intent": "Division whose divisor is itself a division of two attributes (aNumber / (aDouble / aNumber) > 0).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "div"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/divide/nested-division-divisor",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber / (R.attr.aDouble / R.attr.aNumber) > 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A zero inner divisor gives an infinity in CEL's IEEE arithmetic; SQL raises division by zero or returns NULL, flipping the row. The finite companion to the NaN divisor the planner cannot serialise."
+}

@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a7",
+    "b2"
+  ],
+  "degenerateReason": null,
+  "id": "relation/less-or-equal/one-hop",
+  "intent": "parent.aNumber <= 2 through the to-one parent.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aNumber"
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/less-or-equal/one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aNumber <= 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "The threshold sits on a boundary value so <= and < differ (a1/a7); reading the root's column instead of the parent's disagrees everywhere."
+}

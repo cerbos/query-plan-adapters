@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/compared-to-literal",
+  "intent": "A ternary selecting a numeric attribute or a constant, compared with a literal ((aBool ? aNumber : 0) > 1).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/compared-to-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? R.attr.aNumber : 0) > 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The planner emits if(cond, then, else); the comparison must be pushed into guarded branches, and a missing condition must deny both arms."
+}

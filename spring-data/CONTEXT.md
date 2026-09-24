@@ -71,37 +71,17 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   operators compose over it, and the SELECT-only guard fires here. A body is
   handed in as a **SubqueryBodyBuilder**, never a Predicate, because the macro
   shapes consume it in both polarities.
-- **Differential oracle** — the adversarial conformance suite: hostile policy
-  shapes planned against a real PDP, translated, executed on H2, and the id set
-  compared row-by-row against `check()` with attributes mirroring the DB rows
-  exactly. DB NULL is a *missing* attribute on the check side. No
-  hand-computed expectations; a degeneracy guard prevents vacuous passes.
-- **Degenerate by construction** — a corpus action whose `check()` oracle is
-  empty or total *by the corpus's own design* (no seed holds a chain with zero
-  children; every seed's `aString` is shorter than 2^32). The degeneracy guard
-  sweeps every compared action and forbids such an oracle, so each of these is
-  allowlisted with the reason in `degenerateOracles` in
-  `conformance/actions.json` — one list every harness shares — and every entry
-  is asserted to have exactly the oracle it declares.
-- **Refusal site** — the `throw` in the translator's walk that a fail-closed
-  corpus shape actually reaches, named by mechanism ("computed leaf operand",
-  "modulo") rather than by message wording. `actions.json` pins the message
-  per action; the translator unit test pins the site per action and the
-  count per site, so a change that moves a shape between two sites that both
-  throw is a visible diff, and a refusal raised because the *mapping* fell
-  short (`Scope`'s "Unknown attribute" / "Cannot resolve" family) can never
-  pass as a declared limitation.
+- **Conformance replay** — the conformance suite: every golden plan the pinned
+  PDPs recorded for the shared corpus, translated with one mapping, executed on
+  H2, PostgreSQL or MySQL, and the id set compared with the `check()` decisions
+  recorded beside it. DB NULL is a *missing* attribute on the check side unless
+  the mapping declares the attribute EXPLICIT. The cases this adapter cannot
+  pass are listed with reasons in `conformance-ledger.json`.
 - **Double space** — all numeric work happens in IEEE doubles, because Cerbos
   attribute numbers are CEL doubles and the wire plan erases `1` vs `1.0`.
   Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`. Owned by
   **ArithmeticTranslator**, including the zero-divisor story (`NULLIF` guard,
   IEEE-arm rewrite) and the MySQL cast probe (**IeeeDoubleCast**).
-- **Golden expectation** — the SQL this adapter is pinned to emit for one
-  corpus action, in `golden/expectations.json`: the root joins and the `WHERE`
-  clause on each of the three dialects CI executes, with criteria literals
-  inlined. It records what the differential oracle cannot see — two queries can
-  agree on all 22 seeds and disagree on the row a consumer has. Regenerated
-  with `gradle goldenUpdate`, never by CI, and reviewed as a diff.
 - **Options** — the one immutable record holding everything a caller tells the
   adapter: the mapping, the operator overrides, the call-level NULL convention,
   and the macro-depth bound. Collections are copied on construction and each
@@ -127,9 +107,4 @@ Terms used by this adapter's code, tests, and reviews. Architecture vocabulary
   sides of one comparison under different NULL conventions; the fix is a
   declaration. *Malformed*: the planner's wire contract violated — arity, a
   lambda without a variable, a literal CEL would reject; no planner output
-  produces one, which `RefusalTypesTest` pins over the corpus.
-- **The renderer as an input** — a golden expectation is the adapter's Criteria
-  tree *plus* Hibernate's rendering of it, so the asset declares the Hibernate
-  minor that wrote it. `hibernate-core` is `compileOnly`, meaning a consumer
-  brings their own; which one produced these bytes has to be answerable from
-  the file rather than from the classpath.
+  produces one, which `RefusalTypesTest` pins over the ledger's refused cases.

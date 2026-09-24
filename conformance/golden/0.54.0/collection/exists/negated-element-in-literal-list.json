@@ -1,0 +1,98 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/negated-element-in-literal-list",
+  "intent": "Negated exists() over a resource string list whose body tests membership in a literal list.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "tagName"
+                            },
+                            {
+                              "value": [
+                                "public",
+                                "other"
+                              ]
+                            }
+                          ],
+                          "operator": "in"
+                        }
+                      },
+                      {
+                        "variable": "tagName"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/negated-element-in-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.tagNames.exists(tagName, tagName in [\"public\", \"other\"]))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Under negation a null tagNames list or null elements must not flip to an allow; NOT over a nullable array lowering over-grants."
+}

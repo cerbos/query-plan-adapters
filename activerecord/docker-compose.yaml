@@ -1,39 +1,18 @@
 # Services for the ActiveRecord adapter's suites. Only Docker is required.
 #
 #   ./scripts/test.sh                 # all the suites
-#   ./scripts/test.sh spec/adversarial_conformance_spec.rb
+#   ./scripts/test.sh spec/conformance_spec.rb
 #
-# `tests` mounts the repository root because the suites read ../conformance/.
-# Only the adversarial suite needs the PDP; scripts/test.sh runs the others with `--no-deps`.
-# The PDP tag and digest come from conformance/ via scripts/test.sh. Don't hardcode them here.
+# `tests` mounts the repository root because the suites read ../conformance/. No suite needs a
+# PDP, and SQLite runs in memory, so there is no other service.
 
 services:
-  cerbos:
-    image: ghcr.io/cerbos/cerbos:${CERBOS_VERSION:?set CERBOS_VERSION - run via scripts/test.sh}@${CERBOS_IMAGE_DIGEST:?set CERBOS_IMAGE_DIGEST - run via scripts/test.sh}
-    command: ["server", "--set=storage.disk.directory=/policies", "--set=storage.driver=disk", "--set=telemetry.disabled=true", "--set=engine.strictEvaluation=${ADAPTER_TEST_STRICT_EVALUATION-false}", "--log-level=error"]
-    environment:
-      CERBOS_NO_TELEMETRY: "1"
-    volumes:
-      # The only policy suite for semantics (ADR 0008). Don't mount a second one.
-      - ../conformance/policies:/policies:ro
-    healthcheck:
-      test: ["CMD", "/cerbos", "healthcheck", "--insecure"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
-      start_period: 3s
-
   tests:
     build:
       context: .
       args:
         RUBY_VERSION: ${RUBY_VERSION:-4.0}
         ACTIVERECORD_VERSION: ${ACTIVERECORD_VERSION:-8.0}
-    depends_on:
-      cerbos:
-        condition: service_healthy
-    environment:
-      CERBOS_HOST: cerbos:3593
     volumes:
       # Don't mount a volume at /bundle: it would hide the gems installed in the image.
       - ..:/repo

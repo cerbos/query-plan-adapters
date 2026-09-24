@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "string/equals/empty-string",
+  "intent": "String equality against the empty string literal.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": ""
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/equals/empty-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString == \"\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Conflating \"\" with NULL or a missing attribute, or dropping an empty literal as falsy, matches missing attributes or nothing at all."
+}

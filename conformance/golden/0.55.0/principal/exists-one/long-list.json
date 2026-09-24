@@ -1,0 +1,87 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a9",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5"
+  ],
+  "degenerateReason": null,
+  "id": "principal/exists-one/long-list",
+  "intent": "exists_one() over an 11-element principal list compared with a resource attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "set",
+              "same",
+              "",
+              "%_o",
+              "X",
+              "Y",
+              "MIRROR",
+              "filler-1",
+              "filler-2",
+              "filler-3",
+              "filler-4"
+            ]
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t"
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists_one"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists-one/long-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.manyTeams.exists_one(t, t == R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The planner cannot fold exists_one; lowering it like exists() ignores the exactly-one count, so translate it faithfully or refuse."
+}

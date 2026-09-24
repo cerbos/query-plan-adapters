@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildColumnExpression,
   isColumn,
@@ -46,14 +47,14 @@ const resolveHierarchy = (
   mapper: Mapper,
 ): ResolvedHierarchy => {
   if (!isOperatorCall(operand, "hierarchy")) {
-    throw new Error("Hierarchy operators require hierarchy(...) operands");
+    throw new UnsupportedQueryPlanError("Hierarchy operators require hierarchy(...) operands");
   }
   if (operand.operands.length < 1 || operand.operands.length > 2) {
-    throw new Error("'hierarchy' operator requires one or two operands");
+    throw new UnsupportedQueryPlanError("'hierarchy' operator requires one or two operands");
   }
   const [pathOperand, delimiterOperand] = operand.operands;
   if (!pathOperand) {
-    throw new Error("'hierarchy' operator is missing its path operand");
+    throw new UnsupportedQueryPlanError("'hierarchy' operator is missing its path operand");
   }
   let delimiter = ".";
   if (delimiterOperand) {
@@ -61,16 +62,16 @@ const resolveHierarchy = (
       !isValueOperand(delimiterOperand) ||
       typeof delimiterOperand.value !== "string"
     ) {
-      throw new Error("Hierarchy delimiter must be a string value");
+      throw new UnsupportedQueryPlanError("Hierarchy delimiter must be a string value");
     }
     if (delimiterOperand.value === "") {
       // Cerbos splits a path on an empty delimiter into one segment per CHARACTER, so the
       // relation becomes a strict string-prefix test. The descendant lowering below is
       // `LIKE prefix || delimiter || '%'`, which with an empty delimiter matches the path
       // ITSELF (never its own descendant) as well as every string extension of it — the
-      // corpus's hier-empty-delim over-granted a2 that way — so the shape is refused rather
+      // corpus's hierarchy/descendent-of/empty-delimiter over-granted a2 that way — so the shape is refused rather
       // than emitted with the wrong boundary.
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself",
       );
     }
@@ -79,7 +80,7 @@ const resolveHierarchy = (
 
   if (isValueOperand(pathOperand)) {
     if (typeof pathOperand.value !== "string") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Hierarchy path must be a string value or field reference",
       );
     }
@@ -97,7 +98,7 @@ const resolveHierarchy = (
       delimiter,
     };
   }
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     "Segmented hierarchy expressions are not supported by the Drizzle adapter",
   );
 };
@@ -155,7 +156,7 @@ const buildFieldHierarchyFilter = (
       isDescendantOfConstant(),
     );
     if (!combined) {
-      throw new Error("Unable to combine hierarchy overlap conditions");
+      throw new UnsupportedQueryPlanError("Unable to combine hierarchy overlap conditions");
     }
     filter = combined;
   } else if (fieldIsAncestor) {
@@ -179,11 +180,11 @@ export const buildHierarchyFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error(`'${operator}' operator requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
   const [leftOperand, rightOperand] = operands;
   if (!leftOperand || !rightOperand) {
-    throw new Error(`'${operator}' operator is missing operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator is missing operands`);
   }
   const left = resolveHierarchy(leftOperand, mapper);
   const right = resolveHierarchy(rightOperand, mapper);
@@ -194,11 +195,11 @@ export const buildHierarchyFilter = (
     return buildFieldHierarchyFilter(operator, right, left, false, options);
   }
   if (left.kind === "field") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' between two field-backed hierarchies is not supported`,
     );
   }
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     `'${operator}' between two constant hierarchies should be folded by the planner`,
   );
 };

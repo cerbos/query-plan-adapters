@@ -2,6 +2,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { buildFilterFromExpression } from "./filter";
 import { createCollectionScope } from "./mapper";
 import type { CollectionScope } from "./mapper";
@@ -21,11 +22,12 @@ import {
 import {
   chainCorrelation,
   relationCorrelation,
+  relationSource,
   requireLeadingHops,
   resolveTableName,
   wrapWithRelations,
 } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
 
 /**
  * CEL's collection macros — `exists`, `all`, `exists_one`, `except`, `filter` — over a relation
@@ -60,22 +62,31 @@ const resolveMacroScope = (
   lambdaOperand: PlanExpressionOperand,
   context: string,
   mapper: Mapper,
+  options: BuildFilterOptions,
 ): MacroScope => {
   if (!isNameOperand(collectionOperand)) {
-    throw new Error("Collection operand must be a field reference");
+    throw new UnsupportedQueryPlanError("Collection operand must be a field reference");
   }
   const { variable, expression } = extractLambdaComponents(
     lambdaOperand,
     context,
   );
   return {
-    ...createCollectionScope(collectionOperand.name, variable.name, mapper),
+    ...createCollectionScope(
+      collectionOperand.name,
+      variable.name,
+      mapper,
+      options.openTables,
+    ),
     collectionName: collectionOperand.name,
     conditionOperand: expression,
   };
 };
 
-/** The lambda body, translated once, as the per-row condition of the collection's subquery. */
+/**
+ * The lambda body, translated once, as the per-row condition of the collection's subquery. The
+ * iterated table joins `openTables`, so a macro over it again inside the body takes an alias.
+ */
 const buildRowCondition = (
   scope: MacroScope,
   options: BuildFilterOptions,
@@ -83,7 +94,19 @@ const buildRowCondition = (
   buildFilterFromExpression(scope.conditionOperand, scope.mapper, {
     ...options,
     skipRelations: scope.skipRelations,
+    openTables: [
+      ...(options.openTables ?? []),
+      resolveTableName(scope.primaryRelation.table, scope.collectionName),
+    ],
   });
+
+/** The alias the subquery over the scope's primary relation takes, as `wrapWithRelations` reads it. */
+const primaryAlias = (
+  scope: MacroScope,
+): ReadonlyMap<RelationMapping, string> | undefined =>
+  scope.alias === undefined
+    ? undefined
+    : new Map([[scope.primaryRelation, scope.alias]]);
 
 /**
  * `size(filter(coll, lambda))`: COUNT with the lambda condition as the predicate. An element
@@ -97,32 +120,35 @@ export const buildFilteredCount = (
   options: BuildFilterOptions,
 ): SQL => {
   if (filterOperand.operands.length !== 2) {
-    throw new Error("'filter' operator requires exactly two operands");
+    throw new UnsupportedQueryPlanError("'filter' operator requires exactly two operands");
   }
   const [collectionOperand, lambdaOperand] = filterOperand.operands;
   if (!collectionOperand || !lambdaOperand) {
-    throw new Error("'filter' operator requires collection and lambda operands");
+    throw new UnsupportedQueryPlanError("'filter' operator requires collection and lambda operands");
   }
   const scope = resolveMacroScope(
     collectionOperand,
     lambdaOperand,
     "'filter' lambda operand",
     mapper,
+    options,
   );
   const rowCondition = buildRowCondition(scope, options);
-  const tableName = resolveTableName(
-    scope.primaryRelation.table,
-    scope.collectionName,
-  );
   const chainWhere = chainCorrelation(
     scope.primaryRelation,
     scope.leadingRelations,
     scope.collectionName,
     options,
+    scope.alias,
+  );
+  const source = relationSource(
+    scope.primaryRelation,
+    scope.collectionName,
+    scope.alias,
   );
   return requireLeadingHops(
     scope.leadingRelations,
-    sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${sql.identifier(tableName)} where ${chainWhere})`,
+    sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${source} where ${chainWhere})`,
     scope.collectionName,
     options,
   );
@@ -172,13 +198,13 @@ const substituteLambdaVariable = (
           Array.isArray(current) ||
           !(segment in current)
         ) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
         const next = current[segment];
         if (next === undefined) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element field "${segment}" is undefined`,
           );
         }
@@ -239,13 +265,13 @@ const buildKnownValueCollectionFilter = (
   negated: boolean,
 ): SQL => {
   if (operator !== "exists" && operator !== "all") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection value is not supported. ` +
         "Only exists() and all() can be folded into a flat filter.",
     );
   }
   if (!Array.isArray(collectionValue)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection requires a list value`,
     );
   }
@@ -272,7 +298,7 @@ const buildKnownValueCollectionFilter = (
   );
   const combined = combinesWithOr ? or(...filters) : and(...filters);
   if (!combined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Unable to combine folded '${operator}' collection conditions`,
     );
   }
@@ -299,11 +325,11 @@ export const buildCollectionOperatorFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error(`'${operator}' operator requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
   const [collectionOperand, lambdaOperand] = operands;
   if (!collectionOperand || !lambdaOperand) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `'${operator}' operator requires collection and lambda operands`,
     );
   }
@@ -326,6 +352,7 @@ export const buildCollectionOperatorFilter = (
     lambdaOperand,
     `'${operator}' lambda operand`,
     mapper,
+    options,
   );
   const { primaryRelation, leadingRelations, collectionName } = scope;
   const rowCondition = buildRowCondition(scope, options);
@@ -335,8 +362,11 @@ export const buildCollectionOperatorFilter = (
   // scope's table instead.
   const wrapLeading = (inner: SQL): SQL =>
     wrapWithRelations(leadingRelations, inner, collectionName, options);
+  const aliases = primaryAlias(scope);
   const wrapAll = (inner: SQL): SQL =>
-    wrapLeading(wrapWithRelations([primaryRelation], inner, collectionName));
+    wrapLeading(
+      wrapWithRelations([primaryRelation], inner, collectionName, { aliases }),
+    );
   // An absent to-one parent must stay UNKNOWN rather than reaching the empty-collection
   // answer, which `all` reads as TRUE and `!exists` inverts into an allow (#309).
   const guardHops = (inner: SQL): SQL =>
@@ -348,7 +378,7 @@ export const buildCollectionOperatorFilter = (
     // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
     // use — `size(filter(coll, lambda))` — is handled by buildFilteredCount before this.
     case "filter":
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. " +
           "Only size(filter(...)) has a boolean meaning",
       );
@@ -375,15 +405,15 @@ export const buildCollectionOperatorFilter = (
       );
     }
     case "exists_one": {
-      const tableName = resolveTableName(primaryRelation.table, collectionName);
       const matchCondition =
-        and(relationCorrelation(primaryRelation), rowCondition) ??
+        and(relationCorrelation(primaryRelation, scope.alias), rowCondition) ??
         FALSE_CONDITION;
-      const countExpr = sql`(select count(*) from ${sql.identifier(tableName)} where ${matchCondition})`;
+      const countExpr = sql`(select count(*) from ${relationSource(primaryRelation, collectionName, scope.alias)} where ${matchCondition})`;
       const unknownWitness = wrapWithRelations(
         [primaryRelation],
         sql`(${rowCondition}) is null`,
         collectionName,
+        { aliases },
       );
       const triState = sql`(case when ${unknownWitness} then null when ${countExpr} = 1 then true else false end)`;
       return withPolarity(guardHops(wrapLeading(triState)), negated);

@@ -19,8 +19,8 @@
 #      not fussiness: 3592/3593 are Cerbos's default ports, which any other local PDP may be
 #      holding, so a hardcoded default does not fail, it silently plans against the wrong policy
 #      suite.
-#   4. Every adapter has a runnable example/run.sh. The roster is `adapters` in
-#      conformance/actions.json — the one already there, never a second list — so registering an
+#   4. Every adapter has a runnable example/run.sh. The roster is every directory holding a
+#      conformance-ledger.json — the one already there, never a second list — so registering an
 #      adapter is what demands an example of it, and adding one without an example fails here.
 #   5. Principal provenance: an example reads its principal out of seeds.json rather than
 #      restating one inline.
@@ -33,7 +33,7 @@ REPO_ROOT="$(cd "${DEMO_DIR}/.." && pwd)"
 
 SEEDS="${DEMO_DIR}/seeds.json"
 EXPECTED="${DEMO_DIR}/expected.json"
-ACTIONS="${REPO_ROOT}/conformance/actions.json"
+PDP_VERSIONS="${REPO_ROOT}/conformance/pdp-versions.json"
 
 # The five usage shapes from cerbos/query-plan-adapters#349, in emission order.
 SHAPES=(filtered alwaysAllowed alwaysDenied paginated composed)
@@ -41,20 +41,18 @@ SHAPES=(filtered alwaysAllowed alwaysDenied paginated composed)
 failures=0
 fail() { echo "  ✗ $*" >&2; failures=$((failures + 1)); }
 
-for f in "${SEEDS}" "${EXPECTED}" "${ACTIONS}"; do
+for f in "${SEEDS}" "${EXPECTED}" "${PDP_VERSIONS}"; do
   [[ -f "${f}" ]] || { echo "missing ${f}" >&2; exit 1; }
   jq -e . "${f}" >/dev/null || { echo "${f} is not valid JSON" >&2; exit 1; }
 done
 
-# Capture jq's status before populating the array: a failed substitution in a for-loop
-# or process substitution would silently skip every roster-based check.
-if ! adapter_roster="$(jq -er '
-  .adapters
-  | if type == "array" and length > 0
-       and all(.[]; type == "string" and length > 0 and (test("[\\r\\n]") | not))
-    then .[] else error("expected a non-empty adapters array of single-line names") end
-' "${ACTIONS}")"; then
-  echo "${ACTIONS} has no valid adapters roster" >&2
+# The roster is every adapter directory that carries a conformance ledger (conformance/README.md,
+# "The ledger"). Capture it before populating the array: a failed substitution in a for-loop would
+# silently skip every roster-based check.
+adapter_roster="$(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
+  -exec dirname {} \; | xargs -n1 basename | sort)"
+if [[ -z "${adapter_roster}" ]]; then
+  echo "no <adapter>/conformance-ledger.json found: the adapter roster is empty" >&2
   exit 1
 fi
 ADAPTERS=()
@@ -285,16 +283,14 @@ done < <(jq -r '.shapes | to_entries[] | .key as $s | .value.results | keys[] | 
 # ---------------------------------------------------------------------------------------------
 echo "==> [3/5] PDP pin: one pin in the repository, reused, and reached at \$CERBOS_HOST"
 
-pinned_version="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_VERSION")"
-pinned_digest="$(tr -d '[:space:]' <"${REPO_ROOT}/conformance/CERBOS_IMAGE_DIGEST")"
+pinned_version="$(jq -r .current.tag "${PDP_VERSIONS}")"
+pinned_digest="$(jq -r .current.digest "${PDP_VERSIONS}")"
 pinned_image="ghcr.io/cerbos/cerbos:${pinned_version}@${pinned_digest}"
 
 # The demo domain gets no version file of its own. Two pins would eventually name two builds, and
 # the one an example actually ran against would be whichever it happened to read.
-for stray in CERBOS_VERSION CERBOS_IMAGE_DIGEST; do
-  [[ -e "${DEMO_DIR}/${stray}" ]] && \
-    fail "demo/${stray} must not exist — the pin lives in conformance/ and is reused"
-done
+[[ -e "${DEMO_DIR}/pdp-versions.json" ]] && \
+  fail "demo/pdp-versions.json must not exist — the pin lives in conformance/ and is reused"
 
 if ! grep -qF "${pinned_image}" "${DEMO_DIR}/docker-compose.yml"; then
   fail "demo/docker-compose.yml must pin ${pinned_image}"
@@ -351,7 +347,7 @@ for adapter in "${ADAPTERS[@]}"; do
   example_dir="${REPO_ROOT}/${adapter}/example"
   [[ -d "${example_dir}" ]] || continue
   while IFS= read -r ref; do
-    # An interpolation (`cerbos:${CERBOS_VERSION}`) reads the pinned files at runtime and cannot
+    # An interpolation (`cerbos:${tag}`) reads the pinned file at runtime and cannot
     # drift, so it is already correct by construction.
     case "${ref}" in *'ghcr.io/cerbos/cerbos:$'*|*'ghcr.io/cerbos/cerbos:{'*) continue ;; esac
     [[ "${ref}" == "${pinned_image}" ]] || \
@@ -380,11 +376,11 @@ done
 # ---------------------------------------------------------------------------------------------
 echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
 
-# The roster is `adapters` in conformance/actions.json — the same one checks 3 and 5 iterate, and
-# the same rule that keeps the PDP pin in one place. A second list here would be a list that can
-# disagree with the corpus, and the adapter left off it is exactly the one nothing would demand an
-# example of. validate-corpus.sh already asserts that roster is non-empty and duplicate-free and
-# runs in the same job immediately before this script, so this cannot pass by iterating nothing.
+# The roster is the set of directories holding a conformance-ledger.json — the same one checks 3
+# and 5 iterate, and the same rule that keeps the PDP pin in one place. A second list here would be
+# a list that can disagree with the corpus, and the adapter left off it is exactly the one nothing
+# would demand an example of. The roster is asserted non-empty above, so this cannot pass by
+# iterating nothing.
 #
 # There is no per-adapter opt-out and no environment variable to switch it off: a gate with an
 # escape hatch is not a gate, and the reason there is nothing to opt out WITH is ADR 0001, the
@@ -397,7 +393,7 @@ echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
 for adapter in "${ADAPTERS[@]}"; do
   runner="${REPO_ROOT}/${adapter}/example/run.sh"
   if [[ ! -e "${runner}" ]]; then
-    fail "${adapter} has no example/run.sh — every adapter in the actions.json roster needs an" \
+    fail "${adapter} has no example/run.sh — every adapter with a conformance ledger needs an" \
       "example application (demo/README.md)"
   elif [[ ! -x "${runner}" ]]; then
     fail "${adapter}/example/run.sh is not executable — demo/scripts/run-example.sh invokes it" \

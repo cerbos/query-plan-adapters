@@ -6,10 +6,11 @@
 # copies of the same PDP pin waiting to drift apart.
 services:
   cerbos:
-    # Pinned to conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST. The demo domain
-    # gets no version file of its own — one PDP pin in the repository, reused — and
-    # conformance/scripts/validate-corpus.sh asserts that BOTH halves of this reference agree with
-    # it. The tag alone would leave the digest free to name some other build entirely.
+    # Pinned to `current` in conformance/pdp-versions.json, tag AND digest. The demo domain gets no
+    # pin of its own — one PDP pin in the repository, reused — and both
+    # conformance/scripts/validate-corpus.sh and demo/scripts/validate-demo.sh assert that BOTH
+    # halves of this reference agree with it. The tag alone would leave the digest free to name
+    # some other build entirely.
     image: ghcr.io/cerbos/cerbos:0.55.0@sha256:4b9d3b58c4f11c1b8953bc798d8d086e64f276882253ab169625fddc7f432515
     # No `container_name`: the runner gives each adapter its own compose project, and a fixed
     # container name is global, so a container left behind by one adapter's interrupted run could

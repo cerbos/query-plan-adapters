@@ -1,31 +1,31 @@
-import type { Mapper, MapperConfig } from "../src/index";
+import type { MapperConfig } from "../src/index";
 
 /**
- * The mapper the adversarial corpus is proved against, and the pushdown variant of it.
+ * The one mapper every conformance case is translated through.
  *
- * It lives here rather than in `adversarial.ts` because THREE readers need it and they do not all
- * have the same dependencies:
+ * It lives here rather than in `adversarial.ts` because two readers need it and they do not have
+ * the same dependencies:
  *
  * - `adversarial.ts`, the Convex backend that executes the translated query;
- * - `src/adversarial.test.ts`, the differential harness that drives that backend;
- * - `src/translator.test.ts`, the offline translator unit test, which must run with nothing
- *   installed but node.
+ * - `src/translator.test.ts`, the offline unit suite, which must run with nothing installed but
+ *   node.
  *
  * `adversarial.ts` imports `./_generated/server`, which `npx convex codegen` produces against a
  * live backend and `.gitignore` excludes — so importing the mapper from there would make the
- * offline suite need a Convex deployment to assert a filter no Convex ever sees. This file imports
- * types only, from `../src/index`, exactly as `planExecution.ts` does.
+ * offline suite need a Convex deployment. This file imports types only, from `../src/index`.
  *
- * One copy, not three: the unit test pins the filter this adapter emits for a mapping, and the
- * harness proves that same filter returns the documents the PDP allows. Two copies that drifted
- * would leave the pinned filter describing a mapping nothing executes.
+ * `nullable: true` means "this path may be absent from the document", which is CEL's
+ * missing-attribute case and the corpus's omitted-null convention: `conformance/resources.json`
+ * omits those attributes for a NULL column, and so does the stored document. `canPushToDb` keeps
+ * such a field off Convex's filter engine, and the adapter's in-memory post-filter answers it with
+ * CEL's three-valued semantics. The explicit-null attributes (`owner`, `coOwner`, `tagNames` and
+ * the two scalar lists) are always present and are not `nullable`.
  */
 
-// Typed as the record arm of `Mapper` rather than as `Mapper` itself, so `PUSHDOWN_MAPPER` below
-// can derive from it without asserting away the function arm.
+// Typed as the record arm of `Mapper`, so the unit suite can index it to build a function mapper.
 export const MAPPER: Record<string, MapperConfig> = {
-  // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
-  // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+  // The primary key, reached as `request.resource.id` rather than through `attr` (the
+  // `identifier/*` cases). An adapter that resolves references by stripping a `request.resource.attr.` prefix
   // never sees this name. It maps to the corpus id field rather than Convex's own `_id`, which
   // holds a generated document handle unrelated to the corpus.
   "request.resource.id": { field: "id" },
@@ -41,11 +41,11 @@ export const MAPPER: Record<string, MapperConfig> = {
   "request.resource.attr.createdAt": { field: "createdAt", nullable: true },
   "request.resource.attr.updatedAt": { field: "updatedAt", nullable: true },
   "request.resource.attr.scope": { field: "scope", nullable: true },
-  "request.resource.attr.owner": { field: "owner", nullable: true },
-  // `coOwner` is the explicit-null alias of the `scope` field, the second half of
-  // `null-value-f2f`: `scope` itself is omitted when NULL, so the corpus carries the same
-  // value under both conventions (cerbos/query-plan-adapters#308).
-  "request.resource.attr.coOwner": { field: "coOwner", nullable: true },
+  // `owner` and `coOwner` alias `aOptionalString` and `scope` under the explicit-null convention:
+  // the key is always present and a NULL column is stored as a null VALUE, so neither is
+  // `nullable` and Convex's engine answers their comparisons with its own `q.eq(field, null)`.
+  "request.resource.attr.owner": { field: "owner" },
+  "request.resource.attr.coOwner": { field: "coOwner" },
   "request.resource.attr.tagNames": { field: "tagNames" },
   // Every seed carries both lists, most of them empty, so neither path is ever absent.
   "request.resource.attr.aNumberList": { field: "aNumberList" },
@@ -65,7 +65,7 @@ export const MAPPER: Record<string, MapperConfig> = {
     field: "mainCategory.subNames",
     nullable: true,
   },
-  // The corpus's one REAL to-one chain (the `rel-*` actions), stored as nested objects rather
+  // The corpus's one REAL to-one chain (the `relation/*` cases), stored as nested objects rather
   // than a joined table. EVERY level is `nullable: true`, which here means "this path may be
   // absent from the document": a row with no parent carries no `parent` key at all, and one whose
   // parent has no parent of its own carries no `parent.inner`. That is precisely the CEL
@@ -109,45 +109,4 @@ export const MAPPER: Record<string, MapperConfig> = {
     field: "parent.inner.aOptionalString",
     nullable: true,
   },
-};
-
-/**
- * Fields `MAPPER` declares `nullable` that the seeded documents nonetheless ALWAYS carry.
- *
- * `nullable: true` means "this path may be absent from the document", and `canPushToDb` refuses to
- * push any comparison touching such a field: an absent path has CEL missing-attribute semantics
- * that a Convex comparison cannot reproduce. `owner` is the one nullable field whose value can be
- * NULL while the key is still present — the table declares it `v.union(v.string(), v.null())`, not
- * `v.optional(...)` — so the flag is buying nothing there and costs the whole null-comparison
- * family its push-down.
- *
- * Demoting it is a statement about the DOCUMENT SHAPE, not about the plan, so the harness asserts
- * the key is present on every seeded document before trusting this list
- * (cerbos/query-plan-adapters#327).
- */
-export const PUSHDOWN_DEMOTED_FIELDS = ["owner"] as const;
-
-/**
- * The same mapper with `nullable` cleared on {@link PUSHDOWN_DEMOTED_FIELDS}, so the comparison
- * shapes over those fields are decided by Convex's filter engine instead of the adapter's
- * in-memory post-filter. That moves the null-comparison family across the boundary, which is
- * where Convex's own `q.eq(field, null)` semantics live.
- *
- * How much of the corpus each mapper actually hands to the engine is pinned by `translator.test.ts`
- * and quoted in the adapter README; it is deliberately not restated here.
- */
-export const PUSHDOWN_MAPPER: Record<string, MapperConfig> = Object.fromEntries(
-  Object.entries(MAPPER).map(([path, config]) =>
-    PUSHDOWN_DEMOTED_FIELDS.some((field) => field === config.field)
-      ? [path, { ...config, nullable: false }]
-      : [path, config],
-  ),
-);
-
-/** Which mapper `executePlan` should translate with. */
-export type MapperVariant = "default" | "pushdown";
-
-export const MAPPERS: Record<MapperVariant, Mapper> = {
-  default: MAPPER,
-  pushdown: PUSHDOWN_MAPPER,
 };

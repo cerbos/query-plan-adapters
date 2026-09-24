@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h3"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/bounded-repetition",
+  "intent": "matches(\"^(ab){1,2}$\"): a bounded {n,m} repetition of a group.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^(ab){1,2}$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/bounded-repetition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^(ab){1,2}$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dialects without bounded repetition, or that apply it to the last character instead of the group, match the wrong strings (h3 \"ab\" is the witness)."
+}

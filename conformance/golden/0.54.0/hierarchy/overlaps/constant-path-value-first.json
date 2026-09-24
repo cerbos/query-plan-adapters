@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "b5",
+    "c2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/overlaps/constant-path-value-first",
+  "intent": "hierarchy(constant).overlaps(hierarchy(field)), the mirrored operand order.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept.eng"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "overlaps"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/overlaps/constant-path-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(\"dept.eng\").overlaps(hierarchy(R.attr.scope))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Must produce the same inclusive union as the field-first spelling; an order-sensitive translation emits a different set."
+}

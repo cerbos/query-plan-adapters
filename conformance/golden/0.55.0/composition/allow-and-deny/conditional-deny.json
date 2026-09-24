@@ -1,0 +1,95 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "composition/allow-and-deny/conditional-deny",
+  "intent": "A conditional ALLOW (aBool == true) plus a conditional DENY (aNumber > 10), planned as and(allow, not(deny)).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 10
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": true
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/allow-and-deny/conditional-deny",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBool == true"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber > 10"
+        }
+      },
+      "effect": "EFFECT_DENY",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The DENY arrives as a negated subtree; dropping it or mishandling NULL under the not() grants rows the DENY removes."
+}

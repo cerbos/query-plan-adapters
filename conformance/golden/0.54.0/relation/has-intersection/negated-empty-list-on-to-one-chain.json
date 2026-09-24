@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/has-intersection/negated-empty-list-on-to-one-chain",
+  "intent": "Negated hasIntersection of the mainCategory.subNames chain with an empty principal list.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.mainCategory.subNames"
+                },
+                {
+                  "value": []
+                }
+              ],
+              "operator": "hasIntersection"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/has-intersection/negated-empty-list-on-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hasIntersection(R.attr.mainCategory.subNames, P.attr.emptyTeams)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Folding hasIntersection(x, []) to false makes the negation true for every row, over-granting rows with no mainCategory, where CEL errors on the missing hop."
+}

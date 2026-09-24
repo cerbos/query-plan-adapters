@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.",
+  "id": "type-mismatch/contains/number-field-needle",
+  "intent": "contains() on a string attribute with a numeric attribute as the needle (R.attr.aString.contains(R.attr.aNumber)).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/contains/number-field-needle",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.contains(R.attr.aNumber)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A non-string needle is a CEL error; concatenating the number into a LIKE pattern coerces it to text and returns rows."
+}

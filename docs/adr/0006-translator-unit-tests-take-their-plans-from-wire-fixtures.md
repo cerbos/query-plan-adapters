@@ -1,5 +1,9 @@
 # Translator unit tests take their plans from wire fixtures
 
+**Superseded by [ADR 0010](0010-conformance-replays-recorded-pdp-decisions.md).** The wire fixtures,
+`actions.json` and the per-adapter golden filters are gone. Unit tests still read plans from recorded
+files (`conformance/golden/`), but they no longer pin the filter emitted for a corpus case.
+
 An adapter's translator unit test reads its query plans from `conformance/wire-fixtures/*.json` —
 the golden `PlanResources` responses captured against the pinned PDP — and asserts nothing but the
 database-native filter the adapter emits for them. It builds no plans of its own, calls no PDP, and

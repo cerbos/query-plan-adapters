@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a9",
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/element-field-to-outer-field",
+  "intent": "exists() whose body compares the element's field with a top-level resource attribute (t.name == aString).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/element-field-to-outer-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.exists(t, t.name == R.attr.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The comparison crosses from the element column to the correlated outer column; binding both to one scope compares the wrong fields."
+}

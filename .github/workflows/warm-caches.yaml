@@ -22,6 +22,7 @@ on:
       - "**/package-lock.json"
       - "**/go.sum"
       - "**/*.gradle.kts"
+      - "**/gradle-wrapper.properties"
       - ".github/workflows/warm-caches.yaml"
   schedule:
     - cron: "0 3 * * 0"
@@ -64,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [ent, ent/example, pgx, pgx/example]
+        module: [ent, ent/example, pgx, pgx/example, conformance/generator]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -80,10 +81,13 @@ jobs:
 
       # setup-go caches the build cache as well as the module cache, so compile what the adapter
       # workflows compile: the test binaries with and without -race (the unit suite runs with it,
-      # the adversarial suite without). `-run '^$'` builds them and runs nothing.
+      # the conformance suite without). `-run '^$'` builds them and runs nothing. The generator is
+      # built and vetted, which is what conformance.yaml does with it.
       - name: Compile
         run: |
-          if [[ "${{ matrix.module }}" == */example ]]; then
+          if [[ "${{ matrix.module }}" == conformance/generator ]]; then
+            go build ./... && go vet ./...
+          elif [[ "${{ matrix.module }}" == */example ]]; then
             go build ./...
           else
             go test -race -count=1 -run '^$' ./...
@@ -99,7 +103,7 @@ jobs:
             translator-test: "*ElasticsearchTranslatorTest"
             example-task: writeRuntimeClasspath
           - adapter: spring-data
-            translator-test: "*SpringDataTranslatorTest"
+            translator-test: "*SpringDataQueryPlanAdapterTest"
             example-task: assemble
     runs-on: ubuntu-latest
     defaults:
@@ -109,27 +113,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
-          cache-dependency-path: ${{ matrix.adapter }}/**/*.gradle*
+          cache-dependency-path: |
+            ${{ matrix.adapter }}/**/*.gradle*
+            ${{ matrix.adapter }}/**/gradle-wrapper.properties
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-        with:
-          cache-disabled: true
-          gradle-version: "8.12"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # The translator unit test is offline and resolves the full test runtime classpath, which a
-      # compile task alone would not. Spring-data resolves a second ORM set on its `next` leg, so
+      # An offline unit test resolves the full test runtime classpath, which a compile task alone
+      # would not. Spring-data resolves a second ORM set on its `next` leg, so
       # both are fetched. The example resolves the adapter from mavenLocal, so it is published first.
       - name: Resolve dependencies
         run: |
-          gradle test --tests '${{ matrix.translator-test }}' --no-daemon
+          ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
           if [[ "${{ matrix.adapter }}" == spring-data ]]; then
-            ADAPTER_TEST_ORM=next gradle test --tests '${{ matrix.translator-test }}' --no-daemon
+            ADAPTER_TEST_ORM=next ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
           fi
-          gradle publishToMavenLocal --no-daemon
-          gradle -p example ${{ matrix.example-task }} --no-daemon
+          ./gradlew publishToMavenLocal --no-daemon
+          ./gradlew -p example ${{ matrix.example-task }} --no-daemon

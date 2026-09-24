@@ -1,0 +1,32 @@
+{
+  "allowed": [],
+  "degenerateReason": "P.attr.emptyTeams is an empty list, so all() over it is true and its negation false for every seed; the planner folds the plan. The case pins that macro identity and the fold.",
+  "id": "principal/all/negated-empty-list",
+  "intent": "Negated all() over an empty principal list.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/all/negated-empty-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "!all() over an empty list is false for every row; the plan folds to always-denied."
+}

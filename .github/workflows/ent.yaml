@@ -7,6 +7,9 @@ on:
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/ent.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   push:
     tags:
       - ent/v*
@@ -22,7 +25,7 @@ defaults:
     working-directory: ent
 
 jobs:
-  # Lint and the adversarial suite share one job: they need the identical checkout and Go
+  # Lint and the conformance suite share one job: they need the identical checkout and Go
   # toolchain, and the lint steps run first so a formatting break still fails in about a minute
   # rather than after the container-backed suite.
   test:
@@ -56,37 +59,22 @@ jobs:
 
       # The unit suite covers the translator and the renderer over hand-built plans — the malformed
       # and hostile shapes no planner emits, and the per-dialect spellings. It is run on its own
-      # first for two reasons: it fails in seconds where the container-backed suite takes minutes,
-      # and running it with the adversarial test skipped is what keeps "these tests need no Docker"
-      # a checked claim. Under `./...` a unit test that grew a container dependency would be
-      # invisible, because the suite that follows starts Docker anyway.
-      # -count=1 on both suites: the Setup Go cache above covers GOCACHE as well as GOMODCACHE,
-      # and GOCACHE holds Go's test *result* cache — so without it, a re-run of an unchanged commit
-      # prints `ok ... (cached)` in zero seconds and neither the PDP nor the databases are ever
-      # started. A green run has to mean the suite ran. The compiled-package half of that cache is
-      # untouched and is where the time is actually saved.
+      # first for two reasons: it fails in seconds where the container-backed suite takes longer,
+      # and running it with the conformance test skipped is what keeps "these tests need no Docker"
+      # a checked claim.
+      # -count=1 on both suites: the Setup Go cache above covers GOCACHE, which holds Go's test
+      # *result* cache, so without it a re-run of an unchanged commit prints `ok ... (cached)` and
+      # the databases are never started. ../conformance is outside this module, so the cache would
+      # not notice a corpus change either.
       - name: Unit suite (no Docker)
         run: go test -race -count=1 -skip TestAdversarialConformance ./...
 
-      # The harness starts its own Cerbos PDP with testcontainers, reading the pinned version from
-      # conformance/CERBOS_VERSION — there is no separate sidecar to set up, and the version is
-      # never hardcoded here. The corpus is replayed against an in-memory SQLite database and
-      # PostgreSQL and MySQL testcontainers, so every dialect this adapter claims through
-      # WithDialect is actually exercised. Three dialect legs share one PDP and one plan pass;
-      # the timeout allows for the extra container start.
-      # No -race here, unlike the unit suite above: the harness drives the translator from a single
-      # goroutine, so the detector has nothing of this module's to check, and it more than doubled
-      # the wall time of the two most expensive steps in the job. Concurrency the adapter does
-      # exercise lives in the unit suite's t.Parallel tests, which keep it.
-      - name: Adversarial conformance suite (default evaluation)
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "false"
-        run: go test -count=1 -run TestAdversarialConformance -timeout 30m ./...
-
-      - name: Adversarial conformance suite (strict evaluation)
-        if: ${{ !cancelled() }}
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "true"
+      # Replays the recorded golden plans of both pinned PDPs (conformance/golden/) against an
+      # in-memory SQLite database and PostgreSQL and MySQL testcontainers, so every dialect this
+      # adapter claims through WithDialect is exercised, and compares the returned ids with the
+      # recorded check() decisions; conformance-ledger.json lists the exceptions. No PDP is started.
+      # No -race: the harness drives the translator from a single goroutine.
+      - name: Conformance suite
         run: go test -count=1 -run TestAdversarialConformance -timeout 30m ./...
 
   # The example application: the adapter used the way a consumer uses it, against the shared demo
@@ -144,7 +132,7 @@ jobs:
           git diff --exit-code
 
       # The PDP is a container the runner starts from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh ent

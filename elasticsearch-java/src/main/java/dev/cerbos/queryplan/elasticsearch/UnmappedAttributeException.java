@@ -6,13 +6,9 @@
 package dev.cerbos.queryplan.elasticsearch;
 
 /**
- * The plan names an attribute the caller's declarations do not cover: a variable absent from
- * {@link ElasticsearchQueryPlanAdapter.Options#fieldMap()}, or a collection a macro walks that is
- * not declared in {@link ElasticsearchQueryPlanAdapter.Options#nestedPaths()}.
- *
- * <p>The adapter is handed a plan, never an index mapping, so it cannot look the field up itself
- * and it never uses a plan variable verbatim as a field name. This is a configuration gap on the
- * caller's side rather than a limitation of the Query DSL, which is why it is a type of its own.
+ * The plan uses an attribute the caller's {@link ElasticsearchQueryPlanAdapter.Options} do not
+ * declare: a variable missing from the field map, a collection missing from the nested paths, or a
+ * compared field with no scalar type. Fix the options; the policy is fine.
  */
 public final class UnmappedAttributeException extends IllegalArgumentException {
 

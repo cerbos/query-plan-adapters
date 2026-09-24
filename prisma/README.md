@@ -270,17 +270,19 @@ The adapter cannot set a collation or a pragma from inside a `where`.
   ALTER TABLE `YourModel` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
   ```
 
-  Measured on `mysql:8.4`: under `utf8mb4_unicode_ci`, **58 of the 172 oracle-tested actions
-  disagree with the PDP** (`cs-eq` returns `"One"` for a policy that allowed `"one"`); under
-  `utf8mb4_0900_as_cs`, **17** disagree, all on the soft-hyphen seed `h6`.
+  Measured on `mysql:8.4` against PDP 0.55.0's goldens: under `utf8mb4_unicode_ci`, **58 of the
+  184 compared cases disagree with the PDP** (`string/equals/case-sensitive` returns `"One"` for a
+  policy that allowed `"one"`); under `utf8mb4_0900_as_cs`, **17** disagree, all on the
+  soft-hyphen seed `h6`.
 - **SQL Server:** a case-sensitive (`_CS_`) collation, not `_CI_`.
 - **SQLite:** no `COLLATE NOCASE` on mapped fields, **and** `PRAGMA case_sensitive_like = ON` on
   every connection. `contains`/`startsWith`/`endsWith` lower to `LIKE`, which is ASCII
   case-insensitive on SQLite regardless of column collation. The pragma is per connection, not per
   schema, and Prisma 6's query engine pools SQLite connections, so one `$executeRawUnsafe` reaches
   only one of them: pin `connection_limit=1` in the datasource url, as this repository's Prisma 6
-  SQLite leg does. Without it the adapter over-grants the corpus's `cs-contains`, `cs-startswith` and
-  `cs-endswith` actions.
+  SQLite leg does. Without it the adapter over-grants the corpus's
+  `string/contains/case-sensitive`, `string/starts-with/case-sensitive` and
+  `string/ends-with/case-sensitive` cases.
 
 See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity).
 
@@ -303,7 +305,26 @@ are hoisted or case-split so each filter lands on its own model.
 
 ### What throws
 
-Loud failures, never silently wrong filters:
+Loud failures, never silently wrong filters. A shape the adapter cannot express throws
+`UnsupportedQueryPlanError`. It is exported and extends `Error`, so existing `catch` blocks keep
+working:
+
+```ts
+import { queryPlanToPrisma, UnsupportedQueryPlanError } from "@cerbos/orm-prisma";
+
+try {
+  const result = queryPlanToPrisma({ queryPlan, mapper, model: "Resource" });
+} catch (error) {
+  if (error instanceof UnsupportedQueryPlanError) {
+    // The policy uses a shape this adapter cannot translate faithfully: deny, or fall back to
+    // per-row check() calls.
+  }
+  throw error;
+}
+```
+
+A mapper misconfiguration, such as a field-to-field comparison without the `model` option or
+`relation.model`, stays a plain `Error`. The refused shapes include:
 
 - **LIKE metacharacters.** Prisma emits `LIKE` without `ESCAPE`, so `contains`/`startsWith`/
   `endsWith` with a needle containing `%`, `_` or `\`, or a column-valued needle, throws. Hierarchy
@@ -327,14 +348,14 @@ Prisma 6.19 and 7.9 expose the same filter surface on SQLite, PostgreSQL and MyS
 ([#224](https://github.com/cerbos/query-plan-adapters/issues/224)): scalar filters take a constant
 or a same-model field reference, never an expression. These shapes throw:
 
-| CEL shape | Corpus actions | Why Prisma cannot express it |
+| CEL shape | Corpus cases | Why Prisma cannot express it |
 | --- | --- | --- |
-| `a % b` | `arith-mod` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
-| Arithmetic on both sides | `arith-both` | Field references compare two columns as they are; no operand is an expression. |
-| `matches` | `regex-*`, `p-matches`, `matches-alt` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
-| List index `l[i]` | `index-*` | List filters test membership, emptiness or equality, never a position. |
-| `int()`, `double()`, `string()` | `cast-*` | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). |
-| `size()` of a string, or of a list that isn't a mapped relation | `string-size-gt0`, `type-size-*`, `pv-filter`, `size-filter-count`, `pv-except`, `except-size` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
+| `a % b` | `arithmetic/modulo/*` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
+| Arithmetic on both sides | `arithmetic/add/on-both-sides` | Field references compare two columns as they are; no operand is an expression. |
+| `matches` | `regex/matches/*` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)). Full-text `search` matches lexemes, not patterns, and no provider here has RE2. |
+| List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
+| `int()`, `double()`, `string()` | `cast/*` | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). |
+| `size()` of a string, or of a list that isn't a mapped relation | `size/greater-than/string-non-empty`, `type-mismatch/size/*`, `size/equals/filtered-collection`, `principal/filter/size-of-filtered-long-list`, `principal/except/size-after-removing-resource-value`, `collection/except/size-of-difference` | No length filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
 Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
 5–7 has no raw predicate inside `where` ([prisma/prisma#5560](https://github.com/prisma/prisma/issues/5560),
@@ -350,32 +371,29 @@ API and is out of scope.
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed rows, both Prisma 6 and 7, and each of SQLite, PostgreSQL and MySQL. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
+queries over the corpus's 29 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
+out of every golden case in the tier:
 
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 184 reference actions |
-| Fail-closed | 127 reference actions plus the 11 reference-unsupported shapes (138 actions total) |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute sent as an explicit null renders definitely, so a NULL row is included where CEL's null *value* says it should be. Declare `nullAttributeRepresentation: "explicit"` on the mapper entry, or `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 49 / 80 |
+| adversarial | 109 / 227 |
 
-The fail-closed set is: `LIKE` needles Prisma cannot escape, cross-model field references, relation
-counts and string lengths, `exists_one`, unsolved column arithmetic, sub-millisecond `now()`
-thresholds, and the reference probes for regex, ordered indexing, `timestamp()` over a string
-field, `mod`, a positional read of a scalar list, list equality over a `map()` projection, and
-any comparison or membership test (`==`, `!=`, `in`, `hasIntersection`) whose literal has another
-type than the field's mapped `valueType` — on a scalar column (`R.attr.aNumber == "5"`), a relation
-field (`R.attr.tags.exists(t, t.name == 0)`) or a relation-backed list (`"2" in
-R.attr.aNumberList`) — which CEL answers by type and a coercing store would not. Each
-one's error message is pinned in [`conformance/actions.json`](../conformance/actions.json) and
-asserted by the conformance run.
+Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
+on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
+never as passed. On 0.55.0 that is one extended case, `null/has/missing-attribute`: the planner
+folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
+missing-attribute rows, so use `R.attr.x != null` for database-backed attributes instead of
+`has(R.attr.x)`.
 
-**Providers.** The corpus is executed on SQLite, PostgreSQL and MySQL, each with Prisma 6 and 7, in
-both evaluation modes (see [Development](#development)). The MySQL legs run under
-`utf8mb4_0900_bin`; `ADAPTER_TEST_MYSQL_COLLATION` replays them under another collation, which is
-how the figures in the collation section were measured. MySQL adds no fail-closed shape. SQL Server
-and CockroachDB are **not** executed: fail-closed reasons naming them are reasoned from documented
+**Providers.** `ADAPTER_TEST_MYSQL_COLLATION` replays the MySQL legs under another collation, which
+is how the figures in the collation section were measured. MySQL adds no refused shape. SQL Server
+and CockroachDB are **not** executed: refusal reasons naming them are reasoned from documented
 `LIKE` behaviour.
 
 ## Mapping hazards
@@ -396,7 +414,7 @@ own narrowing as `subqueryFilter`; the adapter cannot detect an omission.
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one model holds several row kinds. Declare `{ type: "…" }` |
 | To-one relation used as a collection | **Rejected by Prisma** | `type: "one"` compiles to `is`, which Prisma accepts only on a relation its schema declares to-one. Mapping a to-many relation as `type: "one"` is a Prisma validation error, not a wider subquery |
 | Composite association key | **Reproduced by Prisma** | Prisma resolves multi-column keys from `@relation(fields: […], references: […])`. The mapping names the relation, never its columns |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | None — every operator reached through a relation requires its to-one hops separately, so a missing parent stays denied under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ### Declaring the application's own predicate
 
@@ -426,6 +444,9 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
+  `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
+  misconfiguration stays a plain `Error`.
 - **Breaking:** `hasIntersection` over a relation-backed list checks its literals against the
   `valueType` declared on the list's mapper entry, as `in` already did, and throws `in value type
   does not match mapped <type> field` on a mismatch. It used to drop the declared type and hand the
@@ -448,8 +469,8 @@ vacuously true, matching the empty list your application would send to `check()`
   so `contains("a\\b")` matched `"ab"` on PostgreSQL and `endsWith("\\")` failed with
   `SQLSTATE 22025`.
 - **Breaking:** a hierarchy with an empty delimiter (`hierarchy(R.attr.scope, "")`) now throws. It
-  was lowered as a `startsWith` that also matched the path itself (corpus action
-  `hier-empty-delim` over-granted).
+  was lowered as a `startsWith` that also matched the path itself (corpus case
+  `hierarchy/descendent-of/empty-delimiter` over-granted).
 - **Breaking (Cerbos 0.55 compatibility):** ordered comparisons involving NaN evaluate to false, so
   their negation can allow a row; Cerbos 0.54 denied it. Use Cerbos 0.55 when a policy can negate a
   NaN comparison. Missing attributes and nulls are unchanged.
@@ -478,26 +499,23 @@ A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-p
 
 | Command | What it runs | Needs |
 | --- | --- | --- |
-| `npm test` | Translator unit test | Nothing |
+| `npm test` | Offline unit tests: caller-supplied options the corpus cannot vary (mapper forms, `subqueryFilter`, element nullability, `nullAttributeRepresentation`), the refusal type, the timestamp literal contract and malformed input | Nothing |
 | `npm run typecheck` | `tsc` against Prisma 7 and 6 | Nothing |
-| `npm run test:adversarial:v7` / `:v6` | Corpus on SQLite, Prisma 7 / 6 | Cerbos PDP (started by the script) |
-| `npm run test:adversarial:postgres:v7` / `:v6` | Corpus on PostgreSQL | Docker |
-| `npm run test:adversarial:mysql:v7` / `:v6` | Corpus on MySQL | Docker |
+| `npm run test:adversarial:v7` / `:v6` | Conformance harness on SQLite, Prisma 7 / 6 | Nothing |
+| `npm run test:adversarial:postgres:v7` / `:v6` | Conformance harness on PostgreSQL | Docker |
+| `npm run test:adversarial:mysql:v7` / `:v6` | Conformance harness on MySQL | Docker |
 
-`npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. Set
-`ADAPTER_TEST_STRICT_EVALUATION=true` to run the corpus with strict evaluation for both planning and
-the `check()` oracle (`false` is the default; other values are rejected). CI runs all six
-store/Prisma combinations in both modes. The SQLite legs reset `prisma/dev-adversarial.db` with
+`npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. CI runs all six
+store/Prisma combinations. The SQLite legs reset `prisma/dev-adversarial.db` with
 `prisma db push --force-reset`, so point them only at disposable databases.
 
-`npm test` reads every plan from `conformance/wire-fixtures/`, so it needs no PDP, database or
-generated client, and has no v6/v7 split. It pins the `where` input for every corpus action
-(classified exactly once as a filter, a plan kind or a throw, with the message
-`conformance/actions.json` records), plus mapper contracts no policy can reach:
-`nullAttributeRepresentation`, `subqueryFilter` and malformed input. Its expectations are still
-inline rather than in a `golden/expectations.json`; see
-[ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md) and
-"Golden expectations" in [conformance/README.md](../conformance/README.md).
+No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` for both
+pinned PDPs and applies [`conformance-ledger.json`](conformance-ledger.json): a case with no entry
+must return exactly the recorded allowed ids, and an `unsupported` case must throw
+`UnsupportedQueryPlanError`. See "The harness contract" in
+[conformance/README.md](../conformance/README.md). `npm test` reads its plans from the same golden
+files but pins no corpus case's filter; it needs no database or generated client, and has no v6/v7
+split.
 
 ## Resources
 

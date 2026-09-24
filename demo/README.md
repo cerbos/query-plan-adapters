@@ -9,7 +9,7 @@ It is one of the repository's two shared policy directories, and they prove diff
 
 | Directory       | Proves     | Shapes     | Per-adapter exceptions        |
 | --------------- | ---------- | ---------- | ----------------------------- |
-| `conformance/`  | semantics  | hostile    | five classification buckets   |
+| `conformance/`  | semantics  | hostile    | a per-adapter ledger          |
 | `demo/`         | plumbing   | realistic  | **none**, by construction     |
 
 **Semantics** is whether a translated filter returns exactly the rows the PDP allows. **Plumbing**
@@ -82,11 +82,11 @@ workflow.
 - **Adding a usage shape**: implement it in every example. There is no per-adapter classification to
   opt out with, and adding one is what
   [ADR 0001](../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) rules out.
-- **Adding an adapter**: add its example in the same change that registers it in
-  `conformance/actions.json`; check 4 reads that roster, so the two land together or CI stays red.
-  Step by step: [conformance/README.md](../conformance/README.md#adding-a-new-adapter).
+- **Adding an adapter**: add its example in the same change that adds its
+  `conformance-ledger.json`; check 4 reads the roster from those files, so the two land together or
+  CI stays red. The harness it needs: [conformance/README.md](../conformance/README.md#the-harness-contract).
 - **A shape that needs a carve-out for one adapter is wrong for this directory.** Argue it in
-  `conformance/`, where the classification buckets exist.
+  `conformance/`, where each adapter keeps a ledger.
 
 The domain is roughly the intersection of every adapter's query language, one of which is a vector
 store. It is a **floor, not a ceiling**: every example implements the shared shapes and may add
@@ -127,7 +127,7 @@ ChromaDB or Convex, and anything needing a per-adapter carve-out does not belong
 | `seeds.json`             | Eight rows across three owners, the three principals, and the application's own predicate. |
 | `expected.json`          | The **one shared** expectations file. Every example asserts against it. |
 | `cerbos-config.yaml`     | PDP configuration.                                                  |
-| `docker-compose.yml`     | The PDP itself, pinned to `conformance/CERBOS_VERSION` **and** `conformance/CERBOS_IMAGE_DIGEST`. |
+| `docker-compose.yml`     | The PDP itself, pinned to `current` in `conformance/pdp-versions.json`, tag **and** digest. |
 | `scripts/run-example.sh` | Runs one adapter's example and diffs it against `expected.json`.    |
 | `scripts/validate-demo.sh` | Integrity checks. Needs no PDP, database or network.              |
 
@@ -142,9 +142,9 @@ authorization bug. Here the id lists are frozen on purpose: for plumbing (did th
 did the ORM accept the filter, did rows come back) a frozen list is the better tripwire and doubles
 as documentation.
 
-`validate-demo.sh` first reads the adapter roster (`adapters` in `conformance/actions.json`) once,
-requiring it to be non-empty with non-empty, single-line names, and reuses it for every adapter
-check, so a missing or malformed roster cannot skip validation. It then checks:
+`validate-demo.sh` first reads the adapter roster (every directory holding a
+`conformance-ledger.json`) once, requiring it to be non-empty, and reuses it for every adapter
+check, so a missing roster cannot skip validation. It then checks:
 
 1. **Structural.** `expected.json` declares exactly the five shapes and every entry is well-formed
    for its shape (an `alwaysAllowed` entry with a conditional kind would leave that kind untested).
@@ -153,15 +153,15 @@ check, so a missing or malformed roster cannot skip validation. It then checks:
    *both* filters it composes. Equal to the adapter's filter, and the example could drop the
    application predicate; equal to the application predicate's result, and it could drop **the
    adapter** — an authorization hole that reads as a green build.
-3. **Pin reuse and reachability.** The demo has no `CERBOS_VERSION` of its own: one PDP pin in the
+3. **Pin reuse and reachability.** The demo has no PDP pin of its own: one PDP pin in the
    repository, reused. No example may name a PDP client address; it must use `$CERBOS_HOST`. The
    scan targets client addresses only — `docker-compose.yml`'s `"13592:3592"` names the container's
    own listen port and is correct.
-4. **Example coverage.** Every adapter on the `adapters` roster has a runnable `example/run.sh`.
+4. **Example coverage.** Every adapter on the roster has a runnable `example/run.sh`.
    There is no second list, no opt-out and no environment variable to disable it: registering an
    adapter demands an example. An adapter that cannot implement the five shapes has a packaging or
    ergonomics problem worth finding before release (#349) — the same reason ADR 0001 gives this
-   directory no classification buckets.
+   directory no ledger.
 5. **Principal provenance.** An example looks its principal up in `seeds.json` rather than writing
    one out. A restated principal does not fail quietly like a hardcoded address; it fails later,
    when someone edits `seeds.json`, as an apparent adapter bug. The check stops it at write time

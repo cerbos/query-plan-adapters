@@ -1,0 +1,59 @@
+{
+  "allowed": [],
+  "degenerateReason": "Every seed that holds a mainCategory holds exactly one subCategory, so the negated count is false for it, and every seed without one is a missing-path error. A two-valued absent-parent guard would readmit the parentless rows under the negation.",
+  "id": "relation/size/negated-non-empty-to-one-chain",
+  "intent": "!(size(mainCategory.subCategories) > 0), which the planner emits verbatim rather than as == 0.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.mainCategory.subCategories"
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/negated-non-empty-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(size(R.attr.mainCategory.subCategories) > 0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Guarding only the == 0 spelling misses this; an unguarded negated count readmits parentless rows, so the guard must sit on the count itself (#316)."
+}

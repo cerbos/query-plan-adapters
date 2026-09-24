@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "composition/derived-role/conditional-derived-role",
+  "intent": "An ALLOW for a derived role whose condition reads the resource (aBool == true), plus aNumber < 5, planned as and(lt, eq).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": true
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/derived-role/conditional-derived-role",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber < 5"
+        }
+      },
+      "derivedRoles": [
+        "compose_flagged"
+      ],
+      "effect": "EFFECT_ALLOW"
+    }
+  ],
+  "tier": "extended",
+  "trap": "The derived role's condition must be conjoined with the rule's; dropping it grants a2/a5."
+}

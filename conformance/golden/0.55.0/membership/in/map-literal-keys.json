@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a1",
+    "a9"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/map-literal-keys",
+  "intent": "A string attribute in a map literal, which tests the map's keys.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": [
+              "one",
+              "same"
+            ]
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/map-literal-keys",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in {\"one\": 1, \"same\": 2}"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Matching the map's values instead of its keys; the values are numbers so a value match cannot pass by accident, and c1 (\"One\") is the case trap."
+}

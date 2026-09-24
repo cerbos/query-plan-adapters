@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a1",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "relation/exists/to-one-chain",
+  "intent": "exists() over mainCategory.subCategories, a to-one object followed by a collection.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.mainCategory.subCategories"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "s.name"
+                      },
+                      {
+                        "value": "finance"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "s"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/exists/to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.mainCategory.subCategories.exists(s, s.name == \"finance\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "One nested object to check() is two hops in the store; the subquery must join through the intermediate hop, never off the root."
+}

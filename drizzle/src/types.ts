@@ -172,4 +172,11 @@ export type BuildFilterOptions = {
    * addressable, so they must not be re-joined (or re-required) off the root.
    */
   skipRelations?: Set<RelationMapping>;
+  /**
+   * The tables enclosing collection-macro subqueries range over, outermost first. A macro over
+   * one of them again must alias its own subquery: otherwise its element columns and the
+   * enclosing element's render as the same `"table"."column"`, SQL resolves both to the
+   * innermost row, and the lambda compares an element with itself (#509).
+   */
+  openTables?: readonly string[];
 };

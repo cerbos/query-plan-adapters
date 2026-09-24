@@ -1,0 +1,90 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/nan-from-ternary-value-first",
+  "intent": "The literal 0.5 on the left compared < a ternary yielding 1.0 or NaN.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 0.5
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "value": 1
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 0
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/nan-from-ternary-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Mirroring puts NaN on the normalised left; operand inversion or NaN-as-largest ordering makes the NaN arm true."
+}

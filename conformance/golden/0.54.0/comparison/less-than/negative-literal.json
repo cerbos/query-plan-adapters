@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b3"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/negative-literal",
+  "intent": "Numeric attribute compared less-than a negative literal (aNumber < -1).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": -1
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/negative-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber < -1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Mishandling the unary minus in the planned literal (dropping the sign, or reading it as subtraction) compares against the wrong value."
+}

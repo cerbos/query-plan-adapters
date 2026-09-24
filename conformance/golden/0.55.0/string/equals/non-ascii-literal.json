@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "string/equals/non-ascii-literal",
+  "intent": "String equality against a literal with an accented letter and an astral-plane emoji (\"héllo🚀\").",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "héllo🚀"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/equals/non-ascii-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString == \"héllo🚀\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Lossy encoding or a non-utf8mb4 column mangles multi-byte and astral characters, so the literal matches nothing or the wrong row."
+}

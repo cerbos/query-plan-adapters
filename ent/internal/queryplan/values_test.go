@@ -22,7 +22,7 @@ func TestUnloweredSymbolicValueIsRejected(t *testing.T) {
 	require.Nil(t, result)
 }
 
-// The corpus's nan-ord-* and not-nan-ord-le actions prove the row semantics. This pins the
+// The corpus's NaN ordering cases (comparison/*/*nan*) prove the row semantics. This pins the
 // lowered constant without involving a database renderer, including the distinction from NULL.
 func TestNaNOrderingFoldsToFalse(t *testing.T) {
 	t.Parallel()
@@ -37,7 +37,7 @@ func TestNaNOrderingFoldsToFalse(t *testing.T) {
 }
 
 // A boolean context must infer the NULL type. PostgreSQL independently resolves an all-NULL
-// CASE to text, so adding a presence guard here makes the corpus's not-nan-order-string fail.
+// CASE to text, so adding a presence guard here makes the corpus's type-mismatch/less-than/negated-nan-against-string-field fail.
 func TestMixedTypeOrderingHasNoRedundantNullGuard(t *testing.T) {
 	t.Parallel()
 	result, err := applyComparison(OpLt, float64(1), Column{Name: "text", Type: ValueString})

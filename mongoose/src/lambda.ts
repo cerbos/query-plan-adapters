@@ -4,6 +4,7 @@ import type {
   Value,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { MongooseFilter } from "./index";
 import { getOperandAt, isExpression, isVariable } from "./operands";
 
@@ -45,7 +46,7 @@ export const substituteLambdaVariable = (
           Array.isArray(current) ||
           !(segment in current)
         ) {
-          throw new Error(
+          throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
@@ -119,7 +120,7 @@ export const foldLiteralCollection = (
   translate: (body: PlanExpressionOperand) => MongooseFilter,
 ): MongooseFilter => {
   if (operator !== "exists" && operator !== "all") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection value is not supported. ` +
         "Only exists() and all() can be folded into a flat filter.",
     );
@@ -127,18 +128,18 @@ export const foldLiteralCollection = (
 
   const elements = collection.value;
   if (!Array.isArray(elements)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection requires a list value`,
     );
   }
 
   if (!isExpression(lambda) || lambda.operator !== "lambda") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Second operand of ${operator} must be a lambda expression`,
     );
   }
   if (lambda.operands.length !== 2) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection supports single-variable lambdas only`,
     );
   }
@@ -154,7 +155,7 @@ export const foldLiteralCollection = (
     "Lambda variable must have a name",
   );
   if (!isVariable(variable)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   if (elements.length === 0) {

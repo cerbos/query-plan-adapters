@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "identifier/equals/concatenation-value-first",
+  "intent": "A principal attribute (folded to a constant) compared == \"projects:\" + R.id.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "projects:f1"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "projects:"
+                },
+                {
+                  "variable": "request.resource.id"
+                }
+              ],
+              "operator": "add"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "identifier/equals/concatenation-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.context == \"projects:\" + R.id"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The constant is on the left against a concatenation built from the key; operand inversion or numeric + returns the wrong rows."
+}

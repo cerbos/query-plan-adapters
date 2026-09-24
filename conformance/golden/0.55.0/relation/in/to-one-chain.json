@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a1",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "relation/in/to-one-chain",
+  "intent": "A literal's membership in the string list mainCategory.subNames.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "finance"
+          },
+          {
+            "variable": "request.resource.attr.mainCategory.subNames"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/in/to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"finance\" in R.attr.mainCategory.subNames"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The membership subquery must join through the intermediate to-one hop and map to the element's name, not the root."
+}

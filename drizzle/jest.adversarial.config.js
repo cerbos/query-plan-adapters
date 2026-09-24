@@ -15,7 +15,7 @@ module.exports = {
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  // Isolated from the main jest.config.js run: this suite talks to a Cerbos sidecar loaded
-  // with conformance/policies (resource kind "adversarial").
+  // Isolated from the main jest.config.js run: this suite replays the conformance goldens against
+  // a real store (Docker for the PostgreSQL and MySQL legs).
   testMatch: ["<rootDir>/src/adversarial.test.ts"],
 };

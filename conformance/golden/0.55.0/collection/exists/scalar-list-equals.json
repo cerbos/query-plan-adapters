@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/scalar-list-equals",
+  "intent": "exists() over a string list with an equality body (tagNames.exists(tagName, tagName == \"public\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "tagName"
+                      },
+                      {
+                        "value": "public"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "tagName"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/scalar-list-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.exists(tagName, tagName == \"public\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "The lambda variable is the element itself, not a field of a related row; tagNames' explicit null elements must neither error the row nor match (#430)."
+}

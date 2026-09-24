@@ -9,6 +9,9 @@ on:
       - "demo/**"
       - ".github/workflows/sqlalchemy_pr.yaml"
       - ".github/workflows/sqlalchemy_release.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
 
 permissions: {}
 
@@ -99,14 +102,10 @@ jobs:
         if: matrix.sqlalchemy.constraint == ''
         run: npx -y pyright@1.1.411
 
+      # The unit suites and the conformance harness, which replays conformance/golden/ against
+      # SQLite and a pinned PostgreSQL (testcontainers). No PDP runs here: the plans and the
+      # decisions are recorded. Both SQLAlchemy majors run it.
       - run: pdm run test
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "false"
-
-      - name: Run strict evaluation conformance
-        run: pdm run pytest tests/test_adversarial_conformance.py
-        env:
-          ADAPTER_TEST_STRICT_EVALUATION: "true"
 
   # Runs the example against the built wheel, testing packaging and usage shapes.
   # See docs/adr/0002-examples-install-the-packed-artifact.md.
@@ -132,7 +131,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      # No `pdm install`: the example installs its own pinned tree. The runner starts the PDP
-      # from demo/docker-compose.yml, as a deployed app would reach it.
+      # No `pdm install`: the example builds the adapter and installs its own pinned tree.
+      # The runner starts the PDP from demo/docker-compose.yml (pinned in
+      # conformance/pdp-versions.json), as a deployed app would reach it.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh sqlalchemy

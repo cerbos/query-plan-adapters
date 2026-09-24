@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -11,17 +16,10 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * The scalar leaf: one mapped column against one plan constant.
+ * Translates one column against one constant, and applies the explicit-null convention.
  *
- * <p>Owns the default lowering of each leaf operator ({@link #defaultLeaf}), the routing of
- * every scalar (field, value) translation through the caller's {@link OperatorFunction}
- * overrides ({@link #withOverride}), and the two rules of the explicit-null convention — which
- * attributes the caller sends as an explicit null ({@link #isExplicitNull}) and the
- * asymmetric definite equality that convention entitles them to ({@link #definiteEquality}).
- * It is the one place a registered override is consulted, so "an override wins on EVERY path
- * that produces this operator" is a property of this class rather than of each caller: the
- * comparison seam, the arithmetic path, the timestamp leaf, the bare-boolean variable and
- * scalar {@code in} all come through here.
+ * <p>Every scalar (field, value) translation goes through {@link #withOverride}, so a
+ * registered {@link OperatorFunction} applies on every path that produces its operator.
  */
 final class LeafTranslator {
 
@@ -35,25 +33,18 @@ final class LeafTranslator {
         this.overrides = overrides;
     }
 
-    /** Whether the caller registered an {@link OperatorFunction} for {@code op}. */
     boolean overridden(String op) {
         return overrides.get(op) != null;
     }
 
-    /**
-     * Apply a scalar leaf operator, consulting the per-operator {@code overrides} hook first so a
-     * registered {@link OperatorFunction} wins on EVERY path that produces this operator — direct
-     * comparison, {@code add}-folded comparison, and bare-boolean — not just the direct one.
-     */
+    /** Applies {@code op} through any registered override, else {@link #defaultLeaf}. */
     Predicate applyLeaf(String op, Path<?> path, Object value) {
         return withOverride(op, path, value, () -> defaultLeaf(op, path, value));
     }
 
     /**
-     * Route a scalar (field, value) translation through the per-operator {@code overrides}
-     * hook: a registered {@link OperatorFunction} owns the operator's full translation
-     * (mirrored operators are consulted under the mirrored name — see
-     * {@link NormalizedBinary}); otherwise the supplied default applies.
+     * Uses the override registered for {@code op} if there is one, else {@code dflt}. A
+     * mirrored comparison is looked up under its mirrored name (see {@link NormalizedBinary}).
      */
     Predicate withOverride(String op, Expression<?> field,
                            Object value, Supplier<Predicate> dflt) {
@@ -65,11 +56,9 @@ final class LeafTranslator {
     }
 
     /**
-     * Whether {@code cerbosVar} maps to a scalar the caller sends as an explicit null.
-     *
-     * <p>Read from the mapping rather than from the path: the same column is legitimately
-     * mapped twice under two attribute names with two conventions, so the JPA path cannot
-     * discriminate them.
+     * Whether {@code cerbosVar} is sent as an explicit null: a Field declared
+     * {@link NullAttributeRepresentation#EXPLICIT}, or a bare lambda element. Read from the
+     * mapping, because one column can be mapped under two names with different conventions.
      */
     boolean isExplicitNull(String cerbosVar, Scope scope) {
         if (!(scope.resolve(cerbosVar) instanceof Scope.ResolvedScalar scalar)) return false;
@@ -79,20 +68,13 @@ final class LeafTranslator {
     }
 
     /**
-     * An equality that can never be SQL UNKNOWN, for operands the caller sends as explicit
-     * nulls.
+     * Equality for operands sent as explicit nulls. In CEL {@code null == "x"} is false,
+     * {@code null != "x"} is true and two nulls are equal, while SQL answers UNKNOWN to all
+     * three.
      *
-     * <p>A null VALUE is what CEL holds under that convention, so {@code null == "x"} is a
-     * definite FALSE, {@code null != "x"} a definite TRUE, and two nulls are EQUAL. SQL
-     * answers UNKNOWN to all three, which excludes the row under BOTH polarities — so the
-     * NOT an enclosing negation applies has nothing definite to flip.
-     *
-     * <p>Deliberately not a null-safe equality operator. Two reasons, and the second is the
-     * load-bearing one: Hibernate would need a dialect function — and a null-safe equality is
-     * SYMMETRIC while this rewrite must not be. When only ONE side declares the convention,
-     * the other side's NULL is a MISSING attribute on the check side, so CEL raises an error
-     * and denies; only the asymmetric expansion below keeps propagating UNKNOWN for it. A
-     * null-safe operator would match the two NULLs and over-grant.
+     * <p>Not a null-safe equality operator, because this must be asymmetric: a NULL on a side
+     * that does not declare the convention is a missing attribute, which CEL denies, so it has
+     * to stay UNKNOWN.
      */
     Predicate definiteEquality(String op,
                                Expression<?> left,
@@ -122,17 +104,14 @@ final class LeafTranslator {
         if (leftExplicit && rightExplicit) {
             equality = cb.or(cb.and(cb.isNull(left), cb.isNull(right)), equality);
         }
-        // The junction barrier matters: cb.not(cb.not(p)) collapses in Hibernate, and this
-        // predicate is frequently built under an enclosing negation. TriPredicate.not IS the
-        // barrier (cb.not(cb.and(p))), and it is the adapter's only negation site.
+        // tri.not keeps a nested negation from collapsing in Hibernate.
         return "ne".equals(op) ? tri.not(equality) : equality;
     }
 
     /**
-     * The translation of one scalar leaf operator when no {@link OperatorFunction} override owns
-     * it. A comparison between a column and a constant of an incompatible type — or a string
-     * match over a non-string — is decided here rather than handed to the database: CEL has no
-     * overload for it, so it errors and denies, which only UNKNOWN reproduces under negation.
+     * Translates a leaf with no override. A constant of an incompatible type, or a string
+     * match on a non-string, has no CEL overload and errors, so it is decided here as FALSE or
+     * UNKNOWN rather than sent to the database.
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     Predicate defaultLeaf(String op, Path<?> path, Object value) {
@@ -151,10 +130,8 @@ final class LeafTranslator {
             }
             return tri.unknown();
         }
-        // Fractional constants compare in double space: protoValueToJava yields Double only
-        // for non-whole numbers, and Hibernate refuses to coerce e.g. 1.5 into an
-        // Integer-typed path ("not a whole number") — but `intColumn >= 1.5` is legal CEL
-        // that the planner emits verbatim.
+        // A fractional constant is a Double: compare as double, because Hibernate will not
+        // coerce 1.5 onto an Integer path and `intColumn >= 1.5` is legal CEL.
         Expression raw = (value instanceof Double) ? path.as(Double.class) : path;
         return switch (op) {
             case "eq" -> cb.equal(raw, value);
@@ -163,13 +140,12 @@ final class LeafTranslator {
             case "gt" -> cb.greaterThan(raw, (Comparable) value);
             case "le" -> cb.lessThanOrEqualTo(raw, (Comparable) value);
             case "ge" -> cb.greaterThanOrEqualTo(raw, (Comparable) value);
-            // An operator no leaf case knows — `matches` is the policy-reachable one. An
-            // OperatorFunction override registered under that name is consulted first.
+            // e.g. `matches`, unless an override is registered for it.
             default -> throw Refusals.unsupported("Unsupported operator: " + op);
         };
     }
 
-    /** Whether two Java types compare in SQL the way they compare in CEL: equal, or both numbers. */
+    /** Whether two types compare in SQL as in CEL: the same type, or both numbers. */
     static boolean compatibleTypes(Class<?> left, Class<?> right) {
         return left.equals(right)
                 || (Number.class.isAssignableFrom(left) && Number.class.isAssignableFrom(right));

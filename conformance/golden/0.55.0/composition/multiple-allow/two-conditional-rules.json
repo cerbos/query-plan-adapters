@@ -1,0 +1,145 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "composition/multiple-allow/two-conditional-rules",
+  "intent": "Two conditional ALLOW rules, each an all-of pair, planned as or(and, and).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": true
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 15
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": false
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 7
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/multiple-allow/two-conditional-rules",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "all": {
+            "of": [
+              {
+                "expr": "R.attr.aBool == true"
+              },
+              {
+                "expr": "R.attr.aNumber > 15"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "all": {
+            "of": [
+              {
+                "expr": "R.attr.aBool == false"
+              },
+              {
+                "expr": "R.attr.aNumber < 7"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Mixing conjuncts across the two rules over-grants rows (a1, b4) that satisfy half of each."
+}

@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a3",
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list",
+  "intent": "hasIntersection(aNumberList, [\"2\", 3]): a number list against a literal list mixing a string and a number.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumberList"
+          },
+          {
+            "value": [
+              "2",
+              3
+            ]
+          }
+        ],
+        "operator": "hasIntersection"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hasIntersection(R.attr.aNumberList, [\"2\", 3])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "\"2\" never matches in CEL while 3 can; a coercing store adds a1/a6 through the string."
+}

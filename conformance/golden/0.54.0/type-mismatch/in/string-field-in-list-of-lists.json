@@ -1,0 +1,59 @@
+{
+  "allowed": [],
+  "degenerateReason": "The haystack holds only lists and aString is a string, so CEL denies every seed.",
+  "id": "type-mismatch/in/string-field-in-list-of-lists",
+  "intent": "Membership of a string attribute in a literal list of one-element lists (aString in [[\"one\"], [\"same\"]]).",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": [
+                    "one"
+                  ]
+                },
+                {
+                  "value": [
+                    "same"
+                  ]
+                }
+              ],
+              "operator": "list"
+            }
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/in/string-field-in-list-of-lists",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in [[\"one\"], [\"same\"]]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The haystack holds only lists, so no string is a member; flattening it into IN ('one', 'same') over-grants."
+}

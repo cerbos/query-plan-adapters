@@ -7,13 +7,12 @@ This repository does not ship an Entity Framework (or any other .NET) query plan
 The cost of an adapter here is not the translator — it is the proof obligation that comes
 with it. Every adapter in this repository must:
 
-- carry a per-adapter classification of **all 140 actions** in `conformance/actions.json`,
-  declaring for each one whether the adapter translates it, cannot express it (and therefore
-  throws), or hits an upstream planner divergence;
-- run a differential harness that plans against a real PDP, executes the translated query
-  against a real store, and compares the returned ids against per-row `check()` decisions;
-- own a CI workflow that replays that harness, validates the corpus, and runs a degeneracy
-  guard so no action can pass vacuously;
+- replay **every case** in `conformance/cases/` and keep a `conformance-ledger.json` of the
+  ones it cannot pass — each either refused with a throw or tracked as a known divergence;
+- run a harness that translates each recorded plan, executes the query against a real store,
+  and compares the returned ids against the recorded per-row `check()` decisions, for both
+  pinned PDP versions;
+- own a CI workflow that runs that harness and validates the corpus;
 - own a publish path and a README `Conformance contract` table kept in sync with the corpus.
 
 The adapters live in four toolchains — TypeScript, Python, Go and Java — and each new

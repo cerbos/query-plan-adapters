@@ -2,6 +2,7 @@
 // handler shares.
 
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
+import { UnsupportedQueryPlanError } from "./errors";
 
 export interface NamedOperand {
   name: string;
@@ -41,7 +42,7 @@ export function isOperatorOperand(
 
 export function assertDefined<T>(value: T | undefined, message: string): T {
   if (value === undefined) {
-    throw new Error(message);
+    throw new UnsupportedQueryPlanError(message);
   }
   return value;
 }
@@ -57,7 +58,7 @@ export function assertLogicalOperands(
   operands: PlanExpressionOperand[]
 ): void {
   if ((operator === "and" || operator === "or") && operands.length === 0) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} requires at least one operand: an empty ${operator} is not something the ` +
         "planner emits, and translating it would produce an unconditional filter " +
         "({ AND: [] } matches every row)"

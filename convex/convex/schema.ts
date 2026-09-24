@@ -16,7 +16,7 @@ export const adversarialDocument = {
   coOwner: v.union(v.string(), v.null()),
   tagNames: v.array(v.union(v.string(), v.null())),
   // Native arrays, so an element keeps its JSON type: a stored `true` is never the number 1, and a
-  // null element is a null VALUE rather than a missing one (the `index-*-list` actions).
+  // null element is a null VALUE rather than a missing one (the `collection/index/*` cases).
   aNumberList: v.array(v.union(v.number(), v.null())),
   aBoolList: v.array(v.union(v.boolean(), v.null())),
   obj: v.object({ inner: v.string() }),

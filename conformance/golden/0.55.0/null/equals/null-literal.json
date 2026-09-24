@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a8",
+    "c2",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/equals/null-literal",
+  "intent": "An explicit-null attribute (owner) compared == null.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.owner"
+          },
+          {
+            "value": null
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/equals/null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.owner == null"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "Must become IS NULL, not = NULL (always UNKNOWN in SQL)."
+}

@@ -31,9 +31,8 @@
         </properties>
     </persistence-unit>
 
-    <!-- Isolated database for RepositorySurfaceTest, which seeds rows of its own and reads them
-         back through a real repository. Sharing test-pu would let create-drop wipe them out from
-         under whichever class ran second. -->
+    <!-- Separate database for RepositorySurfaceTest, so another unit's create-drop cannot wipe
+         its rows. -->
     <persistence-unit name="repository-surface-pu" transaction-type="RESOURCE_LOCAL">
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
@@ -61,10 +60,7 @@
         </properties>
     </persistence-unit>
 
-    <!-- The offline translator unit test (SpringDataTranslatorTest): no JDBC connection at all.
-         Hibernate is told the dialect rather than discovering it, and criteria literals are
-         INLINED so the SQL the suite records carries the operands rather than placeholders. The
-         dialect below is only the default; the suite overrides it per rendered dialect. -->
+    <!-- Offline suites (OptionsTest, RefusalTypesTest): no JDBC connection. -->
     <persistence-unit name="translator-pu" transaction-type="RESOURCE_LOCAL">
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>
@@ -87,8 +83,7 @@
         </properties>
     </persistence-unit>
 
-    <!-- Isolated database for the adversarial differential suite so its seed data never
-         interferes with the other test classes sharing the default in-memory DB. -->
+    <!-- Separate database for the adversarial suite's seed rows. -->
     <persistence-unit name="adversarial-pu" transaction-type="RESOURCE_LOCAL">
         <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
         <class>dev.cerbos.queryplan.springdata.testmodel.ResourceEntity</class>

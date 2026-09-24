@@ -1,9 +1,11 @@
 import { PlanResourcesResponse, PlanKind } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
 
 export { PlanKind };
+export { UnsupportedQueryPlanError };
 
 export type MongooseFilter = Record<string, any>;
 
@@ -98,6 +100,6 @@ export function queryPlanToMongoose({
         filters: translateCondition(queryPlan.condition, ctx),
       };
     default:
-      throw Error(`Invalid query plan.`);
+      throw new UnsupportedQueryPlanError(`Invalid query plan.`);
   }
 }

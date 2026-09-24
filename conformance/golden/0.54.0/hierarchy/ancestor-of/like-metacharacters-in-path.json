@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a9",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/ancestor-of/like-metacharacters-in-path",
+  "intent": "ancestorOf against a constant path containing % and _ ('50%.a_b.x').",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "50%.a_b.x"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "ancestorOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/ancestor-of/like-metacharacters-in-path",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(R.attr.scope).ancestorOf(hierarchy(\"50%.a_b.x\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Strict prefixes must be compared by equality (an IN list), not by pattern; a LIKE prefix test lets the wildcards match other rows."
+}

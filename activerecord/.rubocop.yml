@@ -33,8 +33,7 @@ Lint/ConstantDefinitionInBlock:
 # These specs test the conformance corpus, not a class.
 RSpec/DescribeClass:
   Exclude:
-    - spec/adversarial_conformance_spec.rb
-    - spec/translator_spec.rb
+    - spec/conformance_spec.rb
 
 RSpec/ExampleLength:
   Enabled: false

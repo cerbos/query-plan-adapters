@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a7",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-than/relative-window",
+  "intent": "timestamp(field) < now() - duration(\"24h\"), which the planner folds to a constant instant.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "__NOW_MINUS_24H__"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-than/relative-window",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) < now() - duration(\"24h\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The folded timestamp literal must be compared as an instant, not a string; a3 has no createdAt and must deny."
+}

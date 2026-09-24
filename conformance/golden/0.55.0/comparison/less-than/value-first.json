@@ -1,0 +1,69 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/value-first",
+  "intent": "Ordering with the literal on the left (1 < aNumber).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 1
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "1 < R.attr.aNumber"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Operand inversion, this repository's canonical bug (#258, #259): swapping sides without flipping the operator yields a disjoint set."
+}

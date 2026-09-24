@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "No seed lies below -1e19 (g1, at -9.5e18, is the closest). A translator that narrows the literal to the int64 minimum would return g1; the greater-than mirror carries the discriminating oracle.",
+  "id": "comparison/less-than/double-below-int64-range",
+  "intent": "A double attribute compared < -1e19, a literal beyond the int64 range.",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aDouble"
+          },
+          {
+            "value": -10000000000000000000
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/double-below-int64-range",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble < -1e19"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Narrowing the literal through int64 saturates to Long.MIN_VALUE, so g1 (-9.5e18) falls in the gap and is returned though CEL denies it."
+}

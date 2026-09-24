@@ -1,3 +1,8 @@
+/*
+ * Copyright 2021-2026 Zenauth Ltd.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package dev.cerbos.queryplan.springdata.testmodel;
 
 import jakarta.persistence.Column;
@@ -8,15 +13,9 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 
 /**
- * The first level of the conformance corpus's one REAL to-one relation
- * ({@code conformance/seeds.json}'s {@code parentSeedId}).
- *
- * <p>Unlike {@link NestedEmbeddable}, which is an {@code @Embedded} value living in the resource's
- * own row, this is a separate table reached through a join — which is the whole point: the corpus
- * already carries a dotted attribute that is a flat column wearing a dotted name, and this is the
- * one that is not. A resource owns its own parent chain (the join column is unique, so the
- * relation is to-ONE), so no two resources share a parent row and a filter that returned the
- * parent instead of the child could not agree with the oracle by accident.
+ * First hop of the corpus's to-one relation ({@code parentSeedId} in
+ * {@code conformance/seeds.json}). Unlike {@link NestedEmbeddable}, this is a separate table
+ * reached through a join. The join column is unique, so no two resources share a parent row.
  */
 @Entity
 @Table(name = "adversarial_parent")

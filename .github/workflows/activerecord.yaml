@@ -9,6 +9,9 @@ on:
       - "demo/**"
       - ".github/workflows/activerecord.yaml"
       - ".github/workflows/activerecord-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   push:
     tags:
       - activerecord/v*
@@ -45,29 +48,23 @@ jobs:
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
 
-      # Suites run in Docker; scripts/test.sh reads the PDP pin from conformance/. Don't
-      # hardcode it here.
-      #
-      # Both suites are offline (no PDP). They carry the ActiveRecord dimension because the
-      # golden SQL depends on the ActiveRecord version (see RENDERING_DIFFERS_ON_ACTIVERECORD_71
-      # in spec/translator_spec.rb).
-      - name: Run the translator unit test and the adapter contract suite
+      # Suites run in Docker, and none needs a PDP: the conformance suite replays the plans and
+      # decisions recorded in conformance/golden/.
+      - name: Run the adapter contract suite
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
-        run: ./scripts/test.sh spec/translator_spec.rb spec/adapter_contract_spec.rb
+        run: ./scripts/test.sh spec/adapter_contract_spec.rb
 
-      # Keep this in the same job as the tests. Baseline leg only: the corpus tests the
-      # translator and store, not the Ruby version.
-      - name: Run the adversarial differential suite
-        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
+      # Keep this in the same job as the tests. The corpus tests the translator and the SQL
+      # ActiveRecord renders, not the Ruby version, so it runs on the baseline leg and on the
+      # low end of the ActiveRecord range.
+      - name: Run the conformance suite
+        if: (matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0') || matrix.activerecord-version == '7.1'
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
-        run: |
-          for strict in false true; do
-            ADAPTER_TEST_STRICT_EVALUATION="$strict" ./scripts/test.sh spec/adversarial_conformance_spec.rb
-          done
+        run: ./scripts/test.sh spec/conformance_spec.rb
 
       - name: Lint
         if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'

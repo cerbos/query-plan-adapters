@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a3",
+    "a4",
+    "b5",
+    "c2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/ancestor-of/constant-path-value-first",
+  "intent": "hierarchy(constant).ancestorOf(hierarchy(field)): the field must be a strict descendant.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "dept.eng"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "ancestorOf"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/ancestor-of/constant-path-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(\"dept.eng\").ancestorOf(hierarchy(R.attr.scope))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Must become LIKE 'dept.eng.%' with the separator; dropping it matches dept.engineering, and ancestorOf is strict so the equal path is excluded."
+}

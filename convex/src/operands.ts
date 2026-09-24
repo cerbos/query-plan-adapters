@@ -5,6 +5,7 @@ import type {
   PlanExpressionVariable,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MapperConfig } from "./index";
 
 // Reading plan nodes and the caller's mapper. Shared by the three passes over a plan: validation,
@@ -27,7 +28,7 @@ export const operandAt = (
 ): PlanExpressionOperand => {
   const operand = operands[index];
   if (!operand) {
-    throw new Error(errorMessage);
+    throw new UnsupportedQueryPlanError(errorMessage);
   }
   return operand;
 };

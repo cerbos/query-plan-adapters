@@ -19,6 +19,7 @@ import {
   buildNegatedFilter,
   buildPrismaFilterFromCerbosExpression,
 } from "./translate";
+import { UnsupportedQueryPlanError } from "./errors";
 
 /** What one ternary branch contributes: a known constant, or a filter to be guarded. */
 type TernaryBranchPredicate =
@@ -41,7 +42,7 @@ function getTernaryOperands(operands: PlanExpressionOperand[]): {
   elseBranch: PlanExpressionOperand;
 } {
   if (operands.length !== 3) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `if (ternary) requires exactly 3 operands (condition, then, else), got ${operands.length}`
     );
   }
@@ -69,7 +70,7 @@ function getConstantBooleanCondition(
     return undefined;
   }
   if (typeof condition.value !== "boolean") {
-    throw new Error("if (ternary) condition must be a boolean expression");
+    throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
   }
   return condition.value;
 }
@@ -85,7 +86,7 @@ function buildBooleanBranchFilter(
     };
   }
   if (typeof branch.value !== "boolean") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "if (ternary) branch in boolean position must be a boolean"
     );
   }
@@ -257,7 +258,7 @@ export function tryHandleTernaryComparison(
     return null;
   }
   if (operands.length !== 2) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} with a ternary requires exactly 2 operands, got ${operands.length}`
     );
   }
@@ -267,7 +268,7 @@ export function tryHandleTernaryComparison(
     "Ternary comparison operand is missing"
   );
   if (!isOperatorOperand(ternary)) {
-    throw new Error("Ternary comparison operand must be an expression");
+    throw new UnsupportedQueryPlanError("Ternary comparison operand must be an expression");
   }
 
   const { condition, thenBranch, elseBranch } = getTernaryOperands(

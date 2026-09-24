@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h3"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/end-anchor-before-final-newline",
+  "intent": "An anchored regex over a string attribute (aString.matches(\"^ab$\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^ab$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/end-anchor-before-final-newline",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^ab$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2's $ matches only at the absolute end, so \"ab\\n\" is denied; PCRE, POSIX and most SQL dialects let $ match before a final newline and over-grant it (#396)."
+}

@@ -1,0 +1,100 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/greater-than/infinity-from-ternary",
+  "intent": "A ternary yielding +Infinity or -Infinity (1.0/0.0, -1.0/0.0) compared > 0.5.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": 0.5
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/greater-than/infinity-from-ternary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) > 0.5) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Infinities order normally; treating every non-finite value like NaN, or refusing division by zero blindly, gets the +Infinity arm wrong."
+}

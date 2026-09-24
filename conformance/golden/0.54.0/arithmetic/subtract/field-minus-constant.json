@@ -1,0 +1,65 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/subtract/field-minus-constant",
+  "intent": "Attribute minus a double constant compared with zero (aNumber - 3.0 <= 0.0).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 3
+                }
+              ],
+              "operator": "sub"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/subtract/field-minus-constant",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber - 3.0 <= 0.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Subtraction is not commutative; swapped operands or a naive algebraic solve select the wrong rows."
+}

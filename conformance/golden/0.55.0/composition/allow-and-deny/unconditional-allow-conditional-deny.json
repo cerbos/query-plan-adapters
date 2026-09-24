@@ -1,0 +1,85 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "composition/allow-and-deny/unconditional-allow-conditional-deny",
+  "intent": "An unconditional ALLOW plus a conditional DENY (aNumber < 0), planned as not(lt): the most common real policy.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/allow-and-deny/unconditional-allow-conditional-deny",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber < 0"
+        }
+      },
+      "effect": "EFFECT_DENY",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The whole filter is a bare negation; a translator that expects a positive root, or drops the DENY, returns every row."
+}

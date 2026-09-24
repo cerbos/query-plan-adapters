@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "cast/double/negated-malformed-string",
+  "intent": "!(double(aString) > 50.0): a string-to-double conversion under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "double"
+                  }
+                },
+                {
+                  "value": 50
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/double/negated-malformed-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(double(R.attr.aString) > 50.0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL requires the whole string to parse; SQL casts accept a numeric prefix or yield 0, over-granting malformed strings under negation."
+}

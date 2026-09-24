@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/drizzle.yaml"
       - ".github/workflows/drizzle-publish.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
   # Release tags invoke these same checks through the publish workflow.
   workflow_call:
 
@@ -27,7 +30,7 @@ defaults:
 jobs:
   test:
     strategy:
-      # The adversarial suite now shares this matrix, so the default fail-fast would let an
+      # The conformance harness shares this matrix, so the default fail-fast would let an
       # unrelated Node leg cancel the baseline leg mid-corpus and report it as "cancelled" —
       # neither a pass nor a failure for the repo's load-bearing signal.
       fail-fast: false
@@ -39,24 +42,6 @@ jobs:
 
       - name: Validate conformance corpus
         run: ../conformance/scripts/validate-corpus.sh
-
-      # Only the adversarial suite needs a PDP: the translator unit test reads its plans from
-      # conformance/wire-fixtures/, which the `Conformance Corpus` workflow replans and diffs
-      # against this same pinned version. Both steps are therefore gated to the baseline Node leg,
-      # the one the adversarial steps below run on.
-      - name: Read pinned Cerbos version
-        if: matrix.node-version == '22'
-        id: cerbos
-        run: echo "version=$(tr -d '[:space:]' < ../conformance/CERBOS_VERSION)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Cerbos
-        if: matrix.node-version == '22'
-        uses: cerbos/cerbos-setup-action@30ad92b0242d792bd156985682426577fcfcc589 # v1
-        with:
-          # Without a token the action fetches the release under GitHub's stricter anonymous
-          # rate limit, and that download is the step that has failed a run with no code change.
-          github_token: ${{ github.token }}
-          version: v${{ steps.cerbos.outputs.version }}
 
       - name: Test using Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -73,53 +58,29 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
 
-      # The adversarial corpus is a property of the translator, not of the Node runtime, so it
-      # runs in both evaluation modes on the baseline leg only. Each mode starts its own PDP so
-      # planning and the Check oracle share the engine configuration.
-      - name: Run adversarial differential suite (SQLite)
+      # The conformance harness replays the recorded goldens (no PDP) against a real store. The
+      # corpus discriminates the translator and the store, not the Node runtime, so it runs on the
+      # baseline leg only.
+      - name: Run conformance harness (SQLite)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial
 
       # The store IS a translator property, unlike the Node runtime: `float(53)` casts, boolean
-      # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL,
-      # and before this leg existed PostgreSQL support was pinned at the rendered-string level
-      # (cerbos/query-plan-adapters#320). It stays on the baseline Node leg for the same reason
-      # the SQLite one does; the container comes from testcontainers, which needs no service
-      # block on ubuntu-latest.
-      - name: Run adversarial differential suite (PostgreSQL)
+      # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL
+      # (cerbos/query-plan-adapters#320). The container comes from testcontainers, which needs no
+      # service block on ubuntu-latest.
+      - name: Run conformance harness (PostgreSQL)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:postgres || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial:postgres
 
       # The third store, and the one that disagrees with the other two on the most
       # (cerbos/query-plan-adapters#340): its default collation makes `=` case- AND
       # accent-insensitive, `CAST(... AS TEXT)` is a syntax error rather than a portable cast,
       # `x / 0` is NULL where PostgreSQL raises, and `CAST(... AS FLOAT(53))` exists only from
-      # MySQL 8.0.17. Same baseline-Node gate as the two legs above, for the same reason: the
-      # store is a translator property, the Node runtime is not.
-      - name: Run adversarial differential suite (MySQL)
+      # MySQL 8.0.17.
+      - name: Run conformance harness (MySQL)
         if: matrix.node-version == '22'
-        run: |
-          status=0
-          for strict_evaluation in false true; do
-            echo "::group::strictEvaluation=$strict_evaluation"
-            ADAPTER_TEST_STRICT_EVALUATION=$strict_evaluation npm run test:adversarial:mysql || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
+        run: npm run test:adversarial:mysql
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the
@@ -165,7 +126,7 @@ jobs:
       - run: npm install
 
       # The PDP is a container started by the runner from demo/docker-compose.yml, pinned to
-      # conformance/CERBOS_VERSION and conformance/CERBOS_IMAGE_DIGEST — no cerbos-setup-action
+      # `current` in conformance/pdp-versions.json (tag and digest) — no cerbos-setup-action
       # here, because an example must reach the PDP the way a deployed application does.
       - name: Run the example against the demo domain
         run: ../demo/scripts/run-example.sh drizzle

@@ -1,0 +1,70 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "null/not-equals/null-literal-value-first",
+  "intent": "null != owner, the null literal as the first operand.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": null
+          },
+          {
+            "variable": "request.resource.attr.owner"
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/not-equals/null-literal-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "null != R.attr.owner"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Reading operands positionally treats null as the field and inverts the comparison (#258/#259)."
+}

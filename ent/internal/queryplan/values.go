@@ -651,7 +651,7 @@ var (
 // parseTimestamp unwraps a temporal column or parses an RFC-3339 planner constant.
 //
 // Go's time.Time carries nanoseconds, so unlike the Python and TypeScript adapters this does not
-// have to reject the planner's sub-millisecond now() literal — the `ts-window`/`ts-vf` actions are
+// have to reject the planner's sub-millisecond now() literal — the `timestamp/*/relative-window*` cases are
 // translatable here.
 func parseTimestamp(v value, entryIsTemporal bool) (value, error) {
 	if entryIsTemporal {

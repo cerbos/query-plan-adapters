@@ -1,0 +1,93 @@
+{
+  "allowed": [
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/negated-huge-threshold-on-missing-attribute",
+  "intent": "Negated size(optional string) < 5000000000, OR'd with aNumber > 10 to keep the oracle discriminating.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aOptionalString"
+                            }
+                          ],
+                          "operator": "size"
+                        }
+                      },
+                      {
+                        "value": 5000000000
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 10
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/negated-huge-threshold-on-missing-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Folding the always-true arm to IS NOT NULL negates to IS NULL and readmits missing-attribute rows (a2/a4/a8), where size() errors and denies under both polarities."
+}

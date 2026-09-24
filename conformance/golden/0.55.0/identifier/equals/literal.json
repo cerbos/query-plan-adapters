@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "identifier/equals/literal",
+  "intent": "The resource id (R.id) compared == a string literal.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.id"
+          },
+          {
+            "value": "f1"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "identifier/equals/literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.id == \"f1\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "R.id is not under request.resource.attr; an adapter that only strips that prefix misses it or maps it to the wrong column (primary key, ObjectId, document id)."
+}

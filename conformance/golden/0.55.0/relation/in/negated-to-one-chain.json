@@ -1,0 +1,55 @@
+{
+  "allowed": [
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/in/negated-to-one-chain",
+  "intent": "Negated membership !(\"finance\" in mainCategory.subNames) where most rows have no mainCategory.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "finance"
+                },
+                {
+                  "variable": "request.resource.attr.mainCategory.subNames"
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/in/negated-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(\"finance\" in R.attr.mainCategory.subNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An unguarded NOT EXISTS adds the parentless rows; the absent-parent guard belongs in the shared relation-scope code, not in each macro (#315)."
+}

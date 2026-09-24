@@ -22,29 +22,18 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * The leaf operators: one document field against one literal.
- *
- * <p>Owns operand resolution (which side is the field, which the value, and the {@code timestamp()}
- * wrapper), operator mirroring when the value comes first, the null leaf and null-aware
- * membership, the routing of each operator through the caller's override or its default lowering,
- * and the refusals of a non-scalar where a term or range query needs a scalar. It is the one
- * place a field is compared against a value, so every rule about WHICH comparisons the Query DSL
- * can answer honestly sits here.
+ * Translates leaf comparisons: one document field against one literal.
  */
 final class LeafTranslator {
 
-    /**
-     * The leaf operators whose literal operand must be a scalar. A term or range query compares a
-     * field against one value; CEL's whole-list and whole-map equality have no Query DSL form.
-     */
+    /** Operators whose literal must be a scalar: term and range queries take one value. */
     private static final Set<String> SCALAR_OPERAND_OPERATORS = Set.of(
             "eq", "ne", "lt", "gt", "le", "ge", "contains", "startsWith", "endsWith", "matches");
 
-    /** The string operators, which a field declared as anything but a string can never satisfy. */
     private static final Set<String> STRING_OPERATORS =
             Set.of("contains", "startsWith", "endsWith", "matches");
 
-    /** The mirror of each ordering operator, which is what its negation lowers to. */
+    /** The negation of each ordering operator. */
     private static final Map<String, String> NEGATED_RANGE = Map.of(
             "lt", "ge", "le", "gt", "gt", "le", "ge", "lt");
 
@@ -53,7 +42,6 @@ final class LeafTranslator {
         record Literal(Object value) implements ResolvedOperand {}
     }
 
-    /** A leaf read with the field on the left, whatever order the plan carried it in. */
     private record Comparison(String variable, Object value, boolean variableFirst) {}
 
     private final Options options;
@@ -91,8 +79,8 @@ final class LeafTranslator {
         if ("in".equals(normalizedOperator) && variableFirst && value instanceof List<?> values) {
             List<?> members = typedMembers(field, values, operands);
             if (members.isEmpty()) {
-                // No element can equal the field: CEL's `in` is heterogeneous equality against
-                // each element, so it is false wherever the field is present.
+                // No element has the field's type, so CEL's `in` is false wherever the field is
+                // present.
                 return whenTrue ? Queries.matchNone() : Queries.exists(field);
             }
             value = members;
@@ -100,8 +88,7 @@ final class LeafTranslator {
         if (!variableFirst && "in".equals(normalizedOperator)
                 && !options.operatorOverrides().containsKey("in")
                 && !inhabits(declaredElementType(field, "in", operands), value)) {
-            // A value of the wrong type is never an element: CEL's `in` is heterogeneous equality
-            // against each element, and the negated form was refused above.
+            // A value of the wrong type is never an element. The negated form was refused above.
             return Queries.matchNone();
         }
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
@@ -123,7 +110,6 @@ final class LeafTranslator {
         return whenTrue ? positive : negatedQuery(normalizedOperator, field, value, positive);
     }
 
-    /** Which operand is the document field and which the literal, or a refusal when neither is. */
     private static Comparison resolveComparison(Operand leftOperand, Operand rightOperand) {
         ResolvedOperand left = resolveLeafOperand(leftOperand);
         ResolvedOperand right = resolveLeafOperand(rightOperand);
@@ -143,17 +129,12 @@ final class LeafTranslator {
     }
 
     /**
-     * The answer for a comparison against a field whose declared {@link ScalarType} the literal
-     * cannot inhabit, or {@code null} when the declaration does not decide it (an override owns
-     * the operator, or the types agree).
+     * The query for a literal whose type does not match the field's declared type, or
+     * {@code null} when the types match or an override handles the operator.
      *
-     * <p>CEL raises a no-overload error for a comparison across types, and an error is neither
-     * true nor false — so it matches nothing in either polarity. {@code eq} and {@code ne} are the
-     * exception: CEL's heterogeneous equality is simply false, so {@code ne} holds wherever the
-     * field is present.
-     *
-     * @throws UnmappedAttributeException when the field carries no declaration; see
-     *         {@link #declaredType(String, String)}
+     * <p>A cross-type comparison is a CEL error, so it matches nothing in either polarity. The
+     * exception is {@code eq}/{@code ne}: cross-type equality is false, so {@code ne} matches
+     * wherever the field exists.
      */
     private Map<String, Object> typeMismatchQuery(String operator, String field, Object value,
                                                   List<Operand> operands, boolean whenTrue) {
@@ -177,11 +158,9 @@ final class LeafTranslator {
     }
 
     /**
-     * The elements of a {@code field in [...]} list that can equal the field, or the list
-     * unchanged when an {@code in} override owns the operator. A {@code terms} query coerces each
-     * term onto the field's mapped type exactly as a {@code term} query does, so an element of the
-     * wrong type is dropped here rather than left to match; a {@code null} element is kept for
-     * the null-aware membership lowering to answer.
+     * The elements of {@code field in [...]} that have the field's type. Elasticsearch would
+     * coerce the others and match them, so they are dropped. Null elements are kept for the
+     * null-aware path. Unchanged when an {@code in} override is set.
      */
     private List<?> typedMembers(String field, List<?> values, List<Operand> operands) {
         if (options.operatorOverrides().containsKey("in")) {
@@ -195,17 +174,14 @@ final class LeafTranslator {
     }
 
     /**
-     * The elements of a {@code hasIntersection} literal list that can equal an element of the
-     * collection {@code field}. A {@code terms} query coerces each term onto the field's mapped
-     * type, so an element of the wrong type is dropped here rather than left to match; an empty
-     * result means the intersection is false. The collection's declaration is its ELEMENT type.
+     * The {@code hasIntersection} literals that have the collection's declared element type. An
+     * empty result means the intersection is false.
      */
     List<?> typedIntersection(String field, List<?> values, List<Operand> operands) {
         ScalarType type = declaredElementType(field, "hasIntersection", operands);
         return values.stream().filter(element -> inhabits(type, element)).toList();
     }
 
-    /** {@link #declaredType(String, String)} for a collection, whose declaration is per element. */
     private ScalarType declaredElementType(String field, String operator, List<Operand> operands) {
         ScalarType type = declaredType(field, operator);
         if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
@@ -215,15 +191,9 @@ final class LeafTranslator {
     }
 
     /**
-     * The caller's declared {@link ScalarType} for {@code field}, or a refusal when there is none.
-     *
-     * <p>Every comparison this class lowers without an override is a term-level query, and
-     * Elasticsearch coerces a query term onto the field's MAPPED type: {@code "5"} matches the
-     * number {@code 5}, {@code "true"} matches the boolean {@code true}, and {@code 5} matches the
-     * keyword {@code "5"}. CEL's cross-type equality is {@code false}, so the untyped lowering
-     * returns rows the PDP denies. The adapter is handed a plan, never a mapping, and cannot tell
-     * which type a field holds — so the declaration is required rather than assumed
-     * (<a href="https://github.com/cerbos/query-plan-adapters/issues/496">#496</a>).
+     * The declared {@link ScalarType} for {@code field}. Required because Elasticsearch coerces a
+     * query term to the mapped type ({@code "5"} matches the number {@code 5}) while CEL's
+     * cross-type equality is false, and the adapter cannot see the mapping.
      */
     private ScalarType declaredType(String field, String operator) {
         ScalarType type = options.scalarTypes().get(field);
@@ -254,10 +224,7 @@ final class LeafTranslator {
         return unsupported("Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly");
     }
 
-    /**
-     * The query for the operator holding. A positive {@code ne} with no {@code ne} override is
-     * {@code exists AND NOT eq}, with the caller's {@code eq} override inside it.
-     */
+    /** Without an {@code ne} override, {@code ne} is {@code exists AND NOT eq}. */
     private Map<String, Object> positiveQuery(String operator, String field, Object value) {
         if ("ne".equals(operator) && !options.operatorOverrides().containsKey("ne")) {
             return Queries.definedAndNot(field, operatorOrDefault("eq").apply(field, value));
@@ -270,9 +237,8 @@ final class LeafTranslator {
     }
 
     /**
-     * The query for the operator NOT holding. Every negation requires the field to exist, because
-     * CEL errors (and the PDP denies) on a missing one, while a bare {@code bool.must_not} would
-     * match it.
+     * The query for the operator not holding. Requires the field to exist: CEL errors on a missing
+     * field, but a bare {@code bool.must_not} would match it.
      */
     private Map<String, Object> negatedQuery(
             String operator, String field, Object value, Map<String, Object> positive) {
@@ -280,8 +246,7 @@ final class LeafTranslator {
             case "eq", "in", "contains", "startsWith", "endsWith", "matches" ->
                     Queries.definedAndNot(field, positive);
             case "ne" -> operatorOrDefault("eq").apply(field, value);
-            // The negation of an ordering operator is its mirror, so the mirror's override is the
-            // one a caller expects to see applied.
+            // Uses the override of the negated operator, if any.
             case "lt", "le", "gt", "ge" ->
                     operatorOrDefault(NEGATED_RANGE.get(operator)).apply(field, value);
             default -> throw unsupported(
@@ -290,10 +255,8 @@ final class LeafTranslator {
     }
 
     /**
-     * A term or range query compares a field against ONE scalar. CEL's list and map literals have
-     * other meanings — whole-list equality, key membership — that the Query DSL has no operand
-     * for, so a non-scalar where a scalar is expected is refused by name rather than serialised
-     * into a query Elasticsearch would either reject or, worse, read as a different predicate.
+     * Refuses a list or map literal where a scalar is needed. CEL gives them meanings (whole-list
+     * equality, key membership) that the Query DSL cannot express.
      */
     private static void rejectNonScalarOperand(String operator, Object value, boolean variableFirst) {
         boolean nonScalar = value instanceof List<?> || value instanceof Map<?, ?>;
@@ -359,9 +322,8 @@ final class LeafTranslator {
     }
 
     /**
-     * The operator as it reads with the field on the left. The planner preserves policy source
-     * order, so {@code 5 < R.attr.x} arrives value-first and the ordering has to be mirrored; a
-     * string operator whose RECEIVER is the constant has no mirror and is refused.
+     * The operator rewritten with the field on the left: {@code 5 < x} becomes {@code x > 5}. A
+     * string operator whose receiver is the literal has no mirror and is refused.
      */
     static String normalizeLeafOperator(String operator, boolean variableFirst) {
         if (variableFirst) {
@@ -423,18 +385,13 @@ final class LeafTranslator {
         return Queries.definedAndNot(field, operatorOrDefault("in").apply(field, nonNull));
     }
 
-    /**
-     * A {@code null} element in an intersection has no indexed counterpart — Elasticsearch does
-     * not index a JSON null — so whichever side carries it, the shape is refused before a
-     * {@code terms} query is built that would silently drop the element.
-     */
+    /** Elasticsearch does not index null, so a null intersection element cannot match. */
     static void rejectNullIntersection(List<?> values) {
         if (values.stream().anyMatch(Objects::isNull)) {
             throw unsupported("hasIntersection with null requires an explicit null-value mapping");
         }
     }
 
-    /** The caller's override for {@code operator}, or its default lowering. */
     OperatorFunction operatorOrDefault(String operator) {
         return options.operatorOverrides().getOrDefault(operator, Queries.DEFAULT_OPERATORS.get(operator));
     }

@@ -1,0 +1,245 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: 'null'
+description: 'Null handling: explicit null values versus missing attributes (the two NULL conventions).'
+cases:
+- id: 'null/all/negated-null-element'
+  tier: adversarial
+  intent: Negated all() over tags where some elements have a NULL name.
+  trap: '!error is still an error and denies; lowering the NULL element to FALSE makes NOT(FALSE) true and leaks the row.'
+  condition:
+    match:
+      expr: '!R.attr.tags.all(t, t.name == "public")'
+- id: 'null/all/negated-null-element-with-false-sibling'
+  tier: adversarial
+  intent: 'Negated all() where a false witness sits beside a NULL-name element (b6), so all() is false rather than an error.'
+  trap: 'Control for the null-element cases: denying every row with a NULL element under-grants b6, which CEL allows because the false witness absorbs the error.'
+  condition:
+    match:
+      expr: '!R.attr.tags.all(t, t.name != "public")'
+- id: 'null/all/null-element-with-true-sibling'
+  tier: adversarial
+  intent: all() over tags where one element has a NULL name and a sibling satisfies the predicate (b6).
+  trap: The NULL element is a CEL error that all() only absorbs through a false witness; treating it as FALSE or TRUE instead of UNKNOWN gets b6 wrong.
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, t.name != "x")'
+- id: 'null/equals/field-to-field-both-explicit-null'
+  tier: adversarial
+  intent: 'Equality between two explicit-null attributes (owner == coOwner).'
+  trap: 'CEL says null == null is true while SQL gives UNKNOWN, so e1, the one row where both are null, is dropped.'
+  condition:
+    match:
+      expr: R.attr.owner == R.attr.coOwner
+- id: 'null/equals/negated-explicit-null-against-literal'
+  tier: adversarial
+  intent: 'Negated equality !(owner == "x") over an explicit-null owner.'
+  trap: 'The planner sends not(eq(...)) verbatim, so an adapter that null-guards only ne still turns null rows UNKNOWN under NOT and under-grants.'
+  condition:
+    match:
+      expr: '!(R.attr.owner == "x")'
+- id: 'null/equals/negated-null-literal'
+  tier: adversarial
+  intent: '!(owner == null), a negated null equality.'
+  trap: 'NOT (col IS NULL) is never UNKNOWN and returns every non-null row; lowering the inner comparison to = NULL makes the negation UNKNOWN everywhere.'
+  condition:
+    match:
+      expr: '!(R.attr.owner == null)'
+- id: 'null/equals/null-literal'
+  tier: core
+  intent: 'An explicit-null attribute (owner) compared == null.'
+  trap: 'Must become IS NULL, not = NULL (always UNKNOWN in SQL).'
+  condition:
+    match:
+      expr: R.attr.owner == null
+- id: 'null/equals/null-literal-on-missing-attribute'
+  tier: adversarial
+  intent: '== null on an attribute that is omitted, not sent as null, when its column is NULL.'
+  trap: 'The wire node is identical to an explicit-null equality, so defaulting to that convention emits IS NULL and returns five rows the PDP denies; under the omitted convention it must throw (#302).'
+  condition:
+    match:
+      expr: R.attr.aOptionalString == null
+  degenerate:
+    oracle: empty
+    reason: 'aOptionalString follows the omitted convention, so == null is a missing-attribute error for every NULL row and false for every other; CEL denies every seed.'
+- id: 'null/exists-one/negated-null-element'
+  tier: adversarial
+  intent: 'Negated exists_one() over tags where some elements have a NULL name (b5, b6).'
+  trap: 'exists_one errors on any erroring element, even beside a true one (b6); those rows must stay UNKNOWN, since NOT(FALSE) leaks them.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists_one(t, t.name == "public")'
+- id: 'null/exists/negated-explicit-null-in-principal-list'
+  tier: adversarial
+  intent: 'Negated exists over an 11-element principal list comparing an explicit-null owner, which the planner folds into a value list.'
+  trap: 'The null guard must live in the shared comparison code, not only the scalar path; the naive value-list fold returns 13 rows against an oracle of 18 (#295/#301).'
+  condition:
+    match:
+      expr: '!P.attr.manyTeams.exists(t, R.attr.owner == t)'
+- id: 'null/has-intersection/literal-list-with-null-element'
+  tier: adversarial
+  intent: hasIntersection of tagNames with a literal list containing a null element.
+  trap: 'The null element behaves like in and must match null-named tags (b5/b6) through IS NULL; a raw IN (..., NULL) drops them.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tagNames, ["public", null])'
+- id: 'null/has-intersection/literal-list-with-null-element-against-mapped-names'
+  tier: adversarial
+  intent: 'hasIntersection(tags.map(t, t.name), ["public", null]).'
+  trap: 'A tag with no name is a missing key in CEL, not a null value, so the null literal must not match it as SQL NULL handling or an IS NULL rewrite would.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", null])'
+- id: 'null/has-intersection/literal-list-with-null-element-against-mapped-names-value-first'
+  tier: adversarial
+  intent: 'hasIntersection(["public", null], tags.map(t, t.name)), the value-first spelling.'
+  trap: 'Value-first operand order plus a null literal element: inverting the operands, or letting the null match nameless tags, mistranslates.'
+  condition:
+    match:
+      expr: 'hasIntersection(["public", null], R.attr.tags.map(t, t.name))'
+- id: 'null/has-intersection/literal-list-with-null-element-value-first'
+  tier: adversarial
+  intent: 'hasIntersection(["public", null], R.attr.tagNames): a literal list with null on the left, a list with null elements on the right.'
+  trap: 'null equals null in CEL, so a null tagNames element intersects; SQL IN or = never matches NULL, and swapping or losing the value-first operands mistranslates.'
+  condition:
+    match:
+      expr: 'hasIntersection(["public", null], R.attr.tagNames)'
+- id: 'null/has/missing-attribute'
+  tier: extended
+  intent: has() presence test over an optional attribute.
+  trap: 'has() must become a presence (IS NOT NULL) test; the planner currently folds it to always-allowed, so adapters return every row while check() denies rows missing the attribute.'
+  condition:
+    match:
+      expr: has(R.attr.aOptionalString)
+  plannerDivergence:
+    issue: Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED
+    reason: 'The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing.'
+    pdp:
+    - 0.54.0
+    - 0.55.0
+- id: 'null/in/literal-list-of-only-null'
+  tier: adversarial
+  intent: 'Membership in a list whose only element is null (owner in [null]).'
+  trap: 'The planner folds it to eq(owner, null), which must become IS NULL rather than = NULL.'
+  condition:
+    match:
+      expr: 'R.attr.owner in [null]'
+- id: 'null/in/literal-list-with-null-element'
+  tier: adversarial
+  intent: Membership of owner in a literal list holding strings and a null element.
+  trap: 'null in [..., null] is true in CEL, so the null element must become an IS NULL disjunct; a raw IN (..., NULL) drops the null-owner rows.'
+  condition:
+    match:
+      expr: 'R.attr.owner in ["x", "one_two", null]'
+- id: 'null/in/missing-attribute-in-multi-element-list'
+  tier: adversarial
+  intent: 'Membership of a missing-when-null attribute in a multi-element literal list containing an underscore.'
+  trap: 'Missing-attribute rows must deny, and "one_two" must match by equality, never as a LIKE pattern.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString in ["x", "one_two"]'
+- id: 'null/in/missing-attribute-in-resource-list'
+  tier: adversarial
+  intent: An optional attribute tested for membership in a resource list attribute (R.attr.aOptionalString in R.attr.tagNames).
+  trap: 'An omitted attribute is a CEL error that denies, not an explicit null; mapping it to NULL and matching tagNames'' null elements over-grants.'
+  condition:
+    match:
+      expr: (R.attr.aOptionalString in R.attr.tagNames)
+- id: 'null/in/missing-attribute-in-single-element-list'
+  tier: adversarial
+  intent: 'Membership of a missing-when-null attribute in a one-element literal list.'
+  trap: 'A missing attribute is a CEL error that denies; coalescing NULL, or simplifying the one-element IN, must not let those rows through.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString in ["x"]'
+- id: 'null/in/negated-explicit-null-in-literal-list'
+  tier: adversarial
+  intent: 'Negated membership of an explicit-null owner in a literal list with no null element.'
+  trap: 'CEL gives true for a null owner but SQL NOT IN gives UNKNOWN: the oracle is 20 of 22 rows and the naive translation returns 15.'
+  condition:
+    match:
+      expr: '!(R.attr.owner in ["x", "one_two"])'
+- id: 'null/in/negated-literal-list-of-only-null'
+  tier: adversarial
+  intent: Negated membership in a list whose only element is null.
+  trap: Must become IS NOT NULL; NOT (owner = NULL) or NOT IN (NULL) is UNKNOWN and returns nothing.
+  condition:
+    match:
+      expr: '!(R.attr.owner in [null])'
+- id: 'null/in/negated-literal-list-with-null-element'
+  tier: adversarial
+  intent: Negated membership of owner in a literal list holding strings and a null element.
+  trap: 'SQL NOT IN (..., NULL) is UNKNOWN for every row and returns nothing.'
+  condition:
+    match:
+      expr: '!(R.attr.owner in ["x", "one_two", null])'
+- id: 'null/in/negated-missing-attribute-in-resource-list'
+  tier: adversarial
+  intent: 'Negated membership of an optional attribute in a resource list attribute (!(R.attr.aOptionalString in R.attr.tagNames)).'
+  trap: 'The missing-attribute error still denies under negation; a translation where NOT(missing IN list) is true returns the rows lacking the attribute.'
+  condition:
+    match:
+      expr: '!(R.attr.aOptionalString in R.attr.tagNames)'
+- id: 'null/in/negated-null-literal-in-number-list'
+  tier: adversarial
+  intent: '!(null in aNumberList): true for every row except a6, empty lists included.'
+  trap: 'SQL NOT IN or must_not over a list with NULL elements or a missing field goes three-valued or matches absent documents, dropping or adding rows.'
+  condition:
+    match:
+      expr: '!(null in R.attr.aNumberList)'
+- id: 'null/in/negated-null-literal-in-resource-list'
+  tier: adversarial
+  intent: 'Negated null in R.attr.tagNames: rows with no null-named tag, rows with no tags included.'
+  trap: NOT over an = NULL subquery predicate stays UNKNOWN or true everywhere; rows with empty collections must be allowed.
+  condition:
+    match:
+      expr: '!(null in R.attr.tagNames)'
+- id: 'null/in/null-literal-in-number-list'
+  tier: adversarial
+  intent: 'null in aNumberList: true only where a list holds a null element (a6 [null, 2]).'
+  trap: 'A null element is a value in CEL; MySQL''s JSON_TABLE turns it into SQL NULL (which = never matches) and Elasticsearch does not index it, so a6 is lost.'
+  condition:
+    match:
+      expr: null in R.attr.aNumberList
+- id: 'null/in/null-literal-in-resource-list'
+  tier: adversarial
+  intent: 'null in R.attr.tagNames: whether a related tag has a null name.'
+  trap: Must become EXISTS(name IS NULL); name = NULL matches nothing and loses b5/b6.
+  condition:
+    match:
+      expr: null in R.attr.tagNames
+- id: 'null/not-equals/explicit-null-against-literal'
+  tier: adversarial
+  intent: 'Explicit-null owner compared != a non-null string literal.'
+  trap: 'CEL says null != "x" is true, but SQL NULL != ''x'' is UNKNOWN, so a naive lowering drops the null-owner rows (#308).'
+  condition:
+    match:
+      expr: 'R.attr.owner != "x"'
+- id: 'null/not-equals/field-to-field-mixed-null-conventions'
+  tier: adversarial
+  intent: 'Inequality between an explicit-null attribute (owner) and a missing-when-null attribute (scope).'
+  trap: 'No single predicate is right: treating it as definite over-grants (20 rows instead of 18) and a plain comparison under-grants, so every adapter must refuse it (#308).'
+  condition:
+    match:
+      expr: 'R.attr.owner != R.attr.scope'
+- id: 'null/not-equals/missing-attribute-against-literal'
+  tier: adversarial
+  intent: '!= against a literal on an attribute that is omitted (missing) on some rows.'
+  trap: 'CEL denies a missing attribute, but Chroma $ne or a NULL-tolerant filter includes it; SQL NULL <> ''x'' must stay excluded.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString != "x"'
+- id: 'null/not-equals/null-literal'
+  tier: core
+  intent: 'An explicit-null attribute (owner) compared != null.'
+  trap: 'There is no existence operator on the wire: ne with a null operand must become IS NOT NULL, not <> NULL.'
+  condition:
+    match:
+      expr: 'R.attr.owner != null'
+- id: 'null/not-equals/null-literal-value-first'
+  tier: adversarial
+  intent: 'null != owner, the null literal as the first operand.'
+  trap: 'Reading operands positionally treats null as the field and inverts the comparison (#258/#259).'
+  condition:
+    match:
+      expr: 'null != R.attr.owner'

@@ -1,10 +1,13 @@
 # Copyright 2021-2026 Zenauth Ltd.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Structural tests for ``require_hops``; the adversarial suite proves its semantics.
+"""Unit tests for the mapping helpers a caller wires into ``operator_override_fns``.
 
-These pin what a refactor could quietly break: the guard is a ``CASE`` with no
-``ELSE``, and a direct relation gets no guard.
+The conformance harness is the semantic proof of ``require_hops`` — every chained
+corpus case is compared with the PDP's recorded decisions through it.
+These pin the two structural properties that proof depends on and that a refactor
+could quietly break: the guard is a ``CASE`` with no ``ELSE``, and a direct relation
+gets no guard at all.
 """
 
 from sqlalchemy import Column, Integer, MetaData, String, Table, literal, select
@@ -32,15 +35,17 @@ def _sql(expression) -> str:
 
 
 def test_direct_relation_is_returned_unchanged():
-    # `!tags.exists(...)` over zero tags is TRUE. A guard would make it UNKNOWN.
+    # A direct collection keeps its empty-collection semantics: `!tags.exists(...)`
+    # over zero tags is TRUE, and a guard here would wrongly turn it UNKNOWN.
     answer = literal(True)
     assert require_hops(answer, []) is answer
     assert require_hops(answer, ()) is answer
 
 
 def test_guard_has_no_else_branch():
-    # A missing hop must yield NULL so the row stays excluded under negation.
-    # An ELSE FALSE would become TRUE under NOT: the #309 over-grant.
+    # The whole point. A missing hop must yield NULL, because NOT NULL is still
+    # NULL and that is what keeps the row excluded under BOTH polarities. An ELSE
+    # of FALSE would be TRUE once negated — the #309 over-grant, restored.
     guarded = require_hops(literal(True), [category.c.resource_id == resource.c.id])
     assert isinstance(guarded, Case)
     assert guarded.else_ is None
@@ -52,7 +57,8 @@ def test_guard_has_no_else_branch():
 
 
 def test_every_hop_predicate_is_required():
-    # All predicates go in one EXISTS, so the chain is required as a whole.
+    # Several predicates conjoin inside one guard subquery rather than producing
+    # several guards, so a chain is required whole.
     guarded = require_hops(
         literal(True),
         [
@@ -67,8 +73,11 @@ def test_every_hop_predicate_is_required():
 
 
 def test_correlate_targets_keep_the_outer_entity_out_of_the_inner_from():
-    # Auto-correlation only reaches the immediately enclosing SELECT. Without an
-    # explicit correlate, the outer table joins the guard's FROM as a cross join.
+    # SQLAlchemy's auto-correlation only reaches the immediately enclosing SELECT.
+    # Without the explicit correlate, the outer table joins into the guard's FROM
+    # as a cartesian product — silently comparing against EVERY resource row.
+    # Correlation is only observable once the guard sits inside an enclosing SELECT,
+    # which is where a real override puts it.
     def outer(*correlate):
         guarded = require_hops(
             literal(True), [category.c.resource_id == resource.c.id], correlate

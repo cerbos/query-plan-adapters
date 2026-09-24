@@ -1,5 +1,6 @@
 import { PlanKind } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { buildFilterFromExpression, rejectNullConstructors } from "./filter";
 import type {
   BuildFilterOptions,
@@ -29,6 +30,7 @@ export type {
 } from "./types";
 
 export { PlanKind };
+export { UnsupportedQueryPlanError };
 
 export function queryPlanToDrizzle({
   queryPlan,
@@ -50,6 +52,6 @@ export function queryPlanToDrizzle({
         filter: buildFilterFromExpression(queryPlan.condition, mapper, options),
       };
     default:
-      throw new Error("Invalid plan kind");
+      throw new UnsupportedQueryPlanError("Invalid plan kind");
   }
 }

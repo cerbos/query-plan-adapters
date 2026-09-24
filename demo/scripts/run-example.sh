@@ -35,11 +35,10 @@ if [[ $# -ne 1 ]]; then
 fi
 ADAPTER="$1"
 
-# The adapter roster is `adapters` in conformance/actions.json. Deliberately not a second list:
-# an adapter added to one roster but not the other looks consistent from either side.
-if ! jq -e --arg a "${ADAPTER}" '.adapters | index($a)' \
-  "${REPO_ROOT}/conformance/actions.json" >/dev/null; then
-  fail "'${ADAPTER}' is not in conformance/actions.json .adapters"
+# The adapter roster is every directory holding a conformance-ledger.json. Deliberately not a
+# second list: an adapter added to one roster but not the other looks consistent from either side.
+if [[ ! -f "${REPO_ROOT}/${ADAPTER}/conformance-ledger.json" ]]; then
+  fail "'${ADAPTER}' has no ${ADAPTER}/conformance-ledger.json, so it is not in the adapter roster"
 fi
 
 EXAMPLE_DIR="${REPO_ROOT}/${ADAPTER}/example"

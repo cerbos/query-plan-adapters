@@ -53,9 +53,6 @@ tools = [
 
 [tool.pdm.scripts]
 test = "pytest"
-# Rewrites golden/expectations.json, keeping each `note`. Review the diff.
-# CI never sets GOLDEN_UPDATE, so an unreviewed SQL change fails there.
-"golden:update" = {cmd = "pytest tests/test_translator.py", env = {"GOLDEN_UPDATE" = "1"}}
 isort = {cmd = "isort src tests example"}
 ruff_format = {cmd = "ruff format src tests example"}
 lint = {cmd = "ruff check --fix src tests example"}

@@ -1,8 +1,10 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
-import { sql } from "drizzle-orm";
+import { aliasedTableColumn, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
+import { resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
 import type {
   BaseMapperEntry,
@@ -118,7 +120,7 @@ const resolveRelationField = (
 
   const [segment, ...rest] = path;
   if (segment === undefined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Invalid relation path for reference '${reference}': missing segment`,
     );
   }
@@ -134,7 +136,7 @@ const resolveRelationField = (
       );
     }
     if (rest.length > 0) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Mapping for '${segment}' does not support further nesting in '${reference}'`,
       );
     }
@@ -255,12 +257,59 @@ export interface CollectionScope {
   leadingRelations: RelationMapping[];
   /** Every relation of the chain: the lambda body's subqueries are already correlated to them. */
   skipRelations: Set<RelationMapping>;
+  /**
+   * The alias the subquery over `primaryRelation` takes, when an enclosing macro already ranges
+   * over the same table. The lambda variable's columns render against it, so the enclosing
+   * element's columns — still rendered against the bare table name — resolve to the enclosing
+   * row rather than to this one (#509).
+   */
+  alias?: string;
 }
+
+/**
+ * Rebind an element mapping to the aliased subquery. Only a column of the iterated table can be
+ * rebound: a transform closes over the unaliased column and a further relation hop correlates
+ * through it, so either would silently read the enclosing element instead — refused instead.
+ */
+const aliasElementMapping = (
+  resolved: ResolvedMapping,
+  primaryRelation: RelationMapping,
+  chainLength: number,
+  alias: string,
+  reference: string,
+): ResolvedMapping => {
+  const refuse = (): never => {
+    throw new UnsupportedQueryPlanError(
+      `Cannot correlate '${reference}' to a collection macro nested over the same table as an ` +
+        "enclosing one: only a plain column of that table can be rebound to the inner " +
+        "subquery's alias",
+    );
+  };
+  if (resolved.relations.length !== chainLength) refuse();
+  const rebind = (column: AnyColumn): AnyColumn =>
+    column.table === primaryRelation.table
+      ? aliasedTableColumn(column, alias)
+      : refuse();
+  const { mapping } = resolved;
+  if (isMappingConfig(mapping)) {
+    if (mapping.transform || mapping.relation || !mapping.column) refuse();
+    return {
+      relations: resolved.relations,
+      mapping: { ...mapping, column: rebind(mapping.column as AnyColumn) },
+    };
+  }
+  if (!isColumn(mapping)) refuse();
+  return {
+    relations: resolved.relations,
+    mapping: rebind(mapping as AnyColumn),
+  };
+};
 
 export const createCollectionScope = (
   collectionReference: string,
   variableName: string,
   mapper: Mapper,
+  openTables: readonly string[] = [],
 ): CollectionScope => {
   const relationChain = resolveRelationChain(collectionReference, mapper);
   const primaryRelation = relationChain[relationChain.length - 1];
@@ -270,6 +319,32 @@ export const createCollectionScope = (
     );
   }
   const leadingRelations = relationChain.slice(0, -1);
+
+  // An enclosing macro already ranges over this table: take a fresh alias, numbered by how many
+  // enclosing scopes hold the table, so the name is deterministic.
+  const tableName = resolveTableName(primaryRelation.table, collectionReference);
+  const occurrences = openTables.filter((name) => name === tableName).length;
+  const alias =
+    occurrences > 0 ? `cerbos_${tableName}_${occurrences}` : undefined;
+  if (alias !== undefined && primaryRelation.subqueryFilter !== undefined) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot nest a collection macro over '${collectionReference}' inside another over the ` +
+        "same table: its subqueryFilter is written against the unaliased table, so it would " +
+        "narrow the enclosing subquery's rows instead of the inner one's",
+    );
+  }
+  const scoped = (resolved: ResolvedMapping, reference: string) =>
+    makeScopedRelationEntry(
+      alias === undefined
+        ? resolved
+        : aliasElementMapping(
+            resolved,
+            primaryRelation,
+            relationChain.length,
+            alias,
+            reference,
+          ),
+    );
 
   const scopedMapper = (reference: string): MapperEntry | undefined => {
     if (reference === variableName) {
@@ -294,18 +369,19 @@ export const createCollectionScope = (
           };
         }
       }
-      return makeScopedRelationEntry(resolved);
+      return scoped(resolved, reference);
     }
 
     if (reference.startsWith(`${variableName}.`)) {
       const remainder = reference.slice(variableName.length + 1);
-      return makeScopedRelationEntry(
+      return scoped(
         resolveRelationField(
           primaryRelation,
           remainder.split("."),
           `${collectionReference}.${remainder}`,
           leadingRelations,
         ),
+        reference,
       );
     }
 
@@ -317,6 +393,7 @@ export const createCollectionScope = (
     primaryRelation,
     leadingRelations,
     skipRelations: new Set([primaryRelation, ...leadingRelations]),
+    ...(alias === undefined ? {} : { alias }),
   };
 };
 
@@ -343,18 +420,18 @@ export const buildColumnExpression = (
   reference: string,
 ): SQL => {
   if (isRelationValue(mapping)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot use relation '${reference}' as a scalar value expression`,
     );
   }
   if (typeof mapping === "function") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot use transform mapping for '${reference}' as a value expression`,
     );
   }
   if (isMappingConfig(mapping)) {
     if (mapping.relation) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `Cannot use relation mapping for '${reference}' as a scalar value expression`,
       );
     }

@@ -239,6 +239,26 @@ Translations may use `$expr` but never need an aggregation pipeline.
 
 ### What throws
 
+Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
+filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
+
+```ts
+import { queryPlanToMongoose, UnsupportedQueryPlanError } from "@cerbos/orm-mongoose";
+
+try {
+  const result = queryPlanToMongoose({ queryPlan, mapper });
+} catch (error) {
+  if (error instanceof UnsupportedQueryPlanError) {
+    // The policy uses a shape this adapter cannot translate faithfully: deny, or fall back to
+    // per-document check() calls.
+  }
+  throw error;
+}
+```
+
+A mapper misconfiguration — an unmapped reference, or a collection operator over a reference not
+mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
+
 - `Invalid query plan.` — the plan kind is not a `PlanKind`.
 - `Invalid Cerbos expression structure` — a conditional plan lacks `operator`/`operands`.
 - `Unsupported operator: <name>` — anything not in the table above.
@@ -251,32 +271,42 @@ Translations may use `$expr` but never need an aggregation pipeline.
   variable-in-variable membership, unsafe division or non-finite arithmetic, negated collection
   macros over nullable fields (including a negated string match against a nullable field needle),
   whole-list equality (including over a `map()` projection), list-valued membership needles, and
-  `+` between two field paths (see the contract table).
+  `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
+  refused corpus case with its reason).
 
 ## Conformance contract
 
-Select the PDP engine mode with `ADAPTER_TEST_STRICT_EVALUATION=false` (default) or `=true`; other
-values are rejected. For example, `ADAPTER_TEST_STRICT_EVALUATION=true npm run test:adversarial`
-enables strict evaluation for both planning and the `check()` oracle. CI runs both modes for each
-adversarial store and client-version combination.
+The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
+and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
+queries over the corpus's 29 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+0.55.0, identical on both servers, where the total is every golden case in that tier:
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions in both evaluation modes using 29 hostile seed documents and real MongoDB 7 and 8 queries. The Spring Data adapter defines the reference semantics for this compatibility snapshot.
-
-| Classification | Coverage |
+| Tier | Passed / total |
 | --- | --- |
-| Oracle-tested | 221 reference conformance actions plus regex, ordered indexing/`get-field`, timestamp and mixed-null field-to-field probes (225 actions) |
-| Literal of another type than a declared field | `R.attr.aNumber == "5"`, `R.attr.aBool == "true"`, `R.attr.aString == 0`, `R.attr.aNumber in ["5", 2]`, and the same over a typed subdocument field (`t.name == 0`, `hasIntersection(tags.map(t, t.name), ["public", 0])`) are answered as CEL answers them — `==` and membership false, `!=` true where the field is present — because Mongoose casts a query literal to the schema type (`"5"` is sent as `5`). This needs the field's `valueType`; the literal of the declared type stays a plain, indexable leaf. No seed tag name spells a number, so on MongoDB the subdocument probes return the same rows under the cast filter; the translator unit test pins the uncast one |
-| Membership in a native array field | `x in R.attr.list` and `hasIntersection(R.attr.list, [...])` over an array stored on the document (not a relation) are answered inside `$expr` with `$literal` needles, because Mongoose casts a query-level literal to the schema's element type (`{ list: "2" }` is sent as `2` over `[Number]`) while CEL's `"2" in [2]` is false |
-| Fail-closed | 90 reference actions plus the 7 reference-unsupported shapes (97 actions total) |
-| Operand types the plan does not carry | CEL overloads `+` on strings and a plan names no field types. One string operand settles it, so `R.attr.a + "x"` translates as `$concat`. Between **two field paths** it cannot be decided, and MongoDB's `$add` accepts only numbers and dates, so the shape is refused at translation rather than aborting the query on the server (cerbos/query-plan-adapters#391) |
-| Representation-dependent | `null-eq-missing` — rejected under `nullAttributeRepresentation: "omitted"`. Under the default it already returns the empty set the PDP demands, because `nullable: true` on a mapper entry declares that a stored null is a missing attribute; the global option is the backstop for mappings that do not declare it |
-| Attribute NULL convention | Needs no declaration: Mongoose stores the value the caller sent, so a stored null compares as a null *value* exactly as CEL does. Four `null-value-*` probes (cerbos/query-plan-adapters#308) are aligned; the fifth is refused by the negated-collection-macro limitation, not by the null convention |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute documents. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 52 / 80 |
+| adversarial | 148 / 227 |
 
-Every fail-closed shape's error message is pinned in `conformance/actions.json` and asserted here,
-so a classification proves the throw names its declared mechanism. The emitted filter for every
-corpus action is pinned separately by the offline translator unit test (see
-[Development](#development)).
+Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
+pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute` — the planner folds
+`has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
+missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
+`has(R.attr.x)`. Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
+none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
+with its reason.
+
+Two behaviours the corpus relies on that a caller's mapping has to provide:
+
+- **Declared `valueType`.** Mongoose casts a query literal to the schema type (`"5"` is sent as
+  `5`), so `R.attr.aNumber == "5"` would match `5`. Declaring the field's `valueType` lets the
+  adapter answer a literal of another type as CEL does — `==` and membership false, `!=` true where
+  the field is present — including over a typed subdocument field. Membership in a native array
+  field is answered inside `$expr` with `$literal` needles for the same reason.
+- **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
+  from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
+  demands. A field without it compares a stored null as a null *value*. The global
+  `nullAttributeRepresentation: "omitted"` option is the fail-closed backstop for mappings that do
+  not declare it: it refuses every null operand.
 
 ## Mapping hazards
 
@@ -285,7 +315,7 @@ reads must be the documents the application put into the resource attributes.** 
 catalogues six ways that can break.
 
 This adapter **builds no subquery**: a relation is a path inside the same document, and it never
-emits `$lookup`/`$graphLookup` or calls `populate()`/`aggregate()`. `src/adversarial.test.ts`
+emits `$lookup`/`$graphLookup` or calls `populate()`/`aggregate()`. `src/translator.test.ts`
 asserts that, since five of the rows below depend on it.
 
 | Hazard | Position | Mechanism to check |
@@ -295,10 +325,13 @@ asserts that, since five of the rows below depend on it.
 | Subtype discrimination | **Caller-owned** | `Model.discriminator(...)`. Run the filter on the same model the application read the attributes from. Discriminated models share one collection, so a filter run against the *base* model matches other subtypes' documents — the `__t` criterion Mongoose adds for a discriminator model is not in the adapter's filter, and cannot be: the plan does not say which model you will use |
 | To-one relation used as a collection | Not applicable — a document path holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | `relation.requiresParent` for a flattened array parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration: it ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation never matches a document whose subdocument is absent ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | `relation.requiresParent` for a flattened array parent, so `size(chain)` comparisons yield null rather than 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration: it ANDs `{ <path>: { $ne: null } }` outside any `$nor`, so a negation never matches a document whose subdocument is absent ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ## Behaviour changes
 
+- A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
+  `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
+  misconfiguration stays a plain `Error`.
 - **Breaking:** value-first membership and `hasIntersection` over a native array field (a mapper
   entry with no `relation`) emit an `$expr` instead of `{ list: x }` / `{ list: { $in: [...] } }`.
   The old filter over-granted whenever the literal's type differed from the schema's element type,
@@ -344,14 +377,13 @@ demo/scripts/run-example.sh mongoose
 
 | Command | What it does | Needs |
 | --- | --- | --- |
-| `npm test` | Translator unit test: every corpus action's emitted filter, plan kind or pinned refusal, plus the mapper contract no policy can reach (`valueParser` incl. `ObjectId` coercion, function mappers, the `nullAttributeRepresentation` boundary, malformed input) | Node only |
+| `npm test` | Caller-supplied options the corpus cannot vary (`valueParser` incl. `ObjectId` coercion, function mappers, the `nullAttributeRepresentation` boundary), the refusal type, the timestamp literal contract, the no-`$lookup` source scan and malformed input | Node only |
 | `npm run typecheck` | Type-checks `src/` and the tests | Node only |
 | `npm run mongo` | Starts the pinned MongoDB ([`MONGO_IMAGE`](MONGO_IMAGE)) on port 27017 | Docker |
-| `npm run test:adversarial` | Runs the shared corpus against real MongoDB with `check()` as the oracle | Cerbos CLI, `npm run mongo` in another shell |
+| `npm run test:adversarial` | The documents each recorded golden plan returns on real MongoDB equal the recorded `check()` decisions, for both pinned PDPs | `npm run mongo` in another shell |
 
-`npm test` reads its plans from `conformance/wire-fixtures/`, so a change to the emitted query shows
-up as a diff even when it selects the same seed documents, and a new corpus action fails it until
-its filter is recorded ([ADR 0006](../docs/adr/0006-translator-unit-tests-take-their-plans-from-wire-fixtures.md)).
-Mongoose still keeps its expectations inline rather than in a `golden/expectations.json`; see
-"Golden expectations" in [conformance/README.md](../conformance/README.md). CI also runs the
-adversarial suite against [`MONGO_NEXT_IMAGE`](MONGO_NEXT_IMAGE).
+No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
+[`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the
+recorded allowed ids, and an `unsupported` case must throw `UnsupportedQueryPlanError`. See
+"The harness contract" in [conformance/README.md](../conformance/README.md). CI also runs the
+harness against [`MONGO_NEXT_IMAGE`](MONGO_NEXT_IMAGE).

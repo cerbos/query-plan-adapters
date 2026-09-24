@@ -1,0 +1,117 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides",
+  "intent": "Negated ternary <= ternary where one arm yields NaN (0.0/0.0), with now() == now() keeping the arithmetic unfolded.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": 1
+                            },
+                            {
+                              "value": 1
+                            }
+                          ],
+                          "operator": "div"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": 1
+                            },
+                            {
+                              "value": 2
+                            }
+                          ],
+                          "operator": "div"
+                        }
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": 2
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": 0
+                            },
+                            {
+                              "value": 0
+                            }
+                          ],
+                          "operator": "div"
+                        }
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                }
+              ],
+              "operator": "le"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Ordering against NaN is false, so the negation allows the NaN arm and the finite arm (1 <= 2) denies; SQL gives NULL or an error for 0/0 and NOT(NULL) drops the row."
+}

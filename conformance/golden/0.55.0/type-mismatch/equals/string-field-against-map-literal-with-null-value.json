@@ -1,0 +1,62 @@
+{
+  "allowed": [],
+  "degenerateReason": "A string never equals a map literal, null-valued entry or not, so CEL denies every seed.",
+  "id": "type-mismatch/equals/string-field-against-map-literal-with-null-value",
+  "intent": "Equality between a string attribute and a map literal whose value is null (aString == {\"a\": null}).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "a"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "set-field"
+                  }
+                }
+              ],
+              "operator": "struct"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/equals/string-field-against-map-literal-with-null-value",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString == {\"a\": null}"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A string never equals a map; flattening the null entry into an IS NULL test, or serialising the map, returns rows."
+}

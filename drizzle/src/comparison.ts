@@ -2,6 +2,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   evaluateConstantNumberComparison,
   evaluateScalarValueComparison,
@@ -82,11 +83,11 @@ const buildTernaryComparison = (
   ternaryIsLeft: boolean,
 ): SQL => {
   if (ternary.operands.length !== 3) {
-    throw new Error("'if' operator requires exactly three operands");
+    throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
   }
   const [conditionOperand, thenOperand, elseOperand] = ternary.operands;
   if (!conditionOperand || !thenOperand || !elseOperand) {
-    throw new Error("'if' operator is missing operands");
+    throw new UnsupportedQueryPlanError("'if' operator is missing operands");
   }
   const { operator, mapper, options, negated } = context;
   const condition = buildFilterFromExpression(conditionOperand, mapper, options);
@@ -105,7 +106,7 @@ const buildTernaryComparison = (
     and(not(condition), elseFilter),
   );
   if (!combined) {
-    throw new Error("Unable to combine ternary comparison conditions");
+    throw new UnsupportedQueryPlanError("Unable to combine ternary comparison conditions");
   }
   return combined;
 };
@@ -116,7 +117,7 @@ const buildTernaryComparison = (
  * CEL attribute arithmetic is double-typed, so `0/0` is NaN and `x/0` is a
  * signed infinity — neither of which SQL can represent. Lowering the division
  * to NULL (SQLite's division-by-zero result) makes every comparison UNKNOWN.
- * That agrees with CEL for ORDERED comparisons, which is why `cr-div-zero`
+ * That agrees with CEL for ORDERED comparisons, which is why `arithmetic/divide/self-division-greater-than`
  * passed, but it silently denies rows an INEQUALITY allows: `NaN != 1.0` is
  * TRUE in CEL while `NULL != 1.0` is UNKNOWN.
  *
@@ -139,13 +140,13 @@ const buildDivisionComparison = (
   const { operator, mapper, options, negated } = context;
   const [numeratorOperand, denominatorOperand] = division.operands;
   if (!numeratorOperand || !denominatorOperand) {
-    throw new Error("'div' operator is missing operands");
+    throw new UnsupportedQueryPlanError("'div' operator is missing operands");
   }
   if (
     findZeroCapableDivision(numeratorOperand) ||
     findZeroCapableDivision(denominatorOperand)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards",
     );
   }
@@ -172,7 +173,7 @@ const buildDivisionComparison = (
   const arm = (nonFinite: number): SQL => {
     const folded = foldWithSubstitution(enclosing, division, nonFinite);
     if (folded === undefined) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Cannot translate arithmetic over a division whose denominator may be zero: " +
           "the surrounding expression mixes the non-finite result with a column, and " +
           "SQL has no NaN or Infinity to carry it through",
@@ -328,7 +329,7 @@ const buildFieldToFieldComparison = (
       (mapping) => isMappingConfig(mapping) && mapping.valueType === "timestamp",
     )
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead",
     );
   }
@@ -410,7 +411,7 @@ export const buildComparisonFilter = (
     // Both sides can go non-finite, and each CASE rewrite only folds its own side — the other
     // would still lower to NULL, turning `NaN != NaN` (TRUE in CEL) into UNKNOWN. Fail closed
     // rather than emit the under-granting filter.
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Cannot translate a comparison with a zero-capable division on BOTH sides: only one " +
         "side can be folded into IEEE arms, and the other would lower to SQL NULL",
     );
@@ -452,7 +453,7 @@ export const buildComparisonFilter = (
       right.value,
     );
     if (result === undefined) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `'${operator}' cannot compare the provided constant value types`,
       );
     }
@@ -465,7 +466,7 @@ export const buildComparisonFilter = (
       (operand) => isValueOperand(operand) && Array.isArray(operand.value),
     )
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value",
     );
   }
@@ -495,7 +496,7 @@ export const buildComparisonFilter = (
       left,
     );
   } else {
-    throw new Error(`'${operator}' operator requires field or value operands`);
+    throw new UnsupportedQueryPlanError(`'${operator}' operator requires field or value operands`);
   }
   return withPolarity(filter, negated);
 };

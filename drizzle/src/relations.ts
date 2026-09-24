@@ -1,5 +1,12 @@
-import { and, eq, exists, getTableName, sql } from "drizzle-orm";
-import type { SQL, Table } from "drizzle-orm";
+import {
+  aliasedTableColumn,
+  and,
+  eq,
+  exists,
+  getTableName,
+  sql,
+} from "drizzle-orm";
+import type { AnyColumn, SQL, Table } from "drizzle-orm";
 
 import { TRUE_CONDITION } from "./predicates";
 import type { BuildFilterOptions, RelationMapping } from "./types";
@@ -24,8 +31,15 @@ export const resolveTableName = (table: Table, reference: string): string => {
  * The correlation predicate of a subquery over `relation`: the join, narrowed by whatever
  * store-side predicate the caller declared on the mapping.
  */
-export const relationCorrelation = (relation: RelationMapping): SQL => {
-  const joinCondition = eq(relation.targetColumn, relation.sourceColumn);
+export const relationCorrelation = (
+  relation: RelationMapping,
+  alias?: string,
+): SQL => {
+  const targetColumn =
+    alias === undefined
+      ? relation.targetColumn
+      : aliasedTableColumn(relation.targetColumn as AnyColumn, alias);
+  const joinCondition = eq(targetColumn, relation.sourceColumn);
   if (relation.subqueryFilter === undefined) {
     return joinCondition;
   }
@@ -33,15 +47,31 @@ export const relationCorrelation = (relation: RelationMapping): SQL => {
 };
 
 /**
+ * The FROM item of a subquery over `relation`: the bare table, or the table under `alias` when
+ * an enclosing subquery already ranges over it (see `CollectionScope.alias`).
+ */
+export const relationSource = (
+  relation: RelationMapping,
+  reference: string,
+  alias?: string,
+): SQL => {
+  const table = sql.identifier(resolveTableName(relation.table, reference));
+  return alias === undefined ? sql`${table}` : sql`${table} ${sql.identifier(alias)}`;
+};
+
+/**
  * Nest `filter` inside one correlated `EXISTS` per relation, the first relation outermost.
  * Relations in `skipRelations` are already correlated by an enclosing subquery and are passed
- * through. An empty chain returns `filter` itself.
+ * through; a relation in `aliases` takes that alias. An empty chain returns `filter` itself.
  */
 export const wrapWithRelations = (
   relations: RelationMapping[],
   filter: SQL,
   reference: string,
-  options?: { skipRelations?: Set<RelationMapping> },
+  options?: {
+    skipRelations?: Set<RelationMapping>;
+    aliases?: ReadonlyMap<RelationMapping, string>;
+  },
 ): SQL =>
   relations
     .slice()
@@ -55,10 +85,10 @@ export const wrapWithRelations = (
       // That is what makes it correct under negation too: `all` compiles to `NOT EXISTS (… AND
       // NOT P)`, and restricting the scan is what turns that into "every VISIBLE row satisfies
       // P" instead of "every row in the table does".
-      const condition = and(relationCorrelation(relation), currentFilter);
-      const tableName = resolveTableName(relation.table, reference);
+      const alias = options?.aliases?.get(relation);
+      const condition = and(relationCorrelation(relation, alias), currentFilter);
       return exists(
-        sql`(select 1 from ${sql.identifier(tableName)} where ${condition})`,
+        sql`(select 1 from ${relationSource(relation, reference, alias)} where ${condition})`,
       );
     }, filter);
 
@@ -71,8 +101,14 @@ export const chainCorrelation = (
   leading: RelationMapping[],
   reference: string,
   options: BuildFilterOptions,
+  alias?: string,
 ): SQL =>
-  wrapWithRelations(leading, relationCorrelation(primary), reference, options);
+  wrapWithRelations(
+    leading,
+    relationCorrelation(primary, alias),
+    reference,
+    options,
+  );
 
 /**
  * Make `inner` UNKNOWN (SQL NULL) unless every intermediate to-one hop of a dotted path

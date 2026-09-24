@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "b1",
+    "c1",
+    "e1",
+    "h6"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/unanchored",
+  "intent": "matches() with a bare unanchored pattern, which RE2 treats as a substring search.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "ne"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/unanchored",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"ne\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Engines whose regex queries are implicitly anchored (Lucene regexp) make it a full-string match and under-grant."
+}

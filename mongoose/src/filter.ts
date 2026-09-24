@@ -1,5 +1,6 @@
 import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   COMPARISON_OPERATORS,
   buildAggregationExpression,
@@ -103,7 +104,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   exists: quantifier("exists"),
   all: quantifier("all"),
   exists_one: () => {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "exists_one requires exact match cardinality and is unsupported",
     );
   },
@@ -112,7 +113,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
   // `size(filter(...))` form is handled by the size operator before this.
   filter: () => {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "filter() returns a list, not a boolean, so it cannot be a condition on its own; " +
         "only size(filter(...)) has a boolean meaning",
     );
@@ -123,7 +124,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   // consumer, hasIntersection(map(...), [...]), destructures the map operand itself
   // before reaching this table.
   map: () => {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
         "only hasIntersection(map(...), [...]) gives the projection a boolean meaning",
     );
@@ -131,7 +132,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   lambda: ({ operands }, ctx) => translateLambda(operands, ctx),
   if: (expression, ctx) => {
     if (ctx.scope.kind === "collection") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "if aggregation expressions inside collection predicates are unsupported",
       );
     }
@@ -157,7 +158,7 @@ const buildFilter = (
     return translateBareVariable(expression.name, ctx);
   }
   if (!isExpression(expression)) {
-    throw new Error("Invalid Cerbos expression structure");
+    throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
 
   const { operator, operands } = expression;
@@ -184,7 +185,7 @@ const buildFilter = (
   }
 
   if (!Object.hasOwn(FILTER_OPERATORS, operator)) {
-    throw new Error(`Unsupported operator: ${operator}`);
+    throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
   return FILTER_OPERATORS[operator]!(expression, ctx);
 };
@@ -243,7 +244,7 @@ const translateBareVariable = (
   // Its absent-hop requirement is applied by whichever operator encloses it — `not` ANDs it
   // OUTSIDE the `$nor` — rather than by this leaf (cerbos/query-plan-adapters#375).
   if (relation && relation.type !== "one") {
-    throw new Error("Bare collection variables are unsupported");
+    throw new UnsupportedQueryPlanError("Bare collection variables are unsupported");
   }
   return buildGuardedFieldFilter(
     path,
@@ -268,7 +269,7 @@ const translateNot = (
     (isExpression(operand) &&
       ["exists", "exists_one", "all"].includes(operand.operator))
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "not over nullable fields or collection macros cannot preserve Cerbos error semantics",
     );
   }
@@ -322,7 +323,7 @@ const translateComparison = (
         resolveMapperConfig(operand.name, mapper)?.valueType === "dateTime",
     )
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead",
     );
   }
@@ -332,7 +333,7 @@ const translateComparison = (
       (operand) => isValue(operand) && Array.isArray(operand.value),
     )
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value",
     );
   }
@@ -351,12 +352,12 @@ const translateComparison = (
       isExpression(rightOperand) &&
       rightOperand.operator === "if"
     ) {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Mongoose cannot cast comparisons between two conditional expressions",
       );
     }
     if (ctx.scope.kind === "collection") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `${operator} aggregation expressions inside collection predicates are unsupported`,
       );
     }
@@ -372,7 +373,7 @@ const translateComparison = (
   const variableOperand = bothOperands.find(isVariable);
   const valueOperand = bothOperands.find(isValue);
   if (!variableOperand || !valueOperand) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${operator} requires a field/value pair or aggregation operands`,
     );
   }
@@ -432,7 +433,7 @@ const translateIn = (
 
   if (isVariable(leftOperand) && isValue(rightOperand)) {
     if (!Array.isArray(rightOperand.value)) {
-      throw new Error("in with a field on the left requires an array value");
+      throw new UnsupportedQueryPlanError("in with a field on the left requires an array value");
     }
     return emitValueComparison(
       ctx,
@@ -450,7 +451,7 @@ const translateIn = (
   }
 
   if (isValue(leftOperand) && Array.isArray(leftOperand.value)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
     );
   }
@@ -491,7 +492,7 @@ const translateIn = (
     );
   }
 
-  throw new Error(
+  throw new UnsupportedQueryPlanError(
     "in supports only field-in-value-list or value-in-mapped-collection shapes",
   );
 };
@@ -511,8 +512,9 @@ const translateIn = (
  * is read through `$cond`/`$isArray` — which also makes a missing or non-array field an empty
  * list (no match) rather than a server error — and each needle is wrapped in `$literal`, so a
  * string spelled like a field path stays a string. Aggregation equality matches numbers across
- * BSON numeric types and never across types, which is CEL's equality. The `*-list-vs-string`
- * corpus actions run against typed arrays and over-grant without this.
+ * BSON numeric types and never across types, which is CEL's equality. The
+ * `type-mismatch/in/string-literal-in-resource-*-list` cases run against typed arrays and
+ * over-grant without this.
  *
  * Returns undefined for a relation or inside a collection predicate, where the element is a
  * subdocument field matched through `$elemMatch`, and for an empty needle list, which has
@@ -568,7 +570,7 @@ const translateMatches = (
     !isValue(patternOperand) ||
     typeof patternOperand.value !== "string"
   ) {
-    throw new Error("matches operator requires a string regex pattern");
+    throw new UnsupportedQueryPlanError("matches operator requires a string regex pattern");
   }
 
   return emitLeafComparison(
@@ -603,7 +605,7 @@ function translateStringPredicate(
     !isStringOrUntyped(resolveMapperConfig(leftOperand.name, mapper)?.valueType)
   ) {
     if (ctx.scope.kind === "collection") {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         `${operator} aggregation expressions inside collection predicates are unsupported`,
       );
     }
@@ -656,7 +658,7 @@ const translateHasIntersection = (
     assertNullOperandTranslatable(ctx, "a null element in hasIntersection");
   }
   if (operands.length !== 2) {
-    throw new Error("hasIntersection requires exactly two operands");
+    throw new UnsupportedQueryPlanError("hasIntersection requires exactly two operands");
   }
 
   const firstOperand = getOperandAt(
@@ -682,10 +684,10 @@ const translateHasIntersection = (
   }
 
   if (!isVariable(leftOperand) || !isValue(rightOperand)) {
-    throw new Error("Invalid operands for hasIntersection");
+    throw new UnsupportedQueryPlanError("Invalid operands for hasIntersection");
   }
   if (!Array.isArray(rightOperand.value)) {
-    throw new Error("hasIntersection requires an array value");
+    throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
   const values = withoutUnequalConstants(
     leftOperand.name,
@@ -784,13 +786,13 @@ const translateMapIntersection = (
     "Expected a lambda in map expression",
   );
   if (!isVariable(collectionOperand)) {
-    throw new Error("Expected a variable in map expression");
+    throw new UnsupportedQueryPlanError("Expected a variable in map expression");
   }
   if (!isExpression(lambdaOperand)) {
-    throw new Error("Expected a lambda in map expression");
+    throw new UnsupportedQueryPlanError("Expected a lambda in map expression");
   }
   if (lambdaOperand.operator !== "lambda") {
-    throw new Error("Second operand of map must be a lambda expression");
+    throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
   const projectionOperand = getOperandAt(
     lambdaOperand.operands,
@@ -803,10 +805,10 @@ const translateMapIntersection = (
     "Map lambda requires a variable operand",
   );
   if (!isVariable(variableOperand)) {
-    throw new Error("Invalid map expression structure");
+    throw new UnsupportedQueryPlanError("Invalid map expression structure");
   }
   if (!isValue(valuesOperand) || !Array.isArray(valuesOperand.value)) {
-    throw new Error("hasIntersection requires an array value");
+    throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
 
   const { relation } = resolveFieldReference(collectionOperand.name, mapper);
@@ -817,7 +819,7 @@ const translateMapIntersection = (
     throw new Error("map operator requires a collection relation");
   }
   if (!isVariable(projectionOperand)) {
-    throw new Error("Map projection must be a variable reference");
+    throw new UnsupportedQueryPlanError("Map projection must be a variable reference");
   }
 
   const scopedMapper = createScopedMapper(
@@ -869,7 +871,7 @@ const translateMapIntersection = (
 function quantifier(operator: "exists" | "all"): FilterOperator {
   return ({ operands }, ctx) => {
     if (operands.length !== 2) {
-      throw new Error(`${operator} requires exactly two operands`);
+      throw new UnsupportedQueryPlanError(`${operator} requires exactly two operands`);
     }
     const collectionOperand = getOperandAt(
       operands,
@@ -882,10 +884,10 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
       `${operator} operator requires a lambda operand`,
     );
     if (!isVariable(collectionOperand) || !isExpression(lambdaOperand)) {
-      throw new Error("Invalid operands for collection operation");
+      throw new UnsupportedQueryPlanError("Invalid operands for collection operation");
     }
     if (lambdaOperand.operator !== "lambda") {
-      throw new Error("Second operand must be a lambda expression");
+      throw new UnsupportedQueryPlanError("Second operand must be a lambda expression");
     }
     const conditionOperand = getOperandAt(
       lambdaOperand.operands,
@@ -898,7 +900,7 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
       "Lambda operand requires a variable",
     );
     if (!isVariable(variableOperand)) {
-      throw new Error("Lambda variable must have a name");
+      throw new UnsupportedQueryPlanError("Lambda variable must have a name");
     }
 
     const { relation } = resolveFieldReference(
@@ -950,7 +952,7 @@ const translateLambda = (
     "lambda operator requires a variable operand",
   );
   if (!isVariable(variableOperand)) {
-    throw new Error("Lambda variable must have a name");
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   return buildFilter(conditionOperand, {

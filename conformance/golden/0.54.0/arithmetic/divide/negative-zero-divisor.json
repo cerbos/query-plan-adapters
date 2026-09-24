@@ -1,0 +1,59 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b3"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/divide/negative-zero-divisor",
+  "intent": "An attribute divided by the literal -0.0, compared > 0.0.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": -0.0
+                }
+              ],
+              "operator": "div"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/divide/negative-zero-divisor",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber / -0.0 > 0.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Dividing by -0.0 gives -Infinity for positive numerators, +Infinity for negative ones and NaN for 0; dropping the sign or guarding the zero to NULL flips or empties the result (a2/a5/b3)."
+}

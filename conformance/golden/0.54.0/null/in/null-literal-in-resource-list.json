@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "b5",
+    "b6",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/null-literal-in-resource-list",
+  "intent": "null in R.attr.tagNames: whether a related tag has a null name.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": null
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/null-literal-in-resource-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "null in R.attr.tagNames"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Must become EXISTS(name IS NULL); name = NULL matches nothing and loses b5/b6."
+}

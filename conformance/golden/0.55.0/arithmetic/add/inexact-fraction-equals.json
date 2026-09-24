@@ -1,0 +1,55 @@
+{
+  "allowed": [],
+  "degenerateReason": "aDouble + 0.7 == 0.1 holds for no double in IEEE arithmetic; a1 holds -0.6, exactly what solving the equation yields, and -0.6 + 0.7 is 0.09999999999999998. The not-equals mirror carries the discriminating oracle.",
+  "id": "arithmetic/add/inexact-fraction-equals",
+  "intent": "Equality over an attribute plus a fraction that is inexact in IEEE doubles (aDouble + 0.7 == 0.1).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": 0.7
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 0.1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/inexact-fraction-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble + 0.7 == 0.1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Solving to aDouble == -0.6 returns a1, but -0.6 + 0.7 is 0.09999999999999998; the sum must be evaluated in the store."
+}

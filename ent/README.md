@@ -71,9 +71,8 @@ bound parameter.
 
 Every shape the adapter refuses returns an error wrapping `cerbosent.ErrUnsupported` — never a broader
 predicate. Use `errors.Is(err, cerbosent.ErrUnsupported)` to tell "the policy asks for something SQL
-cannot express" from a mapping or configuration error. The refused shapes are listed under
-[Conformance contract](#conformance-contract); each message is pinned in
-[`conformance/actions.json`](../conformance/actions.json).
+cannot express" from a mapping or configuration error. The corpus cases it refuses are listed in
+[`conformance-ledger.json`](conformance-ledger.json) (see [Conformance contract](#conformance-contract)).
 
 ## Mapping attributes
 
@@ -219,32 +218,34 @@ surface. The [pgx adapter](../pgx) quotes defensively instead.
 
 ## Conformance contract
 
-The adapter is differentially tested against Cerbos PDP 0.55.0 `checkResource` decisions using 27
-hostile seed rows and real Ent-built queries, replayed on **SQLite, PostgreSQL and MySQL**. The
-Spring Data adapter defines the reference semantics for this compatibility snapshot.
+The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
+Cerbos PDP 0.55.0 recorded for each case are translated, run against the corpus dataset in real
+Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are compared with the
+recorded `check()` decisions. The previous PDP's goldens (0.54.0) are replayed too. The counts are
+the same on all three databases. The total is every golden case in the tier; a case whose golden
+records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
+and counts toward the total but not toward passed — on 0.55.0 that is one extended case.
 
-| Classification | Coverage |
+| Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
-| Oracle-tested | 259 reference conformance actions, on SQLite, PostgreSQL and MySQL |
-| Fail-closed corpus shapes | Regex `matches()` (SQL regex dialects do not guarantee RE2 semantics), ordered list indexing/`get-field`, `timestamp()` over an untyped string field, `int()`/`double()` casts (SQL `CAST` reads a numeric prefix where CEL demands the whole string, and rounds where CEL truncates toward zero), `filter()`/`map()` used as a condition (both return a list, not a boolean), a hierarchy path constructed by `list()` rather than read from a column, `mod` (reached through the `int()` cast that gives `%` an integer operand), a positional read of a scalar list of strings, numbers or booleans (SQL row order is undefined), list equality over a `map()` projection, a hierarchy with an empty delimiter, two-list `except` with resource-list and principal-list receivers, structured constructor/list operands, unsupported principal-list macros, conditional divisors, and bare temporal-column comparisons (63 actions) |
-| Operand types the plan does not carry | `R.attr.a + "x"` and `"x" + R.attr.a` translate. Between **two columns**, declare the string column `ValueType: cerbosent.ValueString` to get concatenation; otherwise it fails closed rather than emit a numeric `+` — a hard error on PostgreSQL, `0` on SQLite, and on MySQL a silent match against every row (cerbos/query-plan-adapters#391) |
-| Representation-dependent | `null-eq-missing` — rejected under `NullOmitted`; translated as `IS NULL` under the default, which over-grants if the caller omits attributes for NULL columns |
-| Attribute NULL convention | The equality family (`eq`, `ne`, `in`) over an attribute declared `NullConvention: NullConventionExplicit` renders definitely, so a NULL row is included where CEL's null *value* says it should be. Undeclared, the historical rendering applies and `!=` against a constant under-grants those rows (cerbos/query-plan-adapters#308) |
-| Known planner divergence | `has()` on a missing attribute is folded by the Cerbos planner to `ALWAYS_ALLOWED`, while `checkResource` denies the missing-attribute rows. Until the planner is fixed, use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)` |
+| core | 26 / 26 |
+| extended | 59 / 80 |
+| adversarial | 183 / 227 |
 
-Oracle coverage includes value-first and field-to-field comparisons, escaped string predicates,
-relation counts and nested collection macros, null/error propagation, arithmetic and ternaries,
-hierarchy operations, typed timestamps, and multi-hop relations. Sub-millisecond `now()` thresholds
-(`ts-window`, `ts-vf`) translate exactly here, because Go's `time.Time` carries nanoseconds.
+Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
+holds for every dialect. The one case no adapter can pass is `null/has/missing-attribute`: the
+Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those
+rows, so use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
 
 ### Known gaps
 
-Real but unfixed; each needs a corpus action first. Treat them as constraints on your policies.
+Real but unfixed; each needs a corpus case first. Treat them as constraints on your policies.
 
 | Gap | Effect |
 | --- | --- |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering, not CEL's IEEE semantics. Only NaNs the adapter folds itself are exact. |
-| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`, so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is exact (`cr-div-neg-zero`). |
+| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`, so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is exact (`arithmetic/divide/negative-zero-divisor`). |
 | `!=` / `not in` against an explicit null, on an attribute not declared `NullConventionExplicit` | CEL says `null != "x"` is true; SQL leaves it UNKNOWN and excludes the row. Under-grants (fails closed). See cerbos/query-plan-adapters#308. |
 
 ## Mapping hazards
@@ -265,7 +266,7 @@ adapter cannot detect the omission. Where your reads narrow a table, declare the
 | Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
 | To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality, so nothing enforces the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`; a two-column key is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`w1-all-chain`, `rel-not-bool-hop` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*. A scalar read through a to-one hop is `Entry.ScalarRelation` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)), which is NULL when no row correlates and needs no hop guard |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*. A scalar read through a to-one hop is `Entry.ScalarRelation` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)), which is NULL when no row correlates and needs no hop guard |
 
 ### Declaring the application's own predicate
 
@@ -314,7 +315,7 @@ tags := &cerbosent.Relation{
   database coercion; undeclared columns behave as before.
 - **Breaking:** `int()` and `double()` casts fail closed instead of lowering to SQL `CAST`, which
   reads a numeric prefix and rounds where CEL reads the whole string and truncates
-  (`cast-int-string`, `cast-double-string`, `cast-int-double`).
+  (`cast/int/malformed-string`, `cast/double/malformed-string`, `cast/int/negative-fraction`).
 - [#387](https://github.com/cerbos/query-plan-adapters/issues/387): a `filter()`/`map()` result in a
   value position (`map(R.attr.tags, t.id) == [...]`) fails at translation with a named error instead
   of at execution in the driver.
@@ -346,16 +347,16 @@ proves usage shapes only, not packaging: it resolves this module through a `repl
 
 ```bash
 go test -skip TestAdversarialConformance ./...   # unit suite, no Docker
-go test ./...                                    # adds the adversarial conformance suite (Docker)
-ADAPTER_TEST_STRICT_EVALUATION=true go test -count=1 -run TestAdversarialConformance ./...
+go test ./...                                    # adds the conformance suite (Docker)
 golangci-lint run ./...
 golangci-lint fmt ./...
 ```
 
-- The adversarial suite starts one Cerbos container (version from `conformance/CERBOS_VERSION`) and
-  replays the whole corpus against in-memory SQLite, then PostgreSQL and MySQL testcontainers.
-  `ADAPTER_TEST_STRICT_EVALUATION` accepts only `false` (default) and `true`; CI runs both, each
-  against its matching Check oracle.
+- The conformance suite (`TestAdversarialConformance`) starts no PDP: it replays the recorded
+  goldens in `conformance/golden/` against in-memory SQLite, then PostgreSQL and MySQL
+  testcontainers. A case it cannot pass goes in [`conformance-ledger.json`](conformance-ledger.json):
+  `unsupported` (translation must return `ErrUnsupported`) or `divergent` (the result must differ,
+  with an issue).
 - The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile
   plans no planner emits, and per-dialect spellings where a wrong choice is still valid SQL. CI runs
   it as a separate step before the Docker-backed one.

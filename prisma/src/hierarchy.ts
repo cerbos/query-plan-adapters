@@ -19,6 +19,7 @@ import {
 } from "./plan";
 import type { OperatorOperand } from "./plan";
 import { resolveOperand } from "./translate";
+import { UnsupportedQueryPlanError } from "./errors";
 
 type ConstantSegment = { type: "constant"; value: string };
 type FieldSegment = { type: "field"; fieldRef: ResolvedFieldReference };
@@ -55,7 +56,7 @@ function resolveHierarchy(
       "hierarchy requires a delimiter"
     );
     if (!isValueOperand(delimOperand)) {
-      throw new Error("hierarchy delimiter must be a value");
+      throw new UnsupportedQueryPlanError("hierarchy delimiter must be a value");
     }
     const delimiter = String(delimOperand.value);
     if (delimiter === "") {
@@ -63,9 +64,9 @@ function resolveHierarchy(
       // relation becomes a strict string-prefix test. The descendant lowering here is
       // `startsWith(prefix + delimiter)`, which with an empty delimiter matches the path
       // ITSELF (never its own descendant) as well as every string extension of it — the
-      // corpus's hier-empty-delim over-granted a2 that way — so the shape is refused rather
-      // than emitted with the wrong boundary.
-      throw new Error(
+      // corpus's hierarchy/descendent-of/empty-delimiter case over-granted a2 that way — so the
+      // shape is refused rather than emitted with the wrong boundary.
+      throw new UnsupportedQueryPlanError(
         "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the startsWith prefix this adapter emits would also match the path itself"
       );
     }
@@ -83,7 +84,7 @@ function resolveHierarchy(
         delimiter,
       };
     }
-    throw new Error("hierarchy(string, delimiter) requires a value or field operand");
+    throw new UnsupportedQueryPlanError("hierarchy(string, delimiter) requires a value or field operand");
   }
 
   if (operands.length === 1) {
@@ -112,10 +113,10 @@ function resolveHierarchy(
       return { type: "segmented", segments };
     }
 
-    throw new Error("hierarchy requires a value, field, or list operand");
+    throw new UnsupportedQueryPlanError("hierarchy requires a value, field, or list operand");
   }
 
-  throw new Error("hierarchy requires 1 or 2 operands");
+  throw new UnsupportedQueryPlanError("hierarchy requires 1 or 2 operands");
 }
 
 function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
@@ -125,7 +126,7 @@ function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
     case "segmented":
       return resolved.segments;
     case "field":
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Cannot get segments from a field-reference hierarchy"
       );
   }
@@ -161,7 +162,7 @@ function checkPrefixConditions(
     } else if (s.type === "constant" && l.type === "field") {
       conditions.push(buildFieldFilter(l.fieldRef, "equals", s.value));
     } else {
-      throw new Error(
+      throw new UnsupportedQueryPlanError(
         "Cannot compare two field references in hierarchy overlap"
       );
     }
@@ -214,7 +215,7 @@ export function handleOverlapsOperator(
       (segment): segment is FieldSegment => segment.type === "field",
     );
     if (field) return buildImpossibleFilter(field.fieldRef);
-    throw new Error("Cannot determine overlap: no field references found");
+    throw new UnsupportedQueryPlanError("Cannot determine overlap: no field references found");
   }
 
   if (
@@ -247,7 +248,7 @@ export function handleOverlapsOperator(
  */
 function assertLikeSafePrefix(prefix: string): void {
   if (/[%_\[\\]/.test(prefix)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _, \\ or [): " +
         "Prisma emits LIKE without an ESCAPE clause, \\ is the default escape character on " +
         "PostgreSQL and MySQL, and [ opens a character class on SQL Server even with one"
@@ -260,7 +261,7 @@ function handleFieldOverlaps(
   right: ResolvedHierarchy
 ): PrismaFilter {
   if (left.type === "field" && right.type === "field") {
-    throw new Error("overlaps: cannot compare two field-reference hierarchies");
+    throw new UnsupportedQueryPlanError("overlaps: cannot compare two field-reference hierarchies");
   }
 
   // The caller routes here only when at least one side is a field hierarchy.
@@ -268,7 +269,7 @@ function handleFieldOverlaps(
   const other = left.type === "field" ? right : left;
 
   if (other.type !== "constant") {
-    throw new Error("overlaps: segmented hierarchies with field hierarchies are not supported");
+    throw new UnsupportedQueryPlanError("overlaps: segmented hierarchies with field hierarchies are not supported");
   }
 
   const delimiter = field.delimiter;
@@ -293,7 +294,7 @@ function extractHierarchyOperands(
   context: TranslationContext
 ): [ResolvedHierarchy, ResolvedHierarchy] {
   if (operands.length !== 2) {
-    throw new Error(`${operatorName} requires exactly two operands`);
+    throw new UnsupportedQueryPlanError(`${operatorName} requires exactly two operands`);
   }
   const leftOp = assertDefined(operands[0], `${operatorName} requires a left operand`);
   const rightOp = assertDefined(operands[1], `${operatorName} requires a right operand`);
@@ -302,7 +303,7 @@ function extractHierarchyOperands(
     !isOperatorOperand(leftOp) || leftOp.operator !== "hierarchy" ||
     !isOperatorOperand(rightOp) || rightOp.operator !== "hierarchy"
   ) {
-    throw new Error(`${operatorName} requires two hierarchy operands`);
+    throw new UnsupportedQueryPlanError(`${operatorName} requires two hierarchy operands`);
   }
 
   return [
@@ -368,8 +369,8 @@ export function handleAncestorDescendantOperator(
     ) {
       return {};
     }
-    throw new Error(`${operatorName}: constants do not satisfy ${direction} relationship`);
+    throw new UnsupportedQueryPlanError(`${operatorName}: constants do not satisfy ${direction} relationship`);
   }
 
-  throw new Error(`${operatorName}: unsupported hierarchy type combination`);
+  throw new UnsupportedQueryPlanError(`${operatorName}: unsupported hierarchy type combination`);
 }

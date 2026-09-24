@@ -1,7 +1,0 @@
-{
-  "action": "pv-empty-all",
-  "resourceKind": "adversarial",
-  "filter": {
-    "kind": "KIND_ALWAYS_ALLOWED"
-  }
-}

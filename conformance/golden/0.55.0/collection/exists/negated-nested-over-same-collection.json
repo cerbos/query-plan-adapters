@@ -1,0 +1,118 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/negated-nested-over-same-collection",
+  "intent": "!tags.exists(t, tags.exists(u, u.name != t.name)): every tag has the same name.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tags"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "u.name"
+                                        },
+                                        {
+                                          "variable": "t.name"
+                                        }
+                                      ],
+                                      "operator": "ne"
+                                    }
+                                  },
+                                  {
+                                    "variable": "u"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "exists"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/negated-nested-over-same-collection",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.tags.exists(t, R.attr.tags.exists(u, u.name != t.name))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Reusing one alias for both levels makes the inner exists never true, so the negation over-grants a6; b6's NULL-name tag must deny under both polarities."
+}

@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a1",
+    "a7"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/one-hop-number",
+  "intent": "Numeric equality on a field of the to-one parent (parent.aNumber == 2).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aNumber"
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/one-hop-number",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "Reading the root's aNumber instead of the joined parent's returns different rows."
+}

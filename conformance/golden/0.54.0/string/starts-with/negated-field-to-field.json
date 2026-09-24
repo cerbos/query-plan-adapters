@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a7",
+    "b1",
+    "b2",
+    "b3",
+    "b5",
+    "b6",
+    "c1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6"
+  ],
+  "degenerateReason": null,
+  "id": "string/starts-with/negated-field-to-field",
+  "intent": "Negated startsWith whose prefix is another resource attribute (aOptionalString).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ],
+              "operator": "startsWith"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/starts-with/negated-field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.startsWith(R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A bare NOT LIKE leaks missing-needle rows and unescaped % or _ under-grants; its oracle differs from the contains sibling so the operators cannot be confused."
+}

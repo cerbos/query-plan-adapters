@@ -1,0 +1,140 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/negated-nested-three-levels",
+  "intent": "Negation of the three-level nested exists over categories, subCategories and labels.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.categories"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.subCategories"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.labels"
+                                        },
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "expression": {
+                                                  "operands": [
+                                                    {
+                                                      "variable": "l.name"
+                                                    },
+                                                    {
+                                                      "value": "gold"
+                                                    }
+                                                  ],
+                                                  "operator": "eq"
+                                                }
+                                              },
+                                              {
+                                                "variable": "l"
+                                              }
+                                            ],
+                                            "operator": "lambda"
+                                          }
+                                        }
+                                      ],
+                                      "operator": "exists"
+                                    }
+                                  },
+                                  {
+                                    "variable": "s"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "exists"
+                        }
+                      },
+                      {
+                        "variable": "c"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/negated-nested-three-levels",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.categories.exists(c, c.subCategories.exists(s, s.labels.exists(l, l.name == \"gold\")))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Rows that are definitely false are allowed but the erroring row (a6, unnamed label) must still deny; a plain NOT EXISTS allows it."
+}

@@ -6,272 +6,95 @@
 package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.cerbos.queryplan.elasticsearch.Corpus.Golden;
+import dev.cerbos.queryplan.elasticsearch.Corpus.LedgerEntry;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
-import dev.cerbos.sdk.CerbosBlockingClient;
-import dev.cerbos.sdk.PlanResourcesResult;
-import dev.cerbos.sdk.builders.AttributeValue;
-import dev.cerbos.sdk.builders.Principal;
-import dev.cerbos.sdk.builders.Resource;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
+import org.junit.jupiter.api.DynamicNode;
+import org.junit.jupiter.api.TestFactory;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.images.builder.Transferable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.DynamicContainer.dynamicContainer;
+import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 /**
- * Differential suite over the shared hostile corpus. A real, pinned PDP supplies both the query
- * plan and the row-by-row {@code check()} oracle; generated DSL is executed by real Elasticsearch.
+ * The conformance harness. It implements conformance/README.md, "The harness contract":
+ *
+ * <ol>
+ *   <li>Index the dataset ({@code seeds.json} + {@code derived-fields.json}) in a real
+ *       Elasticsearch, mapped by {@link Corpus#OPTIONS}.</li>
+ *   <li>For each PDP and each recorded golden file, translate the plan, run the query, and compare
+ *       the ids with the ones {@code check()} allowed. {@code conformance-ledger.json} lists the
+ *       exceptions: {@code unsupported} must throw {@link UnsupportedPlanShapeException}, and
+ *       {@code divergent} must still give a wrong answer.</li>
+ *   <li>Fail if the ledger names a case that has no golden file, or carries an entry the contract
+ *       does not allow (an unknown status, no reason, a divergence with no issue, or a
+ *       {@code pdp} tag that is not tested).</li>
+ * </ol>
+ *
+ * <p>Needs no PDP: the plans and decisions are recorded. Needs Docker for Elasticsearch.
  */
 class ElasticsearchAdversarialConformanceTest {
 
-    private static final String INDEX = "adversarial";
+    private static final String INDEX = "conformance";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // The three arguments the corpus is translated through live in Corpus, not here, because
-    // ElasticsearchTranslatorTest pins the query this adapter emits for each corpus action and
-    // THIS suite proves the documents that same query returns. Those two statements are only about
-    // one query while both are built from one set of arguments; two copies could drift and each
-    // suite would keep passing.
-
-    private static Path conformanceDir() {
-        return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
-    }
+    // -- the dataset ------------------------------------------------------------------------------
 
     private record Tag(String id, String name) {}
 
-    /**
-     * One hostile row. {@code note} is corpus documentation this harness never reads; it is named
-     * so that strict decoding accepts it, and it is the one seed key {@link #SEED_KEYS} omits.
-     *
-     * <p>{@code aNumberList} and {@code aBoolList} are the corpus's homogeneous scalar lists
-     * (conformance/README.md, "Number and boolean list elements"). Their elements are boxed so a
-     * null ELEMENT survives decoding: CEL compares it as a value ({@code null == 2} is false), so
-     * {@code [null, 2]} is not the list {@code [2]}. They are consumed in two places —
-     * {@link #checkResource} sends them to {@code check()} verbatim, null elements included, and
-     * {@link #seedIndex} stores them as flat arrays the way {@code tagNames} is stored. Nothing
-     * searches them: every action reading them is a positional read, which this adapter refuses
-     * before any query exists, so the indexed copy is there to keep {@link Corpus#FIELD_MAP} naming
-     * only fields the index really holds.
-     */
+    /** One seed row. List elements are boxed so a null element survives. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record Seed(String id, boolean aBool, String aString, int aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
-                        List<Tag> tags, List<String> subCategoryNames,
-                        String parentSeedId, String note) {}
-
-    /**
-     * {@code attr} is typed as raw JSON rather than {@code Map<String, List<String>>}: the corpus
-     * carries scalar principal attributes as well as lists, and a narrower type would reject the
-     * file rather than silently drop one — but it would still be this harness deciding what the
-     * corpus may contain. {@link #principal()} converts each value by its actual JSON type.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record PrincipalSpec(String id, List<String> roles, Map<String, Object> attr) {}
-
-    /**
-     * conformance/seeds.json. Every key the file carries is named, including the prose ones,
-     * because unknown properties are rejected rather than ignored: a seed field this harness does
-     * not consume would be dropped from the indexed document AND the check() oracle at once, and
-     * the differential would agree for the wrong reason.
-     */
-    private record SeedsFile(@JsonProperty("$schema") String schema, String description,
-                             PrincipalSpec principal, String resourceKind, String principalNote,
-                             String relationNote, List<Seed> seeds) {}
-
-    /** One seed's derived fields, exactly as conformance/derived-fields.json carries them. */
-    private record DerivedEntry(String createdBy, Double aDouble, String createdAt, String updatedAt, String scope,
-                                List<String> labels) {}
-
-    private record DerivedFile(@JsonProperty("$schema") String schema, String description,
-                               List<String> fields, Map<String, DerivedEntry> derived) {}
-
-    /**
-     * An {@code expectedUnsupported} entry. {@code messages} carries one entry per adapter that
-     * must reject the shape, keyed by adapter name; {@code validate-corpus.sh} asserts that key
-     * set is exactly the roster minus the adapters that promoted the shape.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record UnsupportedShape(String action, Map<String, String> messages) {}
-
-    /**
-     * An {@code adapterUnsupported} / {@code adapterSupportedExpected} entry. {@code message} is
-     * the substring this adapter's error must contain — present on the first, absent on the
-     * second, which does not throw.
-     */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record AdapterOutcome(String action, String reason, String message,
-                                 Map<String, String> messages) {}
+                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record KnownDivergence(String action, List<String> adapters) {}
+    private record SeedsFile(List<Seed> seeds) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record ActionsFile(List<String> conformance,
-                               Map<String, List<AdapterOutcome>> adapterUnsupported,
-                               Map<String, List<AdapterOutcome>> adapterSupportedExpected,
-                               List<UnsupportedShape> expectedUnsupported,
-                               List<AdapterOutcome> nullRepresentationOmitted,
-                               List<KnownDivergence> knownDivergences,
-                               List<Corpus.DegenerateOracle> degenerateOracles) {}
+    private record DerivedEntry(String createdBy, Double aDouble, String createdAt,
+                                String updatedAt, String scope, List<String> labels) {}
 
-    // -- corpus coverage guards -----------------------------------------------------------------
-    //
-    // The same parsed seed feeds the indexed document AND the check() oracle, so a corpus field
-    // this harness does not consume is dropped from both sides at once and the differential agrees
-    // for the wrong reason — the projection trap conformance/README.md describes for actions.json,
-    // applied to the seeds. Asserting set equality catches both directions: a corpus key nothing
-    // here reads, and a key this harness reads that the corpus no longer carries.
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DerivedFile(Map<String, DerivedEntry> derived) {}
 
-    private static final List<String> SEED_KEYS = List.of(
-            "id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList",
-            "tags", "subCategoryNames", "parentSeedId");
+    private static final List<Seed> SEEDS = readJson("seeds.json", SeedsFile.class).seeds();
+    private static final Map<String, DerivedEntry> DERIVED =
+            readJson("derived-fields.json", DerivedFile.class).derived();
 
-    /** Corpus prose, never read by a harness: the one documented exclusion from SEED_KEYS. */
-    private static final String SEED_NOTE_KEY = "note";
-
-    /**
-     * The one nested object array a seed carries. A key added inside an element is dropped from
-     * both sides of the differential just as silently as a top-level one, so it is guarded the
-     * same way.
-     */
-    private static final List<String> TAG_KEYS = List.of("id", "name");
-
-    private static final List<String> DERIVED_KEYS =
-            List.of("createdBy", "aDouble", "createdAt", "updatedAt", "scope", "labels");
-
-    // The corpus principal is guarded the same way and for the same reason. It feeds the PLAN under
-    // test AND the check() oracle, so an attribute dropped on the way in vanishes from both sides
-    // at once: the plan folds to ALWAYS_DENIED and the oracle, built from the same principal,
-    // agrees. That is how langchain-chromadb's hardcoded attribute allowlist let `pv-exists` pass
-    // while testing nothing (conformance/README.md, "Adding a new hostile shape", step 7).
-    // principal() iterates the whole attr map, which is correct; the guard is what proves it does.
-    //
-    // `id` and `roles` are deliberately IN scope, guarded by PRINCIPAL_KEYS one level above the
-    // attributes — the same two-level shape SEED_KEYS and TAG_KEYS use for a row and its `tags[]`
-    // elements. A role dropped on the way in changes every policy decision at once; that it is less
-    // likely to be projected away than an attribute is a reason to expect the assertion to stay
-    // quiet, not a reason to omit it. PrincipalSpec ignores unknown properties so that this
-    // assertion, not a Jackson decode error, is what names an added key.
-
-    private static final List<String> PRINCIPAL_KEYS = List.of("id", "roles", "attr");
-
-    private static final List<String> PRINCIPAL_ATTR_KEYS =
-            List.of("allowedTags", "context", "fewTeams", "manyTeams", "zero", "emptyTeams",
-                    "manyStructs", "nullableStructs", "missingStructs");
-
-    /** The corpus key for this adapter — its directory name, as every other harness uses. */
-    private static final String ADAPTER = "elasticsearch-java";
-
-    private static SeedsFile seedsFile;
-    private static ActionsFile actionsFile;
-    /** {@code degenerateOracles} from actions.json: action to {@code "empty"} or {@code "total"}. */
-    private static Map<String, String> degenerateOracles;
-    private static DerivedFile derivedFile;
-    private static List<Seed> seeds;
-    private static List<String> oracleActions;
-    private static List<String> throwingActions;
-    private static Map<String, String> throwingMessages;
-    private static List<String> nullRepresentationOmittedActions;
-    private static Map<String, String> nullRepresentationOmittedMessages;
-
-    /**
-     * The substring this adapter's error must contain, or a loud failure. The message is what
-     * turns "it threw" into "it threw for the declared reason": without it a mapper typo or an
-     * unrelated validation satisfies the throw suite just as well as the documented limitation
-     * (cerbos/query-plan-adapters#326).
-     */
-    private static String requireMessage(String label, String message) {
-        if (message == null || message.isEmpty()) {
-            throw new IllegalStateException("actions.json pins no throw message for " + label
-                    + ": the throw suite would accept a failure for any reason");
+    private static <T> T readJson(String name, Class<T> type) {
+        try {
+            return MAPPER.readValue(Corpus.conformanceDir().resolve(name).toFile(), type);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
-        return message;
     }
 
-    private static GenericContainer<?> cerbos;
     private static ElasticsearchContainer elasticsearch;
-    private static CerbosBlockingClient client;
     private static TestElasticsearch es;
 
-    static Stream<String> oracleActions() {
-        return oracleActions.stream();
-    }
-
-    static Stream<String> throwingActions() {
-        return throwingActions.stream();
-    }
-
-    static Stream<String> nullRepresentationOmittedActions() {
-        return nullRepresentationOmittedActions.stream();
-    }
+    /** Passed / total per PDP tag and tier, printed once the run ends. */
+    private static final Map<String, int[]> TALLY = new TreeMap<>();
 
     @BeforeAll
     static void setUp() throws Exception {
-        Path conformance = conformanceDir();
-        seedsFile = MAPPER.readValue(conformance.resolve("seeds.json").toFile(), SeedsFile.class);
-        actionsFile = MAPPER.readValue(conformance.resolve("actions.json").toFile(), ActionsFile.class);
-        degenerateOracles = Corpus.degenerateOracleShapes(actionsFile.degenerateOracles());
-        derivedFile = MAPPER.readValue(
-                conformance.resolve("derived-fields.json").toFile(), DerivedFile.class);
-        seeds = seedsFile.seeds();
-        assertCorpusCoverage(conformance);
-        classifyActions();
-
-        cerbos = new GenericContainer<>(CerbosTestImage.IMAGE)
-                .withExposedPorts(3593)
-                .withCommand("server", "--set=storage.disk.directory=/policies",
-                        "--set=engine.strictEvaluation=" + CerbosTestImage.strictEvaluation())
-                .withEnv("CERBOS_NO_TELEMETRY", "1")
-                .waitingFor(Wait.forLogMessage(".*Starting gRPC server.*", 1));
-        // The WHOLE policy directory, not the one file the corpus carries today. A second policy
-        // file — a derived-roles or exported-variables file a future action depends on — would
-        // otherwise be silently absent from the PDP, and every action reaching it would plan
-        // against a policy that never loaded.
-        List<Path> policies = policyFiles(conformance.resolve("policies"));
-        assertFalse(policies.isEmpty(), "conformance/policies/ holds no policy file");
-        for (Path policy : policies) {
-            String relative = conformance.resolve("policies").relativize(policy).toString();
-            try {
-                cerbos.withCopyToContainer(
-                        Transferable.of(Files.readAllBytes(policy)), "/policies/" + relative);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        cerbos.start();
-        CerbosTestImage.assertPinned(cerbos);
-        client = CerbosTestImage.client(cerbos);
-
         elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
                 .withEnv("xpack.security.enabled", "false");
         elasticsearch.start();
@@ -281,101 +104,83 @@ class ElasticsearchAdversarialConformanceTest {
         es.refresh(INDEX);
     }
 
-    /** Every regular file under the policy directory, in a stable order. */
-    private static List<Path> policyFiles(Path directory) throws IOException {
-        try (Stream<Path> files = Files.walk(directory)) {
-            return files.filter(Files::isRegularFile).sorted().toList();
+    @AfterAll
+    static void tearDown() {
+        TALLY.forEach((key, counts) ->
+                System.out.printf("conformance %s: %d / %d pass%n", key, counts[0], counts[1]));
+        if (elasticsearch != null) elasticsearch.stop();
+    }
+
+    // -- the contract -----------------------------------------------------------------------------
+
+    @TestFactory
+    Stream<DynamicNode> conformance() {
+        DynamicNode ledger = dynamicTest("every ledger entry is well formed", () -> {
+            List<String> malformed = new ArrayList<>();
+            Corpus.LEDGER.forEach((id, entry) -> {
+                if (!"unsupported".equals(entry.status()) && !"divergent".equals(entry.status())) {
+                    malformed.add(id + ": unknown status " + entry.status());
+                }
+                if (entry.reason() == null || entry.reason().isBlank()) {
+                    malformed.add(id + ": no reason");
+                }
+                if ("divergent".equals(entry.status()) && (entry.issue() == null || entry.issue().isBlank())) {
+                    malformed.add(id + ": divergent without an issue");
+                }
+                // An entry scoped to a PDP that is no longer tested can never apply again.
+                if (entry.pdp() != null && (entry.pdp().isEmpty() || !Corpus.PDP_TAGS.containsAll(entry.pdp()))) {
+                    malformed.add(id + ": pdp " + entry.pdp() + " is not a subset of " + Corpus.PDP_TAGS);
+                }
+            });
+            assertEquals(List.of(), malformed);
+        });
+        return Stream.concat(Stream.of(ledger), Corpus.PDP_TAGS.stream().map(tag -> {
+            List<Golden> goldens = Corpus.goldens(tag);
+            List<DynamicNode> tests = new ArrayList<>();
+            tests.add(dynamicTest("has a golden file for every case in the ledger", () -> {
+                TreeSet<String> stale = new TreeSet<>(Corpus.LEDGER.keySet());
+                goldens.forEach(golden -> stale.remove(golden.id()));
+                assertEquals(new TreeSet<String>(), stale, "ledger entries with no golden file");
+            }));
+            goldens.forEach(golden -> tests.add(
+                    dynamicTest(golden.tier() + ": " + golden.id(), () -> check(tag, golden))));
+            return dynamicContainer("PDP " + tag, tests);
+        }));
+    }
+
+    private static void check(String tag, Golden golden) throws Exception {
+        // The total counts every golden in the tier, skipped ones included.
+        int[] tally = TALLY.computeIfAbsent(tag + " " + golden.tier(), key -> new int[2]);
+        tally[1]++;
+        Assumptions.assumeFalse(golden.skipped(tag), "planner divergence");
+        List<String> allowed = golden.allowed().stream().sorted().toList();
+        LedgerEntry entry = Corpus.ledgerEntry(golden.id(), tag);
+        String status = entry == null ? null : entry.status();
+        if (status == null) {
+            assertEquals(allowed, ids(golden));
+            tally[0]++;
+        } else if (status.equals("unsupported")) {
+            assertThrows(UnsupportedPlanShapeException.class, () -> ids(golden));
+        } else if (status.equals("divergent")) {
+            assertNotEquals(allowed, ids(golden), "fixed: remove the divergent ledger entry");
+        } else {
+            throw new IllegalStateException(golden.id() + ": unknown ledger status " + status);
         }
     }
 
-    private static void classifyActions() {
-        Set<String> conformance = Set.copyOf(actionsFile.conformance());
-        Set<String> expected = actionsFile.expectedUnsupported().stream()
-                .map(UnsupportedShape::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> unsupported = actionsFile.adapterUnsupported()
-                .getOrDefault(ADAPTER, List.of()).stream()
-                .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> supportedExpected = actionsFile.adapterSupportedExpected()
-                .getOrDefault(ADAPTER, List.of()).stream()
-                .map(AdapterOutcome::action).collect(java.util.stream.Collectors.toSet());
-        Set<String> divergences = actionsFile.knownDivergences().stream()
-                .filter(divergence -> divergence.adapters().contains(ADAPTER))
-                .map(KnownDivergence::action).collect(java.util.stream.Collectors.toSet());
-        // Actions whose `== null` probe targets an attribute the oracle OMITS for NULL columns.
-        // Elasticsearch needs no representation option — it cannot index an explicit null
-        // distinguishably from a missing field, so every null-SELECTING direction already fails
-        // closed — but the action still has to be classified somewhere (#302).
-        // Every adapter must reject these, so the message map names the whole roster and this
-        // harness resolves its own entry exactly as it does for a throwing action.
-        nullRepresentationOmittedActions = actionsFile.nullRepresentationOmitted().stream()
-                .map(AdapterOutcome::action).sorted().toList();
-        Map<String, String> nullMessages = new LinkedHashMap<>();
-        actionsFile.nullRepresentationOmitted().forEach(outcome ->
-                nullMessages.put(outcome.action(), requireMessage(
-                        "nullRepresentationOmitted." + outcome.action() + ".messages." + ADAPTER,
-                        outcome.messages() == null ? null : outcome.messages().get(ADAPTER))));
-        nullRepresentationOmittedMessages = Map.copyOf(nullMessages);
-
-        assertTrue(conformance.containsAll(unsupported),
-                "adapterUnsupported.elasticsearch-java contains non-conformance actions");
-        assertTrue(expected.containsAll(supportedExpected),
-                "adapterSupportedExpected.elasticsearch-java contains non-expected actions");
-        assertEquals(172, unsupported.size(),
-                "Elasticsearch unsupported coverage changed without updating the ledger assertion");
-        assertEquals(2, supportedExpected.size(),
-                "Elasticsearch supported-expected coverage changed without updating the ledger assertion");
-        assertEquals(Set.of("p-has"), divergences,
-                "Elasticsearch planner divergences changed without updating the tripwire");
-
-        TreeSet<String> oracle = new TreeSet<>(conformance);
-        oracle.removeAll(unsupported);
-        oracle.addAll(supportedExpected);
-        oracleActions = List.copyOf(oracle);
-
-        // The substring each throwing action's error must contain, resolved once here so a
-        // classification with no pinned message fails the whole suite rather than degrading its
-        // case to a bare "it threw" (cerbos/query-plan-adapters#326).
-        Map<String, String> messages = new LinkedHashMap<>();
-        actionsFile.adapterUnsupported().getOrDefault(ADAPTER, List.of()).forEach(outcome ->
-                messages.put(outcome.action(), requireMessage(
-                        "adapterUnsupported." + ADAPTER + "." + outcome.action(),
-                        outcome.message())));
-        actionsFile.expectedUnsupported().stream()
-                .filter(shape -> !supportedExpected.contains(shape.action()))
-                .forEach(shape -> messages.put(shape.action(), requireMessage(
-                        "expectedUnsupported." + shape.action() + ".messages." + ADAPTER,
-                        shape.messages() == null ? null : shape.messages().get(ADAPTER))));
-        throwingMessages = Map.copyOf(messages);
-
-        TreeSet<String> throwing = new TreeSet<>(unsupported);
-        throwing.addAll(expected);
-        throwing.removeAll(supportedExpected);
-        throwingActions = List.copyOf(throwing);
-        assertEquals(throwing, throwingMessages.keySet(),
-                "every throwing action must pin the message that names its mechanism");
-
-        Set<String> classified = new LinkedHashSet<>();
-        classified.addAll(oracleActions);
-        classified.addAll(throwingActions);
-        classified.addAll(nullRepresentationOmittedActions);
-        classified.addAll(divergences);
-        Set<String> manifest = new LinkedHashSet<>();
-        manifest.addAll(conformance);
-        manifest.addAll(expected);
-        manifest.addAll(nullRepresentationOmittedActions);
-        manifest.addAll(divergences);
-        assertEquals(141, oracleActions.size());
-        assertEquals(181, throwingActions.size());
-        assertEquals(1, nullRepresentationOmittedActions.size());
-        assertEquals(324, classified.size());
-        assertEquals(manifest, classified, "every manifest action must be classified locally");
+    /** Translates the recorded plan and runs it, returning the matching seed ids sorted. */
+    private static List<String> ids(Golden golden) throws Exception {
+        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(golden.plan(), Corpus.OPTIONS);
+        if (result instanceof Result.AlwaysAllowed) return SEEDS.stream().map(Seed::id).sorted().toList();
+        if (result instanceof Result.AlwaysDenied) return List.of();
+        Map<String, Object> query = ((Result.Conditional) result).query();
+        // Elasticsearch returns 10 hits by default.
+        List<String> ids = es.ids("/" + INDEX + "/_search?size=" + SEEDS.size(),
+                Map.of("query", Map.of("bool", Map.of("filter", List.of(query)))));
+        return ids.stream().sorted().toList();
     }
 
-    @AfterAll
-    static void tearDown() {
-        if (elasticsearch != null) elasticsearch.stop();
-        if (cerbos != null) cerbos.stop();
-    }
+    // -- the index --------------------------------------------------------------------------------
 
     private static void createIndex() throws Exception {
         Map<String, Object> tagProperties = Map.of(
@@ -395,11 +200,8 @@ class ElasticsearchAdversarialConformanceTest {
                         "name", Map.of("type", "keyword"))));
 
         Map<String, Object> properties = new LinkedHashMap<>();
-        // The corpus id, indexed as an ordinary keyword field as well as being the document's
-        // `_id`. Elasticsearch's `_id` is metadata addressed by the `ids` query rather than a
-        // term query, so the `id-*` actions need a real field to filter on; leaving it unindexed
-        // would make them return NOTHING against a non-empty oracle, which reads as an adapter
-        // defect and is a harness gap.
+        // The corpus id as a keyword field, alongside `_id`. `_id` is metadata that term queries
+        // cannot filter on, and the `identifier/*` cases need a real field.
         properties.put("id", Map.of("type", "keyword"));
         properties.put("aBool", Map.of("type", "boolean"));
         properties.put("aString", Map.of("type", "keyword"));
@@ -409,13 +211,12 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("owner", Map.of("type", "keyword"));
         properties.put("coOwner", Map.of("type", "keyword"));
         properties.put("tagNames", Map.of("type", "keyword"));
-        // The two homogeneous scalar lists, flat arrays like tagNames. `double` rather than
-        // aNumber's `integer`: the elements reach check() as CEL doubles, and an integer mapping
-        // would coerce a fractional element a future seed adds rather than keep it.
+        // Flat scalar lists. `double` because check() receives CEL doubles, and an integer mapping
+        // would coerce a fractional element.
         properties.put("aNumberList", Map.of("type", "double"));
         properties.put("aBoolList", Map.of("type", "boolean"));
-        // Preserve malformed strings in _source while leaving them unindexed. CEL timestamp()
-        // errors on those rows; range predicates and their guarded negations must both deny them.
+        // Keep malformed strings in _source but unindexed. CEL timestamp() errors on those rows,
+        // so range predicates and their guarded negations must both deny them.
         properties.put("createdBy", Map.of("type", "date", "format", "strict_date_optional_time_nanos",
                 "ignore_malformed", true));
         properties.put("updatedAt", Map.of("type", "date", "format", "strict_date_optional_time_nanos"));
@@ -425,8 +226,8 @@ class ElasticsearchAdversarialConformanceTest {
         properties.put("tags", Map.of("type", "nested", "properties", tagProperties));
         properties.put("categories", Map.of("type", "nested", "properties", categoryProperties));
         properties.put("mainCategory", Map.of("properties", mainCategoryProperties));
-        // The corpus's real to-one relation. `obj.inner` above is a flat alias of aString; this
-        // is a genuine two-level chain, indexed as objects because Elasticsearch has no join.
+        // The corpus's to-one relation, two levels deep, indexed as plain objects because
+        // Elasticsearch has no join.
         Map<String, Object> relationLevel = Map.of(
                 "aBool", Map.of("type", "boolean"),
                 "aString", Map.of("type", "keyword"),
@@ -440,30 +241,29 @@ class ElasticsearchAdversarialConformanceTest {
     }
 
     private static void seedIndex() throws Exception {
-        for (Seed seed : seeds) {
+        for (Seed seed : SEEDS) {
             Map<String, Object> document = new LinkedHashMap<>();
             document.put("id", seed.id());
             document.put("aBool", seed.aBool());
             document.put("aString", seed.aString());
             document.put("aNumber", seed.aNumber());
-            if (doubleFor(seed) != null) document.put("aDouble", doubleFor(seed));
+            if (derivedFor(seed).aDouble() != null) document.put("aDouble", derivedFor(seed).aDouble());
             if (seed.aOptionalString() != null) {
                 document.put("aOptionalString", seed.aOptionalString());
                 document.put("owner", seed.aOptionalString());
             } else {
                 document.put("owner", null);
             }
-            document.put("coOwner", scopeFor(seed));
+            document.put("coOwner", derivedFor(seed).scope());
             document.put("tagNames", seed.tags().stream().map(Tag::name).toList());
-            // Verbatim, null elements included, as tagNames carries a null tag name: the source
-            // keeps the list as the corpus wrote it, and Elasticsearch indexes the non-null values
-            // as an unordered bag — which is why no positional read of either list translates.
+            // Stored as written, null elements included; Elasticsearch indexes the non-null
+            // values as an unordered set of terms, so positional reads cannot translate.
             document.put("aNumberList", seed.aNumberList());
             document.put("aBoolList", seed.aBoolList());
-            document.put("createdBy", isoFor(seed));
-            if (timestampFor(seed) != null) document.put("createdAt", derivedFor(seed).createdAt());
+            document.put("createdBy", derivedFor(seed).createdBy());
+            if (derivedFor(seed).createdAt() != null) document.put("createdAt", derivedFor(seed).createdAt());
             if (derivedFor(seed).updatedAt() != null) document.put("updatedAt", derivedFor(seed).updatedAt());
-            if (scopeFor(seed) != null) document.put("scope", scopeFor(seed));
+            if (derivedFor(seed).scope() != null) document.put("scope", derivedFor(seed).scope());
             document.put("obj", Map.of("inner", seed.aString()));
             document.put("tags", seed.tags().stream().map(tag -> {
                 Map<String, Object> value = new LinkedHashMap<>();
@@ -479,9 +279,8 @@ class ElasticsearchAdversarialConformanceTest {
                         "subCategories", seed.subCategoryNames().stream()
                                 .map(name -> Map.of("name", name)).toList()));
             }
-            // The to-one chain, one nested object per level. A seed with no parent gets no
-            // `parent` field at all, which is what makes the absent-parent hazard reachable
-            // through a SCALAR rather than only through mainCategory's collection.
+            // The to-one chain. A seed with no parent gets no `parent` field, matching the
+            // missing attribute check() receives.
             Seed parentSeed = parentSeedOf(seed);
             if (parentSeed != null) {
                 Map<String, Object> parent = relationDocument(parentSeed);
@@ -496,7 +295,7 @@ class ElasticsearchAdversarialConformanceTest {
     private static List<Map<String, Object>> categoriesFor(Seed seed) {
         List<Map<String, Object>> categories = new ArrayList<>();
         for (String subName : seed.subCategoryNames()) {
-            List<Map<String, Object>> labels = labelsFor(seed).stream().map(name -> {
+            List<Map<String, Object>> labels = derivedFor(seed).labels().stream().map(name -> {
                 Map<String, Object> label = new LinkedHashMap<>();
                 label.put("name", name);
                 return label;
@@ -508,68 +307,15 @@ class ElasticsearchAdversarialConformanceTest {
         return categories;
     }
 
-    /** The whole seeded index, so a filter is never silently truncated to Elasticsearch's page. */
-    private static String searchPath() {
-        return "/" + INDEX + "/_search?size=" + seeds.size();
-    }
-
-    private static List<String> search(Map<String, Object> query) throws Exception {
-        return es.ids(searchPath(), Map.of("query", Map.of(
-                "bool", Map.of("filter", List.of(query)))));
-    }
-
-    private static List<String> allIds() {
-        return seeds.stream().map(Seed::id).sorted().toList();
-    }
-
-    private static Principal principal() {
-        PrincipalSpec spec = seedsFile.principal();
-        Principal principal = Principal.newInstance(spec.id(), spec.roles().toArray(String[]::new));
-        for (Map.Entry<String, Object> entry : spec.attr().entrySet()) {
-            principal = principal.withAttribute(entry.getKey(),
-                    principalAttribute(entry.getKey(), entry.getValue()));
-        }
-        return principal;
-    }
-
-    /**
-     * One principal attribute, converted by the JSON type the corpus actually carries. JSON scalars, lists and structs are preserved recursively so the plan and oracle receive
-     * the same unmodified principal.
-     */
-    private static AttributeValue principalAttribute(String key, Object value) {
-        if (value == null) return nullAttributeValue();
-        if (value instanceof String text) return AttributeValue.stringValue(text);
-        if (value instanceof Number number) return AttributeValue.doubleValue(number.doubleValue());
-        if (value instanceof Boolean bool) return AttributeValue.boolValue(bool);
-        if (value instanceof List<?> list) {
-            return AttributeValue.listValue(list.stream()
-                    .map(element -> principalAttribute(key, element)).toList());
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, AttributeValue> fields = new LinkedHashMap<>();
-            map.forEach((name, element) -> {
-                if (!(name instanceof String field)) {
-                    throw new IllegalStateException("Non-string principal field: " + key);
-                }
-                fields.put(field, principalAttribute(key + "." + field, element));
-            });
-            return AttributeValue.mapValue(fields);
-        }
-        throw new IllegalStateException("Unsupported principal attribute: " + key);
-    }
-
-    // -- the real to-one relation (conformance/README.md, "The real to-one relation") -----------
+    // -- the real to-one relation (conformance/README.md, "The dataset") --------------------------
     //
-    // `parentSeedId` names the seed whose four scalars a row's `parent` carries, and that seed's
-    // own `parentSeedId` names the ones `parent.inner` carries. The chain is cut at two levels.
-    // Elasticsearch has no join, so both levels are indexed as nested objects — but the SHAPE is
-    // the same to-one chain every other store carries, and an absent level is a missing path here
-    // exactly as it is a missing row there.
+    // `parentSeedId` names the seed whose scalars a row's `parent` carries, and that seed's own
+    // `parentSeedId` fills `parent.inner`. An absent level is a missing field.
 
     /** The seed one hop out, or null when this level has no parent. A null argument returns null. */
     private static Seed parentSeedOf(Seed seed) {
         if (seed == null || seed.parentSeedId() == null) return null;
-        return seeds.stream()
+        return SEEDS.stream()
                 .filter(candidate -> candidate.id().equals(seed.parentSeedId()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
@@ -577,7 +323,7 @@ class ElasticsearchAdversarialConformanceTest {
                                 + "\", which is not a seed id"));
     }
 
-    /** One level of the chain as an indexed object. A NULL column is an ABSENT field. */
+    /** One level of the chain as an indexed object. A NULL column is an absent field. */
     private static Map<String, Object> relationDocument(Seed seed) {
         Map<String, Object> level = new LinkedHashMap<>();
         level.put("aBool", seed.aBool());
@@ -587,624 +333,11 @@ class ElasticsearchAdversarialConformanceTest {
         return level;
     }
 
-    /** The same four as check() attributes: a NULL column is a MISSING attribute, one hop out. */
-    private static Map<String, AttributeValue> relationAttribute(Seed seed) {
-        Map<String, AttributeValue> level = new LinkedHashMap<>();
-        level.put("aBool", AttributeValue.boolValue(seed.aBool()));
-        level.put("aString", AttributeValue.stringValue(seed.aString()));
-        level.put("aNumber", AttributeValue.doubleValue(seed.aNumber()));
-        if (seed.aOptionalString() != null) {
-            level.put("aOptionalString", AttributeValue.stringValue(seed.aOptionalString()));
-        }
-        return level;
-    }
-
-    private static Resource checkResource(Seed seed) {
-        Resource resource = Resource.newInstance(seedsFile.resourceKind(), seed.id())
-                .withAttribute("aBool", AttributeValue.boolValue(seed.aBool()))
-                .withAttribute("aString", AttributeValue.stringValue(seed.aString()))
-                .withAttribute("aNumber", AttributeValue.doubleValue(seed.aNumber()))
-                .withAttribute("createdBy", AttributeValue.stringValue(isoFor(seed)))
-                .withAttribute("obj", AttributeValue.mapValue(Map.of(
-                        "inner", AttributeValue.stringValue(seed.aString()))))
-                .withAttribute("tags", AttributeValue.listValue(seed.tags().stream()
-                        .map(ElasticsearchAdversarialConformanceTest::tagAttribute).toList()))
-                .withAttribute("categories", AttributeValue.listValue(seed.subCategoryNames().stream()
-                        .map(name -> AttributeValue.mapValue(Map.of(
-                                "name", AttributeValue.stringValue("business"),
-                                "subCategories", AttributeValue.listValue(AttributeValue.mapValue(Map.of(
-                                        "name", AttributeValue.stringValue(name),
-                                        "labels", AttributeValue.listValue(labelsFor(seed).stream()
-                                                .map(ElasticsearchAdversarialConformanceTest::labelAttribute)
-                                                .toList())))))))
-                        .toList()));
-        if (seed.aOptionalString() != null) {
-            resource = resource.withAttribute("aOptionalString",
-                    AttributeValue.stringValue(seed.aOptionalString()));
-        }
-        resource = resource.withAttribute("owner", seed.aOptionalString() == null
-                ? nullAttributeValue() : AttributeValue.stringValue(seed.aOptionalString()));
-        // The explicit-null alias of the `scope` field, the second half of `null-value-f2f`.
-        resource = resource.withAttribute("coOwner", scopeFor(seed) == null
-                ? nullAttributeValue() : AttributeValue.stringValue(scopeFor(seed)));
-        resource = resource.withAttribute("tagNames", AttributeValue.listValue(seed.tags().stream()
-                .map(tag -> tag.name() == null
-                        ? nullAttributeValue() : AttributeValue.stringValue(tag.name()))
-                .toList()));
-        // The homogeneous scalar lists, verbatim. A null ELEMENT is sent as an explicit null
-        // rather than dropped: a6's aNumberList [null, 2] has a first element, and CEL answers
-        // `null == 2` false and its negation true, where a shortened [2] would answer the opposite.
-        resource = resource.withAttribute("aNumberList", AttributeValue.listValue(
-                seed.aNumberList().stream()
-                        .map(number -> number == null
-                                ? nullAttributeValue() : AttributeValue.doubleValue(number))
-                        .toList()));
-        resource = resource.withAttribute("aBoolList", AttributeValue.listValue(
-                seed.aBoolList().stream()
-                        .map(bool -> bool == null
-                                ? nullAttributeValue() : AttributeValue.boolValue(bool))
-                        .toList()));
-        if (doubleFor(seed) != null) {
-            resource = resource.withAttribute("aDouble", AttributeValue.doubleValue(doubleFor(seed)));
-        }
-        if (scopeFor(seed) != null) {
-            resource = resource.withAttribute("scope", AttributeValue.stringValue(scopeFor(seed)));
-        }
-        if (timestampFor(seed) != null) {
-            resource = resource.withAttribute("createdAt",
-                    AttributeValue.stringValue(derivedFor(seed).createdAt()));
-        }
-        if (derivedFor(seed).updatedAt() != null) {
-            resource = resource.withAttribute("updatedAt", AttributeValue.stringValue(derivedFor(seed).updatedAt()));
-        }
-        if (!seed.subCategoryNames().isEmpty()) {
-            resource = resource.withAttribute("mainCategory", AttributeValue.mapValue(Map.of(
-                    "name", AttributeValue.stringValue("business"),
-                    "subCategories", AttributeValue.listValue(seed.subCategoryNames().stream()
-                            .map(name -> AttributeValue.mapValue(Map.of(
-                                    "name", AttributeValue.stringValue(name)))).toList()),
-                    "subNames", AttributeValue.listValue(seed.subCategoryNames().stream()
-                            .map(AttributeValue::stringValue).toList()))));
-        }
-        // The real to-one chain, mirroring the indexed document exactly. A row with no parent
-        // sends NO `parent` attribute — a CEL missing-path error (deny) — matching a document with
-        // no `parent` field; the same holds one level down for `parent.inner`.
-        Seed parentSeed = parentSeedOf(seed);
-        if (parentSeed != null) {
-            Map<String, AttributeValue> parent = relationAttribute(parentSeed);
-            Seed innerSeed = parentSeedOf(parentSeed);
-            if (innerSeed != null) {
-                parent.put("inner", AttributeValue.mapValue(relationAttribute(innerSeed)));
-            }
-            resource = resource.withAttribute("parent", AttributeValue.mapValue(parent));
-        }
-        return resource;
-    }
-
-    private static AttributeValue tagAttribute(Tag tag) {
-        Map<String, AttributeValue> value = new LinkedHashMap<>();
-        value.put("id", AttributeValue.stringValue(tag.id()));
-        if (tag.name() != null) value.put("name", AttributeValue.stringValue(tag.name()));
-        return AttributeValue.mapValue(value);
-    }
-
-    private static AttributeValue labelAttribute(String name) {
-        Map<String, AttributeValue> value = new LinkedHashMap<>();
-        if (name != null) value.put("name", AttributeValue.stringValue(name));
-        return AttributeValue.mapValue(value);
-    }
-
-    private static AttributeValue nullAttributeValue() {
-        try {
-            var constructor = AttributeValue.class.getDeclaredConstructor(com.google.protobuf.Value.class);
-            constructor.setAccessible(true);
-            return constructor.newInstance(com.google.protobuf.Value.newBuilder()
-                    .setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build());
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Unable to construct explicit null AttributeValue", e);
-        }
-    }
-
-    private static List<String> oracleAllowedIds(String action) {
-        return seeds.stream()
-                .filter(seed -> client.check(principal(), checkResource(seed), action).isAllowed(action))
-                .map(Seed::id).sorted().toList();
-    }
-
-    /**
-     * The plan the PDP produces for one action. The SDK's single-action {@code plan} overload is
-     * deprecated in favour of the multi-action one; one action in the list is the same request,
-     * and the result's filter is that action's.
-     */
-    private static PlanResourcesResult plan(String action) {
-        return client.plan(
-                principal(), Resource.newInstance(seedsFile.resourceKind()), List.of(action));
-    }
-
-    private static List<String> adapterFilteredIds(String action) throws Exception {
-        // Translated through Corpus.OPTIONS — the SAME declarations ElasticsearchTranslatorTest
-        // pins the emitted query under — so the two suites are statements about one query.
-        Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                plan(action), Corpus.OPTIONS);
-        if (result instanceof Result.AlwaysAllowed) {
-            return allIds();
-        }
-        if (result instanceof Result.AlwaysDenied) {
-            return List.of();
-        }
-        return search(((Result.Conditional) result).query());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("oracleActions")
-    void adapterMatchesCheckOracle(String action) throws Exception {
-        List<String> oracle = oracleAllowedIds(action);
-        assertOracleShape(action, oracle);
-        assertEquals(oracle, adapterFilteredIds(action),
-                "adapter result diverges from check() oracle for action '" + action + "'");
-    }
-
-    @Test
-    void malformedTimestampRemainsDeniedUnderBothPolarities() throws Exception {
-        Seed malformed = seeds.stream().filter(seed -> seed.id().equals("h5")).findFirst().orElseThrow();
-        assertEquals("not-a-timestamp", isoFor(malformed),
-                "the oracle must receive the original malformed string, not a normalized date");
-        for (String action : List.of("p-timestamp", "cast-not-timestamp")) {
-            assertFalse(oracleAllowedIds(action).contains("h5"), action);
-            assertFalse(adapterFilteredIds(action).contains("h5"), action);
-        }
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("throwingActions")
-    void unsupportedShapesThrow(String action) throws Exception {
-        // The plan is fetched OUTSIDE the assertion (a PDP failure fails the test rather than
-        // passing it) and no search executes: the invariant is that an inexpressible shape
-        // must throw during translation, before any query exists.
-        PlanResourcesResult plan = plan(action);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, Corpus.OPTIONS),
-                "unsupported action must fail during translation: " + action);
-        // The corpus pins the exact mechanism, which subsumes the old "Unknown attribute" guard:
-        // an unmapped Corpus.FIELD_MAP entry (which once let six actions throw here while never
-        // reaching the mechanism their actions.json reasons claim) now fails this assertion with
-        // every other wrong-reason rejection (cerbos/query-plan-adapters#326).
-        assertTrue(ex.getMessage().contains(throwingMessages.get(action)),
-                "action '" + action + "' was rejected for a reason actions.json does not declare: "
-                        + ex.getMessage());
-    }
-
-    /**
-     * #302. Elasticsearch is one of two adapters that need no NULL-representation option: it
-     * cannot index an explicit null distinguishably from a missing field, so every shape that
-     * would SELECT null documents already fails closed and only the {@code exists}-shaped
-     * directions translate. {@code null-eq} (explicit null) is already in
-     * {@code adapterUnsupported} for that reason; {@code null-eq-missing} must fail the same way.
-     * If Elasticsearch ever gains a null sentinel, this stops throwing and the adapter acquires a
-     * representation dependency it must then declare.
-     */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("nullRepresentationOmittedActions")
-    void nullRepresentationOmittedIsRejectedRegardless(String action) throws Exception {
-        assertEquals(List.of(), oracleAllowedIds(action),
-                "the omitted representation must deny every seed for " + action);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> adapterFilteredIds(action));
-        assertTrue(ex.getMessage().contains(nullRepresentationOmittedMessages.get(action)),
-                ex.getMessage());
-    }
-
-    /**
-     * #387. {@code filter-as-conjunct} puts a filter() one level below the root, where the guard
-     * that refuses {@code filter-as-condition} does not look. Its oracle is empty BY CONSTRUCTION
-     * — check() cannot evaluate a non-boolean conjunction — so it is a {@code degenerateOracles}
-     * entry that this adapter never oracle-compares, and the throw suite on its own would say nothing about whether
-     * refusing it is REQUIRED.
-     *
-     * <p>This is that argument. The other conjunct is {@code R.attr.aBool}, which this adapter
-     * certainly can express and which {@code root-bare-bool} spells on its own; an adapter that
-     * dropped the conjunct it could not translate would emit exactly that query and return every
-     * document it matches, all of which the PDP denies for this action.
-     */
-    @Test
-    void filterAsConjunctMustBeRefusedBecauseDroppingItsUntranslatableHalfOverGrants() throws Exception {
-        assertEquals(List.of(), oracleAllowedIds("filter-as-conjunct"),
-                "check() must deny every seed: a filter() in boolean position is not evaluable");
-
-        List<String> survivingHalf = adapterFilteredIds("root-bare-bool");
-        assertFalse(survivingHalf.isEmpty(),
-                "root-bare-bool must match documents, else dropping the other conjunct would cost nothing");
-        assertTrue(survivingHalf.size() < seeds.size(), "root-bare-bool must not match every document");
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> adapterFilteredIds("filter-as-conjunct"));
-        assertTrue(ex.getMessage().contains(throwingMessages.get("filter-as-conjunct")), ex.getMessage());
-    }
-
-    /**
-     * Adding a throwing action without pinning its message must fail this harness rather than
-     * silently degrade the throw suite to a bare "it threw" (cerbos/query-plan-adapters#326).
-     */
-    @Test
-    void throwingActionWithNoPinnedMessageFailsClassification() {
-        for (String absent : new String[] {null, ""}) {
-            IllegalStateException ex = assertThrows(IllegalStateException.class,
-                    () -> requireMessage("synthetic-entry", absent));
-            assertTrue(ex.getMessage().contains("pins no throw message"), ex.getMessage());
-        }
-    }
-
-    /**
-     * The one {@code knownDivergences} entry, kept visible rather than skipped. The planner folds
-     * {@code has(R.attr.aOptionalString)} to {@code ALWAYS_ALLOWED}, so a caller searches
-     * unfiltered — and this is what unfiltered COSTS, measured: the search returns every document
-     * {@code check()} denies. {@code allIds() == adapterFilteredIds("p-has")} used to stand here,
-     * and it was a tautology: an always-allowed result returns {@code allIds()} by construction,
-     * so it could not fail whatever the PDP or the index held.
-     */
-    @Test
-    void upstreamHasFoldOverGrantTripwire() throws Exception {
-        assertTrue(plan("p-has").isAlwaysAllowed(),
-                "p-has should remain the documented planner divergence");
-        assertInstanceOf(Result.AlwaysAllowed.class,
-                ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan("p-has"), Corpus.OPTIONS));
-
-        List<String> oracle = oracleAllowedIds("p-has");
-        // Both halves: an empty oracle is a silently broken PDP or policy load, which the
-        // non-total assertion alone would pass.
-        assertFalse(oracle.isEmpty(), "p-has check() oracle must still allow the seeds holding the attr");
-        assertTrue(oracle.size() < seeds.size(), "p-has check() oracle must still deny missing attrs");
-        assertTrue(oracle.contains("a1"), "p-has: a1 holds aOptionalString");
-
-        // The over-grant itself. An ALWAYS_ALLOWED plan means the caller runs its search with no
-        // authorization clause, which is `match_all` here; every id the oracle denies comes back.
-        Set<String> denied = new TreeSet<>(allIds());
-        denied.removeAll(oracle);
-        assertFalse(denied.isEmpty(), "p-has: check() must deny at least one seed, or there is"
-                + " no over-grant for this tripwire to see");
-        List<String> unfiltered = es.ids(searchPath(), Map.of("query", Map.of("match_all", Map.of())));
-        assertTrue(unfiltered.containsAll(denied), "the unfiltered search must return every"
-                + " document the PDP denies for p-has; denied " + denied + ", got " + unfiltered);
-        assertEquals(allIds(), unfiltered);
-    }
-
-    /**
-     * Shapes this adapter refuses to translate: they have no oracle comparison to guard, and stay
-     * here as PDP/policy liveness probes for a group the sweep in
-     * {@link #adapterMatchesCheckOracle} cannot cover.
-     */
-    private static final List<String> DEGENERACY_LIVENESS_PROBES = List.of(
-            "cast-not-double", "cast-not-int", "cast-not-string-missing",
-            "cast-not-string-null", "index-fractional", "index-negative",
-            "index-not-oob", "regex-eq-true", "regex-lookahead",
-            "projection-exists-not-eq",
-            "regex-digit", "regex-case", "regex-posix", "regex-unanchored", "regex-dot", "regex-alternation", "regex-brace", "except-size", "except-eq", "pv-structs", "pv-exists-one", "pv-filter", "pv-map", "pv-except", "lambda-in-literal", "lambda-in-literal-neg", "lambda-ternary", "in-var-var-omitted", "in-var-var-omitted-neg", "not-concat-unsolvable", "not-concat-unsolvable-ne", "hier-overlaps-list-prefix", "not-hasint-empty-chain", "div-by-division", "temporal-raw-eq", "not-nan-ord-le", "not-ternary-parent", "not-nan-order-string", "hasint-null-vf", "hasint-map-null", "hasint-map-null-vf", "eq-list", "ne-list",
-            // Three shapes the audit added the corpus for, each refused by name here and compared
-            // on the adapters that can express it: size() over a string, a top-level regex
-            // alternation, and an empty hierarchy delimiter.
-            "string-size-gt0",
-            "matches-alt",
-            "hier-empty-delim",
-            // Elasticsearch does not index an empty nested array, so a positive all() cannot tell
-            // an empty collection (true) from a missing one (CEL error).
-            "all-on-empty",
-            // The chain reached through a ternary condition (#334) and through a fractional count
-            // threshold (#333): different rejection sites, both still fail-closed here — the
-            // Query DSL has no conditional-value expression and no arbitrary count threshold.
-            "w1-ternary-chain-cond",
-            "w1-size-frac-le-chain",
-            // Nor an explicit null scalar, so positive equality against null cannot tell an
-            // explicit null (allow) from a missing field (deny). The negated forms stay compared.
-            "null-eq",
-            // The other half of the same limitation (#308): comparing that explicit-null
-            // attribute against a NON-null constant. Every Query DSL spelling either requires
-            // the field to exist or matches every document missing it, and neither is the
-            // decision, so the whole group is refused and probed rather than compared.
-            "null-value-ne-const",
-            "null-value-not-eq-const",
-            "null-value-not-in-const",
-            "null-value-f2f",
-            "null-value-pv-not-exists",
-            // The id-* group's fail-closed half (#376), one per rejection site: a second document
-            // field on the value side, and a computed operand there. string() is the same
-            // computed-operand rejection reached through a cast and has no compared member at all.
-            "id-f2f-ne",
-            "id-concat",
-            "cast-string-bool",
-            // A concatenation of two document fields is the same computed operand id-concat is
-            // refused for, without the primary key involved (#391).
-            "concat-f2f",
-            // #387, one probe per group this adapter cannot compare: the negated LIKE, whose
-            // COLUMN needle is a second document field; modulo; the positional read of a scalar
-            // list; and list equality over a map() projection. All four are computed leaf
-            // operands the Query DSL has no form for without scripts.
-            "not-contains",
-            "arith-mod",
-            "index-scalar-list",
-            "index-scalar-list-not-eq",
-            "index-scalar-list-null",
-            "map-eq-list",
-            // The same positional read over the number and boolean lists, refused at the same
-            // site: the element type those actions discriminate is never reached here, including
-            // by the two cross-type probes, whose `aNumber == 5` branch is refused with the whole
-            // disjunction.
-            "index-number-list",
-            "index-number-list-not-eq",
-            "index-bool-list",
-            "index-bool-list-not-eq",
-            "index-bool-list-vs-number",
-            "index-number-list-vs-bool",
-            // The one hierarchy shape that stays fail-closed once the rest of the group translates (#332):
-            // its descendant path is CONSTRUCTED by list() from a constant segment and the primary
-            // key, so there is no stored path for a prefix or terms query to run against. It sits
-            // here rather than in the sweep, and the complement assertion below is what
-            // makes that split a statement rather than an omission.
-            "hier-list-id",
-            // A null element of a flat number list leaves no indexed term, so membership of null
-            // is refused in both polarities, the negation first as negated collection membership.
-            "null-in-number-list",
-            "not-null-in-number-list");
-
-    /**
-     * Guard the guard, over the WHOLE oracle set. The comparison in
-     * {@link #adapterMatchesCheckOracle} passes vacuously when the oracle is trivial — the PDP
-     * denying every seed, or allowing every seed, whatever the adapter emitted — so that
-     * comparison asserts this shape on the oracle it has already computed, before comparing, for
-     * EVERY oracle-compared action. The only way out is the corpus allowlist,
-     * {@code degenerateOracles} in {@code conformance/actions.json}, which every harness shares:
-     * a listed action must have exactly the declared oracle, and any other must have a non-empty,
-     * non-total one. A representative sample used to stand here (cerbos/query-plan-adapters#490);
-     * a sample leaves the actions it does not name free to go degenerate unnoticed.
-     */
-    private static void assertOracleShape(String action, List<String> oracle) {
-        String declared = degenerateOracles.get(action);
-        if ("empty".equals(declared)) {
-            assertEquals(List.of(), oracle, "'" + action + "' is listed as an empty oracle in"
-                    + " degenerateOracles (conformance/actions.json) but its oracle allows seeds;"
-                    + " it discriminates now, so remove it from that list");
-        } else if ("total".equals(declared)) {
-            assertEquals(allSeedIds(), oracle, "'" + action + "' is listed as a total oracle in"
-                    + " degenerateOracles (conformance/actions.json) but its oracle denies seeds;"
-                    + " it discriminates now, so remove it from that list");
-        } else {
-            assertTrue(!oracle.isEmpty() && oracle.size() < seeds.size(),
-                    "oracle for '" + action + "' is degenerate (" + oracle + "): the differential"
-                            + " cannot fail for a degenerate oracle, so either the corpus lost its"
-                            + " discriminating seed or the action belongs in degenerateOracles in"
-                            + " conformance/actions.json with a reason");
-        }
-    }
-
-    private static List<String> allSeedIds() {
-        return seeds.stream().map(Seed::id).sorted().toList();
-    }
-
-    /**
-     * Every {@code degenerateOracles} entry — whether this adapter oracle-compares it, refuses
-     * it, or rejects it under the omitted null representation — has exactly the oracle the corpus
-     * declares, so the allowlist cannot rot into a blanket exemption: an entry whose oracle became
-     * discriminating is a guard entry wearing an exemption.
-     */
-    @Test
-    void everyDegenerateOracleIsExactlyAsDeclared() {
-        List<String> wrong = new ArrayList<>();
-        for (Map.Entry<String, String> entry : degenerateOracles.entrySet()) {
-            List<String> ids = oracleAllowedIds(entry.getKey());
-            List<String> want = "empty".equals(entry.getValue()) ? List.of() : allSeedIds();
-            if (!want.equals(ids)) {
-                wrong.add(entry.getKey() + " (declared " + entry.getValue() + "): " + ids);
-            }
-        }
-        assertEquals(List.of(), wrong, "these degenerateOracles entries in"
-                + " conformance/actions.json do not have the oracle they declare");
-    }
-
-    /**
-     * The liveness probes are this adapter's refused shapes, so the sweep in
-     * {@link #adapterMatchesCheckOracle} never reaches them. Asserting the complement keeps the
-     * split honest — an action this adapter gains support for must move out of the liveness
-     * probes and into the sweep.
-     */
-    @Test
-    void livenessProbesAreRefusedAndNonDegenerate() {
-        Set<String> compared = Set.copyOf(oracleActions);
-        for (String action : DEGENERACY_LIVENESS_PROBES) {
-            assertFalse(compared.contains(action),
-                    "'" + action + "' is now oracle-compared: remove it from the liveness probes");
-            assertNonDegenerateOracle(action);
-        }
-    }
-
-    /**
-     * The to-one relation carries no corpus action yet — this is the expand half of
-     * cerbos/query-plan-adapters#372's expand–contract — so nothing else in this class would
-     * notice a seeder that indexed no chain at all, or one that wrote the root's own fields one
-     * hop out. Read the two hops back out of the indexed documents rather than counting them: a
-     * count cannot tell the corpus's values from the root's, which is exactly the flat-alias
-     * failure this relation exists to make visible.
-     */
-    @Test
-    @SuppressWarnings("unchecked")
-    void seededToOneChainMatchesTheCorpusRelation() throws Exception {
-        long withParent = seeds.stream().filter(s -> parentSeedOf(s) != null).count();
-        long withInner = seeds.stream()
-                .filter(s -> parentSeedOf(parentSeedOf(s)) != null).count();
-        assertTrue(withParent > 0, "no seed has a parent");
-        assertTrue(withInner > 0, "no seed reaches parent.inner");
-        assertTrue(withParent < seeds.size(), "every seed has a parent");
-
-        Map<String, List<String>> want = new LinkedHashMap<>();
-        for (Seed seed : seeds) {
-            Seed parent = parentSeedOf(seed);
-            Seed inner = parentSeedOf(parent);
-            want.put(seed.id(), java.util.Arrays.asList(
-                    parent == null ? null : parent.aString(),
-                    inner == null ? null : inner.aString()));
-        }
-
-        Map<String, List<String>> got = new LinkedHashMap<>();
-        for (Map<String, Object> hit :
-                es.hits(searchPath(), Map.of("query", Map.of("match_all", Map.of())))) {
-            Map<String, Object> source = (Map<String, Object>) hit.get("_source");
-            Map<String, Object> parent = (Map<String, Object>) source.get("parent");
-            Map<String, Object> inner = parent == null
-                    ? null : (Map<String, Object>) parent.get("inner");
-            got.put((String) hit.get("_id"), java.util.Arrays.asList(
-                    parent == null ? null : (String) parent.get("aString"),
-                    inner == null ? null : (String) inner.get("aString")));
-        }
-        assertEquals(want, got);
-    }
-
-    private static void assertNonDegenerateOracle(String action) {
-        List<String> ids = oracleAllowedIds(action);
-        assertTrue(!ids.isEmpty() && ids.size() < seeds.size(),
-                "oracle for '" + action + "' is degenerate: " + ids);
-    }
-
-    /**
-     * Proves this harness consumes every seed key, every principal key and every derived field the
-     * corpus defines, and nothing it does not. Rejecting unknown properties on decode cannot do
-     * this alone: it catches an added key but says nothing about one that disappears, and a
-     * disappeared key decodes to its default on both sides of the differential.
-     */
-    private static void assertCorpusCoverage(Path conformance) throws IOException {
-        JsonNode rawSeedsFile = MAPPER.readTree(conformance.resolve("seeds.json").toFile());
-        JsonNode rawSeeds = rawSeedsFile.get("seeds");
-        assertEquals(seeds.size(), rawSeeds.size(), "seeds.json rows lost in decoding");
-        for (int i = 0; i < rawSeeds.size(); i++) {
-            String label = "seeds.json seeds[" + i + "]";
-            assertKeys(label, keysOf(rawSeeds.get(i)), SEED_KEYS, List.of(SEED_NOTE_KEY));
-            assertScalarList(label + ".aNumberList", rawSeeds.get(i).get("aNumberList"),
-                    JsonNode::isNumber);
-            assertScalarList(label + ".aBoolList", rawSeeds.get(i).get("aBoolList"),
-                    JsonNode::isBoolean);
-            JsonNode rawTags = rawSeeds.get(i).get("tags");
-            for (int j = 0; j < rawTags.size(); j++) {
-                assertKeys(label + ".tags[" + j + "]", keysOf(rawTags.get(j)), TAG_KEYS,
-                        List.of());
-            }
-        }
-
-        assertPrincipalCoverage(rawSeedsFile.get("principal"));
-
-        assertKeys("derived-fields.json fields", derivedFile.fields(), DERIVED_KEYS, List.of());
-        assertEquals(seeds.stream().map(Seed::id).collect(Collectors.toCollection(TreeSet::new)),
-                new TreeSet<>(derivedFile.derived().keySet()),
-                "derived-fields.json must carry exactly one entry per seeds.json id");
-        JsonNode rawDerived =
-                MAPPER.readTree(conformance.resolve("derived-fields.json").toFile()).get("derived");
-        for (Map.Entry<String, JsonNode> entry : rawDerived.properties()) {
-            assertKeys("derived-fields.json derived[\"" + entry.getKey() + "\"]",
-                    keysOf(entry.getValue()), DERIVED_KEYS, List.of());
-        }
-    }
-
-    /**
-     * Guards the corpus principal the way {@link #assertCorpusCoverage} guards a seed row: the
-     * top-level keys, then the keys one level in.
-     *
-     * <p>Asserted against the RAW JSON because {@link #principal()} rebuilds the principal from
-     * {@link PrincipalSpec} — a rebuilt object could only ever report the keys this harness already
-     * names. Attribute values are guarded as well: scalar types, collection element types and
-     * struct keys must match the corpus declaration before recursive conversion feeds both APIs.
-     */
-    private static void assertPrincipalCoverage(JsonNode principal) {
-        assertKeys("seeds.json principal", keysOf(principal), PRINCIPAL_KEYS, List.of());
-        JsonNode attr = principal.get("attr");
-        assertKeys("seeds.json principal.attr", keysOf(attr), PRINCIPAL_ATTR_KEYS, List.of());
-        for (Map.Entry<String, JsonNode> entry : attr.properties()) {
-            String label = "seeds.json principal.attr." + entry.getKey();
-            JsonNode value = entry.getValue();
-            switch (entry.getKey()) {
-                case "context" -> assertTrue(value.isTextual(), label);
-                case "zero" -> assertTrue(value.isNumber(), label);
-                case "manyStructs", "nullableStructs", "missingStructs" -> {
-                    assertTrue(value.isArray(), label);
-                    for (JsonNode element : value) {
-                        assertTrue(element.isObject(), label);
-                        assertKeys(label + "[]", keysOf(element),
-                                entry.getKey().equals("missingStructs") ? List.of() : List.of("name"),
-                                List.of());
-                        if (!entry.getKey().equals("missingStructs")) {
-                            assertTrue(element.get("name").isTextual() || element.get("name").isNull(), label);
-                        }
-                    }
-                }
-                default -> {
-                    assertTrue(value.isArray(), label);
-                    for (JsonNode element : value) assertTrue(element.isTextual(), label);
-                }
-            }
-        }
-    }
-
-    /**
-     * One homogeneous scalar list, checked against the RAW JSON. The {@link Seed} record's element
-     * type is not a check: Jackson's scalar coercion reads a quoted {@code "2"} into a number list,
-     * and the coerced value would then reach the index and {@code check()} alike, so the
-     * differential would agree about a list the corpus never wrote. A null element is allowed —
-     * the corpus carries them on purpose.
-     */
-    private static void assertScalarList(String label, JsonNode list,
-                                         Predicate<JsonNode> elementType) {
-        assertTrue(list.isArray(), () -> label + " is not an array: " + list);
-        for (JsonNode element : list) {
-            assertTrue(element.isNull() || elementType.test(element),
-                    () -> label + " holds " + element + ", which is not its declared element type");
-        }
-    }
-
-    private static void assertKeys(String label, Collection<String> got, Collection<String> want,
-                                   Collection<String> optional) {
-        Set<String> allowed = new LinkedHashSet<>(want);
-        allowed.addAll(optional);
-        for (String key : got) {
-            assertTrue(allowed.contains(key), () -> label + " carries \"" + key
-                    + "\", which this harness does not consume: an unconsumed corpus field is"
-                    + " dropped from the indexed document and the check() oracle at once");
-        }
-        Set<String> missing = new LinkedHashSet<>(want);
-        missing.removeAll(got);
-        assertTrue(missing.isEmpty(),
-                () -> label + " is missing " + missing + ", which this harness consumes");
-    }
-
-    private static List<String> keysOf(JsonNode node) {
-        return node.properties().stream().map(Map.Entry::getKey).toList();
-    }
-
-    // -- deterministic derived fields (conformance/README.md, "Deterministic derived fields") -----
-    //
-    // Read from conformance/derived-fields.json rather than restated here. The same value feeds the
-    // indexed document and the check() oracle, so a transcription error would be self-consistent
-    // and invisible to the differential; one machine-readable definition makes that impossible.
-
     private static DerivedEntry derivedFor(Seed seed) {
-        DerivedEntry entry = derivedFile.derived().get(seed.id());
-        assertNotNull(entry,
-                () -> "derived-fields.json has no entry for seed \"" + seed.id() + "\"");
+        DerivedEntry entry = DERIVED.get(seed.id());
+        if (entry == null) {
+            throw new IllegalStateException("derived-fields.json has no entry for seed " + seed.id());
+        }
         return entry;
-    }
-
-    private static String isoFor(Seed seed) {
-        return derivedFor(seed).createdBy();
-    }
-
-    private static Double doubleFor(Seed seed) {
-        return derivedFor(seed).aDouble();
-    }
-
-    private static Instant timestampFor(Seed seed) {
-        String value = derivedFor(seed).createdAt();
-        return value == null ? null : Instant.parse(value);
-    }
-
-    private static List<String> labelsFor(Seed seed) {
-        return derivedFor(seed).labels();
-    }
-
-    private static String scopeFor(Seed seed) {
-        return derivedFor(seed).scope();
     }
 }

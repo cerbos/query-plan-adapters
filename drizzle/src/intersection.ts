@@ -2,6 +2,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildColumnExpression,
   createCollectionScope,
@@ -98,21 +99,21 @@ const buildMappedIntersection = (
   options: BuildFilterOptions,
 ): SQL => {
   if (mapOperand.operands.length !== 2) {
-    throw new Error("'map' operator within hasIntersection requires two operands");
+    throw new UnsupportedQueryPlanError("'map' operator within hasIntersection requires two operands");
   }
   const [collectionOperand, lambdaOperand] = mapOperand.operands;
   if (!collectionOperand || !lambdaOperand) {
-    throw new Error("Map expression is missing operands");
+    throw new UnsupportedQueryPlanError("Map expression is missing operands");
   }
   if (!isNameOperand(collectionOperand)) {
-    throw new Error("Map collection operand must be a field reference");
+    throw new UnsupportedQueryPlanError("Map collection operand must be a field reference");
   }
   const { variable, expression: projectionOperand } = extractLambdaComponents(
     lambdaOperand,
     "Map lambda operand",
   );
   if (!isNameOperand(projectionOperand)) {
-    throw new Error("Invalid map lambda structure");
+    throw new UnsupportedQueryPlanError("Invalid map lambda structure");
   }
 
   const scope = createCollectionScope(
@@ -163,11 +164,11 @@ export const buildHasIntersectionFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
-    throw new Error("'hasIntersection' operator requires exactly two operands");
+    throw new UnsupportedQueryPlanError("'hasIntersection' operator requires exactly two operands");
   }
   const [firstOperand, secondOperand] = operands;
   if (!firstOperand || !secondOperand) {
-    throw new Error("'hasIntersection' requires exactly two operands");
+    throw new UnsupportedQueryPlanError("'hasIntersection' requires exactly two operands");
   }
   // hasIntersection is commutative and the planner preserves source order, so the constant
   // list arrives FIRST when the policy spells it first. The two operands are not
@@ -182,7 +183,7 @@ export const buildHasIntersectionFilter = (
   // — an emitted filter the corpus forbids, silent because it never threw (#387).
   const values = extractArrayValue(rightOperand);
   if (values === undefined) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "'hasIntersection' requires a literal list as one of its operands",
     );
   }
@@ -204,7 +205,7 @@ export const buildHasIntersectionFilter = (
         options,
       );
     }
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "Empty intersection over a computed collection requires preserving its evaluation errors",
     );
   }
@@ -213,7 +214,7 @@ export const buildHasIntersectionFilter = (
     return buildMappedIntersection(leftOperand, values, mapper, options);
   }
   if (!isNameOperand(leftOperand)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "'hasIntersection' requires a field reference or map expression as the first operand",
     );
   }

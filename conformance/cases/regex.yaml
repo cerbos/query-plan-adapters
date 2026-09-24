@@ -1,0 +1,110 @@
+# Conformance cases. The generator builds the policy, dataset and golden files from these;
+# see conformance/README.md. Edit here, then run: go -C conformance/generator run .
+area: regex
+description: 'matches(): RE2 semantics a store''s regex dialect must reproduce or refuse.'
+cases:
+- id: 'regex/matches/anchored-prefix'
+  tier: extended
+  intent: matches() with an anchored regex (^h).
+  trap: 'CEL uses RE2; SQL regex dialects differ in syntax and semantics, so a translated pattern can accept different strings than the PDP.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^h")'
+- id: 'regex/matches/bounded-repetition'
+  tier: extended
+  intent: 'matches("^(ab){1,2}$"): a bounded {n,m} repetition of a group.'
+  trap: 'Dialects without bounded repetition, or that apply it to the last character instead of the group, match the wrong strings (h3 "ab" is the witness).'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(ab){1,2}$")'
+- id: 'regex/matches/case-insensitive-flag'
+  tier: extended
+  intent: 'matches() with RE2''s inline (?i) flag on an anchored literal.'
+  trap: 'Dialects without inline flags reject (?i) or read it literally, and a case-sensitive store match under-grants "One".'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(?i)^one$")'
+- id: 'regex/matches/compared-to-true'
+  tier: adversarial
+  intent: 'A regex match used as an equality operand (aString.matches("^h") == true).'
+  trap: 'The planner keeps eq(matches(...), true); a translator that handles matches() only as a bare predicate crashes or drops the comparison.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^h") == true'
+- id: 'regex/matches/digit-class'
+  tier: extended
+  intent: 'matches() with the RE2 \d digit escape, unanchored.'
+  trap: 'Target regex dialects (SQL, Lucene) do not all support \d or treat it as RE2 does.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("\\d")'
+- id: 'regex/matches/dot-excludes-newline'
+  tier: adversarial
+  intent: 'matches("^a.*b$"), where . must not cross a newline.'
+  trap: 'In RE2 . does not match \n, so h2 ("a\nb") is denied; dialects where . matches a newline over-grant it.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^a.*b$")'
+- id: 'regex/matches/end-anchor-before-final-newline'
+  tier: adversarial
+  intent: 'An anchored regex over a string attribute (aString.matches("^ab$")).'
+  trap: 'RE2''s $ matches only at the absolute end, so "ab\n" is denied; PCRE, POSIX and most SQL dialects let $ match before a final newline and over-grant it (#396).'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^ab$")'
+- id: 'regex/matches/grouped-alternation'
+  tier: extended
+  intent: 'matches("^(ab|b)$"): a parenthesised alternation anchored at both ends.'
+  trap: Dropping the group or the anchors turns an exact match into a substring or prefix test.
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(ab|b)$")'
+- id: 'regex/matches/literal-brace'
+  tier: adversarial
+  intent: 'matches() with a {q} that is not a repetition plus [*] and [?] literal classes, matching h1 "a{q}*?b".'
+  trap: 'RE2 reads {q} as a literal brace; Lucene rejects it at query time and other dialects parse it as a quantifier or leave * and ? as wildcards.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^a{q}[*][?]b$")'
+- id: 'regex/matches/lookahead-from-principal'
+  tier: adversarial
+  intent: 'matches() with a lookahead pattern chosen by a principal-attribute ternary (a literal invalid regex would not compile), OR''d with aNumber == 5.'
+  trap: 'Lookahead is outside RE2 and errors at evaluation in CEL; an engine that accepts it (PCRE, JS) over-grants h3/h5 instead of refusing.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches(P.attr.context == "projects:f1" ? "a(?=b)" : "^h") || R.attr.aNumber == 5'
+- id: 'regex/matches/lucene-reserved-characters-in-class'
+  tier: adversarial
+  intent: 'matches() with a character class containing @ # & ~ < >, all literal in RE2.'
+  trap: 'Lucene regexp treats @ # & ~ < > as optional operators, so passing the pattern through unescaped changes its meaning.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^[ab@#&~<>]+$")'
+- id: 'regex/matches/posix-character-class'
+  tier: extended
+  intent: 'matches() with a POSIX bracket class [[:digit:]].'
+  trap: 'Dialects without POSIX classes read [[:digit:]] as a plain set of the characters :dgit.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("[[:digit:]]")'
+- id: 'regex/matches/top-level-alternation-prefix-or-suffix'
+  tier: adversarial
+  intent: 'matches("^o|e$"): an unparenthesised alternation of an anchored prefix and an anchored suffix.'
+  trap: 'RE2 parses it as ^o OR e$; wrapping it as ^(...)$ or lowering ^ to a prefix query gets it wrong (c1 "One" matches only by its tail).'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^o|e$")'
+- id: 'regex/matches/top-level-alternation-single-characters'
+  tier: adversarial
+  intent: 'matches("^a|b$"): an unparenthesised alternation of an anchored a prefix and an anchored b suffix.'
+  trap: '| binds loosest, so it is ^a OR b$, not ^(a|b)$; wrapping or splitting the anchors changes the result.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^a|b$")'
+- id: regex/matches/unanchored
+  tier: extended
+  intent: 'matches() with a bare unanchored pattern, which RE2 treats as a substring search.'
+  trap: 'Engines whose regex queries are implicitly anchored (Lucene regexp) make it a full-string match and under-grant.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("ne")'

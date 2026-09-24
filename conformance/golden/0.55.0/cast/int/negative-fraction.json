@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a7",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "cast/int/negative-fraction",
+  "intent": "int() over a double attribute compared with zero.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                }
+              ],
+              "operator": "int"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/int/negative-fraction",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aDouble) == 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL int() truncates toward zero while PostgreSQL and MySQL CAST round; a1 (-0.6) must be allowed because int(-0.6) is 0."
+}

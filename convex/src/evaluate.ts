@@ -4,6 +4,7 @@ import type {
   PlanExpressionVariable,
 } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import {
   EVALUATION_ERROR,
   asBoolean,
@@ -69,11 +70,13 @@ export const evaluate = (
   if (isValue(operand)) return operand.value;
   if (isVariable(operand)) return lookUp(operand.name, scope);
   if (!isExpression(operand)) {
-    throw new Error("Invalid Cerbos expression structure");
+    throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
   const operator = operatorFor(operand.operator);
   if (!operator) {
-    throw new Error(`Unsupported operator: ${operand.operator}`);
+    throw new UnsupportedQueryPlanError(
+      `Unsupported operator: ${operand.operator}`,
+    );
   }
   return operator.evaluate({
     operator: operand.operator,
@@ -144,16 +147,16 @@ export const lambdaComponents = (
   lambda: PlanExpressionOperand,
 ): { body: PlanExpressionOperand; variable: PlanExpressionVariable } => {
   if (!isExpression(lambda) || lambda.operator !== "lambda") {
-    throw new Error("Expected a lambda operand");
+    throw new UnsupportedQueryPlanError("Expected a lambda operand");
   }
   if (lambda.operands.length !== 2) {
-    throw new Error("Lambda requires exactly two operands");
+    throw new UnsupportedQueryPlanError("Lambda requires exactly two operands");
   }
   const first = operandAt(lambda.operands, 0, "Lambda body is required");
   const second = operandAt(lambda.operands, 1, "Lambda variable is required");
   if (looksLikeLambdaVariable(second)) return { body: first, variable: second };
   if (looksLikeLambdaVariable(first)) return { body: second, variable: first };
-  throw new Error("Lambda requires a variable operand");
+  throw new UnsupportedQueryPlanError("Lambda requires a variable operand");
 };
 
 /** The macro's lambda (its second operand) as a function of one collection element. */
@@ -234,7 +237,7 @@ const arithmetic = (call: Call): unknown => {
       if (right === 0 && left !== 0) {
         // Backstop for zeros only computed at evaluation time; constant zero divisors are
         // already rejected during translation by `validateDivision`.
-        throw new Error(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
+        throw new UnsupportedQueryPlanError(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
       }
       return left / right;
     default:
@@ -253,7 +256,7 @@ const validateDivision = ({ operands }: PlanExpression): void => {
     isExpression(denominator) &&
     denominator.operator === "div"
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity",
     );
   }
@@ -263,7 +266,7 @@ const validateDivision = ({ operands }: PlanExpression): void => {
     denominator.value === 0 &&
     !(numerator !== undefined && isValue(numerator) && numerator.value === 0)
   ) {
-    throw new Error(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
+    throw new UnsupportedQueryPlanError(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
   }
 };
 
@@ -275,7 +278,7 @@ const validatePattern = ({ operands }: PlanExpression): void => {
     typeof pattern.value !== "string" ||
     !parseSafeRegexPattern(pattern.value)
   ) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       "matches requires a constant RE2-compatible pattern in the supported " +
         "literal, anchor, and trailing .* subset",
     );
@@ -409,7 +412,9 @@ const OPERATORS: Record<string, Operator> = {
   },
   lambda: {
     evaluate: () => {
-      throw new Error("lambda should not be evaluated directly");
+      throw new UnsupportedQueryPlanError(
+        "lambda should not be evaluated directly",
+      );
     },
   },
 

@@ -1,0 +1,1129 @@
+{
+  "kind": "conformance",
+  "principal": {
+    "attr": {
+      "allowedTags": [
+        "public",
+        "special"
+      ],
+      "context": "projects:f1",
+      "emptyTeams": [],
+      "fewTeams": [
+        "set",
+        "",
+        "%_o"
+      ],
+      "manyStructs": [
+        {
+          "name": "set"
+        },
+        {
+          "name": "same"
+        },
+        {
+          "name": ""
+        },
+        {
+          "name": "%_o"
+        },
+        {
+          "name": "X"
+        },
+        {
+          "name": "Y"
+        },
+        {
+          "name": "MIRROR"
+        },
+        {
+          "name": "filler-1"
+        },
+        {
+          "name": "filler-2"
+        },
+        {
+          "name": "filler-3"
+        },
+        {
+          "name": "filler-4"
+        }
+      ],
+      "manyTeams": [
+        "set",
+        "same",
+        "",
+        "%_o",
+        "X",
+        "Y",
+        "MIRROR",
+        "filler-1",
+        "filler-2",
+        "filler-3",
+        "filler-4"
+      ],
+      "missingStructs": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ],
+      "nullableStructs": [
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        },
+        {
+          "name": null
+        }
+      ],
+      "zero": 0
+    },
+    "id": "u1",
+    "roles": [
+      "USER"
+    ]
+  },
+  "resources": [
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [
+          true
+        ],
+        "aDouble": -0.6,
+        "aNumber": 5,
+        "aNumberList": [
+          2
+        ],
+        "aOptionalString": "set",
+        "aString": "one",
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "labels": [
+                  {
+                    "name": "gold"
+                  },
+                  {
+                    "name": "silver"
+                  }
+                ],
+                "name": "finance"
+              }
+            ]
+          }
+        ],
+        "coOwner": "dept",
+        "createdAt": "2020-03-15T10:30:00Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "finance"
+            }
+          ],
+          "subNames": [
+            "finance"
+          ]
+        },
+        "obj": {
+          "inner": "one"
+        },
+        "owner": "set",
+        "parent": {
+          "aBool": true,
+          "aNumber": 2,
+          "aOptionalString": "x",
+          "aString": "100xdone",
+          "inner": {
+            "aBool": true,
+            "aNumber": 3,
+            "aOptionalString": "",
+            "aString": "héllo🚀"
+          }
+        },
+        "scope": "dept",
+        "tagNames": [
+          "public"
+        ],
+        "tags": [
+          {
+            "id": "t1a",
+            "name": "public"
+          }
+        ],
+        "updatedAt": "2020-03-15T10:30:00.000Z"
+      },
+      "id": "a1"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": 0.25,
+        "aNumber": -2,
+        "aNumberList": [],
+        "aString": "100%_done",
+        "categories": [],
+        "coOwner": "dept.eng",
+        "createdAt": "2037-01-01T00:00:00Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "100%_done"
+        },
+        "owner": null,
+        "parent": {
+          "aBool": false,
+          "aNumber": 6,
+          "aOptionalString": "%_o",
+          "aString": "50%_off",
+          "inner": {
+            "aBool": true,
+            "aNumber": -4,
+            "aOptionalString": "k\\s",
+            "aString": "back\\slash"
+          }
+        },
+        "scope": "dept.eng",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "a2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [
+          false
+        ],
+        "aNumber": 2,
+        "aNumberList": [
+          2,
+          3
+        ],
+        "aOptionalString": "x",
+        "aString": "100xdone",
+        "categories": [],
+        "coOwner": "dept.eng.platform",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "100xdone"
+        },
+        "owner": "x",
+        "parent": {
+          "aBool": true,
+          "aNumber": 3,
+          "aOptionalString": "",
+          "aString": "héllo🚀"
+        },
+        "scope": "dept.eng.platform",
+        "tagNames": [
+          "public",
+          "public"
+        ],
+        "tags": [
+          {
+            "id": "t3a",
+            "name": "public"
+          },
+          {
+            "id": "t3b",
+            "name": "public"
+          }
+        ]
+      },
+      "id": "a3"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [
+          null,
+          true
+        ],
+        "aDouble": 1.3,
+        "aNumber": 1,
+        "aNumberList": [
+          3,
+          2
+        ],
+        "aString": "xa_by",
+        "categories": [],
+        "coOwner": "dept.eng.platform.obs",
+        "createdAt": "2024-06-01T00:00:00Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "xa_by"
+        },
+        "owner": null,
+        "parent": {
+          "aBool": false,
+          "aNumber": -2,
+          "aString": "100%_done",
+          "inner": {
+            "aBool": false,
+            "aNumber": 6,
+            "aOptionalString": "%_o",
+            "aString": "50%_off"
+          }
+        },
+        "scope": "dept.eng.platform.obs",
+        "tagNames": [
+          "private"
+        ],
+        "tags": [
+          {
+            "id": "t4a",
+            "name": "private"
+          }
+        ],
+        "updatedAt": "2024-06-01T00:00:00Z"
+      },
+      "id": "a4"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [
+          false,
+          true
+        ],
+        "aDouble": -4.7,
+        "aNumber": -5,
+        "aNumberList": [
+          -2
+        ],
+        "aOptionalString": "y",
+        "aString": "xaXby",
+        "categories": [],
+        "coOwner": "dept.engineering",
+        "createdAt": "2020-03-15T10:30:00.123456Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "xaXby"
+        },
+        "owner": "y",
+        "scope": "dept.engineering",
+        "tagNames": [
+          "public"
+        ],
+        "tags": [
+          {
+            "id": "t5a",
+            "name": "public"
+          }
+        ]
+      },
+      "id": "a5"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 3.3,
+        "aNumber": 3,
+        "aNumberList": [
+          null,
+          2
+        ],
+        "aOptionalString": "",
+        "aString": "héllo🚀",
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "labels": [
+                  {},
+                  {
+                    "name": "silver"
+                  }
+                ],
+                "name": "finance"
+              }
+            ]
+          }
+        ],
+        "coOwner": "dept.sales",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "finance"
+            }
+          ],
+          "subNames": [
+            "finance"
+          ]
+        },
+        "obj": {
+          "inner": "héllo🚀"
+        },
+        "owner": "",
+        "scope": "dept.sales",
+        "tagNames": [
+          "public",
+          "private"
+        ],
+        "tags": [
+          {
+            "id": "t6a",
+            "name": "public"
+          },
+          {
+            "id": "t6b",
+            "name": "private"
+          }
+        ]
+      },
+      "id": "a6"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 0.3,
+        "aNumber": 0,
+        "aNumberList": [
+          20
+        ],
+        "aOptionalString": "z",
+        "aString": "tail\\",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2021-05-05T05:05:05Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "tail\\"
+        },
+        "owner": "z",
+        "parent": {
+          "aBool": true,
+          "aNumber": 2,
+          "aString": ""
+        },
+        "tagNames": [
+          "other"
+        ],
+        "tags": [
+          {
+            "id": "t7a",
+            "name": "other"
+          }
+        ]
+      },
+      "id": "a7"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 2.3,
+        "aNumber": 2,
+        "aNumberList": [],
+        "aString": "",
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "labels": [
+                  {
+                    "name": "silver"
+                  }
+                ],
+                "name": "tech"
+              }
+            ]
+          }
+        ],
+        "coOwner": "",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "tech"
+            }
+          ],
+          "subNames": [
+            "tech"
+          ]
+        },
+        "obj": {
+          "inner": ""
+        },
+        "owner": null,
+        "scope": "",
+        "tagNames": [
+          "public"
+        ],
+        "tags": [
+          {
+            "id": "t8a",
+            "name": "public"
+          }
+        ]
+      },
+      "id": "a8"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 4.3,
+        "aNumber": 4,
+        "aNumberList": [],
+        "aOptionalString": "same",
+        "aString": "same",
+        "categories": [],
+        "coOwner": "50%",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "same"
+        },
+        "owner": "same",
+        "parent": {
+          "aBool": false,
+          "aNumber": 8,
+          "aOptionalString": "mirror",
+          "aString": "mirror"
+        },
+        "scope": "50%",
+        "tagNames": [
+          "same"
+        ],
+        "tags": [
+          {
+            "id": "t9a",
+            "name": "same"
+          }
+        ]
+      },
+      "id": "a9"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 7.3,
+        "aNumber": 7,
+        "aNumberList": [],
+        "aOptionalString": "one_two",
+        "aString": "oneXtwo",
+        "categories": [],
+        "coOwner": "50%:a_b:x",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "oneXtwo"
+        },
+        "owner": "one_two",
+        "parent": {
+          "aBool": true,
+          "aNumber": 11,
+          "aOptionalString": "Set",
+          "aString": "One",
+          "inner": {
+            "aBool": false,
+            "aNumber": 12,
+            "aString": "xA_by"
+          }
+        },
+        "scope": "50%:a_b:x",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "b1"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": 6.3,
+        "aNumber": 6,
+        "aNumberList": [],
+        "aOptionalString": "%_o",
+        "aString": "50%_off",
+        "categories": [],
+        "coOwner": "50x:a_b:y",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "50%_off"
+        },
+        "owner": "%_o",
+        "parent": {
+          "aBool": true,
+          "aNumber": -4,
+          "aOptionalString": "k\\s",
+          "aString": "back\\slash"
+        },
+        "scope": "50x:a_b:y",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "b2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": -3.7,
+        "aNumber": -4,
+        "aNumberList": [],
+        "aOptionalString": "k\\s",
+        "aString": "back\\slash",
+        "categories": [],
+        "coOwner": "50%:aXb:y",
+        "createdAt": "2021-05-05T05:05:05Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "back\\slash"
+        },
+        "owner": "k\\s",
+        "scope": "50%:aXb:y",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "b3"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [
+          true
+        ],
+        "aDouble": 8.3,
+        "aNumber": 8,
+        "aNumberList": [
+          1
+        ],
+        "aOptionalString": "mirror",
+        "aString": "mirror",
+        "categories": [],
+        "coOwner": "50%:a_b",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "mirror"
+        },
+        "owner": "mirror",
+        "scope": "50%:a_b",
+        "tagNames": [
+          "mirror"
+        ],
+        "tags": [
+          {
+            "id": "mirror",
+            "name": "mirror"
+          }
+        ]
+      },
+      "id": "b4"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 9.3,
+        "aNumber": 9,
+        "aNumberList": [],
+        "aOptionalString": "nt",
+        "aString": "nulltag",
+        "categories": [],
+        "coOwner": "dept.eng.platform2",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nulltag"
+        },
+        "owner": "nt",
+        "scope": "dept.eng.platform2",
+        "tagNames": [
+          null
+        ],
+        "tags": [
+          {
+            "id": "t10a"
+          }
+        ]
+      },
+      "id": "b5"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": 10.3,
+        "aNumber": 10,
+        "aNumberList": [],
+        "aOptionalString": "mx",
+        "aString": "mixed",
+        "categories": [],
+        "coOwner": "50%.a_b",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "mixed"
+        },
+        "owner": "mx",
+        "parent": {
+          "aBool": true,
+          "aNumber": 13,
+          "aOptionalString": "[SEC]",
+          "aString": "[SEC]ret",
+          "inner": {
+            "aBool": false,
+            "aNumber": 14,
+            "aOptionalString": "xSECy",
+            "aString": "Secret"
+          }
+        },
+        "scope": "50%.a_b",
+        "tagNames": [
+          null,
+          "public"
+        ],
+        "tags": [
+          {
+            "id": "t11a"
+          },
+          {
+            "id": "t11b",
+            "name": "public"
+          }
+        ]
+      },
+      "id": "b6"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [
+          true,
+          false
+        ],
+        "aDouble": 11.3,
+        "aNumber": 11,
+        "aNumberList": [
+          0
+        ],
+        "aOptionalString": "Set",
+        "aString": "One",
+        "categories": [
+          {
+            "name": "business",
+            "subCategories": [
+              {
+                "labels": [
+                  {
+                    "name": "Gold"
+                  }
+                ],
+                "name": "Finance"
+              }
+            ]
+          }
+        ],
+        "coOwner": "Dept.Eng",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "mainCategory": {
+          "name": "business",
+          "subCategories": [
+            {
+              "name": "Finance"
+            }
+          ],
+          "subNames": [
+            "Finance"
+          ]
+        },
+        "obj": {
+          "inner": "One"
+        },
+        "owner": "Set",
+        "parent": {
+          "aBool": false,
+          "aNumber": 12,
+          "aString": "xA_by"
+        },
+        "scope": "Dept.Eng",
+        "tagNames": [
+          "Public"
+        ],
+        "tags": [
+          {
+            "id": "tc1",
+            "name": "Public"
+          }
+        ]
+      },
+      "id": "c1"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": 12.3,
+        "aNumber": 12,
+        "aNumberList": [],
+        "aString": "xA_by",
+        "categories": [],
+        "coOwner": "dept.eng.",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "xA_by"
+        },
+        "owner": null,
+        "scope": "dept.eng.",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "c2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 13.3,
+        "aNumber": 13,
+        "aNumberList": [],
+        "aOptionalString": "[SEC]",
+        "aString": "[SEC]ret",
+        "categories": [],
+        "coOwner": "[env]:prod:eu",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "[SEC]ret"
+        },
+        "owner": "[SEC]",
+        "parent": {
+          "aBool": false,
+          "aNumber": 14,
+          "aOptionalString": "xSECy",
+          "aString": "Secret"
+        },
+        "scope": "[env]:prod:eu",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "d1"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": 14.3,
+        "aNumber": 14,
+        "aNumberList": [],
+        "aOptionalString": "xSECy",
+        "aString": "Secret",
+        "categories": [],
+        "coOwner": "e:prod:eu",
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "Secret"
+        },
+        "owner": "xSECy",
+        "scope": "e:prod:eu",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "d2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 15.3,
+        "aNumber": 15,
+        "aNumberList": [],
+        "aString": "nullowner",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nullowner"
+        },
+        "owner": null,
+        "parent": {
+          "aBool": true,
+          "aNumber": 5,
+          "aOptionalString": "set",
+          "aString": "one",
+          "inner": {
+            "aBool": true,
+            "aNumber": 2,
+            "aOptionalString": "x",
+            "aString": "100xdone"
+          }
+        },
+        "tagNames": [
+          null
+        ],
+        "tags": [
+          {
+            "id": "te1"
+          }
+        ]
+      },
+      "id": "e1"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 16.3,
+        "aNumber": 16,
+        "aNumberList": [],
+        "aOptionalString": "prefix:f1",
+        "aString": "f1",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "f1"
+        },
+        "owner": "prefix:f1",
+        "parent": {
+          "aBool": true,
+          "aNumber": 4,
+          "aOptionalString": "same",
+          "aString": "same",
+          "inner": {
+            "aBool": false,
+            "aNumber": 8,
+            "aOptionalString": "mirror",
+            "aString": "mirror"
+          }
+        },
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "f1"
+    },
+    {
+      "attr": {
+        "aBool": false,
+        "aBoolList": [],
+        "aDouble": -9.5e18,
+        "aNumber": 17,
+        "aNumberList": [],
+        "aOptionalString": "q",
+        "aString": "big",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "big"
+        },
+        "owner": "q",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "g1"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 18.3,
+        "aNumber": 18,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "a{q}*?b",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "a{q}*?b"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h1"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 19.3,
+        "aNumber": 19,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "a\nb",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "a\nb"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 20.3,
+        "aNumber": 20,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "ab",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "ab"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h3"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 0.3,
+        "aNumber": 0,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "0",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2021-05-05T05:05:05Z",
+        "createdBy": "2026-06-01T00:00:00Z",
+        "obj": {
+          "inner": "0"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h4"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 21.3,
+        "aNumber": 21,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "ab\n",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "not-a-timestamp",
+        "obj": {
+          "inner": "ab\n"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h5"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 22.3,
+        "aNumber": 22,
+        "aNumberList": [],
+        "aOptionalString": "s­et",
+        "aString": "o­ne",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "o­ne"
+        },
+        "owner": "s­et",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h6"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 23.3,
+        "aNumber": 23,
+        "aNumberList": [],
+        "aOptionalString": "é",
+        "aString": "é-x-é",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "é-x-é"
+        },
+        "owner": "é",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "h7"
+    }
+  ]
+}

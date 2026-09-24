@@ -1,13 +1,10 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import { describe, expect, test } from "@jest/globals";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
 } from "@cerbos/core";
 
-import { queryPlanToPrisma, PlanKind } from ".";
+import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
 import type {
   Mapper,
   MapperConfig,
@@ -15,42 +12,34 @@ import type {
   PrismaFilter,
   QueryPlanToPrismaResult,
 } from ".";
-import {
-  CONFORMANCE_DIR,
-  MAPPER,
-  MODEL,
-  classifyActionsForAdapter,
-  planFromWireFixture,
-  wireFixtureActions,
-} from "./corpus";
-import type { ActionsFile } from "./corpus";
+import { MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
 
 /**
- * Offline contract for planner wire fixtures: emitted filters, plan kinds, pinned refusals,
- * and caller options that the shared corpus cannot vary. The adversarial suite separately
- * executes filters against a store and compares them with the PDP oracle.
- * Every fixture must appear exactly once in the completeness guard below (ADR 0006).
+ * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
+ * `subqueryFilter`, element nullability, `nullAttributeRepresentation`), the refusal type, the
+ * timestamp literal contract, and plans the planner cannot produce.
+ *
+ * Which rows a corpus case returns is the conformance harness's job (`adversarial.test.ts`); nothing
+ * here pins the filter emitted for a corpus case. Plans come from the current PDP's golden files,
+ * read by case id, rather than being typed by hand.
  */
 
-const actionsFile: ActionsFile = JSON.parse(
-  fs.readFileSync(path.join(CONFORMANCE_DIR, "actions.json"), "utf8")
-);
+const CURRENT = pdpTags()[0]!;
 
-// Refusal messages come from the same classification ledger as the live harness.
-const { throwingActions: THROWING_ACTIONS } = classifyActionsForAdapter(
-  actionsFile,
-  "prisma"
-);
+/** The current PDP's recorded plan for a corpus case, `__NOW_MINUS_24H__` filled as `now`. */
+function planFor(id: string, now?: string): PlanResourcesResponse {
+  return planOf(readGolden(CURRENT, id), now);
+}
 
 function translate(
-  action: string,
+  id: string,
   options: {
     mapper?: Mapper;
     nullAttributeRepresentation?: NullAttributeRepresentation;
   } = {}
 ): QueryPlanToPrismaResult {
   return queryPlanToPrisma({
-    queryPlan: planFromWireFixture(action),
+    queryPlan: planFor(id),
     mapper: options.mapper ?? MAPPER,
     model: MODEL,
     ...(options.nullAttributeRepresentation
@@ -59,1902 +48,162 @@ function translate(
   });
 }
 
-/**
- * Plan kinds for actions the planner resolves without a condition.
- *
- * `p-has` is `knownDivergences` for every adapter — the planner folds `has(unknown attr)` to
- * ALWAYS_ALLOWED, so the harness cannot compare it against the oracle. Translation is still
- * defined, and pinning it here is the only assertion the corpus makes about the action.
- */
-const EXPECTED_KINDS: Record<
-  string,
-  PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED
-> = {
-  "in-empty": PlanKind.ALWAYS_DENIED,
-  "p-has": PlanKind.ALWAYS_ALLOWED,
-  "pv-empty-all": PlanKind.ALWAYS_ALLOWED,
-  "pv-empty-exists": PlanKind.ALWAYS_DENIED,
-  "pv-empty-not-all": PlanKind.ALWAYS_DENIED,
-  "pv-empty-not-exists": PlanKind.ALWAYS_ALLOWED,
-  "pv-structs-missing": PlanKind.ALWAYS_DENIED,
-};
-
-/**
- * The `where` input this adapter emits for every corpus action it can translate, under `MAPPER`
- * and the default (`"explicit"`) null representation.
- *
- * Alphabetical by action, so the diff of a translator change reads as a list of the shapes it
- * moved. Comments are on the entries where the emitted shape is the whole point of the action;
- * the rest are pins.
- */
-const EXPECTED_FILTERS: Record<string, PrismaFilter> = {
-  // The three-valued-logic guard. `every` collapses UNKNOWN to false at the EXISTS boundary, so
-  // an element whose `name` is NULL would be silently satisfied; CEL raises a missing-attribute
-  // error and check() denies. The second conjunct is what keeps the two aligned, and it is only
-  // emitted because the mapper declares `name` nullable.
-  "all-on-empty": {
-    AND: [
-      { tags: { every: { name: { equals: "public" } } } },
-      { tags: { none: { name: null } } },
-    ],
-  },
-  "arith-add": { aNumber: { gt: 1 } },
-  "arith-div": { aNumber: { equals: 2 } },
-  "arith-div-frac": { aNumber: { gte: 3 } },
-  "arith-mult-neg": { OR: [{ aNumber: { gt: -1.5 } }, { aNumber: { gte: -1 } }] },
-  "arith-sub": { aNumber: { lte: 3 } },
-  // Value-first: the plan reads `K < add(aNumber, K)`, and the mirrored operator is the whole
-  // assertion. Emitting `lt` here would invert the comparison — this repository's canonical bug
-  // class, and the reason `vf-*` and `arith-vf` pin the same filter as their column-first twins.
-  "arith-vf": { aNumber: { gt: 1 } },
-  "compose-allow-deny": {
-    AND: [{ NOT: { aNumber: { gt: 10 } } }, { aBool: { equals: true } }],
-  },
-  "compose-deny-only": { NOT: { aNumber: { lt: 0 } } },
-  "compose-derived-deny": {
-    AND: [{ NOT: { aBool: { equals: true } } }, { aNumber: { lt: 12 } }],
-  },
-  "compose-derived-role": {
-    AND: [{ aNumber: { lt: 5 } }, { aBool: { equals: true } }],
-  },
-  "compose-multi-allow": {
-    OR: [
-      { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 15 } }] },
-      { AND: [{ aBool: { equals: false } }, { aNumber: { lt: 7 } }] },
-    ],
-  },
-  "compose-multi-allow-deny": {
-    AND: [
-      { NOT: { aNumber: { gt: 20 } } },
-      {
-        OR: [
-          { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 15 } }] },
-          { AND: [{ aBool: { equals: false } }, { aNumber: { lt: 7 } }] },
-        ],
-      },
-    ],
-  },
-  "compose-or-not": {
-    OR: [{ aNumber: { gt: 20 } }, { NOT: { aBool: { equals: true } } }],
-  },
-  "compose-two-deny": {
-    AND: [
-      { NOT: { OR: [{ aBool: { equals: false } }, { aNumber: { gt: 18 } }] } },
-      { aNumber: { gte: 0 } },
-    ],
-  },
-  "compose-variable": {
-    AND: [
-      { NOT: { aNumber: { gt: 10 } } },
-      { aOptionalString: { in: ["set", "", "%_o"] } },
-    ],
-  },
-  // A constant receiver with a column needle: `K.contains(aString)` cannot become a LIKE, so the
-  // adapter enumerates every substring of the constant and tests membership. The enumeration is
-  // long, and pinning it verbatim is the point — an off-by-one at either end of the window is
-  // invisible in a row comparison over 22 seeds and obvious in this list.
-  "cr-contains": {
-    aString: {
-      in: [
-        "",
-        "s",
-        "s1",
-        "s10",
-        "s100",
-        "s100X",
-        "s100Xd",
-        "s100Xdo",
-        "s100Xdon",
-        "s100Xdone",
-        "s100Xdone-",
-        "s100Xdone-t",
-        "s100Xdone-ta",
-        "s100Xdone-tai",
-        "s100Xdone-tail",
-        "s100Xdone-tail\\",
-        "s100Xdone-tail\\o",
-        "s100Xdone-tail\\on",
-        "s100Xdone-tail\\one",
-        "s100Xdone-tail\\one-",
-        "s100Xdone-tail\\one-e",
-        "s100Xdone-tail\\one-en",
-        "s100Xdone-tail\\one-end",
-        "1",
-        "10",
-        "100",
-        "100X",
-        "100Xd",
-        "100Xdo",
-        "100Xdon",
-        "100Xdone",
-        "100Xdone-",
-        "100Xdone-t",
-        "100Xdone-ta",
-        "100Xdone-tai",
-        "100Xdone-tail",
-        "100Xdone-tail\\",
-        "100Xdone-tail\\o",
-        "100Xdone-tail\\on",
-        "100Xdone-tail\\one",
-        "100Xdone-tail\\one-",
-        "100Xdone-tail\\one-e",
-        "100Xdone-tail\\one-en",
-        "100Xdone-tail\\one-end",
-        "0",
-        "00",
-        "00X",
-        "00Xd",
-        "00Xdo",
-        "00Xdon",
-        "00Xdone",
-        "00Xdone-",
-        "00Xdone-t",
-        "00Xdone-ta",
-        "00Xdone-tai",
-        "00Xdone-tail",
-        "00Xdone-tail\\",
-        "00Xdone-tail\\o",
-        "00Xdone-tail\\on",
-        "00Xdone-tail\\one",
-        "00Xdone-tail\\one-",
-        "00Xdone-tail\\one-e",
-        "00Xdone-tail\\one-en",
-        "00Xdone-tail\\one-end",
-        "0X",
-        "0Xd",
-        "0Xdo",
-        "0Xdon",
-        "0Xdone",
-        "0Xdone-",
-        "0Xdone-t",
-        "0Xdone-ta",
-        "0Xdone-tai",
-        "0Xdone-tail",
-        "0Xdone-tail\\",
-        "0Xdone-tail\\o",
-        "0Xdone-tail\\on",
-        "0Xdone-tail\\one",
-        "0Xdone-tail\\one-",
-        "0Xdone-tail\\one-e",
-        "0Xdone-tail\\one-en",
-        "0Xdone-tail\\one-end",
-        "X",
-        "Xd",
-        "Xdo",
-        "Xdon",
-        "Xdone",
-        "Xdone-",
-        "Xdone-t",
-        "Xdone-ta",
-        "Xdone-tai",
-        "Xdone-tail",
-        "Xdone-tail\\",
-        "Xdone-tail\\o",
-        "Xdone-tail\\on",
-        "Xdone-tail\\one",
-        "Xdone-tail\\one-",
-        "Xdone-tail\\one-e",
-        "Xdone-tail\\one-en",
-        "Xdone-tail\\one-end",
-        "d",
-        "do",
-        "don",
-        "done",
-        "done-",
-        "done-t",
-        "done-ta",
-        "done-tai",
-        "done-tail",
-        "done-tail\\",
-        "done-tail\\o",
-        "done-tail\\on",
-        "done-tail\\one",
-        "done-tail\\one-",
-        "done-tail\\one-e",
-        "done-tail\\one-en",
-        "done-tail\\one-end",
-        "o",
-        "on",
-        "one",
-        "one-",
-        "one-t",
-        "one-ta",
-        "one-tai",
-        "one-tail",
-        "one-tail\\",
-        "one-tail\\o",
-        "one-tail\\on",
-        "one-tail\\one",
-        "one-tail\\one-",
-        "one-tail\\one-e",
-        "one-tail\\one-en",
-        "one-tail\\one-end",
-        "n",
-        "ne",
-        "ne-",
-        "ne-t",
-        "ne-ta",
-        "ne-tai",
-        "ne-tail",
-        "ne-tail\\",
-        "ne-tail\\o",
-        "ne-tail\\on",
-        "ne-tail\\one",
-        "ne-tail\\one-",
-        "ne-tail\\one-e",
-        "ne-tail\\one-en",
-        "ne-tail\\one-end",
-        "e",
-        "e-",
-        "e-t",
-        "e-ta",
-        "e-tai",
-        "e-tail",
-        "e-tail\\",
-        "e-tail\\o",
-        "e-tail\\on",
-        "e-tail\\one",
-        "e-tail\\one-",
-        "e-tail\\one-e",
-        "e-tail\\one-en",
-        "e-tail\\one-end",
-        "-",
-        "-t",
-        "-ta",
-        "-tai",
-        "-tail",
-        "-tail\\",
-        "-tail\\o",
-        "-tail\\on",
-        "-tail\\one",
-        "-tail\\one-",
-        "-tail\\one-e",
-        "-tail\\one-en",
-        "-tail\\one-end",
-        "t",
-        "ta",
-        "tai",
-        "tail",
-        "tail\\",
-        "tail\\o",
-        "tail\\on",
-        "tail\\one",
-        "tail\\one-",
-        "tail\\one-e",
-        "tail\\one-en",
-        "tail\\one-end",
-        "a",
-        "ai",
-        "ail",
-        "ail\\",
-        "ail\\o",
-        "ail\\on",
-        "ail\\one",
-        "ail\\one-",
-        "ail\\one-e",
-        "ail\\one-en",
-        "ail\\one-end",
-        "i",
-        "il",
-        "il\\",
-        "il\\o",
-        "il\\on",
-        "il\\one",
-        "il\\one-",
-        "il\\one-e",
-        "il\\one-en",
-        "il\\one-end",
-        "l",
-        "l\\",
-        "l\\o",
-        "l\\on",
-        "l\\one",
-        "l\\one-",
-        "l\\one-e",
-        "l\\one-en",
-        "l\\one-end",
-        "\\",
-        "\\o",
-        "\\on",
-        "\\one",
-        "\\one-",
-        "\\one-e",
-        "\\one-en",
-        "\\one-end",
-        "one-e",
-        "one-en",
-        "one-end",
-        "ne-e",
-        "ne-en",
-        "ne-end",
-        "e-e",
-        "e-en",
-        "e-end",
-        "-e",
-        "-en",
-        "-end",
-        "en",
-        "end",
-        "nd",
-      ],
-    },
-  },
-  "cr-endswith": {
-    aString: {
-      in: [
-        "",
-        "prefix-xaXby",
-        "refix-xaXby",
-        "efix-xaXby",
-        "fix-xaXby",
-        "ix-xaXby",
-        "x-xaXby",
-        "-xaXby",
-        "xaXby",
-        "aXby",
-        "Xby",
-        "by",
-        "y",
-      ],
-    },
-  },
-  "cr-startswith": {
-    aString: {
-      in: [
-        "",
-        "x",
-        "xa",
-        "xaX",
-        "xaXb",
-        "xaXby",
-        "xaXby-",
-        "xaXby-t",
-        "xaXby-ta",
-        "xaXby-tai",
-        "xaXby-tail",
-      ],
-    },
-  },
-  "cr-startswith-concat": {
-    aString: {
-      in: [
-        "",
-        "x",
-        "xa",
-        "xaX",
-        "xaXb",
-        "xaXby",
-        "xaXby-",
-        "xaXby-t",
-        "xaXby-ta",
-        "xaXby-tai",
-        "xaXby-tail",
-      ],
-    },
-  },
-  "cs-contains": { aString: { contains: "one" } },
-  "cs-endswith": { aString: { endsWith: "one" } },
-  "cs-eq": { aString: { equals: "one" } },
-  "cs-startswith": { aString: { startsWith: "one" } },
-  // A double literal beyond int64 on a double column: the wire carries -1e19 as a plain number
-  // and it is bound as one, with no narrowing through a 64-bit integer on the way.
-  "double-huge-gt": { aDouble: { gt: -10000000000000000000 } },
-  "double-huge-lt": { aDouble: { lt: -10000000000000000000 } },
-  "double-negation": { aBool: { equals: true } },
-  "double-threshold": { AND: [{ aNumber: { gte: 1.5 } }, { aNumber: { gt: 1 } }] },
-  "empty-string-eq": { aString: { equals: "" } },
-  "exists-on-empty": { tags: { some: { name: { equals: "public" } } } },
-  "field-to-field": {
-    aString: { equals: { _ref: "aOptionalString", _container: "AdversarialResource" } },
-  },
-  "gt-bare": { aNumber: { gt: 1 } },
-  "hasint-map-null": {
-    AND: [
-      {
-        tags: {
-          some: {
-            OR: [
-              { name: "public" },
-              { name: null },
-            ],
-          },
-        },
-      },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "hasint-map-null-vf": {
-    AND: [
-      {
-        tags: {
-          some: {
-            OR: [
-              { name: "public" },
-              { name: null },
-            ],
-          },
-        },
-      },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "hasint-map-vf": {
-    AND: [
-      { tags: { some: { name: { in: ["public", "other"] } } } },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "hasint-null-vf": {
-    OR: [{ tags: { some: { name: "public" } } }, { tags: { some: { name: null } } }],
-  },
-  "hier-ancestor-cf": { scope: { startsWith: "dept.eng." } },
-  "hier-ancestor-ff": { scope: { in: ["dept", "dept.eng"] } },
-  "hier-descendent-cf": { scope: { in: ["dept", "dept.eng"] } },
-  "hier-descendent-ff": { scope: { startsWith: "dept.eng." } },
-  "hier-list-id": {
-    OR: [
-      {
-        AND: [
-          { id: { equals: "f1" } },
-          {
-            OR: [
-              {
-                id: { equals: "" },
-              },
-              {
-                id: { not: "" },
-              },
-            ],
-          },
-        ],
-      },
-      {
-        AND: [
-          {
-            id: { equals: "" },
-          },
-          {
-            id: { not: "" },
-          },
-        ],
-      },
-    ],
-  },
-  "hier-meta-in": { scope: { in: ["50%", "50%.a_b"] } },
-  "hier-overlaps-cf": {
-    OR: [
-      { scope: { in: ["dept"] } },
-      { scope: { equals: "dept.eng" } },
-      { scope: { startsWith: "dept.eng." } },
-    ],
-  },
-  "hier-overlaps-ff": {
-    OR: [
-      { scope: { in: ["dept"] } },
-      { scope: { equals: "dept.eng" } },
-      { scope: { startsWith: "dept.eng." } },
-    ],
-  },
-  "hier-overlaps-list-prefix": {
-    AND: [
-      {
-        OR: [
-          {
-            scope: { equals: "" },
-          },
-          {
-            scope: { not: "" },
-          },
-        ],
-      },
-    ],
-  },
-  "id-concat-vf": { id: { equals: "f1" } },
-  // The primary key, which arrives as the variable `request.resource.id` rather than through
-  // `attr` — the planner leaves the resource's own identity symbolic because PlanResources is
-  // asked about a kind, not a row. An adapter that resolves references by stripping a
-  // `request.resource.attr.` prefix never reaches this name, and fails silently when it does not.
-  "id-eq-const": { id: { equals: "f1" } },
-  // `_ref`/`_container` is Prisma's field-reference encoding: comparing two columns needs the
-  // model name, which is why `queryPlanToPrisma` takes `model`.
-  "id-f2f": { aString: { equals: { _ref: "id", _container: "AdversarialResource" } } },
-  "id-f2f-ne": {
-    NOT: { aString: { equals: { _ref: "id", _container: "AdversarialResource" } } },
-  },
-  // Membership in a map literal: the planner folds it to its key list, so the filter is the one
-  // a list literal produces.
-  "in-map-keys": { aString: { in: ["one", "same"] } },
-  "in-null-elem-hasint": {
-    OR: [{ tags: { some: { name: "public" } } }, { tags: { some: { name: null } } }],
-  },
-  "in-null-elem-mixed": {
-    OR: [{ aOptionalString: { in: ["x", "one_two"] } }, { aOptionalString: null }],
-  },
-  "in-null-elem-neg": {
-    NOT: {
-      OR: [{ aOptionalString: { in: ["x", "one_two"] } }, { aOptionalString: null }],
-    },
-  },
-  "in-null-elem-only": { aOptionalString: { equals: null } },
-  "in-null-elem-only-neg": { NOT: { aOptionalString: { equals: null } } },
-  "in-null-elem-rel": { tags: { some: { name: null } } },
-  "in-null-elem-rel-neg": { NOT: { tags: { some: { name: null } } } },
-  "in-number-list": { numberList: { some: { value: 2 } } },
-  "in-numbers": {
-    aNumber: {
-      in: [2, 3, 5],
-    },
-  },
-  "in-single": { aString: { equals: "one" } },
-  "lambda-in-literal": {
-    tags: {
-      some: {
-        AND: [
-          {
-            name: {
-              not: null
-            }
-          },
-          {
-            name: {
-              in: [
-                "public",
-                "other"
-              ]
-            }
-          }
-        ]
-      }
+describe("the refusal type", () => {
+  test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", () => {
+    let raised: unknown;
+    try {
+      translate("regex/matches/digit-class");
+    } catch (error) {
+      raised = error;
     }
-  },
-  "lambda-in-literal-neg": {
-    NOT: {
-      tags: {
-        some: {
-          AND: [
-            {
-              name: {
-                not: null
-              }
-            },
-            {
-              name: {
-                in: [
-                  "public",
-                  "other"
-                ]
-              }
-            }
-          ]
-        }
-      }
+    expect(raised).toBeInstanceOf(UnsupportedQueryPlanError);
+    expect(raised).toBeInstanceOf(Error);
+    expect((raised as Error).name).toBe("UnsupportedQueryPlanError");
+  });
+
+  test("mapper misconfiguration is a plain Error, not a refusal", () => {
+    let raised: unknown;
+    try {
+      queryPlanToPrisma({ queryPlan: planFor("comparison/equals/field-to-field"), mapper: MAPPER });
+    } catch (error) {
+      raised = error;
     }
-  },
-  "lambda-in-principal": { tags: { some: { name: { in: ["public", "special"] } } } },
-  "lambda-ternary": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            tags: {
-              some: {
-                OR: [
-                  { name: { equals: "public" } },
-                  {
-                    AND: [
-                      { name: { equals: "public" } },
-                      { NOT: { name: { equals: "public" } } },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
-      },
-      {
-        AND: [
-          { aBool: { equals: false } },
-          {
-            tags: {
-              some: {
-                OR: [
-                  { NOT: { name: { equals: "public" } } },
-                  {
-                    AND: [
-                      { name: { equals: "public" } },
-                      { NOT: { name: { equals: "public" } } },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "le-bare": { aNumber: { lte: 2 } },
-  "like-bracket": { aString: { startsWith: "[SEC]" } },
-  "macro-depth3-all": {
-    categories: {
-      some: {
-        subCategories: { every: { labels: { some: { name: { equals: "gold" } } } } },
-      },
-    },
-  },
-  "macro-depth3-exists": {
-    categories: {
-      some: {
-        subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
-      },
-    },
-  },
-  "macro-depth3-not-exists": {
-    AND: [
-      {
-        NOT: {
-          categories: {
-            some: {
-              subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
-            },
-          },
-        },
-      },
-      {
-        NOT: {
-          categories: {
-            some: {
-              AND: [
-                {
-                  NOT: {
-                    subCategories: { some: { labels: { some: { name: { equals: "gold" } } } } },
-                  },
-                },
-                {
-                  subCategories: {
-                    some: {
-                      AND: [
-                        {
-                          NOT: { labels: { some: { name: { equals: "gold" } } } },
-                        },
-                        { labels: { some: { name: null } } },
-                      ],
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    ],
-  },
-  "n-all-mixed-null": {
-    AND: [
-      { tags: { every: { name: { not: "x" } } } },
-      { tags: { none: { name: null } } },
-    ],
-  },
-  "n-not-all-absorb": { tags: { some: { NOT: { name: { not: "public" } } } } },
-  "n-not-all-null": { tags: { some: { NOT: { name: { equals: "public" } } } } },
-  "nan-ord-inf": {
-    OR: [
-      { aBool: { equals: true } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "nan-ord-le": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            OR: [
-              {
-                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        AND: [
-          { aBool: { equals: false } },
-          {
-            OR: [
-              { aBool: { equals: true } },
-              {
-                AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }],
-              },
-            ],
-          },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "nan-ord-ternary": {
-    OR: [
-      { aBool: { equals: true } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "nan-ord-ternary-vf": {
-    OR: [
-      { aBool: { equals: true } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "nary-and": {
-    AND: [
-      { aBool: { equals: true } },
-      { aNumber: { gte: 0 } },
-      { aString: { not: "one" } },
-    ],
-  },
-  "neg-number": { aNumber: { lt: -1 } },
-  // The De Morgan branch. `NOT` over a conjunction was unreachable from the corpus until #387,
-  // and it is the same wire shape a DENY-composed `nand` rule produces — byte-identical
-  // `filter.condition` JSON, which is why the DENY spelling ported as a delete.
-  "not-and": { NOT: { AND: [{ aBool: { equals: true } }, { aString: { not: "one" } }] } },
-  "not-concat-unsolvable": {
-    NOT: {
-      AND: [
-        {
-          aOptionalString: {
-            equals: "nope",
-          },
-        },
-        {
-          aOptionalString: {
-            not: "nope",
-          },
-        },
-      ],
-    },
-  },
-  "not-concat-unsolvable-ne": {
-    OR: [
-      {
-        aOptionalString: {
-          equals: "nope",
-        },
-      },
-      {
-        aOptionalString: {
-          not: "nope",
-        },
-      },
-    ],
-  },
-  "not-empty": { NOT: { tags: { none: {} } } },
-  "not-exists": {
-    AND: [
-      { NOT: { tags: { some: { name: { equals: "private" } } } } },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "not-gt": { NOT: { aNumber: { gt: 1 } } },
-  "not-hasint-empty-chain": {
-    AND: [
-      { categories: { some: {} } },
-      {
-        NOT: {
-          categories: {
-            some: {
-              subCategories: {
-                some: {
-                  name: {
-                    in: [],
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    ],
-  },
-  "not-lt": { NOT: { aNumber: { lt: 2 } } },
-  "not-nan-ord-le": {
-    OR: [
-      {
-        AND: [
-          {
-            aBool: {
-              equals: true
-            }
-          },
-          {
-            OR: [
-              {
-                aBool: {
-                  equals: false
-                }
-              },
-              {
-                AND: [
-                  {
-                    aBool: {
-                      equals: true
-                    }
-                  },
-                  {
-                    aBool: {
-                      equals: false
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        AND: [
-          {
-            aBool: {
-              equals: false
-            }
-          },
-          {
-            OR: [
-              {
-                aBool: {
-                  equals: false
-                }
-              },
-              {
-                AND: [
-                  {
-                    aBool: {
-                      equals: true
-                    }
-                  },
-                  {
-                    aBool: {
-                      equals: false
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        AND: [
-          {
-            aBool: {
-              equals: true
-            }
-          },
-          {
-            aBool: {
-              equals: false
-            }
-          }
-        ]
-      }
-    ]
-  },
-  // The negation stays total over every row but a6, empty lists included: `none` of no element
-  // rows is true, exactly as CEL answers `null in []` false.
-  "not-null-in-number-list": { NOT: { numberList: { some: { value: null } } } },
-  "not-ternary-parent": {
-    OR: [
-      {
-        aBool: {
-          equals: true
-        }
-      },
-      {
-        AND: [
-          {
-            aBool: {
-              equals: false
-            }
-          },
-          {
-            parent: {
-              is: {
-                aOptionalString: {
-                  not: "set"
-                }
-              }
-            }
-          }
-        ]
-      },
-      {
-        AND: [
-          {
-            aBool: {
-              equals: true
-            }
-          },
-          {
-            aBool: {
-              equals: false
-            }
-          }
-        ]
-      }
-    ]
-  },
-  "null-eq": { aOptionalString: { equals: null } },
-  "null-eq-missing": { aOptionalString: { equals: null } },
-  // A null ELEMENT is a value in CEL, stored as its own element row with a NULL `value`, so
-  // membership is a `some` over that row: a6's [null, 2] and nothing else.
-  "null-in-number-list": { numberList: { some: { value: null } } },
-  "null-ne": { aOptionalString: { not: null } },
-  "null-not-eq": { NOT: { aOptionalString: { equals: null } } },
-  "null-value-f2f": {
-    OR: [
-      { AND: [{ aOptionalString: null }, { scope: null }] },
-      {
-        AND: [
-          { aOptionalString: { not: null } },
-          { scope: { not: null } },
-          {
-            aOptionalString: { equals: { _ref: "scope", _container: "AdversarialResource" } },
-          },
-        ],
-      },
-    ],
-  },
-  "null-value-ne-const": {
-    NOT: {
-      AND: [{ aOptionalString: { not: null } }, { aOptionalString: { equals: "x" } }],
-    },
-  },
-  // Under the explicit-null convention CEL holds a null VALUE, so `null != "x"` is TRUE and
-  // `null == "x"` is FALSE — both definite. Prisma's bare `{ not: "x" }` drops the row under both
-  // polarities, so the equality family is rendered so it can never depend on SQL's UNKNOWN. The
-  // `not: null` conjunct is that rendering, and it is what the `owner`/`coOwner` declarations in
-  // the mapper buy (cerbos/query-plan-adapters#308).
-  "null-value-not-eq-const": {
-    NOT: {
-      AND: [{ aOptionalString: { not: null } }, { aOptionalString: { equals: "x" } }],
-    },
-  },
-  "null-value-not-in-const": {
-    NOT: {
-      AND: [
-        { aOptionalString: { not: null } },
-        { aOptionalString: { in: ["x", "one_two"] } },
-      ],
-    },
-  },
-  "null-value-pv-not-exists": {
-    AND: [
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "set" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "same" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "%_o" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "X" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "Y" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "MIRROR" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "filler-1" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "filler-2" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "filler-3" } },
-          ],
-        },
-      },
-      {
-        NOT: {
-          AND: [
-            { aOptionalString: { not: null } },
-            { aOptionalString: { equals: "filler-4" } },
-          ],
-        },
-      },
-    ],
-  },
-  "optional-ne": { aOptionalString: { not: "x" } },
-  "or-eq-exists": {
-    OR: [
-      { aBool: { equals: true } },
-      { tags: { some: { name: { equals: "public" } } } },
-    ],
-  },
-  "or-eq-in": { OR: [{ aBool: { equals: true } }, { tags: { some: { name: "public" } } }] },
-  "outer-attr-depth2": {
-    AND: [
-      {
-        categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
-      },
-      { aBool: { equals: true } },
-    ],
-  },
-  "p-arith-in-lambda": {
-    AND: [{ tags: { some: { name: { equals: "public" } } } }, { aNumber: { gt: 1 } }],
-  },
-  "p-double-frac": {
-    AND: [
-      { aNumber: { equals: 2.9999999999999996 } },
-      { aNumber: { gt: 2 } },
-      { aNumber: { lt: 3 } },
-    ],
-  },
-  "p-hasintersection-map": {
-    AND: [
-      {
-        tags: {
-          some: { name: { in: ["public", "h\u00e9llo\ud83d\ude80", "100%_x"] } },
-        },
-      },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "p-in-null-multi": { aOptionalString: { in: ["x", "one_two"] } },
-  "p-in-null-single": { aOptionalString: { equals: "x" } },
-  "p-lambda-inner-f2f": {
-    tags: {
-      some: { tagId: { equals: { _ref: "name", _container: "AdversarialTag" } } },
-    },
-  },
-  "p-not-exists-empty": {
-    AND: [
-      { NOT: { tags: { some: { name: { equals: "public" } } } } },
-      { NOT: { tags: { some: { name: null } } } },
-    ],
-  },
-  "p-not-ternary-null": {
-    OR: [
-      {
-        AND: [
-          { aOptionalString: { not: "x" } },
-          {
-            aNumber: {
-              lte: 1,
-            },
-          },
-        ],
-      },
-      { NOT: { aOptionalString: { not: "x" } } },
-      {
-        AND: [
-          { aOptionalString: { not: "x" } },
-          { NOT: { aOptionalString: { not: "x" } } },
-        ],
-      },
-    ],
-  },
-  "p-struct": { aString: { equals: "one" } },
-  "p-ternary-in-exists": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          { tags: { some: { name: { equals: "public" } } } },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "p-ternary-of-ternaries": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            OR: [
-              {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gt: 1 } }],
-              },
-              {
-                AND: [
-                  { aString: { equals: "" } },
-                  { NOT: { aString: { equals: "" } } },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        AND: [
-          { aBool: { equals: false } },
-          {
-            OR: [
-              { NOT: { aNumber: { lt: 0 } } },
-              { AND: [{ aNumber: { lt: 0 } }, { NOT: { aNumber: { lt: 0 } } }] },
-            ],
-          },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "p-ternary-under-all": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            AND: [
-              { tags: { every: { name: { not: "private" } } } },
-              { tags: { none: { name: null } } },
-            ],
-          },
-        ],
-      },
-      { aBool: { equals: false } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "p-ternary-vs-ternary": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            OR: [
-              { AND: [{ aString: { equals: "" } }, { aNumber: { gt: 1 } }] },
-              {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gt: 2 } }],
-              },
-              {
-                AND: [
-                  { aString: { equals: "" } },
-                  { NOT: { aString: { equals: "" } } },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        AND: [
-          { aBool: { equals: false } },
-          {
-            OR: [
-              {
-                AND: [
-                  { aString: { equals: "" } },
-                  { NOT: { aString: { equals: "" } } },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "projection-exists-eq": {
-    tags: {
-      some: {
-        AND: [
-          {
-            name: {
-              not: null
-            }
-          },
-          {
-            name: {
-              equals: "public"
-            }
-          }
-        ]
-      }
-    }
-  },
-  "projection-exists-not-eq": {
-    tags: {
-      some: {
-        NOT: {
-          AND: [
-            {
-              name: {
-                not: null
-              }
-            },
-            {
-              name: {
-                equals: "public"
-              }
-            }
-          ]
-        }
-      }
-    }
-  },
-
-
-  "pv-all": {
-    AND: [
-      { aOptionalString: { not: "set" } },
-      { aOptionalString: { not: "same" } },
-      { aOptionalString: { not: "" } },
-      { aOptionalString: { not: "%_o" } },
-      { aOptionalString: { not: "X" } },
-      { aOptionalString: { not: "Y" } },
-      { aOptionalString: { not: "MIRROR" } },
-      { aOptionalString: { not: "filler-1" } },
-      { aOptionalString: { not: "filler-2" } },
-      { aOptionalString: { not: "filler-3" } },
-      { aOptionalString: { not: "filler-4" } },
-    ],
-  },
-  "pv-all-unrolled": {
-    AND: [
-      { aOptionalString: { not: "set" } },
-      {
-        AND: [{ aOptionalString: { not: "" } }, { aOptionalString: { not: "%_o" } }],
-      },
-    ],
-  },
-  "pv-exists": {
-    OR: [
-      { aOptionalString: { equals: "set" } },
-      { aOptionalString: { equals: "same" } },
-      { aOptionalString: { equals: "" } },
-      { aOptionalString: { equals: "%_o" } },
-      { aOptionalString: { equals: "X" } },
-      { aOptionalString: { equals: "Y" } },
-      { aOptionalString: { equals: "MIRROR" } },
-      { aOptionalString: { equals: "filler-1" } },
-      { aOptionalString: { equals: "filler-2" } },
-      { aOptionalString: { equals: "filler-3" } },
-      { aOptionalString: { equals: "filler-4" } },
-    ],
-  },
-  "pv-exists-unrolled": {
-    OR: [
-      { aOptionalString: { equals: "set" } },
-      {
-        OR: [
-          { aOptionalString: { equals: "" } },
-          { aOptionalString: { equals: "%_o" } },
-        ],
-      },
-    ],
-  },
-  "pv-in": {
-    aOptionalString: {
-      in: [
-        "set",
-        "same",
-        "",
-        "%_o",
-        "X",
-        "Y",
-        "MIRROR",
-        "filler-1",
-        "filler-2",
-        "filler-3",
-        "filler-4",
-      ],
-    },
-  },
-  "pv-in-unrolled": {
-    aOptionalString: {
-      in: ["set", "", "%_o"],
-    },
-  },
-  "pv-not-all": {
-    OR: [
-      {
-        NOT: { aOptionalString: { equals: "set" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "same" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "%_o" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "X" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "Y" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "MIRROR" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-1" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-2" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-3" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-4" } },
-      },
-    ],
-  },
-  "pv-not-exists": {
-    AND: [
-      {
-        NOT: { aOptionalString: { equals: "set" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "same" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "%_o" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "X" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "Y" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "MIRROR" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-1" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-2" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-3" } },
-      },
-      {
-        NOT: { aOptionalString: { equals: "filler-4" } },
-      },
-    ],
-  },
-  "pv-shadow": {
-    OR: [
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-      {
-      tags: { some: { name: { equals: "public" } } },
-    },
-    ],
-  },
-  "rel-bool-hop": { parent: { is: { aBool: { equals: true } } } },
-  "rel-bool-hop2": { parent: { is: { inner: { is: { aBool: { equals: true } } } } } },
-  "rel-contains-hop": { parent: { is: { aString: { contains: "done" } } } },
-  "rel-eq-hop": { parent: { is: { aString: { equals: "One" } } } },
-  "rel-eq-num-hop": { parent: { is: { aNumber: { equals: 2 } } } },
-  "rel-ge-hop": { parent: { is: { aNumber: { gte: 2 } } } },
-  "rel-gt-hop": { parent: { is: { aNumber: { gt: 2 } } } },
-  "rel-hop-and-root": {
-    AND: [
-      { aBool: { equals: true } },
-      { parent: { is: { aString: { contains: "re" } } } },
-    ],
-  },
-  "rel-hop2-or-exists": {
-    OR: [
-      { parent: { is: { inner: { is: { aBool: { equals: true } } } } } },
-      { categories: { some: { name: { equals: "business" } } } },
-    ],
-  },
-  "rel-le-hop": { parent: { is: { aNumber: { lte: 2 } } } },
-  "rel-lt-hop": { parent: { is: { aNumber: { lt: 2 } } } },
-  "rel-ne-null-hop": { parent: { is: { aOptionalString: { not: null } } } },
-  // The absent-parent guard. `NOT { parent: { is: P } }` is satisfied by a row with no parent at
-  // all, while CEL raises a missing-attribute error on the hop and check() denies. The first
-  // conjunct — an existence test on the hop itself — is what keeps a negated shape over an
-  // OPTIONAL to-one relation from over-granting. The positive shapes cannot discriminate it,
-  // which is why the corpus carries the negated ones (ADR 0005).
-  "rel-not-bool-hop": {
-    AND: [
-      { parent: { is: {} } },
-      { NOT: { parent: { is: { aBool: { equals: true } } } } },
-    ],
-  },
-  "rel-not-contains-hop": {
-    AND: [
-      {
-        parent: {
-          is: {}
-        }
-      },
-      {
-        NOT: {
-          parent: {
-            is: {
-              aString: {
-                contains: "done"
-              }
-            }
-          }
-        }
-      }
-    ]
-  },
-  "rel-not-eq-hop": {
-    AND: [
-      {
-        parent: {
-          is: {}
-        }
-      },
-      {
-        NOT: {
-          parent: {
-            is: {
-              aString: {
-                equals: "One"
-              }
-            }
-          }
-        }
-      }
-    ]
-  },
-  "rel-not-hierarchy-hop": {
-    AND: [
-      {
-        parent: {
-          is: {}
-        }
-      },
-      {
-        NOT: {
-          OR: [
-            {
-              parent: {
-                is: {
-                  aString: {
-                    equals: "one"
-                  }
-                }
-              }
-            },
-            {
-              parent: {
-                is: {
-                  aString: {
-                    startsWith: "one."
-                  }
-                }
-              }
-            }
-          ]
-        }
-      }
-    ]
-  },
-
-
-
-  "rel-range-hop": {
-    AND: [
-      { parent: { is: { aNumber: { gt: 2 } } } },
-      { parent: { is: { aNumber: { lt: 12 } } } },
-    ],
-  },
-  "rel-startswith-hop2": { parent: { is: { inner: { is: { aString: { startsWith: "100" } } } } } },
-  "root-bare-bool": { aBool: { equals: true } },
-  "root-not-bool": { aBool: { equals: false } },
-  "root-or": { OR: [{ aBool: { equals: true } }, { aNumber: { lt: 0 } }] },
-  "size-ge-one": { tags: { some: {} } },
-  "ternary-bare": {
-    OR: [
-      { AND: [{ aBool: { equals: true } }, { aString: { equals: "one" } }] },
-      { AND: [{ aBool: { equals: false } }, { aNumber: { lt: 0 } }] },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "ternary-cmp": {
-    OR: [
-      { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 1 } }] },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "ternary-expr-cond": {
-    OR: [
-      { AND: [{ aString: { startsWith: "100" } }, { aNumber: { gte: 0 } }] },
-      {
-        AND: [
-          { aString: { startsWith: "100" } },
-          { NOT: { aString: { startsWith: "100" } } },
-        ],
-      },
-    ],
-  },
-  "ternary-negated": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            aNumber: {
-              lte: 1,
-            },
-          },
-        ],
-      },
-      { aBool: { equals: false } },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "ternary-nested": {
-    OR: [
-      {
-        AND: [
-          { aBool: { equals: true } },
-          {
-            OR: [
-              {
-                AND: [{ NOT: { aString: { equals: "" } } }, { aNumber: { gte: 2 } }],
-              },
-              {
-                AND: [
-                  { aString: { equals: "" } },
-                  { NOT: { aString: { equals: "" } } },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "ternary-null-cond": {
-    OR: [
-      { AND: [{ aOptionalString: { not: "x" } }, { aNumber: { gt: 1 } }] },
-      {
-        AND: [
-          { aOptionalString: { not: "x" } },
-          { NOT: { aOptionalString: { not: "x" } } },
-        ],
-      },
-    ],
-  },
-  "ternary-value-first": {
-    OR: [
-      { AND: [{ aBool: { equals: true } }, { aNumber: { gt: 0 } }] },
-      { AND: [{ aBool: { equals: true } }, { aBool: { equals: false } }] },
-    ],
-  },
-  "triple-negation": { aBool: { equals: false } },
-  "ts-eq": { createdAt: { equals: "2024-06-01T00:00:00.000Z" } },
-  "ts-eq-offset": { createdAt: { equals: "2024-06-01T00:00:00.000Z" } },
-  "ts-ne": { createdAt: { not: "2024-06-01T00:00:00.000Z" } },
-  "unicode-eq": { aString: { equals: "h\u00e9llo\ud83d\ude80" } },
-  "vf-ge": { aNumber: { lte: 2 } },
-  "vf-hasint": { tags: { some: { name: { in: ["public", "other"] } } } },
-  "vf-le": { aNumber: { gte: 3 } },
-  "vf-lt": { aNumber: { gt: 1 } },
-  "vf-ne": { aString: { not: "one" } },
-  "vf-null-ne": { aOptionalString: { not: null } },
-  "vf-size": { tags: { some: {} } },
-  "w1-exists-chain": {
-    categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
-  },
-  "w1-in-chain": { categories: { some: { subCategories: { some: { name: "finance" } } } } },
-  // The same absent-hop guard as `rel-not-bool-hop`, one level up a multi-hop chain: the negation
-  // is joined through every intermediate relation, never off the root, and the leading existence
-  // test is what stops a row with no category at all from satisfying the negation.
-  "w1-not-exists-chain": {
-    AND: [
-      { categories: { some: {} } },
-      {
-        NOT: {
-          categories: { some: { subCategories: { some: { name: { equals: "finance" } } } } },
-        },
-      },
-    ],
-  },
-  "w1-not-hasint-chain": {
-    AND: [
-      { categories: { some: {} } },
-      {
-        NOT: {
-          categories: { some: { subCategories: { some: { name: "finance" } } } },
-        },
-      },
-    ],
-  },
-  "w1-not-in-chain": {
-    AND: [
-      { categories: { some: {} } },
-      {
-        NOT: {
-          categories: { some: { subCategories: { some: { name: "finance" } } } },
-        },
-      },
-    ],
-  },
-  "w1-not-size-chain": {
-    AND: [
-      { categories: { some: {} } },
-      { NOT: { categories: { some: { subCategories: { some: {} } } } } },
-    ],
-  },
-  "w1-size-chain": { categories: { some: { subCategories: { some: {} } } } },
-  "w1-size-zero-chain": { categories: { some: { subCategories: { none: {} } } } },
-  "w1-ternary-chain-cond": {
-    OR: [
-      {
-        AND: [
-          {
-            categories: { some: { subCategories: { some: { name: "finance" } } } },
-          },
-          { aBool: { equals: true } },
-        ],
-      },
-      {
-        AND: [
-          {
-            AND: [
-              { categories: { some: {} } },
-              {
-                NOT: {
-                  categories: { some: { subCategories: { some: { name: "finance" } } } },
-                },
-              },
-            ],
-          },
-          { aBool: { equals: false } },
-        ],
-      },
-      {
-        AND: [
-          {
-            categories: { some: { subCategories: { some: { name: "finance" } } } },
-          },
-          {
-            AND: [
-              { categories: { some: {} } },
-              {
-                NOT: {
-                  categories: { some: { subCategories: { some: { name: "finance" } } } },
-                },
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  "wildcard-contains": {
-    aString: {
-      contains: "*?b",
-    },
-  },
-  "wildcard-endswith": {
-    aString: {
-      endsWith: "*?b",
-    },
-  },
-};
-
-describe("corpus shapes", () => {
-  test.each(Object.entries(EXPECTED_FILTERS))(
-    "%s emits the pinned filter",
-    (action, filters) => {
-      expect(translate(action)).toStrictEqual({
-        kind: PlanKind.CONDITIONAL,
-        filters,
-      });
-    }
-  );
-
-  test.each(Object.entries(EXPECTED_KINDS))(
-    "%s resolves without a condition",
-    (action, kind) => {
-      expect(translate(action)).toStrictEqual({ kind });
-    }
-  );
-
-  // The message, not just the throw: a mapper typo or an unrelated validation satisfies a bare
-  // `toThrow()` just as well as the limitation the corpus documents (#326). The harness makes the
-  // same assertion against a live PDP; here it costs a millisecond and covers the whole roster,
-  // which is what lets the completeness guard below be total.
-  test.each(THROWING_ACTIONS)(
-    "%s is refused with the message actions.json pins (%s)",
-    (action, _reason, message) => {
-      expect(() => translate(action)).toThrow(message);
-    }
-  );
-
-  test("every corpus action is classified here exactly once", () => {
-    const filters = Object.keys(EXPECTED_FILTERS);
-    const kinds = Object.keys(EXPECTED_KINDS);
-    const throwing = THROWING_ACTIONS.map(([action]) => action);
-    const classified = [...filters, ...kinds, ...throwing].sort();
-
-    // Total: a corpus action with no entry here lands as a failure rather than as silence. This
-    // is the assertion that makes the file self-maintaining — adding a hostile shape to the
-    // corpus forces someone to look at the filter this adapter emits for it.
-    expect(classified).toEqual(wireFixtureActions());
-    // Disjoint: an action pinned as a filter AND declared unsupported would satisfy the union
-    // above while asserting two contradictory things.
-    expect(classified).toEqual([...new Set(classified)].sort());
-    // The table is alphabetical, so a translator change reads as the list of shapes it moved.
-    expect(filters).toEqual([...filters].sort());
-
-    // Tripwires. Bump them deliberately: a count that moves without anyone noticing is how a
-    // shape gets dropped from a table nobody reads end to end.
-    expect({
-      filters: filters.length,
-      kinds: kinds.length,
-      throwing: throwing.length,
-    }).toEqual({ filters: 179, kinds: 7, throwing: 138 });
+    expect(raised).toBeInstanceOf(Error);
+    expect(raised).not.toBeInstanceOf(UnsupportedQueryPlanError);
+    expect((raised as Error).message).toContain("requires the `model` option");
   });
 });
 
 describe("declared scalar types", () => {
   test("an undeclared type preserves the legacy mapper contract", () => {
     expect(
-      translate("type-string-number", {
+      translate("type-mismatch/equals/string-field-against-number-principal", {
         mapper: { "request.resource.attr.aString": { field: "aString" } },
       }),
     ).toEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { aString: { equals: 0 } },
     });
-    expect(() => translate("type-string-number")).toThrow(
+    expect(() => translate("type-mismatch/equals/string-field-against-number-principal")).toThrow(
       "eq value type does not match mapped string field",
     );
   });
 });
 
+/** The shared mapper with every per-attribute null declaration stripped. */
+const UNDECLARED: Record<string, MapperConfig> = Object.fromEntries(
+  Object.entries(MAPPER).map(([reference, config]) => {
+    const { nullAttributeRepresentation: _stripped, ...rest } = config;
+    return [reference, rest];
+  })
+);
+
+/** Whether any operand anywhere in the wire plan is a literal null, or a list containing one. */
+function carriesNullLiteral(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const record = node as Record<string, unknown>;
+  if ("value" in record) {
+    const value = record["value"];
+    return value === null || (Array.isArray(value) && value.includes(null));
+  }
+  return Object.values(record).some((child) =>
+    Array.isArray(child) ? child.some(carriesNullLiteral) : carriesNullLiteral(child)
+  );
+}
+
 describe("nullAttributeRepresentation", () => {
-  // `null-eq-missing` is the corpus's `nullRepresentationOmitted` probe: `== null` against an
-  // attribute the caller OMITS when the column is NULL. The two conventions are indistinguishable
-  // on the wire — the planner emits the same `eq(attr, null)` either way — so the adapter has to
-  // be told, and the whole behaviour is a translator property with no store in it. Under the
-  // default (`"explicit"`) it becomes the IS NULL filter EXPECTED_FILTERS pins above.
+  // `== null` against an attribute the caller OMITS when the column is NULL. The two conventions
+  // are indistinguishable on the wire — the planner emits the same `eq(attr, null)` either way — so
+  // the adapter has to be told. The corpus mapping declares it per attribute; these vary the
+  // call-level option and the declaration, which the corpus cannot.
+  const MISSING = "null/equals/null-literal-on-missing-attribute";
+
+  test("explicit (the default): == null is an IS NULL filter", () => {
+    expect(translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
+      kind: PlanKind.CONDITIONAL,
+      filters: { aOptionalString: { equals: null } },
+    });
+  });
+
   test("omitted: the same plan is refused rather than translated", () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
-    // filter above would return exactly those rows (#302).
+    // IS NULL filter would return exactly those rows (#302).
     expect(() =>
-      translate("null-eq-missing", { nullAttributeRepresentation: "omitted" })
+      translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
+    ).toThrow(UnsupportedQueryPlanError);
+  });
+
+  test("a per-attribute declaration overrides the call-level option, in both directions", () => {
+    // Declared omitted, called explicit: refused (#308).
+    expect(() => translate(MISSING)).toThrow("missing-attribute error");
+    // Declared explicit (`owner`), called omitted: translated.
+    expect(
+      translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" }).kind
+    ).toBe(PlanKind.CONDITIONAL);
+    // Strip the declaration and the same call is refused.
+    expect(() =>
+      translate("null/equals/null-literal", {
+        mapper: UNDECLARED,
+        nullAttributeRepresentation: "omitted",
+      })
     ).toThrow("missing-attribute error");
+  });
+
+  // The rejection must key off the null OPERAND, not a list of operators: `hasIntersection(tagNames,
+  // ["public", null])` carries one in its value list. Enumerating the goldens rather than naming
+  // shapes covers a newly added case carrying a null constant automatically.
+  test("every plan carrying a null literal is refused under call-level omitted", () => {
+    const carrying = readGoldens(CURRENT).filter((golden) => carriesNullLiteral(golden.plan));
+    const ids = carrying.map((golden) => golden.id);
+    expect(ids).toContain(MISSING);
+    expect(ids).toContain("null/has-intersection/literal-list-with-null-element");
+
+    const notRejected = carrying.flatMap((golden) => {
+      try {
+        queryPlanToPrisma({
+          queryPlan: planOf(golden),
+          mapper: UNDECLARED,
+          model: MODEL,
+          nullAttributeRepresentation: "omitted",
+        });
+        return [golden.id];
+      } catch (error) {
+        // A positional read of a list compares an element, not an optionally absent field; the
+        // index operator has no Prisma filter form under either representation.
+        const message = String(error);
+        return message.includes("missing-attribute error") ||
+          message.includes("Unsupported operator: index")
+          ? []
+          : [`${golden.id} (${message})`];
+      }
+    });
+    expect(notRejected).toEqual([]);
   });
 });
 
 describe("reentrant function mappers", () => {
-  // Function mappers are caller-supplied, so the corpus cannot exercise nested adapter calls.
-  test.each(["null-eq-missing", "field-to-field", "all-on-empty"])(
-    "keeps %s isolated from a nested translation",
-    (action) => {
-      const expected = translate(action);
-      let calls = 0;
-      const mapper: Mapper = (key) => {
-        calls++;
-        queryPlanToPrisma({
-          queryPlan: planFromWireFixture("arith-add"),
-          mapper: MAPPER,
-          model: "NestedModel",
-          nullAttributeRepresentation: "omitted",
-        });
-        return MAPPER[key] ?? { field: key };
-      };
-      expect(translate(action, { mapper })).toStrictEqual(expected);
-      expect(calls).toBeGreaterThan(0);
-    },
-  );
+  // Function mappers are caller-supplied, so the corpus cannot exercise nested adapter calls. The
+  // nested call's "omitted" must not leak into the outer "explicit" translation of `== null`.
+  test.each([
+    "null/equals/null-literal-on-missing-attribute",
+    "comparison/equals/field-to-field",
+    "collection/all/empty-collection",
+  ])("keeps %s isolated from a nested translation", (action) => {
+    const expected = translate(action, { mapper: UNDECLARED });
+    let calls = 0;
+    const mapper: Mapper = (key) => {
+      calls++;
+      queryPlanToPrisma({
+        queryPlan: planFor("arithmetic/add/field-plus-constant"),
+        mapper: MAPPER,
+        model: "NestedModel",
+        nullAttributeRepresentation: "omitted",
+      });
+      return UNDECLARED[key] ?? { field: key };
+    };
+    expect(translate(action, { mapper })).toStrictEqual(expected);
+    expect(calls).toBeGreaterThan(0);
+  });
 });
 
 test("an unplannable nested map does not register nullable fields on the outer lambda", () => {
@@ -1984,7 +233,7 @@ test("an unplannable nested map does not register nullable fields on the outer l
     ],
   };
   const result = queryPlanToPrisma({
-    queryPlan: { ...planFromWireFixture("all-on-empty"), kind: PlanKind.CONDITIONAL, condition },
+    queryPlan: { ...planFor("collection/all/empty-collection"), kind: PlanKind.CONDITIONAL, condition },
     mapper: MAPPER,
     model: MODEL,
   });
@@ -1995,22 +244,22 @@ test("an unplannable nested map does not register nullable fields on the outer l
 });
 
 describe("timestamp literals", () => {
-  // `regenerate-wire-fixtures.sh` rewrites the folded `now() - duration("24h")` literal in
-  // `ts-window` to a placeholder, because it differs on every capture. That makes this the one
-  // fixture whose value the reader chooses — so it is also the one place the whole timestamp
-  // boundary can be walked, by substituting the instant and asking what the adapter does with it.
+  // The golden records the folded `now() - duration("24h")` literal as `__NOW_MINUS_24H__`, because
+  // it differs on every capture. That makes this the one plan whose value the reader chooses — so
+  // it is also the one place the whole timestamp boundary can be walked, by substituting the
+  // instant and asking what the adapter does with it.
   const at = (plannedAt: string) =>
     queryPlanToPrisma({
-      queryPlan: planFromWireFixture("ts-window", plannedAt),
+      queryPlan: planFor("timestamp/less-than/relative-window", plannedAt),
       mapper: MAPPER,
       model: MODEL,
     });
 
   test("a nanosecond instant — what the PDP actually folds — is refused", () => {
-    // This, and nothing else, is why `ts-window` and `ts-vf` are `adapterUnsupported`. A tidy
-    // millisecond substitution in the loader would translate cleanly and quietly contradict
-    // actions.json.
-    expect(() => translate("ts-window")).toThrow(
+    // This, and nothing else, is why the two relative-window cases are `unsupported` in the
+    // ledger. A tidy millisecond substitution in the loader would translate cleanly and quietly
+    // contradict it.
+    expect(() => translate("timestamp/less-than/relative-window")).toThrow(
       "Timestamp value exceeds millisecond precision"
     );
   });
@@ -2077,7 +326,7 @@ describe("relation subqueryFilter", () => {
   };
 
   test("declared: exists() examines only the records the application serialised", () => {
-    expect(filtersFor("exists-on-empty", VISIBLE_ONLY)).toStrictEqual({
+    expect(filtersFor("collection/exists/empty-collection", VISIBLE_ONLY)).toStrictEqual({
       tags: {
         some: { AND: [{ name: { not: "hidden" } }, { name: { equals: "public" } }] },
       },
@@ -2090,7 +339,7 @@ describe("relation subqueryFilter", () => {
     // declaration mean "ignore what the application hides" — including the empty-collection case,
     // where CEL's all() is vacuously true and check() agrees because the application sent an
     // empty list for the same reason.
-    expect(filtersFor("all-on-empty", VISIBLE_ONLY)).toStrictEqual({
+    expect(filtersFor("collection/all/empty-collection", VISIBLE_ONLY)).toStrictEqual({
       tags: {
         none: {
           AND: [
@@ -2103,20 +352,20 @@ describe("relation subqueryFilter", () => {
   });
 
   test("declared: an emptiness check counts only the visible records", () => {
-    expect(filtersFor("not-empty", VISIBLE_ONLY)).toStrictEqual({
+    expect(filtersFor("size/equals/negated-collection-zero", VISIBLE_ONLY)).toStrictEqual({
       NOT: { tags: { none: { name: { not: "hidden" } } } },
     });
   });
 
   test("undeclared: the emitted filter is what it was before the field existed", () => {
     // The non-breaking guarantee. Silence must not add a clause, and must not warn.
-    expect(filtersFor("exists-on-empty")).toStrictEqual({
+    expect(filtersFor("collection/exists/empty-collection")).toStrictEqual({
       tags: { some: { name: { equals: "public" } } },
     });
-    expect(filtersFor("all-on-empty")).toStrictEqual({
+    expect(filtersFor("collection/all/empty-collection")).toStrictEqual({
       tags: { every: { name: { equals: "public" } } },
     });
-    expect(filtersFor("not-empty")).toStrictEqual({
+    expect(filtersFor("size/equals/negated-collection-zero")).toStrictEqual({
       NOT: { tags: { none: {} } },
     });
   });
@@ -2129,7 +378,7 @@ describe("the mapper contract", () => {
   test.each([undefined, true, false])(
     "hierarchy segment nullability %s is respected",
     (nullable) => {
-      const result = translate("hier-overlaps-list-prefix", {
+      const result = translate("hierarchy/overlaps/path-built-from-list-value-first", {
         mapper: { "request.resource.attr.scope": { field: "scope", nullable } },
       });
       expect(result).toStrictEqual({
@@ -2148,7 +397,7 @@ describe("the mapper contract", () => {
 
   test("a function mapper resolves a scalar reference", () => {
     expect(
-      translate("cs-eq", {
+      translate("string/equals/case-sensitive", {
         mapper: (key: string) => ({
           field: key.replace("request.resource.attr.", ""),
         }),
@@ -2161,7 +410,7 @@ describe("the mapper contract", () => {
 
   test("a function mapper resolves a relation", () => {
     expect(
-      translate("rel-bool-hop", {
+      translate("relation/bare-attribute/one-hop-boolean", {
         mapper: () => ({
           relation: {
             name: "parent",
@@ -2176,12 +425,12 @@ describe("the mapper contract", () => {
     });
   });
 
-  test.each(["projection-exists-eq", "projection-exists-not-eq"])(
+  test.each(["collection/exists/scalar-list-equals", "collection/exists/scalar-list-negated-body"])(
     "%s resolves a projection supplied through a prefix mapper",
     (action) => {
       const direct = translate(action);
       if (direct.kind !== PlanKind.CONDITIONAL) {
-        throw new Error("Expected a conditional projection fixture");
+        throw new Error("Expected a conditional projection plan");
       }
       const mapper: Mapper = {
         "request.resource.attr": {
@@ -2208,9 +457,9 @@ describe("the mapper contract", () => {
     // scope]))` fold to `{}` (asserted above). Prisma evaluates `{ NOT: {} }` as true, so the
     // negation would match every row where CEL's `!true` matches none; the adapter has no
     // field-free false condition to emit instead (cerbos/query-plan-adapters#495).
-    const fixture = planFromWireFixture("hier-overlaps-list-prefix");
+    const fixture = planFor("hierarchy/overlaps/path-built-from-list-value-first");
     if (fixture.kind !== PlanKind.CONDITIONAL) {
-      throw new Error("Expected a conditional hierarchy fixture");
+      throw new Error("Expected a conditional hierarchy plan");
     }
     expect(() =>
       queryPlanToPrisma({
@@ -2237,7 +486,7 @@ describe("the mapper contract", () => {
     };
     const unguarded = { tags: { every: { name: { equals: "public" } } } };
     const allFor = (fields?: Record<string, MapperConfig>) =>
-      translate("all-on-empty", {
+      translate("collection/all/empty-collection", {
         mapper: {
           "request.resource.attr.tags": {
             relation: { name: "tags", type: "many", ...(fields ? { fields } : {}) },
@@ -2260,7 +509,7 @@ describe("the mapper contract", () => {
 
   test("size() against a scalar mapping is refused rather than guessed", () => {
     expect(() =>
-      translate("not-empty", {
+      translate("size/equals/negated-collection-zero", {
         mapper: { "request.resource.attr.tags": { field: "tags" } },
       })
     ).toThrow("size operator requires a relation mapping");
@@ -2269,8 +518,8 @@ describe("the mapper contract", () => {
 
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function, not policy shapes. Every other assertion in this file
-  // reads its plan from a fixture precisely because a typed plan is a belief about the planner —
-  // but these are malformed by construction, so there is no fixture to read and nothing to
+  // reads its plan from a golden file precisely because a typed plan is a belief about the planner —
+  // but these are malformed by construction, so there is no golden to read and nothing to
   // believe. They exist so a caller who hands the adapter a hand-rolled or half-decoded plan gets
   // an error rather than a filter.
   //

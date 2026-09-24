@@ -1,0 +1,81 @@
+{
+  "allowed": [
+    "a3",
+    "a5",
+    "a7",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/negated-missing-attribute-condition",
+  "intent": "Negated comparison over a ternary whose condition reads an attribute that is missing on some rows.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aOptionalString"
+                            },
+                            {
+                              "value": "x"
+                            }
+                          ],
+                          "operator": "ne"
+                        }
+                      },
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/negated-missing-attribute-condition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aOptionalString != \"x\" ? R.attr.aNumber : 0.0) > 1.0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A missing condition is a CEL error that denies; SQL NOT over FALSE instead of UNKNOWN leaks those rows."
+}

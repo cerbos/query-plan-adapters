@@ -1,0 +1,107 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/all/nested-three-levels-middle",
+  "intent": "all() at the middle of three nested macros: categories.exists(subCategories.all(labels.exists(...))).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.categories"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "c.subCategories"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "s.labels"
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "variable": "l.name"
+                                              },
+                                              {
+                                                "value": "gold"
+                                              }
+                                            ],
+                                            "operator": "eq"
+                                          }
+                                        },
+                                        {
+                                          "variable": "l"
+                                        }
+                                      ],
+                                      "operator": "lambda"
+                                    }
+                                  }
+                                ],
+                                "operator": "exists"
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "all"
+                  }
+                },
+                {
+                  "variable": "c"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/all/nested-three-levels-middle",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == \"gold\")))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "all() lowers to NOT EXISTS of the negated body while keeping the erroring row (a6) denied; empty inner collections make all() vacuously true."
+}

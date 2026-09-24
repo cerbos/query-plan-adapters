@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a7",
+    "a8",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/greater-or-equal/value-first",
+  "intent": "Literal on the left of >= against a numeric attribute (2 >= aNumber).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 2
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/greater-or-equal/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "2 >= R.attr.aNumber"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Treating the literal as the column side emits aNumber >= 2 instead of aNumber <= 2."
+}

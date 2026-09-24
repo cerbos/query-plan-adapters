@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
 
+import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper } from "./index";
 import { lambdaComponents, operatorFor } from "./evaluate";
 import {
@@ -21,11 +22,13 @@ import {
 export const validateStructure = (expression: PlanExpressionOperand): void => {
   if (isValue(expression) || isVariable(expression)) return;
   if (!isExpression(expression)) {
-    throw new Error("Invalid Cerbos expression structure");
+    throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
   const operator = operatorFor(expression.operator);
   if (!operator) {
-    throw new Error(`Unsupported operator: ${expression.operator}`);
+    throw new UnsupportedQueryPlanError(
+      `Unsupported operator: ${expression.operator}`,
+    );
   }
   operator.validate?.(expression);
   for (const op of expression.operands) {
@@ -41,7 +44,7 @@ export const validateStructure = (expression: PlanExpressionOperand): void => {
 //
 // Every boolean POSITION is checked, not just the root. `and(filter(...), aBool)` puts the
 // macro one level down, where the recursion dispatches on the operator and the root check
-// never runs — the position was deciding rather than the shape (`filter-as-conjunct`,
+// never runs — the position was deciding rather than the shape (`collection/filter/as-conjunct`,
 // cerbos/query-plan-adapters#387). The walk stops at `and`/`or`/`not` because those are the
 // only operators whose operands are themselves conditions; inside `size()` a list is exactly
 // what is wanted, and both macros stay translatable there.
@@ -50,7 +53,7 @@ export const assertNoListValuedCondition = (
 ): void => {
   if (!isExpression(expression)) return;
   if (expression.operator === "filter" || expression.operator === "map") {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `${expression.operator}() returns a list, not a boolean, so it cannot be a condition ` +
         "on its own; only size() over its result has a boolean meaning",
     );
@@ -97,7 +100,7 @@ export const assertNoNullComparisonOperands = (
   if (!isExpression(expression)) return;
 
   if (expression.operands.some(carriesNullLiteral)) {
-    throw new Error(
+    throw new UnsupportedQueryPlanError(
       `Cannot translate \`${expression.operator}\` against a null operand under ` +
         'nullAttributeRepresentation "omitted": a NULL field sends no attribute, so Cerbos ' +
         "evaluates the comparison as a missing-attribute error (deny) while a null-selecting " +
