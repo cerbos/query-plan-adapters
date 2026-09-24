@@ -303,7 +303,7 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles |
 | Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
-| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved to a plain comparison (`R.attr.n + 1 > 2` → `{ n: { gt: 1 } }`; negative multipliers flip the direction); string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
+| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
 | Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)`, `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
 
@@ -342,8 +342,8 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   a chain) reachable.
 - **Cross-model column comparisons**, including membership between an outer scalar column and a
   related collection column.
-- **Unsolvable arithmetic.** Arithmetic on both sides, division *by* a column, and `==`/`!=` over
-  fractional addition (not reversible in IEEE-754).
+- **Unsolvable arithmetic.** Arithmetic on both sides, and division *by* a column other than
+  `x / x`.
 - **Other malformed shapes:** the two-list `except` function compared to a list or counted past
   emptiness, an empty hierarchy delimiter, non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
@@ -387,7 +387,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 163 / 227 |
+| adversarial | 172 / 227 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -450,6 +450,12 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- Arithmetic against a constant is solved exactly over IEEE-754 doubles: `x + c CMP v` (and `-`,
+  `*`, `/` by a constant) becomes the range of doubles `x` for which the rounded result compares,
+  found by bisecting the doubles in order, where it used to compute `v - c` — inexact for a
+  fraction, and refused for `==`/`!=`. `x + 1 == 3` now also admits `1.9999999999999998`, which CEL
+  rounds to 3. A comparison whose one column appears only as `x / x` or `x / ±0` splits on the sign
+  of `x` (those divisions are 1, ±Inf or NaN, never an error, on doubles).
 - `all()` over a multi-hop chain translates (the hops must exist, and the predicate holds at the
   end of every path). **Fix:** a negated `all()` over a chain put its negation outside the inner
   hops (`some { NOT { some P } }`), which admitted a hop with no elements — where `all()` is

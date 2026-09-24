@@ -35,6 +35,8 @@ import {
 } from "./plan";
 import type { OperatorOperand } from "./plan";
 import { relationFilter, wrapInRelations } from "./relations";
+import { negateInterval, solveMonotone } from "./solve";
+import type { DoubleInterval } from "./solve";
 import { tryHandleTernaryComparison } from "./ternary";
 import { roundSubMillisecond } from "./timestamp";
 import { resolveOperand, tryFoldValueExpression } from "./translate";
@@ -587,61 +589,88 @@ function handleArithmeticComparison(
     throw new UnsupportedQueryPlanError(`${arithOp} comparison requires numeric operands`);
   }
 
-  if (
-    arithOp === "add" &&
-    (effectiveOperator === "eq" || effectiveOperator === "ne") &&
-    (!Number.isInteger(constant) || !Number.isInteger(other.value))
-  ) {
+  if (arithOp === "mult" && constant === 0) {
     throw new UnsupportedQueryPlanError(
-      "Fractional addition equality cannot be translated safely: solving IEEE-754 addition into a plain Prisma column comparison is not reversible"
+      "Multiplication by a constant zero must be folded by the Cerbos planner"
     );
   }
-
-  let solved: number;
-  switch (arithOp) {
-    case "add":
-      solved = other.value - constant;
-      break;
-    case "sub":
-      if (fieldIsLeft) {
-        // f - c CMP v  ⇔  f CMP v + c
-        solved = other.value + constant;
-      } else {
-        // c - f CMP v  ⇔  -f CMP v - c  ⇔  f mirror(CMP) c - v
-        solved = constant - other.value;
-        effectiveOperator = mirrorOperator(effectiveOperator);
-      }
-      break;
-    case "mult":
-      if (constant === 0) {
-        throw new UnsupportedQueryPlanError(
-          "Multiplication by a constant zero must be folded by the Cerbos planner"
-        );
-      }
-      solved = other.value / constant;
-      if (constant < 0) {
-        effectiveOperator = mirrorOperator(effectiveOperator);
-      }
-      break;
-    case "div":
-      if (!fieldIsLeft) {
-        throw new UnsupportedQueryPlanError(
-          "Division by a column is not supported: the comparison cannot be solved to a plain column filter"
-        );
-      }
-      if (constant === 0) {
-        throw new UnsupportedQueryPlanError("Division by a constant zero is not supported");
-      }
-      solved = other.value * constant;
-      if (constant < 0) {
-        effectiveOperator = mirrorOperator(effectiveOperator);
-      }
-      break;
-    default:
-      throw new UnsupportedQueryPlanError(`Unsupported operator: ${arithOp}`);
+  if (arithOp === "div" && !fieldIsLeft) {
+    throw new UnsupportedQueryPlanError(
+      "Division by a column is not supported: the comparison cannot be solved to a plain column filter"
+    );
+  }
+  if (arithOp === "div" && constant === 0) {
+    throw new UnsupportedQueryPlanError("Division by a constant zero is not supported");
+  }
+  if (!ARITHMETIC_OPERATORS.has(arithOp)) {
+    throw new UnsupportedQueryPlanError(`Unsupported operator: ${arithOp}`);
   }
 
-  return buildComparisonFilter(context, fieldRef, effectiveOperator, solved);
+  // The column side as a non-decreasing function of `y`, where `y` is the column or, when the
+  // arithmetic reverses the order (`c - x`, a negative multiplier or divisor), its negation —
+  // negating a double is exact, so `c - x` is `c + y` and `x * c` is `y * -c`.
+  const c = constant;
+  const decreasing =
+    (arithOp === "sub" && !fieldIsLeft) || ((arithOp === "mult" || arithOp === "div") && c < 0);
+  const f = (y: number): number => {
+    switch (arithOp) {
+      case "add":
+        return y + c;
+      case "sub":
+        return fieldIsLeft ? y - c : c + y;
+      case "mult":
+        return decreasing ? y * -c : y * c;
+      default:
+        return decreasing ? y / -c : y / c;
+    }
+  };
+  const solved = solveMonotone(
+    f,
+    effectiveOperator === "ne" ? "eq" : (effectiveOperator as "eq" | "lt" | "le" | "gt" | "ge"),
+    other.value
+  );
+  const interval = decreasing ? negateInterval(solved) : solved;
+  const filter = buildIntervalFilter(context, fieldRef, interval);
+  return effectiveOperator === "ne" ? { NOT: filter } : filter;
+}
+
+/**
+ * `lo <= column <= hi`. An empty interval is a contradiction and an unbounded one a tautology,
+ * both spelled on the column, so a NULL keeps them UNKNOWN as the arithmetic's error requires.
+ */
+function buildIntervalFilter(
+  context: TranslationContext,
+  fieldRef: ResolvedFieldReference,
+  interval: DoubleInterval
+): PrismaFilter {
+  if (interval.empty) {
+    return {
+      AND: [
+        buildComparisonFilter(context, fieldRef, "gt", 0),
+        buildComparisonFilter(context, fieldRef, "le", 0),
+      ],
+    };
+  }
+  const bounds: PrismaFilter[] = [];
+  if (interval.lo !== undefined) {
+    bounds.push(buildComparisonFilter(context, fieldRef, "ge", interval.lo));
+  }
+  if (interval.hi !== undefined) {
+    bounds.push(buildComparisonFilter(context, fieldRef, "le", interval.hi));
+  }
+  if (bounds.length === 0) {
+    return {
+      OR: [
+        buildComparisonFilter(context, fieldRef, "gt", 0),
+        buildComparisonFilter(context, fieldRef, "le", 0),
+      ],
+    };
+  }
+  // Each bound may itself be a bracket (see fractionalBracket); one flat AND reads better.
+  const flat = bounds.flatMap((bound) =>
+    Object.keys(bound).length === 1 && Array.isArray(bound["AND"]) ? bound["AND"] : [bound]
+  );
+  return flat.length === 1 ? flat[0]! : { AND: flat };
 }
 
 /**

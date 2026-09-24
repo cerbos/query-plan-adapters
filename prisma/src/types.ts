@@ -8,7 +8,7 @@ import { enterLambdaScope, lookupMapping, resolveFieldReference } from "./mappin
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import type { MapperConfig } from "./index";
 import { COMPARISON_OPERATORS, isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
-import type { OperatorOperand } from "./plan";
+import type { NamedOperand, OperatorOperand } from "./plan";
 
 /**
  * The CEL type an operand is known to have. Numbers are one family: CEL's heterogeneous equality
@@ -70,7 +70,9 @@ export function settleTypeMismatches(
   }
 
   const cast =
-    rewriteCastComparison(expr, context, positive) ?? rewriteConcatenation(expr, context);
+    rewriteCastComparison(expr, context, positive) ??
+    rewriteConcatenation(expr, context) ??
+    splitDivision(expr, context);
   if (cast !== undefined) return settleTypeMismatches(cast, context, positive);
 
   const outcomes = leafOutcomes(expr, context);
@@ -211,6 +213,102 @@ function rewriteCastComparison(
     return operator === "eq" ? range : { operator: "not", operands: [range] };
   }
   return undefined;
+}
+
+/**
+ * A comparison whose only column appears as `x / x` or `x / ±0`, split on the sign of `x`. CEL
+ * numbers are doubles, so neither division raises an error: `x / x` is 1, or NaN at zero, and
+ * `x / ±0` is an infinity signed by both operands, or NaN at zero. Each arm substitutes that
+ * constant, leaving a comparison between constants that folds; the arms' guards are plain
+ * comparisons on `x`, UNKNOWN on a NULL column, as the missing attribute's error requires.
+ */
+function splitDivision(
+  expr: OperatorOperand,
+  context: TranslationContext
+): PlanExpressionOperand | undefined {
+  if (!COMPARISON_OPERATORS.has(expr.operator)) return undefined;
+  const column = divisionColumn(expr);
+  if (column === undefined) return undefined;
+  const fieldRef = resolveFieldReference(column.name, context);
+  if (
+    fieldRef.valueType !== "number" ||
+    (fieldRef.relations?.length ?? 0) > 0 ||
+    fieldRef.nullAttributeRepresentation === "explicit"
+  ) {
+    return undefined;
+  }
+  const sign = (op: string): PlanExpressionOperand => ({
+    operator: op,
+    operands: [column, { value: 0 }],
+  });
+  const arms: PlanExpressionOperand[] = [];
+  for (const [guard, x] of [
+    ["gt", 1],
+    ["lt", -1],
+    ["eq", 0],
+  ] as const) {
+    const substituted = substituteDivision(expr, column.name, x);
+    if (substituted === undefined) return undefined;
+    arms.push({ operator: "and", operands: [sign(guard), substituted] });
+  }
+  return { operator: "or", operands: arms };
+}
+
+/** The one column of a comparison when every reference to it sits in `x / x` or `x / ±0`. */
+function divisionColumn(expr: PlanExpressionOperand): NamedOperand | undefined {
+  let column: NamedOperand | undefined;
+  let divided = false;
+  const visit = (node: PlanExpressionOperand): boolean => {
+    if (isNamedOperand(node)) {
+      if (column !== undefined && column.name !== node.name) return false;
+      column = node;
+      return false;
+    }
+    if (!isOperatorOperand(node)) return true;
+    if (node.operator === "lambda") return false;
+    if (isColumnDivision(node)) {
+      const numerator = node.operands[0] as NamedOperand;
+      if (column !== undefined && column.name !== numerator.name) return false;
+      column = numerator;
+      divided = true;
+      return true;
+    }
+    return node.operands.every(visit);
+  };
+  return visit(expr) && divided ? column : undefined;
+}
+
+function isColumnDivision(node: OperatorOperand): boolean {
+  if (node.operator !== "div" || node.operands.length !== 2) return false;
+  const [numerator, denominator] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  if (!isNamedOperand(numerator)) return false;
+  if (isNamedOperand(denominator)) return denominator.name === numerator.name;
+  return isValueOperand(denominator) && denominator.value === 0;
+}
+
+/**
+ * `expr` with every division of the column replaced by its value when the column has the sign of
+ * `x`, or undefined when the column is still referenced outside one.
+ */
+function substituteDivision(
+  expr: PlanExpressionOperand,
+  name: string,
+  x: number
+): PlanExpressionOperand | undefined {
+  if (isNamedOperand(expr)) return undefined;
+  if (!isOperatorOperand(expr)) return expr;
+  if (isColumnDivision(expr)) {
+    const denominator = expr.operands[1]!;
+    const d = isNamedOperand(denominator) ? x : ((denominator as { value: number }).value);
+    return { value: x / d };
+  }
+  const operands: PlanExpressionOperand[] = [];
+  for (const operand of expr.operands) {
+    const substituted = substituteDivision(operand, name, x);
+    if (substituted === undefined) return undefined;
+    operands.push(substituted);
+  }
+  return { operator: expr.operator, operands };
 }
 
 /** Past this many code points, a literal is not split across a two-column concatenation. */

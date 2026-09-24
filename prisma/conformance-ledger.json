@@ -1,53 +1,17 @@
 {
   "adapter": "prisma",
   "cases": {
-    "arithmetic/add/exact-fraction-equals": {
-      "status": "unsupported",
-      "reason": "An exact corpus witness does not make the general column-addition predicate expressible; Prisma has no column arithmetic"
-    },
-    "arithmetic/add/inexact-fraction-equals": {
-      "status": "unsupported",
-      "reason": "Prisma filters cannot express column arithmetic, and algebraically solving fractional IEEE-754 addition is not reversible for every row"
-    },
-    "arithmetic/add/inexact-fraction-not-equals": {
-      "status": "unsupported",
-      "reason": "Same fractional column-arithmetic limitation as arithmetic/add/inexact-fraction-equals"
-    },
     "arithmetic/add/on-both-sides": {
       "status": "unsupported",
       "reason": "Arithmetic on both sides of a comparison cannot be solved to a plain column filter; Prisma filters cannot express column arithmetic"
-    },
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "Arithmetic composed on a column division is doubly inexpressible: Prisma has no column arithmetic, and the algebraic solve has no reciprocal for a denominator that may be zero"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "Same composed column-division limitation as arithmetic/add/self-division-plus-constant-greater-than, reached through an inequality"
     },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express"
     },
-    "arithmetic/divide/negated-self-division-equals": {
-      "status": "unsupported",
-      "reason": "Same column-division limitation as arithmetic/divide/self-division-greater-than, reached through a negated equality"
-    },
-    "arithmetic/divide/negative-zero-divisor": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no column arithmetic, so the division must be solved algebraically into a plain column predicate — and a zero denominator has no reciprocal to solve with; the adapter throws rather than guessing the sign of the resulting infinity"
-    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: div."
-    },
-    "arithmetic/divide/self-division-greater-than": {
-      "status": "unsupported",
-      "reason": "Division by a column cannot be solved to a plain column filter"
-    },
-    "arithmetic/divide/self-division-not-equals": {
-      "status": "unsupported",
-      "reason": "Same column-division limitation as arithmetic/divide/self-division-greater-than, reached through an inequality"
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
