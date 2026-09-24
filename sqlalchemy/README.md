@@ -329,7 +329,11 @@ instants with `timestamp()` on both operands.
 | --- | --- | --- |
 | Comparisons, logical operators, value-first and field-to-field forms, ternaries | translated | — |
 | `contains`, `startsWith`, `endsWith` | escaped `LIKE` | — |
-| Arithmetic; `string()` over a numeric, text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
+| `+`, `-`, `*`, `/` by a constant | translated | — |
+| `/` by a column | refused, unless the numerator is that column or a constant zero (a zero divisor then gives NaN, which has no sign) | an override |
+| `%` | refused: CEL defines it only over integers, and attribute numbers are doubles | an override |
+| `string()` over a text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
+| `string()` over a numeric column | refused: CEL prints Go's shortest `%g` form (`1e+06`, `-0`) | an override matching your database |
 | `int()`, `double()` | refused | an override matching your database |
 | `size()` over a string column | `LENGTH` | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
@@ -357,10 +361,10 @@ run on PostgreSQL under both storage shapes, `json` and `pgArray`. Results for t
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
-| adversarial | 185 / 227 |
+| extended | 60 / 80 |
+| adversarial | 187 / 250 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (60 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (82 cases) or is
 skipped because its golden file records a planner divergence: under 0.55.0 that is the one case
 `null/has/missing-attribute` (`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the
 planner), which no adapter can pass and the harness does not compare.
@@ -449,6 +453,17 @@ chain.
 
 ## Behaviour changes
 
+- **Breaking:** shapes that used to return a wrong filter now raise `UnsupportedPlanError`:
+  - `string()` over a numeric column. CEL prints an attribute double in Go's shortest `%g` form
+    (`1e+06`, `2`, `-0`), where `CAST` prints `1000000` or `2.0`, and SQL cannot keep the sign of a
+    zero, so `string(R.attr.aDouble) == "1e+06"` under-granted.
+  - `/` by a column, unless the numerator is that column or a constant zero. A zero divisor makes
+    CEL's quotient an infinity carrying the zero's sign, which SQL cannot read (`-0.0 = 0.0`, and
+    SQLite stores `-0.0` as `0.0`); the column used to be assumed `+0.0`, which over-granted.
+  - `%` over a column. CEL defines `%` only over integers and attribute numbers are doubles, so it is
+    a no-such-overload error; SQL's remainder made `!(R.attr.aNumber % 2 == 1)` true for most rows.
+  - A scalar column compared with a list or map literal (`R.attr.aString == ["same"]`), which used to
+    bind the list as a parameter and fail, or be coerced, at execution.
 - Translation refusals now raise `cerbos_sqlalchemy.UnsupportedPlanError`, a `ValueError` subclass
   (also a `TypeError` where the refusal raised one before), so existing handlers keep catching them.
   Not breaking.
