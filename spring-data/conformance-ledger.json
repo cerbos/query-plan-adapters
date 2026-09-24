@@ -61,14 +61,6 @@
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no JPA Criteria translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "exists first operand must be a variable"
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "exists first operand must be a variable"
-    },
     "regex/matches/anchored-prefix": {
       "status": "unsupported",
       "reason": "JPA Criteria has no regular-expression predicate, so matches() is refused."
@@ -132,26 +124,6 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of eq"
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of eq"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "Unsupported hasIntersection operand shape: VARIABLE 'request.resource.attr.tagNames' / EXPRESSION list(). Supported shapes are hasIntersection(collection-attribute, [values...]) and hasIntersection(map(collection, lambda), [values...])."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "Unsupported in operand combination: VARIABLE 'request.resource.attr.aString' / EXPRESSION list()"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unexpected struct() expression in leaf operand of ne"
     }
   }
 }

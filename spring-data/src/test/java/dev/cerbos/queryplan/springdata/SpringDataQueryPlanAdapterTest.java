@@ -426,18 +426,6 @@ class SpringDataQueryPlanAdapterTest {
                 "isSet");
     }
 
-    // The planner sends map literals as struct() expressions, never as a STRUCT_VALUE constant.
-    @Test
-    void eqFieldAgainstStructConstantThrowsNamedError() {
-        Operand structConstant = Operand.newBuilder()
-                .setValue(Value.newBuilder().setStructValue(Struct.newBuilder()
-                        .putFields("k", Value.newBuilder().setStringValue(ELEM_A).build())))
-                .build();
-        assertNamedError(
-                exprOp("eq", var("request.resource.attr.aString"), structConstant),
-                "eq", "request.resource.attr.aString", "map of 1 entry");
-    }
-
     /**
      * Hierarchy shapes no plan carries. The planner folds a comparison of two constant
      * hierarchies to ALWAYS_ALLOWED or ALWAYS_DENIED, and CEL's checker rejects {@code overlaps}
@@ -1779,53 +1767,34 @@ class SpringDataQueryPlanAdapterTest {
     }
 
     /**
-     * {@code eq}/{@code ne} against a list constant, in either operand order, must throw a named
-     * {@link IllegalArgumentException} rather than a raw Hibernate conversion error. The message
+     * {@code eq}/{@code ne} against a list constant, in either operand order. CEL equality across
+     * types is false, so a scalar column never equals a list; a relation must throw a named
+     * {@link IllegalArgumentException} rather than a raw Hibernate conversion error, whose message
      * must not contain the element values.
      */
     @Nested
     class StructuredConstantComparison {
 
-        /**
-         * <strong>Corpus gap.</strong> #509: {@code comparison/equals/whole-list-literal} carries a relation-mapped attribute; a
-         * scalar column against a list constant is not carried.
-         */
-        @Test
-        void eqFieldAgainstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
-                    "eq", "request.resource.attr.aString", "list of 2 elements");
+        /** Rows whose aString is present: {@code aString != canary} holds for every one. */
+        private int presentStrings() {
+            return runCount(exprOp("ne", var("request.resource.attr.aString"), sval(ELEM_A)));
         }
 
         /**
-         * <strong>Corpus gap.</strong> #509: {@code comparison/not-equals/whole-list-literal} carries a relation-mapped attribute; a
-         * scalar column against a list constant is not carried.
+         * <strong>Corpus gap.</strong> #509: the corpus compares a scalar column with a map
+         * literal ({@code type-mismatch/equals/string-field-against-map-literal}) but not with a
+         * list constant.
          */
         @Test
-        void neFieldAgainstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B)),
-                    "ne", "request.resource.attr.aString", "list of 2 elements");
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #509: The value-first spelling of the same gap.
-         */
-        @Test
-        void eqValueFirstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString")),
-                    "eq", "request.resource.attr.aString", "list of 1 element");
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #509: The value-first {@code ne} spelling of the same gap.
-         */
-        @Test
-        void neValueFirstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString")),
-                    "ne", "request.resource.attr.aString", "list of 2 elements");
+        void aScalarFieldNeverEqualsAListConstant() {
+            assertEquals(0, runCount(
+                    exprOp("eq", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B))));
+            assertEquals(0, runCount(
+                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString"))));
+            assertEquals(presentStrings(), runCount(
+                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B))));
+            assertEquals(presentStrings(), runCount(
+                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString"))));
         }
 
         /**

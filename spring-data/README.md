@@ -358,6 +358,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
+| A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
 | Bare boolean variable | `cb.equal(path, true)` |
 
 ## Not yet supported
@@ -376,7 +377,7 @@ consulted.
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
-| `eq`/`ne` against a list constant of two or more elements, or against a `Field` | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; use `in`/`hasIntersection`, or `size()` with `exists()` |
+| `eq`/`ne` between a relation and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; use `in`/`hasIntersection`, or `size()` with `exists()` |
 | `except` | `size(R.attr.tags.except(["archived"])) > 0` | no | Rewrite as `R.attr.tags.exists(x, !(x in ["archived"]))` |
 
 ## Conformance contract
@@ -391,11 +392,11 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 68 / 80 |
-| adversarial | 200 / 227 |
+| extended | 69 / 80 |
+| adversarial | 206 / 227 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 31 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -626,6 +627,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- The planner's `list(...)` and `struct(...)` literal expressions (lists of lists, maps, lists of
+  maps) are folded to constants, and a scalar compared with a list or map literal is decided
+  (false for `==`, true for `!=`) instead of throwing. Macros over a literal list of maps
+  (`P.attr.items.exists(t, t.name == R.attr.x)`) now translate.
 - `AttributeMapping.Relation#withPositionField` declares a relation's element order, and positional
   reads over such a relation (`R.attr.tags[0] == "x"`, `R.attr.tags[0].name == "x"`) now
   translate. `Relation` gains a `positionField` record component; the three-argument constructor

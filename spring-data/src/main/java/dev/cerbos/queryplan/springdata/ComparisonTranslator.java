@@ -335,6 +335,10 @@ final class ComparisonTranslator {
         // A list or map constant has no scalar-column comparison, and Hibernate would fail
         // with a raw coercion error. Checked before path resolution so a Relation-mapped
         // attribute gets this message too. The message never includes element values.
+        if ((value instanceof List<?> || value instanceof Map<?, ?>)
+                && holdsScalars(field.variable(), scope)) {
+            return scalarAgainstAggregate(op, field, scope);
+        }
         if (value instanceof List<?> || value instanceof Map<?, ?>) {
             throw Refusals.unsupported(
                     op + " comparison against a " + constantShape(value)
@@ -374,6 +378,40 @@ final class ComparisonTranslator {
         }
 
         return leaf.applyLeaf(op, path, value);
+    }
+
+    /**
+     * Whether {@code variable} holds a scalar: a Field, or the bare element of a relation whose
+     * elements are values rather than objects. An unmapped variable answers false and is
+     * refused by the caller.
+     */
+    private static boolean holdsScalars(String variable, Scope scope) {
+        Scope.Resolution resolved;
+        try {
+            resolved = scope.resolve(variable);
+        } catch (IllegalArgumentException unmapped) {
+            return false;
+        }
+        return resolved instanceof Scope.ResolvedScalar scalar
+                && (scalar.mapping() instanceof AttributeMapping.Field
+                        || scalar.mapping() instanceof AttributeMapping.Relation r
+                                && (r.defaultMemberField() != null || r.fields().isEmpty()));
+    }
+
+    /**
+     * A scalar against a list or map literal. CEL equality across types is false, not an error,
+     * so {@code ==} matches nothing and {@code !=} everything, a NULL column staying UNKNOWN
+     * unless it is sent as an explicit null; any other operator has no overload and errors.
+     */
+    private Predicate scalarAgainstAggregate(String op, Resolved.Field field, Scope scope) {
+        if (!"eq".equals(op) && !"ne".equals(op)) {
+            return tri.unknown();
+        }
+        if (leaf.isExplicitNull(field.variable(), scope)) {
+            return constant("ne".equals(op));
+        }
+        Path<?> path = scope.path(field.variable());
+        return matchesNothing(op, path);
     }
 
     /**

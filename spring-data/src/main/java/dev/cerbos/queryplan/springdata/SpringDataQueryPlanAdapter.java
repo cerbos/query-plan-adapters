@@ -339,7 +339,8 @@ public final class SpringDataQueryPlanAdapter {
      * on another {@code Root}. The OMITTED scan always runs, because an attribute can declare
      * OMITTED when the call does not.
      */
-    private static <T> Specification<T> conditional(Operand condition, Options options) {
+    private static <T> Specification<T> conditional(Operand planned, Options options) {
+        Operand condition = PlanLiterals.fold(planned);
         assertNoNullComparisonOperands(condition, options.mapping(),
                 options.operatorOverrides(), options.nullAttributeRepresentation());
         return (root, query, cb) ->
