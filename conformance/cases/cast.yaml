@@ -59,6 +59,34 @@ cases:
   condition:
     match:
       expr: 'string(R.attr.aBool) == "true"'
+- id: 'cast/string/from-boolean-case-changed-literal'
+  tier: adversarial
+  intent: 'string() over a boolean attribute compared with "TRUE", OR''d with aNumber == 5.'
+  trap: 'CEL renders the word "true", which never equals "TRUE", so only a1 (through aNumber) is allowed; comparing the rendered word in a case-insensitive collation (MySQL''s default, or a driver''s connection collation) matches every true row.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool) == "TRUE" || R.attr.aNumber == 5'
+- id: 'cast/string/negated-from-boolean'
+  tier: adversarial
+  intent: '!(string(aBool) == "true"): string() over a boolean attribute that is missing on one row, under negation.'
+  trap: 'string() of a missing aBool (j3) errors and denies under negation; a rendering whose NULL falls through to "false", or a NULL cast negated to true, over-grants j3.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aBool) == "true")'
+- id: 'cast/string/negated-from-boolean-expression'
+  tier: adversarial
+  intent: '!(string(aNumber > 3) == "true"): string() over a boolean-valued comparison rather than a column, under negation.'
+  trap: 'The operand is a boolean expression, so CEL renders "true"/"false"; a plain CAST of a SQL comparison yields "1"/"0" on SQLite and MySQL, which never equals "true" and over-grants every row with aNumber > 3. A missing aNumber (j2) must still deny.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aNumber > 3) == "true")'
+- id: 'cast/string/negated-from-boolean-through-relation'
+  tier: adversarial
+  intent: '!(string(parent.aBool) == "true"): string() over a boolean read through the to-one parent, under negation.'
+  trap: 'A row with no parent is a missing attribute and denies under negation; the parent''s boolean must still render "true"/"false". A plain CAST over the hop yields "1"/"0" on SQLite and MySQL and over-grants every row whose parent''s aBool is true.'
+  condition:
+    match:
+      expr: '!(string(R.attr.parent.aBool) == "true")'
 - id: 'cast/string/from-double'
   tier: extended
   intent: 'string() over a double attribute compared with a literal (string(aDouble) == "-0.6").'

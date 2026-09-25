@@ -448,7 +448,7 @@ These throw `UnsupportedPlanShapeException`. The adapter never generates Painles
 would change the security and performance profile of every filter.
 
 - field-to-field comparisons; a constant string receiver with a field argument
-- arithmetic over fields, `int()` / `double()` casts, conditional values (CEL ternary, as a
+- arithmetic over fields, `int()` / `double()` / `string()` casts, conditional values (CEL ternary, as a
   condition or an operand)
 - `except()`; `filter()` / `map()` used as a condition; `exists_one`
 - counts other than emptiness; `size()` over an undeclared field; collection-empty checks
@@ -472,7 +472,7 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 25 / 26 |
 | extended | 28 / 80 |
-| adversarial | 87 / 250 |
+| adversarial | 87 / 254 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in

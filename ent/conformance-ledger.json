@@ -57,6 +57,14 @@
       "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; telling them apart needs the stored zero's sign, which SQLite discards on storage and no dialect exposes portably.",
       "status": "unsupported"
     },
+    "cast/string/negated-from-boolean-expression": {
+      "reason": "string() over a boolean-valued comparison is refused on every dialect: the translator gives CEL's \"true\"/\"false\" only to a plain column declared ValueBool, and a CAST of the comparison renders 1/0 on SQLite and MySQL. PostgreSQL's CAST would be right, but one translation holds on all three engines until #470 lands.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-boolean-through-relation": {
+      "reason": "string() over a ValueBool column read through the to-one hop is refused on every dialect: the translator spells only a plain column through its CASE, and a CAST of the scalar subquery renders 1/0 on SQLite and MySQL. PostgreSQL's CAST would be right, but one translation holds on all three engines until #470 lands.",
+      "status": "unsupported"
+    },
     "cast/timestamp/malformed-string": {
       "reason": "timestamp() over a column requires that column to be mapped with a timestamp value type; a malformed string must stay a CEL error, which no dialect's cast reproduces.",
       "status": "unsupported"
