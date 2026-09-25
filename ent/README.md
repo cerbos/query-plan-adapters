@@ -125,11 +125,12 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
-- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. Only a plain
-  column is spelled that way: `string()` over a `ValueBool` column read through a to-one
-  `ScalarRelation`, or over a boolean-valued expression (`string(R.attr.n > 3)`), returns an error
-  wrapping `ErrUnsupported` on every dialect until
-  [#470](https://github.com/cerbos/query-plan-adapters/issues/470) spells those too.
+- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`)
+  and a boolean-valued expression (`string(R.attr.n > 3)`). An undeclared column, through a hop or
+  not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
+  tells the adapter the column holds a boolean. Declare every boolean column you pass to `string()`,
+  since SQLite and MySQL render a stored boolean as `"1"`/`"0"` under a `CAST`.
 
 ### Timestamps on SQLite
 
@@ -234,7 +235,7 @@ and counts toward the total but not toward passed — on 0.55.0 that is four ext
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 190 / 254 |
+| adversarial | 192 / 254 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
@@ -327,6 +328,12 @@ tags := &cerbosent.Relation{
   `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text, giving CEL's
   words on every dialect; a NULL column stays NULL and the row is excluded. On MySQL the cast
   carries `COLLATE utf8mb4_0900_bin`.
+- [#470](https://github.com/cerbos/query-plan-adapters/issues/470): `string()` over a boolean-valued
+  expression (`string(R.attr.n > 3)`), or over a `ValueBool` column read through a to-one
+  `ScalarRelation`, is spelled through the same `CASE` as a plain `ValueBool` column, instead of a
+  plain `CAST`. On SQLite and MySQL that `CAST` said `"1"`/`"0"`, so `!(string(x) == "true")`
+  returned rows whose `x` is true (`cast/string/negated-from-boolean-expression`,
+  `cast/string/negated-from-boolean-through-relation`).
 - **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
   disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
   attribute number is a double — so the PDP denies every row
@@ -338,13 +345,6 @@ tags := &cerbosent.Relation{
   string constant, lowered to a numeric comparison with the double CEL spells that way (Go's `%g`:
   `"1e+06"`, `"2"`), and a zero spelling is refused (`cast/string/from-double-spellings`,
   `cast/string/from-negative-zero-double`).
-- **Breaking ([#470](https://github.com/cerbos/query-plan-adapters/issues/470)):** `string()` over
-  a boolean-valued expression (`string(R.attr.n > 3)`), or over a column declared `ValueBool` and
-  read through a to-one `ScalarRelation`, fails closed on every dialect. It used to emit a plain
-  `CAST`, which SQLite and MySQL render as `"1"`/`"0"`, so `!(string(x) == "true")` returned rows
-  whose `x` is true (`cast/string/negated-from-boolean-expression`,
-  `cast/string/negated-from-boolean-through-relation`). PostgreSQL's `CAST` was right, but one
-  translation holds on all three engines.
 - A list literal compared with a column declared `ValueString`, `ValueNumber` or `ValueBool` is
   unequal wherever the column is present (`type-mismatch/equals/string-field-against-list-literal`);
   against an undeclared column it fails closed. It used to bind the list as a parameter, which the

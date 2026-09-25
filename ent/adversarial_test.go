@@ -486,7 +486,7 @@ func buildMapper() cerbosent.Mapper {
 		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
 		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
 		// The two aBool hops are declared boolean, like the root aBool, because that is what they
-		// hold; string() over one is refused until the translator spells it (#470).
+		// hold, and an undeclared one keeps the plain CAST that SQLite and MySQL render as 1/0.
 		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool},
 		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},

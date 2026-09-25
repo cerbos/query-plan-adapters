@@ -171,7 +171,12 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
-- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`.
+- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`)
+  and a boolean-valued expression (`string(R.attr.n > 3)`). An undeclared column, through a hop or
+  not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
+  tells the adapter the column holds a boolean. PostgreSQL's own `CAST` of a `boolean` column already
+  says `"true"`/`"false"`, so an undeclared boolean column is right here too.
 
 ## NULL representation
 
@@ -328,6 +333,11 @@ tags := &cerbospgx.Relation{
   column translates (it used to fail closed), via
   `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text. A NULL
   column stays NULL and the row is excluded.
+- [#470](https://github.com/cerbos/query-plan-adapters/issues/470): `string()` over a boolean-valued
+  expression (`string(R.attr.n > 3)`), or over a `ValueBool` column read through a to-one
+  `ScalarRelation`, is spelled through the same `CASE` as a plain `ValueBool` column, instead of a
+  plain `CAST`. PostgreSQL's `CAST` already said `"true"`/`"false"`, so results do not change;
+  the vendored translator is shared with the ent module, where SQLite and MySQL said `"1"`/`"0"`.
 - **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
   disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
   attribute number is a double — so the PDP denies every row
