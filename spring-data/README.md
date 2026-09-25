@@ -759,7 +759,8 @@ checkout of the **whole repository**; the conformance suite needs Docker on Post
 | `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
 
-Hibernate 7 / Spring Data JPA 4 needs no translation change. Spring Data JPA 4 removed
+Hibernate 7 / Spring Data JPA 4 needs no translation change, and CI runs the conformance suite on
+H2, PostgreSQL and MySQL under both ORM sets. Spring Data JPA 4 removed
 `JpaSpecificationExecutor.delete(Specification)`, so the bulk-delete hazard can't be reached through
 that overload there; the guard still fires on any `CriteriaDelete`.
 
