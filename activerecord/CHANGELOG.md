@@ -68,6 +68,11 @@
 
 - Comparing a scalar with a list literal is false (UNKNOWN for a missing attribute), as in CEL, instead of failing with a `TypeError`
 
+- `string()` over any boolean-valued operand spells `"true"`/`"false"`, as `string()` over a boolean column already did: a comparison, a logical operator, `in`, a string predicate, a collection macro, and a `member_field` element held in a boolean column ([#471](https://github.com/cerbos/query-plan-adapters/issues/471))
+
+  They previously went through `CAST(... AS TEXT)`, which gives `"1"`/`"0"` on SQLite and MySQL, so `!(string(R.attr.n > 3) == "true")` returned rows the policy denies.
+  A NULL or missing operand still leaves the row out under both polarities.
+
 ### Removed
 
 - Support for Ruby 3.2 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))

@@ -59,6 +59,14 @@ module Cerbos
         "endsWith" => {prefix: true, suffix: false}
       }.freeze
 
+      # The operators whose result CEL holds as a boolean, so `string()` over one spells
+      # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
+      # boolean only when an arm is: see {#ternary}.
+      BOOLEAN_OPERATORS = (
+        %w[and or not exists all exists_one in hasIntersection ancestorOf descendentOf overlaps] +
+        COMPARISONS + STRING_MATCHES.keys
+      ).freeze
+
       # The values that `null_attribute_representation` accepts. See
       # {AttributeMapping::NULL_REPRESENTATIONS}.
       NULL_REPRESENTATIONS = AttributeMapping::NULL_REPRESENTATIONS
@@ -276,9 +284,11 @@ module Cerbos
       end
 
       def evaluate_expression(node, environment)
-        operator = node.operator
-        operands = node.operands
+        result = evaluate_operator(node.operator, node.operands, environment)
+        BOOLEAN_OPERATORS.include?(node.operator) ? record_boolean(result) : result
+      end
 
+      def evaluate_operator(operator, operands, environment)
         case operator
         when "and", "or" then combine(operator, operands, environment)
         when "not" then negate(operands, environment)
@@ -355,7 +365,17 @@ module Cerbos
           )
         end
 
-        branches(condition, then_value, else_value)
+        result = branches(condition, then_value, else_value)
+        (boolean_arm?(then_value) || boolean_arm?(else_value)) ? record_boolean(result) : result
+      end
+
+      def boolean_arm?(value)
+        value == true || value == false || boolean_value?(value)
+      end
+
+      # Records that CEL holds a node as a boolean. See {Casts#boolean_value?}.
+      def record_boolean(value)
+        ArelSupport.arel_node?(value) ? record_cel_type(value, :bool) : value
       end
 
       # `CASE WHEN c THEN a WHEN NOT c THEN b END`. No ELSE, so UNKNOWN gives NULL. See
