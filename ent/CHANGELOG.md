@@ -8,6 +8,13 @@
   keeps UNKNOWN under any negation, and a column read through a to-one `ScalarRelation` renders the
   same way. Every other null operand against such an attribute is still refused, and the
   call-level `NullOmitted` is unchanged (#551).
+- **Breaking:** `string()` over a numeric constant, directly or as a ternary branch
+  (`string(R.attr.flag ? 1000000 : 0)`), now returns an error wrapping `ErrUnsupported`. The plan
+  ships an int and a double constant as the same number, which CEL renders differently
+  (`"1000000"` and `"1e+06"`), and SQLite's CAST says `"1000000.0"`, so the comparison denied the
+  rows the PDP allowed and its negation returned them. A to-one relation used as a value
+  (`"k" in R.attr.parent`) is refused at translation instead of emitting SQL that fails to run
+  (#554).
 - **Breaking:** `%` over an attribute, a comparison decided by the sign of an infinity from a zero
   column denominator, and `string()` over a `ValueNumber` column outside `==`/`!=` against a
   string constant (or against `"0"`/`"-0"`) now return an error wrapping `ErrUnsupported` instead of

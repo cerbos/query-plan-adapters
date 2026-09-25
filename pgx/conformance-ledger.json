@@ -1,6 +1,14 @@
 {
   "adapter": "pgx",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "reason": "Same int() refusal as arithmetic/add/int-beside-double-field, under negation.",
+      "status": "unsupported"
+    },
     "arithmetic/divide/field-by-field": {
       "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign; PostgreSQL compares -0.0 equal to 0.0 and the shared translator reads no sign bit, so a comparison that sign decides is refused.",
       "status": "unsupported"
@@ -73,12 +81,24 @@
       "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero, so the string() over it is never reached.",
       "status": "unsupported"
     },
+    "cast/string/from-integral-ternary": {
+      "reason": "string() over a numeric constant is refused: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\"), and a SQL CAST of the bound parameter spells neither reliably (SQLite says \"1000000.0\").",
+      "status": "unsupported"
+    },
     "cast/string/from-negative-zero-double": {
       "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; PostgreSQL compares the two zeros equal and the shared translator reads no sign bit, so a string() comparison against a zero spelling is refused.",
       "status": "unsupported"
     },
+    "cast/string/from-ternary-with-int-branch": {
+      "reason": "string() over a ternary with a numeric constant branch is refused as in cast/string/from-integral-ternary, and its int() branch cannot be lowered to a SQL CAST either.",
+      "status": "unsupported"
+    },
     "cast/string/negated-from-int-past-exponent-threshold": {
       "reason": "Same int() refusal as cast/string/from-int-past-exponent-threshold, under negation.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "reason": "Same string() refusal of a numeric constant as cast/string/from-integral-ternary, under negation.",
       "status": "unsupported"
     },
     "cast/timestamp/malformed-string": {
@@ -199,6 +219,14 @@
     },
     "hierarchy/overlaps/path-built-from-list-value-first": {
       "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
+      "status": "unsupported"
+    },
+    "membership/in/map-attribute-keys": {
+      "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
+      "status": "unsupported"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
     },
     "null/not-equals/field-to-field-mixed-null-conventions": {
