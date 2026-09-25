@@ -559,11 +559,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 72 / 80 |
-| adversarial | 265 / 308 |
+| adversarial | 266 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-44 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+43 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -599,8 +599,10 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   with `list()`/`struct()` from constants — folds per element: `exists`, `all`, `exists_one` (up to
   32 elements, as a pairwise exclusion that stays UNKNOWN when any element errors),
   `size(filter(...))` (a strict count, UNKNOWN when any element errors), and `x in list.map(...)`
-  (a disjunction of equalities);
-- `!=` between two columns under mixed null conventions.
+  (a disjunction of equalities).
+
+`==` and `!=` between two columns under mixed null conventions translate: the definite expansion
+over the `EXPLICIT` side, made UNKNOWN when the other side's column is NULL.
 
 The cases the corpus declares a planner divergence (`plannerDivergence`: the plan and `check()`
 disagree, so no adapter can pass them) are skipped. Among them is `null/has/missing-attribute`: the

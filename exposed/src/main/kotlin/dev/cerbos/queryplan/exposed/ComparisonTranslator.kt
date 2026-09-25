@@ -883,7 +883,20 @@ internal class ComparisonTranslator(private val translation: Translation) {
         val leftExplicit = translation.leaf.isExplicitNull(left)
         val rightExplicit = translation.leaf.isExplicitNull(right)
         if ((operator == "eq" || operator == "ne") && leftExplicit != rightExplicit) {
-            throw ScalarRefusals.mixedNullConventions(operator)
+            // One side holds a null VALUE (definite), the other a missing attribute (an error).
+            // The definite expansion over the declared side, made UNKNOWN when the undeclared side
+            // is NULL: CEL raises there before it compares anything.
+            val undeclared = if (leftExplicit) right else left
+            return TriLogic.baseUnlessUnknown(
+                translation.leaf.definiteEquality(
+                    operator,
+                    left.expression,
+                    right.expression,
+                    leftExplicit = leftExplicit,
+                    rightExplicit = rightExplicit,
+                ),
+                IsNullOp(undeclared.expression),
+            )
         }
         if ((operator == "eq" || operator == "ne") && leftExplicit && rightExplicit) {
             return translation.leaf.definiteEquality(

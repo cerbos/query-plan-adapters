@@ -46,21 +46,6 @@ internal object ScalarRefusals {
     )
 
     /**
-     * Equality between one attribute that declares the explicit-null convention and one that does
-     * not. The declared side needs a definite answer for its NULL (CEL holds a null VALUE there);
-     * the undeclared side needs UNKNOWN (a missing attribute, which CEL denies under both
-     * polarities). A definite predicate returns rows the PDP refuses, a plain one drops rows the
-     * PDP allows, and no single predicate is both.
-     */
-    fun mixedNullConventions(operator: String): UnmappedAttributeException = Refusals.unmapped(
-        "Cannot translate `$operator` between two columns under mixed null conventions: one " +
-            "attribute declares NullAttributeRepresentation.EXPLICIT and the other does not, so " +
-            "the declared side needs a definite answer for its NULL while the undeclared side " +
-            "needs UNKNOWN, and no single predicate is both. Declare the convention on both " +
-            "mappings, or on neither.",
-    )
-
-    /**
      * A column operand of a string match or of `size()` whose declared type is not text.
      *
      * THE ONE FACTORY for that requirement: the haystack and the column needle of `contains`,

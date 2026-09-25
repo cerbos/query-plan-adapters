@@ -125,15 +125,6 @@ class ScalarLeafTest {
         @Test
         fun `two explicit-null columns are EQUAL when both are NULL`() =
             assertSelects("null/equals/field-to-field-both-explicit-null", "r2", "r7")
-
-        @Test
-        fun `mixing the two conventions across one comparison is refused, not guessed`() {
-            val error = assertThrows<UnmappedAttributeException> { Scalars.ids("null/not-equals/field-to-field-mixed-null-conventions") }
-            assertTrue(
-                error.message!!.contains("between two columns under mixed null conventions"),
-                error.message,
-            )
-        }
     }
 
     @Nested
