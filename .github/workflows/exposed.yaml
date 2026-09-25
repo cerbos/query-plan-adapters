@@ -94,7 +94,8 @@ jobs:
   # behaviour, so a store this job does not execute is a store the adapter does not cover. MySQL
   # runs with client-side and with server-side prepared statements: Connector/J's default sends a
   # double bind as an exact DECIMAL literal, and the adapter casts explicitly rather than relying
-  # on either (README.md, "MySQL").
+  # on either (README.md, "MySQL"). Every store leg runs under both ORM sets: Exposed renders the
+  # SQL each store executes, so a leg one ORM set skips is a store that ORM set does not cover.
   test-database:
     permissions:
       contents: read
@@ -102,11 +103,18 @@ jobs:
       # Each store leg is a separate finding.
       fail-fast: false
       matrix:
+        # ORM version sets declared in build.gradle.kts, as in the `test` job.
+        orm: [baseline, floor]
+        database: [sqlite, postgres, mysql]
+        server-prep-stmts: [""]
+        # Each entry changes server-prep-stmts, so it adds a MySQL leg rather than altering one:
+        # eight legs in all.
         include:
-          - database: sqlite
-          - database: postgres
-          - database: mysql
-          - database: mysql
+          - orm: baseline
+            database: mysql
+            server-prep-stmts: "true"
+          - orm: floor
+            database: mysql
             server-prep-stmts: "true"
     runs-on: ubuntu-latest
     steps:
@@ -132,9 +140,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
-      - name: Conformance suite (${{ matrix.database }})
+      - name: Conformance suite (${{ matrix.database }}, ${{ matrix.orm }})
         run: ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
         env:
+          ADAPTER_TEST_ORM: ${{ matrix.orm }}
           ADAPTER_TEST_DB: ${{ matrix.database }}
           ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
 
@@ -142,7 +151,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: "Reports for ${{ matrix.database }}${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
+          name: "Reports for ${{ matrix.database }} (${{ matrix.orm }})${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
           path: |-
             **/build/reports/
             **/build/test-results/

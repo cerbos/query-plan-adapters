@@ -126,8 +126,10 @@ ADAPTER_TEST_ORM=floor ./gradlew build   # every suite on Exposed 1.0.0, the rel
 ```
 
 The harness runs on H2 by default, and on SQLite in process; PostgreSQL and MySQL are
-Testcontainers. `ReviewOperandTypeTest` (tag `docker`) and `OfflineRendererTest`'s
-`server-cross-check` cases start containers of their own and skip without Docker; the build excludes
+Testcontainers, the PostgreSQL leg initialised with `--lc-collate=C` like every other. CI runs the
+corpus on every store under both ORM sets. `ReviewOperandTypeTest` (tag `docker`) and
+`OfflineRendererTest`'s `server-cross-check` cases start containers of their own and skip without
+Docker; the build excludes
 both tags on the non-H2 store legs and under `ADAPTER_TEST_CONTAINER_SUITES=skip`
 ([ADR 0011](docs/adr/0011-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
 
@@ -260,7 +262,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
 - **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`), Exposed's (`baseline`, `floor`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
 

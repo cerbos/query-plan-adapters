@@ -50,6 +50,8 @@ internal class TestStore(
         const val PROPERTY: String = "adapter.test.db"
         const val COLLATION_PROPERTY: String = "adapter.test.mysql.collation"
         const val SERVER_PREP_STMTS_PROPERTY: String = "adapter.test.mysql.serverPrepStmts"
+        const val POSTGRES_INITDB_ARGS_PROPERTY: String = "adapter.test.postgres.initdbArgs"
+        const val DEFAULT_POSTGRES_INITDB_ARGS: String = "--lc-collate=C"
 
         /**
          * MySQL's own default, `utf8mb4_0900_ai_ci`, makes `=` itself case- and accent-insensitive
@@ -114,8 +116,17 @@ internal class TestStore(
             )
         }
 
+        /**
+         * Byte-order collation by default. CEL orders strings by code point; the image's default
+         * `en_US.utf8` orders linguistically, so `"One" > "a"` is true there and a string ordering
+         * returns a row the PDP denies (cerbos/query-plan-adapters#489). Override
+         * `adapter.test.postgres.initdbArgs` (`ADAPTER_TEST_POSTGRES_INITDB_ARGS`), for example with
+         * `--lc-collate=en_US.utf8`, to reproduce the over-grant.
+         */
         private fun postgres(): TestStore {
+            val initdbArgs = System.getProperty(POSTGRES_INITDB_ARGS_PROPERTY, DEFAULT_POSTGRES_INITDB_ARGS)
             val container = PostgreSQLContainer(DatabaseTestImages.POSTGRES)
+                .withEnv("POSTGRES_INITDB_ARGS", initdbArgs)
             container.start()
             return TestStore(
                 name = "postgres",

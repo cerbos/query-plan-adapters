@@ -191,6 +191,7 @@ tasks.test {
         "adapter.test.db" to "ADAPTER_TEST_DB",
         "adapter.test.mysql.collation" to "ADAPTER_TEST_MYSQL_COLLATION",
         "adapter.test.mysql.serverPrepStmts" to "ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS",
+        "adapter.test.postgres.initdbArgs" to "ADAPTER_TEST_POSTGRES_INITDB_ARGS",
     ).forEach { (property, variable) ->
         val value = System.getProperty(property) ?: System.getenv(variable)
         if (value != null) {
