@@ -1,0 +1,71 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b1",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i7",
+    "i9",
+    "j2",
+    "j3"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/greater-than/string-code-point-order",
+  "intent": "A plain string attribute ordered greater-than a literal (aString > \"a\").",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "a"
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/greater-than/string-code-point-order",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString > \"a\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL orders strings by code point, so every upper-case or \"[\" initial sorts before \"a\"; a case- and punctuation-insensitive linguistic collation sorts c1 \"One\", d1 \"[SEC]ret\" and d2 \"Secret\" after it and over-grants them (glibc en_US.UTF-8 all three, ICU en-US c1 and d2)."
+}

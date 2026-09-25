@@ -39,7 +39,10 @@ PostgreSQL and MySQL via testcontainers: `npm run test:adversarial:postgres` / `
 `:v6` / `:v7` on Prisma), selected by `ADAPTER_TEST_DB`; an unknown value fails. The MySQL legs pin
 the byte-exact collation `utf8mb4_0900_bin`: MySQL's default makes `=` case-insensitive, and
 `utf8mb4_0900_as_cs` still ignores a soft hyphen
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Every PostgreSQL leg initialises
+with `--lc-collate=C`, because CEL orders strings by code point and a linguistic collation does not
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)); `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
+overrides it to reproduce the over-grant.
 
 ### Python (SQLAlchemy)
 ```bash

@@ -287,6 +287,29 @@ func buildMapper() cerbospgx.Mapper {
 
 // -- the store ----------------------------------------------------------------------------------
 
+// postgresInitdbArgs is how the PostgreSQL leg's database is initialised: --lc-collate=C, a
+// byte-order collation. CEL orders strings by code point, and <, <=, > and >= on a text column
+// follow the column's collation. PostgreSQL collations are deterministic, so = is byte-exact under
+// any of them, but a linguistic one orders case, accents and punctuation below the letter: under
+// glibc's en_US.utf8 'One' > 'a' is TRUE, which over-grants
+// comparison/greater-than/string-code-point-order (cerbos/query-plan-adapters#489). "C" orders by
+// byte, which for UTF-8 is code point order.
+//
+// Stated rather than inherited: the Alpine image reports en_US.utf8 without it, and orders by byte
+// only because musl's strcoll does. The same database on a glibc image, or on a managed service,
+// orders linguistically.
+//
+// ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it, so the over-grant can be reproduced rather than
+// taken on trust: "--locale-provider=icu --icu-locale=en-US" gives the pinned image ICU's
+// linguistic order, which musl cannot, and fails both string-code-point-order cases. A measurement
+// escape hatch, not a CI leg.
+func postgresInitdbArgs() string {
+	if args, ok := os.LookupEnv("ADAPTER_TEST_POSTGRES_INITDB_ARGS"); ok {
+		return args
+	}
+	return "--lc-collate=C"
+}
+
 func startPostgres(t *testing.T, corpus *Corpus) *pgxpool.Pool {
 	t.Helper()
 	ctx := t.Context()
@@ -296,6 +319,7 @@ func startPostgres(t *testing.T, corpus *Corpus) *pgxpool.Pool {
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
+		testcontainers.WithEnv(map[string]string{"POSTGRES_INITDB_ARGS": postgresInitdbArgs()}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(2*time.Minute),

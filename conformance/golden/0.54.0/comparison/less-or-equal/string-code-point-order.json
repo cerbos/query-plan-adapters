@@ -1,0 +1,77 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a6",
+    "a8",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i8",
+    "i9",
+    "j2",
+    "j3"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-or-equal/string-code-point-order",
+  "intent": "A plain string attribute ordered less-or-equal a literal (aString <= \"one\").",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "one"
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-or-equal/string-code-point-order",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString <= \"one\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL orders strings by code point, so \"é\" (U+00E9) sorts after \"o\". A linguistic collation weighs accents and case below the letter and skips punctuation, so it over-grants h7 \"é-x-é\" and i7 (KELVIN SIGN, U+212A, sorted as \"k\"), under-grants c1 \"One\" and d2 \"Secret\", and on glibc en_US.UTF-8 also over-grants h6 (soft hyphen ignored) and under-grants d1 \"[SEC]ret\"."
+}

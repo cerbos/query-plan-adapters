@@ -213,16 +213,26 @@ connection collation cannot make `string(x) == "set"` match `"Set"`.
 
 ## Collation
 
-CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow the database's
-collation. A looser collation is an **over-grant the adapter cannot detect**, so treat collation as
-part of your policy contract:
+CEL string comparison is case-sensitive and byte-exact, and CEL orders strings by code point; `=`,
+`LIKE` and `<`/`<=`/`>`/`>=` follow the database's collation. A looser collation is an
+**over-grant the adapter cannot detect**, so treat collation as part of your policy contract:
 
-- **SQLite:** set `PRAGMA case_sensitive_like = ON`.
-- **PostgreSQL:** use a deterministic collation (the default).
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
+  point.
+- **PostgreSQL:** use a deterministic collation (the default) for equality, and a byte-order
+  collation, `"C"`, on every column a policy orders. A linguistic collation such as glibc's
+  `en_US.UTF-8` (the usual default on Debian images and managed services) or ICU's `en-US` sorts
+  `"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). The conformance leg
+  initialises its database with `--lc-collate=C` rather than trusting the Alpine image, whose musl
+  libc orders by byte only by accident;
+  `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
+  TestAdversarialConformance ./...` reproduces the over-grant.
 - **MySQL:** use `utf8mb4_0900_bin` (8.0.17+) on every string column policies read. The default
   `utf8mb4_0900_ai_ci` is case- and accent-insensitive. Even `utf8mb4_0900_as_cs` is not
   byte-exact: it ignores a soft hyphen (U+00AD), so `"o­ne"` equals `"one"` — an over-grant on
   `==`/`in` and an under-grant on `!=` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  `utf8mb4_0900_bin` orders by code point.
 - A `_CI_` SQL Server collation has the same problem.
 
 ## Identifier quoting
@@ -248,7 +258,7 @@ adversarial cases.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 222 / 286 |
+| adversarial | 224 / 288 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger

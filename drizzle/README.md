@@ -334,11 +334,24 @@ See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
   `utf8mb4_0900_ai_ci` makes **62 of the 268 compared cases** disagree with the PDP, and
   `utf8mb4_0900_as_cs` makes **16** disagree, all on the soft-hyphen seed `h6`
   ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-- **PostgreSQL:** the default is fine. Do not use nondeterministic ICU collations or `citext` for
-  mapped attributes.
-- **SQLite:** do not apply `COLLATE NOCASE` to mapped columns.
+- **PostgreSQL:** every collation is deterministic by default, so equality is exact, but **string
+  ordering** (`<`, `<=`, `>`, `>=`) needs a byte-order collation, `"C"`. CEL orders strings by
+  code point; a linguistic collation such as glibc's `en_US.UTF-8` (the usual default on Debian
+  images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`, so
+  `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
+  `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders. Do not use
+  nondeterministic ICU collations or `citext` for mapped attributes.
+- **SQLite:** do not apply `COLLATE NOCASE` to mapped columns. The default `BINARY` orders by code
+  point, as CEL does.
 
-This covers equality, ordering, `in`, intersections and hierarchy comparisons.
+This covers equality, ordering, `in`, intersections and hierarchy comparisons. `utf8mb4_0900_bin`
+orders by code point too.
+
+The conformance PostgreSQL leg initialises its database with `--lc-collate=C` rather than trusting
+the Alpine image, whose musl libc orders by byte only by accident. To reproduce the over-grant,
+`ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" npm run
+test:adversarial:postgres` fails both `comparison/*/string-code-point-order` cases.
 
 `contains` / `startsWith` / `endsWith` do not depend on it: they are lowered to `REPLACE` (so a
 column-valued needle is never read as `LIKE` pattern syntax), which is case-sensitive on all three
@@ -413,7 +426,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 271 / 286 |
+| adversarial | 273 / 288 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its

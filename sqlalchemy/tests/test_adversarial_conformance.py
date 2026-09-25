@@ -231,7 +231,16 @@ def pg_engine():
         encoding="utf-8",
     ) as f:
         image = f.read().strip()
-    with PostgresContainer(image) as container:
+    # A byte-order collation, stated rather than inherited. CEL orders strings by code
+    # point, and <, <=, > and >= on a text column follow the column's collation: under
+    # glibc's en_US.utf8 'One' > 'a' is TRUE (cerbos/query-plan-adapters#489). The Alpine
+    # image reports en_US.utf8 and orders by byte only because musl's strcoll does.
+    # Override with ADAPTER_TEST_POSTGRES_INITDB_ARGS to reproduce the over-grant, for
+    # example "--locale-provider=icu --icu-locale=en-US"; a measurement, not a CI leg.
+    initdb_args = os.environ.get("ADAPTER_TEST_POSTGRES_INITDB_ARGS", "--lc-collate=C")
+    with PostgresContainer(image).with_env(
+        "POSTGRES_INITDB_ARGS", initdb_args
+    ) as container:
         engine = create_engine(container.get_connection_url())
         _seed(engine)
         with engine.begin() as conn:
