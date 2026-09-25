@@ -144,9 +144,9 @@ export function planOf(
  *
  * Fields are optional unless declared otherwise, so `$ne`/`$nin` are rejected by default.
  * `required: true` is asserted only for the metadata keys the harness's `metadataFor` writes for
- * every seed in `conformance/seeds.json`. `aOptionalString` is NULL for some seeds — a missing
- * attribute in `resources.json`, and no metadata key here — so it stays optional and its inequality
- * shapes remain fail-closed. Attributes the mapping does not name (`createdBy`, `scope`, `owner`,
+ * every seed in `conformance/seeds.json`: the id alone. Every scalar attribute is NULL for some
+ * seed — a missing attribute in `resources.json`, and no metadata key here — so each stays
+ * optional and its inequality shapes remain fail-closed. Attributes the mapping does not name (`createdBy`, `scope`, `owner`,
  * `coOwner`, the lists and relations) are read by no case this adapter translates.
  */
 export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
@@ -156,12 +156,13 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     // separate `ids` argument to `get()` — so `metadataFor` mirrors the id into a metadata key and
     // this maps onto that.
     "request.resource.id": { field: "id", required: true },
-    "request.resource.attr.aBool": { field: "aBool", required: true },
-    "request.resource.attr.aString": { field: "aString", required: true },
+    // NULL for one seed each (j3, j1, j2: no metadata key), so `required: false`.
+    "request.resource.attr.aBool": { field: "aBool", required: false },
+    "request.resource.attr.aString": { field: "aString", required: false },
     "request.resource.attr.aNumber": {
       field: "aNumber",
       numericType: "integer",
-      required: true,
+      required: false,
     },
     "request.resource.attr.aOptionalString": {
       field: "aOptionalString",
@@ -169,8 +170,8 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     },
     // NULL for some seeds (no metadata key), so `required: false`.
     "request.resource.attr.aDouble": { field: "aDouble", required: false },
-    // `obj.inner` mirrors aString in the corpus resource; `metadataFor` writes it for every seed.
-    "request.resource.attr.obj.inner": { field: "obj.inner", required: true },
+    // `obj.inner` mirrors aString in the corpus resource, so it is missing where aString is.
+    "request.resource.attr.obj.inner": { field: "obj.inner", required: false },
     // The corpus's one REAL to-one chain (the `relation/*` cases), flattened onto dotted metadata keys
     // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
     // that a level can be absent — so Chroma's
