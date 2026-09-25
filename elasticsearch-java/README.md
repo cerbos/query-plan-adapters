@@ -577,6 +577,10 @@ applies to every field, and quietly returns more rows.
   with `if (CEL ternary) cannot be expressed…` instead of `if requires exactly 2 operands, got 3`.
 - An integral double outside `[-2^63, 2^63)` is bound as a double instead of saturating to
   `Long.MAX_VALUE`.
+- `"k" in R.attr.obj`, where `obj` maps to an object field (the field map names a sub-field of
+  it), throws `UnsupportedPlanShapeException` instead of `UnmappedAttributeException`. CEL's `in`
+  over a map tests its keys, and Elasticsearch indexes no key whose value is null, so no query
+  answers it ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - Refusals are typed (`UnsupportedPlanShapeException`, `UnmappedAttributeException`,
   `MalformedPlanException`); all extend `IllegalArgumentException`, so existing catches still work.
 

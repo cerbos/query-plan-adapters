@@ -17,6 +17,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
     },
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts, and int() over the field is a computed operand too; CEL's missing int + double overload is never reached."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same missing scriptless arithmetic and computed operand as arithmetic/add/int-beside-double-field, under negation."
+    },
     "arithmetic/add/on-both-sides": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
@@ -157,9 +165,17 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's decimal rendering of int(field) without scripts."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare the string() of a ternary without scripts."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare the string() of a ternary over int(field) without scripts."
     },
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
@@ -184,6 +200,10 @@
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-integral-ternary, under negation."
     },
     "cast/string/negated-missing-attribute": {
       "status": "unsupported",
@@ -485,9 +505,17 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts"
     },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "CEL's in over a map tests its keys; parent is an object field in the index, and Elasticsearch indexes no JSON null, so a query cannot tell a key held with a null value from an absent key."
+    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same limitation as membership/in/map-attribute-keys, under negation: no query answers key membership in an object field."
     },
     "null/all/null-element-with-true-sibling": {
       "status": "unsupported",
