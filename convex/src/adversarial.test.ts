@@ -34,9 +34,9 @@ interface Tag {
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
@@ -102,11 +102,10 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 
 /** The four scalars one level of the chain carries. A NULL column is an ABSENT key. */
 function relationLevelOf(seed: Seed): StoredRelationLevel {
-  const level: StoredRelationLevel = {
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-  };
+  const level: StoredRelationLevel = {};
+  if (seed.aBool !== null) level.aBool = seed.aBool;
+  if (seed.aString !== null) level.aString = seed.aString;
+  if (seed.aNumber !== null) level.aNumber = seed.aNumber;
   if (seed.aOptionalString !== null)
     level.aOptionalString = seed.aOptionalString;
   return level;
@@ -127,9 +126,6 @@ function storedDocument(seed: Seed): StoredDocument {
   const derived = derivedFor(seed);
   const document: StoredDocument = {
     id: seed.id,
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
     createdBy: derived.createdBy,
     // Explicit-null aliases of `aOptionalString` and `scope`.
     owner: seed.aOptionalString,
@@ -137,7 +133,7 @@ function storedDocument(seed: Seed): StoredDocument {
     tagNames: seed.tags.map((tag) => tag.name),
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,
-    obj: { inner: seed.aString },
+    obj: seed.aString === null ? {} : { inner: seed.aString },
     tags: seed.tags.map((tag) =>
       tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
@@ -158,6 +154,9 @@ function storedDocument(seed: Seed): StoredDocument {
             },
           ],
   };
+  if (seed.aBool !== null) document.aBool = seed.aBool;
+  if (seed.aString !== null) document.aString = seed.aString;
+  if (seed.aNumber !== null) document.aNumber = seed.aNumber;
   if (seed.aOptionalString !== null) {
     document.aOptionalString = seed.aOptionalString;
   }

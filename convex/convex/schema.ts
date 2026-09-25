@@ -3,9 +3,9 @@ import { v, type Infer } from "convex/values";
 
 export const adversarialDocument = {
   id: v.string(),
-  aBool: v.boolean(),
-  aString: v.string(),
-  aNumber: v.number(),
+  aBool: v.optional(v.boolean()),
+  aString: v.optional(v.string()),
+  aNumber: v.optional(v.number()),
   aDouble: v.optional(v.number()),
   aOptionalString: v.optional(v.string()),
   createdBy: v.string(),
@@ -19,7 +19,7 @@ export const adversarialDocument = {
   // null element is a null VALUE rather than a missing one (the `collection/index/*` cases).
   aNumberList: v.array(v.union(v.number(), v.null())),
   aBoolList: v.array(v.union(v.boolean(), v.null())),
-  obj: v.object({ inner: v.string() }),
+  obj: v.object({ inner: v.optional(v.string()) }),
   tags: v.array(
     v.object({
       id: v.string(),
@@ -49,15 +49,15 @@ export const adversarialDocument = {
   // absent level is a missing path here exactly as it is a missing row there.
   parent: v.optional(
     v.object({
-      aBool: v.boolean(),
-      aString: v.string(),
-      aNumber: v.number(),
+      aBool: v.optional(v.boolean()),
+      aString: v.optional(v.string()),
+      aNumber: v.optional(v.number()),
       aOptionalString: v.optional(v.string()),
       inner: v.optional(
         v.object({
-          aBool: v.boolean(),
-          aString: v.string(),
-          aNumber: v.number(),
+          aBool: v.optional(v.boolean()),
+          aString: v.optional(v.string()),
+          aNumber: v.optional(v.number()),
           aOptionalString: v.optional(v.string()),
         }),
       ),
