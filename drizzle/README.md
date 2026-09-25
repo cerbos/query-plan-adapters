@@ -413,16 +413,17 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 271 / 284 |
+| adversarial | 271 / 286 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
-reason. Four extended cases and one adversarial case are known Cerbos planner divergences and are
+reason. Four extended cases and three adversarial cases are known Cerbos planner divergences and are
 skipped:
 
 - `null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()`
   from the plan while `checkResource` denies the missing-attribute rows, so use `R.attr.x != null`
   for database-backed attributes instead of `has(R.attr.x)`.
+- `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`.
 - `composition/allow-and-deny/conditional-deny`,
   `composition/allow-and-deny/unconditional-allow-conditional-deny` and
   `composition/variable/allow-and-deny-through-variables`: a DENY condition that errors on a

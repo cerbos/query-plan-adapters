@@ -404,15 +404,15 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 226 / 284 |
+| adversarial | 226 / 286 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is four extended cases and one adversarial case.
+never as passed. On 0.55.0 that is four extended cases and three adversarial cases.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
 the plan while `checkResource` denies the missing-attribute rows, so use `R.attr.x != null` for
-database-backed attributes instead of `has(R.attr.x)`. And the three `composition/*` cases with a conditional `DENY` rule: a deny
+database-backed attributes instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And the three `composition/*` cases with a conditional `DENY` rule: a deny
 condition that errors on a missing attribute does not deny in `checkResource`, while the plan
 negates it as an ordinary condition, which a missing attribute leaves unsatisfiable
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

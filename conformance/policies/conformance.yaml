@@ -45,6 +45,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble + 0.7 != 0.1
+    # arithmetic/add/int-literal-negated
+    - actions:
+        - arithmetic/add/int-literal-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aNumber + 1 > 2.0)'
+    # arithmetic/add/int-literal-plus-constant
+    - actions:
+        - arithmetic/add/int-literal-plus-constant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber + 1 > 2.0
     # arithmetic/add/on-both-sides
     - actions:
         - arithmetic/add/on-both-sides

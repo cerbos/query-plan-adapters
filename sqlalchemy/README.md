@@ -408,13 +408,16 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 221 / 284 |
+| adversarial | 221 / 286 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.55.0 those are four extended cases and one adversarial case:
+harness does not compare. Under 0.55.0 those are four extended cases and three adversarial cases:
 `null/has/missing-attribute` and `null/has/composed-with-comparison` (the planner drops `has()` from
-the plan, so use `R.attr.x != null` instead), and three
+the plan, so use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
+`R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
+and three
 `composition/*` cases whose DENY condition reads an attribute a row is missing: `check()` skips the
 erroring DENY, while the plan's `not(...)` of it denies the row
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

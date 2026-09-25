@@ -357,16 +357,17 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 217 / 284 |
+| adversarial | 217 / 286 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
 skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
-four extended cases and one adversarial case. In `null/has/missing-attribute` and
+four extended cases and three adversarial cases. In `null/has/missing-attribute` and
 `null/has/composed-with-comparison` the Cerbos planner drops `has()` from the plan, but `check()`
 denies rows missing the attribute. Until the planner is fixed, use `R.attr.x != null` instead of
-`has(R.attr.x)` for database attributes. In the other three, all `composition/*`, a DENY condition reads an attribute the row is missing: `check()` skips the
+`has(R.attr.x)` for database attributes. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
+planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In the other three, all `composition/*`, a DENY condition reads an attribute the row is missing: `check()` skips the
 erroring DENY and the ALLOW stands, while the plan's `not(...)` of it denies the row
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 

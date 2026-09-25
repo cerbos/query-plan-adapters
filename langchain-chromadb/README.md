@@ -318,7 +318,7 @@ caller must. Passed cases on the current PDP, 0.55.0, out of every golden case i
 | --- | --- |
 | core | 20 / 26 |
 | extended | 39 / 80 |
-| adversarial | 134 / 284 |
+| adversarial | 134 / 286 |
 
 Without `allowPostFilter`, the 129 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 64
@@ -327,10 +327,10 @@ passing: 18, 10 and 36 in the three tiers.
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
-four extended cases and one adversarial case. `null/has/missing-attribute` and
+four extended cases and three adversarial cases. `null/has/missing-attribute` and
 `null/has/composed-with-comparison`: the planner drops `has()` from the plan while `checkResource`
 denies the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes
-instead of `has(R.attr.x)`. Three `composition/*`
+instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
 cases whose DENY condition reads a missing attribute: the plan negates the deny condition with the
 same `not` as CEL's `!`, while `checkResource` treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

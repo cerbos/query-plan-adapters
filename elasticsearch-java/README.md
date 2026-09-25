@@ -479,17 +479,17 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 25 / 26 |
 | extended | 28 / 80 |
-| adversarial | 107 / 284 |
+| adversarial | 107 / 286 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is four extended cases and one adversarial case. In
+pass them. On 0.55.0 that is four extended cases and three adversarial cases. In
 `null/has/missing-attribute` and `null/has/composed-with-comparison` the planner drops `has()` from
 the plan while `check()` denies documents missing the attribute, so use `R.attr.x != null` for
-indexed attributes instead of `has(R.attr.x)`. In three `composition/*`
+indexed attributes instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
 cases a DENY condition over a missing attribute does not fire in `check()`, while the plan negates
 it and so excludes the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

@@ -1,0 +1,62 @@
+{
+  "allowed": [],
+  "degenerateReason": "aNumber is a CEL double and CEL has no double + int overload, so check() errors on every row.",
+  "id": "arithmetic/add/int-literal-plus-constant",
+  "intent": "Attribute plus an int constant compared with a double threshold (aNumber + 1 > 2.0).",
+  "oracle": "empty",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/544",
+    "pdp": [
+      "0.54.0",
+      "0.55.0"
+    ],
+    "reason": "The planner drops the int type of the literal 1: the plan is byte-identical to aNumber + 1.0 > 2.0, which allows rows, while check() has no double + int overload and denies every row."
+  },
+  "request": {
+    "action": "arithmetic/add/int-literal-plus-constant",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber + 1 > 2.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan is the double spelling's, so a translation returns field-plus-constant's rows; check() errors on double + int and denies every row."
+}

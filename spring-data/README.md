@@ -402,15 +402,18 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 265 / 284 |
+| adversarial | 265 / 286 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 18 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the fix is a mapping change) rather than emit a filter. Four extended cases and one adversarial
-case are planner divergences the corpus skips: `null/has/missing-attribute` and
+when the fix is a mapping change) rather than emit a filter. Four extended cases and three adversarial
+cases are planner divergences the corpus skips: `null/has/missing-attribute` and
 `null/has/composed-with-comparison`, where the planner drops `has()` from the plan (see
-[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)), and
+[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)),
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
+planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
+overload and denies every row (write `1.0`), and
 three `composition/*` cases whose DENY condition reads a missing attribute, which `check()` treats as
 not firing while the plan negates it
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
