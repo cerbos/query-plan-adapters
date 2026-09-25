@@ -33,13 +33,23 @@ module Cerbos
       module_function
 
       # A plan operand as an aggregation expression: a variable becomes a +$field.path+, a
-      # value becomes itself, an expression recurses.
+      # value becomes a constant (see #constant), an expression recurses.
       def build(operand, mapper)
         return "$#{mapper.resolve_field(operand.name).path.join(".")}" if variable?(operand)
-        return operand.value if value?(operand)
+        return constant(operand.value) if value?(operand)
         return build_expression(operand, mapper) if expression?(operand)
 
         raise InvalidPlanError, "Invalid operand structure"
+      end
+
+      # A plan constant as an aggregation expression. Inside $expr a string that starts with `$`
+      # is a field path (and `$$` a variable), and an array or a document is evaluated element by
+      # element, so `R.attr.a + "q" == "$b"` would compare with the document's own `b` field and
+      # return documents the PDP denies. $literal keeps each such constant the value it is.
+      def constant(value)
+        return {"$literal" => value} if value.is_a?(Array) || value.is_a?(Hash) || (value.is_a?(String) && value.start_with?("$"))
+
+        value
       end
 
       def build_expression(expression, mapper)
@@ -311,7 +321,7 @@ module Cerbos
           raise InvalidPlanError, "matches operator requires two operands"
         end
 
-        {"$regexMatch" => {"input" => build(input, mapper), "regex" => Regex.normalise_re2(pattern.value)}}
+        {"$regexMatch" => {"input" => build(input, mapper), "regex" => constant(Regex.normalise_re2(pattern.value))}}
       end
 
       # contains/startsWith/endsWith over two strings; null (an error to CEL) otherwise.
