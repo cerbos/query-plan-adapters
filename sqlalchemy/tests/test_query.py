@@ -8,6 +8,7 @@ so they are tested here. Policy-reachable shapes belong in the corpus. No PDP ne
 """
 
 import math
+import warnings
 
 import pytest
 from cerbos.sdk.model import (
@@ -18,7 +19,7 @@ from cerbos.sdk.model import (
 from sqlalchemy import Boolean, DateTime, String, column, create_engine, literal, table
 from sqlalchemy.dialects import postgresql
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import UnsupportedPlanError, get_query
 
 
 def _default_resp_params():
@@ -1219,3 +1220,51 @@ class TestPlanOperandBoundary:
 
         with pytest.raises(ValueError, match="Unrecognised operand shape"):
             parse_operand(operand)
+
+
+_A_BOOL = {"variable": "request.resource.attr.aBool"}
+
+
+class TestEmptyBooleanOperators:
+    """A zero-operand ``and``/``or`` is refused, never rendered as an empty clause.
+
+    The planner never sends this shape. ``and_()``/``or_()`` with no arguments
+    render nothing, ``.where()`` drops it and every row comes back, even for an
+    empty ``or``, which CEL evaluates as false. See #498.
+    """
+
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            pytest.param({"operator": "or", "operands": []}, id="or"),
+            pytest.param({"operator": "and", "operands": []}, id="and"),
+            pytest.param(
+                {
+                    "operator": "and",
+                    "operands": [_A_BOOL, {"operator": "or", "operands": []}],
+                },
+                id="or-under-and",
+            ),
+            pytest.param(
+                {
+                    "operator": "or",
+                    "operands": [_A_BOOL, {"operator": "and", "operands": []}],
+                },
+                id="and-under-or",
+            ),
+            pytest.param(
+                {"operator": "not", "operands": [{"operator": "or", "operands": []}]},
+                id="or-under-not",
+            ),
+        ],
+    )
+    def test_zero_operand_boolean_is_refused(self, resource_table, expression):
+        with warnings.catch_warnings():
+            # Nor may it warn about an argument-less and_()/or_() on the way.
+            warnings.simplefilter("error")
+            with pytest.raises(UnsupportedPlanError):
+                get_query(
+                    _conditional_plan(expression),
+                    resource_table,
+                    {"request.resource.attr.aBool": resource_table.aBool},
+                )

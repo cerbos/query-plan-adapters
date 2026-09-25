@@ -316,6 +316,27 @@ TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
 `string()` over a boolean column compares the literals `'true'`/`'false'` in the connection's
 collation on MySQL — make it case-sensitive, or `string(flag) == "TRUE"` selects rows CEL does not.
 
+On SQLite a column collation does not help: SQLite's `LIKE` ignores it and folds ASCII case unless
+the connection sets `PRAGMA case_sensitive_like = ON`. Without the pragma, `contains`, `startsWith`,
+`endsWith` and hierarchy-prefix predicates **over-grant** (`R.attr.name.startsWith("o")` matches
+`One`). The adapter does not own the connection, so set the pragma on every one it opens, as the
+conformance harness does:
+
+```python
+from sqlalchemy import create_engine, event
+
+engine = create_engine("sqlite:///app.db")
+
+
+@event.listens_for(engine, "connect")
+def _case_sensitive_like(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA case_sensitive_like = ON")
+    cursor.close()
+```
+
+For an async engine, listen on `async_engine.sync_engine`.
+
 ### Timestamps
 
 Timestamp literals must be strict RFC 3339, within CEL's year 0001–9999 range, and exactly
