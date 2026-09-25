@@ -1,0 +1,84 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a6",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j3"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/composed-with-comparison",
+  "intent": "has(aOptionalString) && aNumber > 0: a presence guard composed with a comparison on another attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED",
+    "pdp": [
+      "0.54.0",
+      "0.55.0"
+    ],
+    "reason": "The planner folds the has() guard to true and drops it, so the plan is gt(aNumber, 0) alone. Every faithful translation returns a4, a8, c2 and e1, which lack aOptionalString and which check() denies: a live over-grant."
+  },
+  "request": {
+    "action": "null/has/composed-with-comparison",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "has(R.attr.aOptionalString) && R.attr.aNumber > 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a4, a8, c2 and e1 lack aOptionalString but have aNumber > 0; a plan or translation that drops the has() guard and keeps only the comparison returns them."
+}

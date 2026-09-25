@@ -279,6 +279,13 @@ the other declares nothing, the adapter raises `UnsupportedOperatorError`. Decla
 neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## The collation is part of the contract
 
 CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
@@ -350,16 +357,16 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 217 / 283 |
+| adversarial | 217 / 284 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
 skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
-four extended cases. In `null/has/missing-attribute` the Cerbos planner folds `has()` on a missing
-attribute to `ALWAYS_ALLOWED`, but `check()` denies those rows. Until the planner is fixed, use
-`R.attr.x != null` instead of `has(R.attr.x)` for database attributes. In the other three, all
-`composition/*`, a DENY condition reads an attribute the row is missing: `check()` skips the
+four extended cases and one adversarial case. In `null/has/missing-attribute` and
+`null/has/composed-with-comparison` the Cerbos planner drops `has()` from the plan, but `check()`
+denies rows missing the attribute. Until the planner is fixed, use `R.attr.x != null` instead of
+`has(R.attr.x)` for database attributes. In the other three, all `composition/*`, a DENY condition reads an attribute the row is missing: `check()` skips the
 erroring DENY and the ALLOW stands, while the plan's `not(...)` of it denies the row
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 

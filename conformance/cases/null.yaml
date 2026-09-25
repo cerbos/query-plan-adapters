@@ -124,6 +124,19 @@ cases:
     pdp:
     - 0.54.0
     - 0.55.0
+- id: 'null/has/composed-with-comparison'
+  tier: adversarial
+  intent: 'has(aOptionalString) && aNumber > 0: a presence guard composed with a comparison on another attribute.'
+  trap: 'a4, a8, c2 and e1 lack aOptionalString but have aNumber > 0; a plan or translation that drops the has() guard and keeps only the comparison returns them.'
+  condition:
+    match:
+      expr: 'has(R.attr.aOptionalString) && R.attr.aNumber > 0'
+  plannerDivergence:
+    issue: Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'The planner folds the has() guard to true and drops it, so the plan is gt(aNumber, 0) alone. Every faithful translation returns a4, a8, c2 and e1, which lack aOptionalString and which check() denies: a live over-grant.'
 - id: 'null/in/literal-list-of-only-null'
   tier: adversarial
   intent: 'Membership in a list whose only element is null (owner in [null]).'

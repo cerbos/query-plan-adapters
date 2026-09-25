@@ -126,6 +126,13 @@ comparison operand is rejected under either convention (every `null/*` corpus ca
 null literal throws, including `null/equals/null-literal-on-missing-attribute`). See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns records missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Write membership as `in`, not as a collection macro
 
 ```yaml
@@ -311,7 +318,7 @@ caller must. Passed cases on the current PDP, 0.55.0, out of every golden case i
 | --- | --- |
 | core | 20 / 26 |
 | extended | 39 / 80 |
-| adversarial | 134 / 283 |
+| adversarial | 134 / 284 |
 
 Without `allowPostFilter`, the 129 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 64
@@ -320,9 +327,10 @@ passing: 18, 10 and 36 in the three tiers.
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
-four extended cases. `null/has/missing-attribute`: the planner folds `has()` on a missing attribute
-to `ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute documents, so use
-`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`. Three `composition/*`
+four extended cases and one adversarial case. `null/has/missing-attribute` and
+`null/has/composed-with-comparison`: the planner drops `has()` from the plan while `checkResource`
+denies the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes
+instead of `has(R.attr.x)`. Three `composition/*`
 cases whose DENY condition reads a missing attribute: the plan negates the deny condition with the
 same `not` as CEL's `!`, while `checkResource` treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

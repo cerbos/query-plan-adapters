@@ -402,14 +402,15 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 265 / 283 |
+| adversarial | 265 / 284 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 18 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the fix is a mapping change) rather than emit a filter. Four extended cases are planner
-divergences the corpus skips: `null/has/missing-attribute`, where the planner folds `has()` to
-always-allowed (see [Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)), and
+when the fix is a mapping change) rather than emit a filter. Four extended cases and one adversarial
+case are planner divergences the corpus skips: `null/has/missing-attribute` and
+`null/has/composed-with-comparison`, where the planner drops `has()` from the plan (see
+[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)), and
 three `composition/*` cases whose DENY condition reads a missing attribute, which `check()` treats as
 not firing while the plan negates it
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
@@ -532,10 +533,13 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 ### `has(...)` over-grants at the planner level — write `!= null` instead
 
 An **upstream Cerbos planner issue that affects every adapter**: the planner folds
-`has(R.attr.aOptionalString)` to `KIND_ALWAYS_ALLOWED`, but `check()` denies resources missing the
-attribute. Translating the plan faithfully returns rows with a NULL column that `check()` would deny.
-The corpus records it as a planner divergence on `null/has/missing-attribute`, and the conformance
-suite skips that case for the PDP versions it names.
+`has(R.attr.aOptionalString)` to true and drops it from the plan, but `check()` denies resources
+missing the attribute. Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
+`has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter.
+Translating the plan faithfully returns rows with a NULL column that `check()` would deny, and the
+adapter, which only sees the plan, cannot restore the guard. The corpus records both forms as
+planner divergences, `null/has/missing-attribute` and `null/has/composed-with-comparison`, and the
+conformance suite skips them for the PDP versions they name.
 
 **Workaround (PDP-verified):**
 

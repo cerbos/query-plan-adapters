@@ -236,6 +236,13 @@ explicit side's NULL compares as a value, the other side's NULL stays an error. 
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Relation element nullability
 
 Collection macros lower to `some`/`every`/`none`, which treat SQL UNKNOWN as false. Without a guard,
@@ -397,15 +404,15 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 226 / 283 |
+| adversarial | 226 / 284 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is four extended cases. `null/has/missing-attribute`: the planner
-folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
-missing-attribute rows, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`. And the three `composition/*` cases with a conditional `DENY` rule: a deny
+never as passed. On 0.55.0 that is four extended cases and one adversarial case.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
+the plan while `checkResource` denies the missing-attribute rows, so use `R.attr.x != null` for
+database-backed attributes instead of `has(R.attr.x)`. And the three `composition/*` cases with a conditional `DENY` rule: a deny
 condition that errors on a missing attribute does not deny in `checkResource`, while the plan
 negates it as an ordinary condition, which a missing attribute leaves unsatisfiable
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

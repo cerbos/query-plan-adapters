@@ -307,6 +307,13 @@ either convention. `null/equals/null-literal` and `null/equals/null-literal-on-m
 a document missing the field is never authorized by a `must_not` matching it — Cerbos treats a
 missing attribute as an evaluation error.
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns documents missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Custom operator overrides
 
 Replace the default lowering of a plan operator with an `OperatorFunction`, which takes the field
@@ -472,16 +479,17 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 25 / 26 |
 | extended | 28 / 80 |
-| adversarial | 107 / 283 |
+| adversarial | 107 / 284 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is four extended cases. In `null/has/missing-attribute` the planner folds
-`has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those documents, so use
-`R.attr.x != null` for indexed attributes instead of `has(R.attr.x)`. In three `composition/*`
+pass them. On 0.55.0 that is four extended cases and one adversarial case. In
+`null/has/missing-attribute` and `null/has/composed-with-comparison` the planner drops `has()` from
+the plan while `check()` denies documents missing the attribute, so use `R.attr.x != null` for
+indexed attributes instead of `has(R.attr.x)`. In three `composition/*`
 cases a DENY condition over a missing attribute does not fire in `check()`, while the plan negates
 it and so excludes the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

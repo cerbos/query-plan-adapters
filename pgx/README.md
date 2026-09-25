@@ -226,6 +226,13 @@ mapper := cerbospgx.MapperMap{
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
   of the same or undeclared scalar type is rejected.
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Collation
 
 CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow the column's
@@ -244,16 +251,16 @@ PDP's goldens (0.54.0) are replayed too.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 222 / 283 |
+| adversarial | 222 / 284 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. The one case
-no adapter can pass is `null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing
-attribute to `ALWAYS_ALLOWED` while `check()` denies those rows, so use `R.attr.x != null` for
-database-backed attributes instead of `has(R.attr.x)`.
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the
+skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the Cerbos
+planner dropping `has()` from the plan while `check()` denies rows missing the attribute, so use
+`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
 
 ### Known gaps
 
