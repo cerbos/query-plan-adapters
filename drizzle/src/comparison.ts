@@ -4,7 +4,6 @@ import { is } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgColumn } from "drizzle-orm/pg-core";
-import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
@@ -26,7 +25,11 @@ import {
   exceedsMillisecondPrecision,
   formatRfc3339Nanoseconds,
   parseRfc3339Nanoseconds,
+  sqliteInstantLiteral,
+  sqliteTextInstant,
+  timestampColumnForm,
 } from "./timestamp";
+import type { TimestampColumnForm } from "./timestamp";
 import {
   buildColumnExpression,
   columnForOperand,
@@ -58,7 +61,12 @@ import {
   isIntegerColumnReference,
   resolveScalarOperand,
 } from "./values";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type {
+  BuildFilterOptions,
+  Mapper,
+  RelationMapping,
+  ResolvedMapping,
+} from "./types";
 
 /**
  * `eq`, `ne`, `lt`, `le`, `gt`, `ge` between two operands, each of which may be a field, a
@@ -348,10 +356,9 @@ const buildMixedTypeComparison = (
 };
 
 /**
- * The fractional-second digits every value of a timestamp column carries at most, read off its
- * Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (the server's default is 6), a MySQL
- * `datetime` / `timestamp`'s `fsp` (MySQL's default is 0). A SQLite text column holds whatever
- * string the application wrote, so it is held to the millisecond contract the README states.
+ * The fractional-second digits every value of a native timestamp column carries at most, read off
+ * its Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (the server's default is 6), a
+ * MySQL `datetime` / `timestamp`'s `fsp` (MySQL's default is 0).
  */
 const timestampColumnDigits = (column: AnyColumn): number | undefined => {
   const declared = column as AnyColumn & { precision?: number; fsp?: number };
@@ -364,8 +371,83 @@ const timestampColumnDigits = (column: AnyColumn): number | undefined => {
   ) {
     return declared.fsp ?? 0;
   }
-  if (is(column, SQLiteColumn) && column.dataType === "string") return 3;
   return undefined;
+};
+
+/** `timestamp(<field typed "timestamp">)` over a column, with how that column compares instants. */
+const timestampColumnOperand = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): { name: string; resolved: ResolvedMapping; form: TimestampColumnForm } | undefined => {
+  const field = timestampField(operand, mapper);
+  if (field === undefined) return undefined;
+  const resolved = resolveFieldReference(field.name, mapper);
+  const column = isMappingConfig(resolved.mapping) ? resolved.mapping.column : undefined;
+  if (column === undefined) return undefined;
+  return { name: field.name, resolved, form: timestampColumnForm(column, field.name) };
+};
+
+/** `timestamp("<literal>")`, as its literal. */
+const timestampLiteral = (operand: PlanExpressionOperand): string | undefined => {
+  if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  return operand.operands.length === 1 &&
+    inner !== undefined &&
+    isValueOperand(inner) &&
+    typeof inner.value === "string"
+    ? inner.value
+    : undefined;
+};
+
+/**
+ * A timestamp comparison with a SQLite text column on either side. Both sides are brought to the
+ * one fixed-width UTC form (`sqliteTextInstant`, `sqliteInstantLiteral`), whose string order is
+ * instant order, at CEL's nanosecond resolution, so no literal needs a grid point. The other side
+ * must be a `timestamp()` literal or another such column: anything else would meet the rewritten
+ * string in a comparison that knows nothing of its form.
+ */
+const buildSqliteTextTimestampComparison = (
+  context: ComparisonContext,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+): SQL | undefined => {
+  const { operator, mapper, options, negated } = context;
+  const leftColumn = timestampColumnOperand(left, mapper);
+  const rightColumn = timestampColumnOperand(right, mapper);
+  if (leftColumn?.form !== "sqlite-text" && rightColumn?.form !== "sqlite-text") return undefined;
+  const reference = (leftColumn ?? rightColumn)!.name;
+  const side = (
+    operand: PlanExpressionOperand,
+    column: ReturnType<typeof timestampColumnOperand>,
+  ): { expr: SQL; relations: RelationMapping[] } => {
+    if (column?.form === "sqlite-text") {
+      return {
+        expr: sqliteTextInstant(buildColumnExpression(column.resolved.mapping, column.name)),
+        relations: column.resolved.relations,
+      };
+    }
+    const literal = timestampLiteral(operand);
+    if (column === undefined && literal !== undefined) {
+      return { expr: sql`${sqliteInstantLiteral(literal)}`, relations: [] };
+    }
+    throw new UnsupportedQueryPlanError(
+      `Cannot compare the SQLite text timestamp '${reference}' with anything but a timestamp() ` +
+        "constant or another SQLite text timestamp: the stored string is compared in a rewritten " +
+        "UTC form that nothing else is written in",
+    );
+  };
+  const leftSide = side(left, leftColumn);
+  const rightSide = side(right, rightColumn);
+  return withPolarity(
+    wrapCombinedRelations(
+      applyComparisonWithExpression(operator, leftSide.expr, rightSide.expr),
+      leftSide.relations,
+      rightSide.relations,
+      reference,
+      options,
+    ),
+    negated,
+  );
 };
 
 /**
@@ -392,8 +474,8 @@ const buildOffGridTimestampComparison = (
   if (digits === undefined || digits > 9) {
     throw new UnsupportedQueryPlanError(
       `Cannot compare '${field.name}' with a timestamp finer than a millisecond (${literal}): ` +
-        "the column's precision is not declared on a PostgreSQL timestamp, a MySQL datetime or " +
-        "timestamp, or a SQLite text column, so no grid point is known to compare against instead",
+        "the column's precision is not declared on a PostgreSQL timestamp or a MySQL datetime or " +
+        "timestamp, so no grid point is known to compare against instead",
     );
   }
   const instant = parseRfc3339Nanoseconds(literal);
@@ -728,6 +810,8 @@ export const buildComparisonFilter = (
     buildCheckedIntComparison(MIRRORED_OPERATORS[operator], right, left, mapper, options);
   if (checkedInt !== undefined) return withPolarity(checkedInt, negated);
 
+  const sqliteTextTimestamp = buildSqliteTextTimestampComparison(context, left, right);
+  if (sqliteTextTimestamp !== undefined) return sqliteTextTimestamp;
   const leftTimestamp = timestampField(left, mapper);
   const rightTimestampLiteral = subMillisecondTimestampLiteral(right);
   if (leftTimestamp && rightTimestampLiteral !== undefined) {

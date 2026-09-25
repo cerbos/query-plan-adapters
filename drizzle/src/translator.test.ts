@@ -8,6 +8,7 @@ import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
 import { PgDialect } from "drizzle-orm/pg-core/dialect";
 import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-core";
+import { integer, sqliteTable } from "drizzle-orm/sqlite-core";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
@@ -460,12 +461,34 @@ describe("timestamp literals", () => {
   test.each([
     ["postgresql", "2026-08-11T09:13:39.123457Z"],
     ["mysql", "2026-08-11T09:13:39.123457Z"],
-    ["sqlite", "2026-08-11T09:13:39.124Z"],
   ] as const)(
     "a nanosecond instant — what the PDP actually folds — bounds `<` by the next grid point (%s)",
     (store, bound) => {
       const filter = filterFor(store, WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
       expect(render(store, filter).params).toEqual([bound]);
+    },
+  );
+
+  // A SQLite text column is compared in a fixed-width nanosecond form, so no grid point stands in.
+  test("a nanosecond instant is compared exactly against a SQLite text column", () => {
+    const filter = filterFor("sqlite", WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
+    expect(render("sqlite", filter).params).toEqual(["2026-08-11T09:13:39.123456789Z"]);
+  });
+
+  // The column type is caller-supplied schema: the corpus maps one SQLite text column and cannot
+  // vary it. SQLite ranks every integer below every string, so an integer-mode column bound against
+  // an RFC-3339 literal would be "less than" every instant.
+  test.each(["timestamp", "timestamp_ms"] as const)(
+    "an integer column in %s mode refuses an ordered timestamp comparison",
+    (mode) => {
+      const table = sqliteTable("events", { at: integer("at", { mode }) });
+      const plan = timestampPlan("lt", "2020-03-15T10:30:00Z");
+      expect(() =>
+        queryPlanToDrizzle({
+          queryPlan: plan,
+          mapper: { "request.resource.attr.createdAt": { column: table.at, valueType: "timestamp" } },
+        }),
+      ).toThrow(UnsupportedQueryPlanError);
     },
   );
 
