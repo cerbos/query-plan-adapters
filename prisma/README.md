@@ -413,7 +413,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 228 / 289 |
+| adversarial | 232 / 301 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -479,6 +479,14 @@ records are ignored rather than required. If the declaration hides every record,
 vacuously true, matching the empty list your application would send to `check()`.
 
 ## Behaviour changes
+
+- An ordering of a boolean column against a boolean constant (`R.attr.flag < true`) translates:
+  CEL orders `false < true`, and Prisma's Boolean filter has only `equals`, so it becomes the bools
+  that satisfy it (`< true` is `equals: false`). It used to emit `lt` on a Boolean field, which the
+  Prisma client rejected with a validation error.
+- A macro (`exists`, `all`, `exists_one`, `filter`, `map`) over a to-one relation throws
+  `UnsupportedQueryPlanError`: CEL ranges it over the related row's attribute names. It used to
+  emit `some` on a to-one relation, which the Prisma client rejected with a validation error.
 
 - A comparison against NaN settles (`==` and orderings false, `!=` true, as the current PDP
   evaluates them even against a string), and a comparison over `c ? a : b` with `c` a boolean

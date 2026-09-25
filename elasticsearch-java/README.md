@@ -457,7 +457,8 @@ would change the security and performance profile of every filter.
 - field-to-field comparisons; a constant string receiver with a field argument
 - arithmetic over fields, `int()` / `double()` / `string()` casts, conditional values (CEL ternary, as a
   condition or an operand)
-- `except()`; `filter()` / `map()` used as a condition; `exists_one`
+- `except()`; `filter()` / `map()` used as a condition; `exists_one`; a macro over an object field
+  (a CEL map, whose keys the macro ranges over, which no query can enumerate)
 - counts other than emptiness; `size()` over an undeclared field; collection-empty checks
 - ordered array indexing (`R.attr.tagNames[0] == "public"`) — a `term` matches any position
 - positive `all` and negated `exists` over a document collection; negated membership in, or
@@ -479,7 +480,7 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 25 / 26 |
 | extended | 28 / 80 |
-| adversarial | 109 / 289 |
+| adversarial | 113 / 301 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in

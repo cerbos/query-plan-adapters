@@ -333,6 +333,54 @@ const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper):
 };
 
 /**
+ * Whether the operand is certainly a CEL int: `int()`, `size()`, or `+ - * / %` over ints of which
+ * at least one is such an expression (an integral constant beside one can only be an int).
+ */
+const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
+  if (isOperatorCall(operand, "int") || isOperatorCall(operand, "size")) return true;
+  if (!isExpressionOperand(operand) || !(operand.operator in ARITHMETIC_OPERATORS)) return false;
+  const isIntOrWhole = (side: PlanExpressionOperand): boolean =>
+    isCelIntExpression(side) ||
+    (isValueOperand(side) && typeof side.value === "number" && Number.isInteger(side.value));
+  return operand.operands.every(isIntOrWhole) && operand.operands.some(isCelIntExpression);
+};
+
+/**
+ * CEL's `/` over ints truncates toward zero, where a double division makes `int(3) / 2` 1.5; a
+ * zero divisor is an error, and an int beside a double is a no-overload error. It is lowered only
+ * for `int()` of an integer column divided by a non-zero whole constant, with each store's
+ * truncating integer division: SQLite's and PostgreSQL's `/` over two integers, MySQL's `DIV`
+ * (whose `/` returns a decimal). The constant is inlined as an integer literal, since a bound
+ * JavaScript number may reach SQLite as a REAL and turn the division back into a double one.
+ */
+const buildIntDivision = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const dividend = integerConversionColumn(leftOperand, mapper);
+  const divisor = resolveConstantNumber(rightOperand);
+  const dialect = dividend === undefined ? undefined : columnDialect(dividend);
+  if (
+    dialect === undefined ||
+    divisor === undefined ||
+    !Number.isSafeInteger(divisor) ||
+    divisor === 0 ||
+    !isValueOperand(rightOperand)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate '/' over a CEL int: CEL's int division truncates toward zero and errors " +
+        "on a zero divisor, so the adapter lowers it only for int() of an integer column divided " +
+        "by a non-zero whole constant, where each store has an exact truncating integer division",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  const right = sql.raw(String(divisor));
+  return dialect === "mysql" ? sql`(${left} div ${right})` : sql`(${left} / ${right})`;
+};
+
+/**
  * CEL's `%` is integer-only, and no attribute is an integer: CEL reads every attribute number as a
  * double. So `%` straight over an attribute is a no-overload error, which denies the row whatever
  * surrounds it; it is lowered to a NULL, which SQL's three-valued logic carries the same way.
@@ -502,6 +550,9 @@ const buildArithmeticExpression = (
   }
   if (operator === "mod") {
     return buildModulo(leftOperand, rightOperand, mapper, options);
+  }
+  if (operator === "div" && (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand))) {
+    return buildIntDivision(leftOperand, rightOperand, mapper, options);
   }
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);

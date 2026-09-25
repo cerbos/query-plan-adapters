@@ -126,6 +126,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / 2.0 >= 1.5
+    # arithmetic/divide/int-truncates
+    - actions:
+        - arithmetic/divide/int-truncates
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) / 2 == 1
+    # arithmetic/divide/int-truncates-toward-zero
+    - actions:
+        - arithmetic/divide/int-truncates-toward-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) / 2 == -2
+    # arithmetic/divide/negated-int-truncates
+    - actions:
+        - arithmetic/divide/negated-int-truncates
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) / 2 == 1)'
     # arithmetic/divide/negated-self-division-equals
     - actions:
         - arithmetic/divide/negated-self-division-equals
@@ -369,6 +396,33 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aDouble) == "1e+06" || string(R.attr.aDouble) == "2" || string(R.attr.aDouble) == "-9.5e+18"
+    # cast/string/from-int-beyond-double-precision
+    - actions:
+        - cast/string/from-int-beyond-double-precision
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(int(R.attr.aString)) == "9007199254740993"
+    # cast/string/from-int-past-exponent-threshold
+    - actions:
+        - cast/string/from-int-past-exponent-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(int(R.attr.aDouble)) == "1000000"
+    # cast/string/negated-from-int-past-exponent-threshold
+    - actions:
+        - cast/string/negated-from-int-past-exponent-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(int(R.attr.aDouble)) == "1000000")'
     # cast/string/from-negative-zero-double
     - actions:
         - cast/string/from-negative-zero-double
@@ -522,6 +576,15 @@ resourcePolicy:
       condition:
         match:
           expr: (R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))
+    # collection/exists/map-keys
+    - actions:
+        - collection/exists/map-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.exists(k, k == "inner")
     # collection/exists/element-in-principal-list
     - actions:
         - collection/exists/element-in-principal-list
@@ -567,6 +630,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.tags.exists(t, t.name == "public")'
+    # collection/exists/negated-map-keys
+    - actions:
+        - collection/exists/negated-map-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.exists(k, k == "inner")'
     # collection/exists/negated-nested-over-same-collection
     - actions:
         - collection/exists/negated-nested-over-same-collection
@@ -957,6 +1029,24 @@ resourcePolicy:
       condition:
         match:
           expr: 3 <= R.attr.aNumber
+    # comparison/less-than/astral-string-against-high-bmp
+    - actions:
+        - comparison/less-than/astral-string-against-high-bmp
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString < "héllo�"
+    # comparison/less-than/boolean-field-against-true
+    - actions:
+        - comparison/less-than/boolean-field-against-true
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBool < true
     # comparison/less-than/double-below-int64-range
     - actions:
         - comparison/less-than/double-below-int64-range
@@ -975,6 +1065,24 @@ resourcePolicy:
       condition:
         match:
           expr: '(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()'
+    # comparison/less-than/negated-astral-string-against-high-bmp
+    - actions:
+        - comparison/less-than/negated-astral-string-against-high-bmp
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < "héllo�")'
+    # comparison/less-than/negated-boolean-field-against-true
+    - actions:
+        - comparison/less-than/negated-boolean-field-against-true
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aBool < true)'
     # comparison/less-than/negative-literal
     - actions:
         - comparison/less-than/negative-literal

@@ -196,6 +196,43 @@ function fractionalBracket(
 }
 
 /**
+ * An ordering against a boolean constant. CEL orders bools, `false < true`, but Prisma's Boolean
+ * filter has only `equals` and `not`, so the ordering becomes the set of bools that satisfy it,
+ * spelled with `equals` alone. Every spelling reads the column, so a NULL stays UNKNOWN under both
+ * polarities, as the missing-attribute error requires: an empty set is a contradiction on the
+ * column and the full set a tautology on it. Plain `equals` rather than the explicit-null guard,
+ * because ordering a null VALUE is a no-overload error in CEL, not a definite answer.
+ */
+function buildBooleanOrderingFilter(
+  fieldRef: ResolvedFieldReference,
+  operator: string,
+  value: boolean
+): PrismaFilter {
+  const satisfied = [false, true].filter((candidate) => {
+    const [a, b] = [Number(candidate), Number(value)];
+    switch (operator) {
+      case "lt":
+        return a < b;
+      case "le":
+        return a <= b;
+      case "gt":
+        return a > b;
+      case "ge":
+        return a >= b;
+      default:
+        throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
+    }
+  });
+  if (satisfied.length === 1) return buildFieldFilter(fieldRef, "equals", satisfied[0]!);
+  const fieldName = getLeafField(fieldRef.path);
+  const both = [{ [fieldName]: { equals: false } }, { [fieldName]: { equals: true } }];
+  return wrapInRelations(
+    fieldRef.relations,
+    satisfied.length === 0 ? { AND: both } : { OR: both }
+  );
+}
+
+/**
  * Builds a field-vs-constant comparison. Fractional constants are emitted as a two-clause
  * bracket (see fractionalBracket).
  */
@@ -211,6 +248,10 @@ export function buildComparisonFilter(
   );
 
   assertScalarValue(fieldRef, value, operator);
+
+  if (typeof value === "boolean" && operator !== "eq" && operator !== "ne") {
+    return buildBooleanOrderingFilter(fieldRef, operator, value);
+  }
 
   if (value === null) {
     assertNullOperandTranslatable(

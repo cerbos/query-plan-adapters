@@ -44,6 +44,18 @@ final class ComparisonTranslator {
     static final Set<String> COMPARISON_OPS =
             Set.of("eq", "ne", "lt", "gt", "le", "ge");
 
+    private static final Set<String> ORDERING_OPS = Set.of("lt", "gt", "le", "ge");
+
+    /** Whether {@code text} holds a UTF-16 code unit at or above 0xD800. */
+    private static boolean hasCodeUnitFromSurrogates(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) >= '\uD800') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private final CriteriaBuilder cb;
     private final TriPredicate tri;
     private final LeafTranslator leaf;
@@ -390,6 +402,20 @@ final class ComparisonTranslator {
                 && !leaf.overridden(op)
                 && leaf.isExplicitNull(field.variable(), scope)) {
             return leaf.definiteEquality(op, path, cb.literal(value), true, false);
+        }
+
+        // CEL orders strings by code point. A JPA store may compare by UTF-16 code unit instead
+        // (H2 uses Java's String.compareTo), which puts an astral character's high surrogate
+        // (from 0xD800) before U+E000–U+FFFF. The two orders can only disagree at a position
+        // where one side holds a code unit at or above 0xD800, so a literal holding none cannot
+        // be ordered differently; one that does is refused.
+        if (ORDERING_OPS.contains(op) && !leaf.overridden(op)
+                && value instanceof String text && hasCodeUnitFromSurrogates(text)) {
+            throw Refusals.unsupported(op + " orders a string attribute against a literal holding"
+                    + " a character at or above U+D800 (an astral character or U+E000–U+FFFF):"
+                    + " CEL orders strings by code point, and a store that compares UTF-16 code"
+                    + " units (H2, Java's String.compareTo) puts a surrogate pair before"
+                    + " U+E000–U+FFFF");
         }
 
         return leaf.applyLeaf(op, path, value);

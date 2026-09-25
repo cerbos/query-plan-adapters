@@ -124,6 +124,20 @@ cases:
   condition:
     match:
       expr: 3 <= R.attr.aNumber
+- id: 'comparison/less-than/astral-string-against-high-bmp'
+  tier: adversarial
+  intent: 'A string attribute ordered below "héllo�", which shares a6''s prefix and then holds a character above the surrogate range.'
+  trap: 'CEL orders strings by code point, so a6''s U+1F680 sorts after U+FFFD and a6 is denied; comparing UTF-16 code units puts its high surrogate (0xD83D) first and over-grants a6.'
+  condition:
+    match:
+      expr: 'R.attr.aString < "héllo�"'
+- id: 'comparison/less-than/boolean-field-against-true'
+  tier: adversarial
+  intent: 'A boolean attribute ordered below true (aBool < true).'
+  trap: 'CEL orders bools, false before true, so every aBool false row is allowed; treating a bool ordering as an error under-grants them, and a missing aBool (j3) stays denied.'
+  condition:
+    match:
+      expr: 'R.attr.aBool < true'
 - id: 'comparison/less-than/double-below-int64-range'
   tier: adversarial
   intent: 'A double attribute compared < -1e19, a literal beyond the int64 range.'
@@ -141,6 +155,20 @@ cases:
   condition:
     match:
       expr: '(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()'
+- id: 'comparison/less-than/negated-astral-string-against-high-bmp'
+  tier: adversarial
+  intent: '!(aString < "héllo�"): the code point ordering under negation.'
+  trap: 'CEL allows a6, whose U+1F680 sorts after U+FFFD by code point; comparing UTF-16 code units makes the ordering true for a6 and the negation under-grants it, and a missing aString (j1) stays denied.'
+  condition:
+    match:
+      expr: '!(R.attr.aString < "héllo�")'
+- id: 'comparison/less-than/negated-boolean-field-against-true'
+  tier: adversarial
+  intent: '!(aBool < true): a boolean ordering under negation.'
+  trap: 'CEL allows every aBool true row, since true < true is false; treating a bool ordering as an error denies them under both polarities, and a missing aBool (j3) stays denied.'
+  condition:
+    match:
+      expr: '!(R.attr.aBool < true)'
 - id: 'comparison/less-than/negative-literal'
   tier: adversarial
   intent: 'Numeric attribute compared less-than a negative literal (aNumber < -1).'

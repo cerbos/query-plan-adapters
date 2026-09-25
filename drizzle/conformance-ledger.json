@@ -25,6 +25,14 @@
       "status": "unsupported",
       "reason": "int() over a string column compared with a constant at or beyond 2^53: PostgreSQL and MySQL compare a bigint with a double by converting the bigint, so 2^53 + 1 would equal 2^53. The adapter lowers the checked int() only against a constant below 2^53 in magnitude and refuses the rest."
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "string() over int(): string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. A CAST would render the number in the store's own format, and no cast target is shared by SQLite, PostgreSQL and MySQL (TEXT is a syntax error on MySQL, CHAR is character(1) on PostgreSQL), so string() of an int() conversion is refused."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-int-beyond-double-precision`: string() of an int() conversion has no CAST-free lowering, and CEL renders an int in plain decimal (\"1000000\") where it renders the double it came from as \"1e+06\", so the number-column inversion does not apply."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
@@ -41,6 +49,10 @@
       "status": "unsupported",
       "reason": "The to-one parent is a relation, which this adapter reads only as a relation filter (an EXISTS over the related row), never as a scalar value expression, so string() over parent.aBool has no operand to convert."
     },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
+    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() comparison over an ISO-date string column: 'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
@@ -52,6 +64,14 @@
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Unsupported value-expression operator: except."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as `collection/exists/map-keys`: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate."
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",

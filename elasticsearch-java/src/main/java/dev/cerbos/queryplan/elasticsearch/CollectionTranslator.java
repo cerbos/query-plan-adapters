@@ -88,6 +88,14 @@ final class CollectionTranslator {
                 if (equality != null) return equality;
                 throw unsupported("Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping");
             }
+            if (isObjectPath(esField)) {
+                // CEL ranges a macro over a map's keys. The field is an object whose sub-fields
+                // the field map names, and a query matches values, never the key set of an
+                // object, so no query answers the macro.
+                throw unsupported(operator + " over the object field '" + esField
+                        + "' ranges over its keys, as CEL iterates a map, and a Query DSL query"
+                        + " cannot enumerate the keys an object holds");
+            }
             throw unmapped("Field '" + esField + "' is not declared in nestedPaths. "
                     + "Collection operators require nested mappings.");
         }
@@ -294,6 +302,12 @@ final class CollectionTranslator {
         }
 
         return leaf.applyResolvedLeaf("hasIntersection", operands, root, Polarity.TRUE);
+    }
+
+    /** Whether the field map names a sub-field of {@code esField}, so it is an object in the index. */
+    private boolean isObjectPath(String esField) {
+        String prefix = esField + ".";
+        return options.fieldMap().values().stream().anyMatch(f -> f.startsWith(prefix));
     }
 
     private static boolean isMapProjection(Operand operand) {

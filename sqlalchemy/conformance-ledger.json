@@ -5,6 +5,18 @@
       "status": "unsupported",
       "reason": "A zero divisor makes CEL's quotient an infinity carrying the zero's sign, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read; a column divisor is refused unless zero can only give NaN (the numerator is the divisor itself or a constant zero)."
     },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "The dividend is int(aNumber), and int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the int division is reached."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as arithmetic/divide/int-truncates: the truncating int division over it is never reached."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as arithmetic/divide/int-truncates, under negation."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Both divisions divide by a column, and a zero divisor makes CEL's quotient an infinity carrying the zero's sign, which SQL cannot read (it compares -0.0 equal to 0.0, and SQLite stores it as 0.0); only a divisor whose zero can give nothing but NaN is lowered."
@@ -61,9 +73,21 @@
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "string() wraps int(aString), and int() is refused: SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "string() wraps int(aDouble), and int() is refused: PostgreSQL and MySQL CAST round where CEL truncates toward zero, and SQL has no error for a double beyond int64."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as cast/string/from-int-past-exponent-threshold, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -88,6 +112,14 @@
     "collection/except/size-of-difference": {
       "status": "unsupported",
       "reason": "Two-list except has no operator override or built-in SQL list-difference lowering."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so the harness's collection override refuses it."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same map-key iteration over the to-one parent row as collection/exists/map-keys, under negation."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",

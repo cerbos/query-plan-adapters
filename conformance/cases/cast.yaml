@@ -108,6 +108,27 @@ cases:
   condition:
     match:
       expr: 'string(R.attr.aDouble) == "1e+06" || string(R.attr.aDouble) == "2" || string(R.attr.aDouble) == "-9.5e+18"'
+- id: 'cast/string/from-int-beyond-double-precision'
+  tier: adversarial
+  intent: 'string(int(aString)) == "9007199254740993": an int past 2^53 rendered back to a string.'
+  trap: 'i6 holds 2^53 + 1, which CEL converts exactly and renders in full; an evaluator that carries the int as a double renders 2^53 instead, and one that cannot render a big int errors and under-grants i6.'
+  condition:
+    match:
+      expr: 'string(int(R.attr.aString)) == "9007199254740993"'
+- id: 'cast/string/from-int-past-exponent-threshold'
+  tier: adversarial
+  intent: 'string(int(aDouble)) == "1000000": an int of 1e6 rendered as a string.'
+  trap: 'CEL renders an int in plain decimal, "1000000" (i1), where a double of the same value renders "1e+06"; rendering the int with the double formatting under-grants i1.'
+  condition:
+    match:
+      expr: 'string(int(R.attr.aDouble)) == "1000000"'
+- id: 'cast/string/negated-from-int-past-exponent-threshold'
+  tier: adversarial
+  intent: '!(string(int(aDouble)) == "1000000"): the int rendering under negation.'
+  trap: 'Rendering the int 1000000 as the double "1e+06" makes the equality false for i1, so the negation over-grants i1, which CEL denies; a missing aDouble and an int() beyond int64 (g1) stay denied.'
+  condition:
+    match:
+      expr: '!(string(int(R.attr.aDouble)) == "1000000")'
 - id: 'cast/string/from-negative-zero-double'
   tier: adversarial
   intent: 'string(aDouble) == "-0", where i5 holds the double -0.0.'

@@ -10,6 +10,15 @@
   always stored and never null to keep it on Convex's filter engine. `"explicit"` output is
   unchanged ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 
+- `postFilter` evaluates five shapes as cel-go does (#545). Arithmetic over two ints (`int()`,
+  `size()`, int arithmetic, next to an integral constant) is exact int64 arithmetic, so
+  `int(R.attr.n) / 2` truncates toward zero instead of dividing to 1.5, and its negation no
+  longer returns the rows the PDP denied. `string()` over an int renders plain decimal
+  (`"1000000"`, not `"1e+06"`), including an int beyond 2^53. Strings order by code point, not
+  UTF-16 code unit, so an astral character sorts after U+E000–U+FFFF. Bools order, `false < true`,
+  where they used to be an evaluation error. `exists`, `exists_one`, `all`, `filter` and `map`
+  over a map-valued attribute range over its keys, where they used to be an evaluation error.
+
 - An ordering (`<`, `<=`, `>`, `>=`) against a literal is pushed to Convex only inside a guard
   confining the field to the literal's type, and `not` is pushed inward so the guard is never
   negated. Convex orders values across types, so a non-nullable field compared with a literal of

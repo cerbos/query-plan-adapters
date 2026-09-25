@@ -90,6 +90,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+- id: 'collection/exists/map-keys'
+  tier: adversarial
+  intent: 'exists() over a map-valued attribute, which ranges over its keys (parent.exists(k, k == "inner")).'
+  trap: 'A CEL macro over a map iterates its keys, so every row whose parent has a parent of its own is allowed; reading a map as no collection under-grants them, and a row with no parent is a missing attribute that denies.'
+  condition:
+    match:
+      expr: 'R.attr.parent.exists(k, k == "inner")'
 - id: 'collection/exists/element-in-principal-list'
   tier: extended
   intent: 'exists() over resource tags whose body tests the element''s name for membership in a principal list attribute.'
@@ -125,6 +132,13 @@ cases:
   condition:
     match:
       expr: '!R.attr.tags.exists(t, t.name == "public")'
+- id: 'collection/exists/negated-map-keys'
+  tier: adversarial
+  intent: 'Negated exists() over a map-valued attribute''s keys (!parent.exists(k, k == "inner")).'
+  trap: 'CEL allows each row whose parent has no parent of its own; reading a map as no collection is an error that denies them under both polarities, and a row with no parent stays denied.'
+  condition:
+    match:
+      expr: '!R.attr.parent.exists(k, k == "inner")'
 - id: 'collection/exists/negated-nested-over-same-collection'
   tier: adversarial
   intent: '!tags.exists(t, tags.exists(u, u.name != t.name)): every tag has the same name.'

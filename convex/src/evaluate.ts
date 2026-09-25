@@ -13,6 +13,7 @@ import {
   convertToInt,
   convertToString,
   getNestedValue,
+  intArithmetic,
   isEvaluationError,
   isHierarchyValue,
   isRecord,
@@ -20,6 +21,7 @@ import {
   parseRfc3339Timestamp,
   valuesEqual,
 } from "./cel";
+import type { ArithmeticOperator } from "./cel";
 import type { Mapper } from "./index";
 import {
   isExpression,
@@ -187,10 +189,17 @@ const lambdaOf = (call: Call): ((element: unknown) => unknown) => {
     });
 };
 
+/** What a macro ranges over: a list's elements, or a map's keys, as CEL iterates a map. */
+const macroItems = (collection: unknown): unknown[] | undefined => {
+  if (Array.isArray(collection)) return collection;
+  if (isRecord(collection)) return Object.keys(collection);
+  return undefined;
+};
+
 /** `exists`, `exists_one` and `all`, with CEL's error absorption across elements. */
 const quantifier = (call: Call): unknown => {
-  const collection = arg(call, 0, "collection");
-  if (!Array.isArray(collection)) return EVALUATION_ERROR;
+  const collection = macroItems(arg(call, 0, "collection"));
+  if (collection === undefined) return EVALUATION_ERROR;
   const body = lambdaOf(call);
   let trueCount = 0;
   let sawError = false;
@@ -226,6 +235,11 @@ const arithmetic = (call: Call): unknown => {
   const { operator } = call;
   const left = arg(call, 0, "left");
   const right = arg(call, 1, "right");
+  // Over two int operands CEL does int arithmetic: `int(3) / 2` truncates to 1, where JavaScript
+  // divides to 1.5. The plan carries no numeric type, so the mode is chosen from the expression.
+  if (isIntExpression({ operator, operands: call.operands })) {
+    return intArithmetic(operator as ArithmeticOperator, left, right);
+  }
   // CEL overloads `+` on strings, and JavaScript's `+` concatenates identically. Only `add`
   // has the overload — `sub`/`mult`/`div`/`mod` over strings stay a CEL error, which is what
   // falling through to the numeric guard below already produces. Before this, a string `add`
@@ -285,8 +299,16 @@ const modulo = (call: Call, left: number, right: number): unknown => {
  * `size()`, or int arithmetic over those. A field read is certainly a double; anything else has a
  * type the plan does not carry.
  */
-const isIntOperand = (operand: PlanExpressionOperand): boolean => {
-  if (isValue(operand)) return Number.isInteger(operand.value);
+const isIntOperand = (operand: PlanExpressionOperand): boolean =>
+  isValue(operand) ? Number.isInteger(operand.value) : isIntExpression(operand);
+
+/**
+ * Whether the operand is an expression whose result is certainly a CEL int: `int()`, `size()`, or
+ * arithmetic over ints of which at least one is such an expression. Arithmetic over integral
+ * constants alone is not: the planner keeps `0.0 / 0.0` unfolded beside `now()`, and ships it as
+ * `0 / 0`.
+ */
+const isIntExpression = (operand: PlanExpressionOperand): boolean => {
   if (!isExpression(operand)) return false;
   switch (operand.operator) {
     case "int":
@@ -295,8 +317,12 @@ const isIntOperand = (operand: PlanExpressionOperand): boolean => {
     case "add":
     case "sub":
     case "mult":
+    case "div":
     case "mod":
-      return operand.operands.every(isIntOperand);
+      return (
+        operand.operands.every(isIntOperand) &&
+        operand.operands.some(isIntExpression)
+      );
     default:
       return false;
   }
@@ -450,8 +476,8 @@ const OPERATORS: Record<string, Operator> = {
   all: { evaluate: quantifier },
   filter: {
     evaluate: (call) => {
-      const collection = arg(call, 0, "collection");
-      if (!Array.isArray(collection)) return EVALUATION_ERROR;
+      const collection = macroItems(arg(call, 0, "collection"));
+      if (collection === undefined) return EVALUATION_ERROR;
       const body = lambdaOf(call);
       const filtered: unknown[] = [];
       for (const item of collection) {
@@ -464,8 +490,8 @@ const OPERATORS: Record<string, Operator> = {
   },
   map: {
     evaluate: (call) => {
-      const collection = arg(call, 0, "collection");
-      if (!Array.isArray(collection)) return EVALUATION_ERROR;
+      const collection = macroItems(arg(call, 0, "collection"));
+      if (collection === undefined) return EVALUATION_ERROR;
       const body = lambdaOf(call);
       const mapped: unknown[] = [];
       for (const item of collection) {
@@ -531,7 +557,14 @@ const OPERATORS: Record<string, Operator> = {
   },
 
   // Each conversion maps an evaluation error to itself, so an error operand needs no special case.
-  string: { evaluate: (call) => convertToString(arg(call, 0, "operand")) },
+  string: {
+    // An int renders "1000000" where a double of the same value renders "1e+06".
+    evaluate: (call) =>
+      convertToString(
+        arg(call, 0, "operand"),
+        isIntExpression(operandAt(call.operands, 0, "string operand")),
+      ),
+  },
   double: { evaluate: (call) => convertToDouble(arg(call, 0, "operand")) },
   int: { evaluate: (call) => convertToInt(arg(call, 0, "operand")) },
   timestamp: {

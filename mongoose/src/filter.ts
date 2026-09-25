@@ -39,6 +39,18 @@ import {
   isValue,
   isVariable,
 } from "./operands";
+
+/**
+ * A macro over a reference mapped as a to-one relation. To CEL that attribute is a map, and a macro
+ * over a map ranges over its KEYS; the adapter translates a macro only as an element match over a
+ * collection relation's subdocuments, and has no filter that iterates a subdocument's field names.
+ * A refusal rather than a mapper error: the mapping is right, the shape is what cannot be spelled.
+ */
+const toOneMacroRefusal = (operator: string): UnsupportedQueryPlanError =>
+  new UnsupportedQueryPlanError(
+    `${operator}() over a to-one relation ranges over the related object's keys in CEL, and ` +
+      "a MongoDB filter has no form that iterates a subdocument's field names",
+  );
 import { escapeRegexValue, normalizeRe2PatternForMongo } from "./regex";
 
 /** Translates a CONDITIONAL plan's condition into a Mongoose filter. */
@@ -978,7 +990,7 @@ const translateMapIntersection = (
     throw new Error("map operator requires a relation mapping");
   }
   if (relation.type !== "many") {
-    throw new Error("map operator requires a collection relation");
+    throw toOneMacroRefusal("map");
   }
   if (!isVariable(projectionOperand)) {
     throw new UnsupportedQueryPlanError("Map projection must be a variable reference");
@@ -1073,7 +1085,7 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
       throw new Error(`${operator} operator requires a relation mapping`);
     }
     if (relation.type !== "many") {
-      throw new Error(`${operator} operator requires a collection relation`);
+      throw toOneMacroRefusal(operator);
     }
 
     const elementCondition = buildFilter(conditionOperand, {

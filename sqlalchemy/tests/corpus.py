@@ -360,7 +360,23 @@ def _require_hops(rel: _Relation, expr: Any):
     return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
 
+class _ToOneRow:
+    """The to-one `parent` read whole: a map-valued attribute, stored as a row."""
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return "_ToOneRow(parent)"
+
+
+PARENT = _ToOneRow()
+
+
 def _require_relation(op: str, coll: Any) -> _Relation:
+    if isinstance(coll, _ToOneRow):
+        raise UnsupportedPlanError(
+            f"{op} over the to-one parent ranges over the keys of a map, and the "
+            "parent is a row: SQL has no way to enumerate which of its columns are "
+            "non-NULL as the attribute's keys"
+        )
     if not isinstance(coll, _Relation):
         raise UnsupportedPlanError(
             f"{op} over unsupported collection operand: {coll!r}"
@@ -657,6 +673,8 @@ ATTR_MAP = {
     # Not a real nested column; aliases aString for comparison/equals/nested-map-member.
     "request.resource.attr.obj.inner": AdvResource.a_string,
     # The real to-one chain (`relation/*` cases), as correlated scalar subqueries.
+    # Read whole, the parent is a map; a macro over its keys is refused.
+    "request.resource.attr.parent": PARENT,
     "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
     "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
     "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
@@ -685,6 +703,9 @@ ATTR_MAP = {
     "s.labels": LABELS_OF_SUB,
     "l": LABELS_OF_SUB,
     "l.name": AdvLabel.name,
+    # A key of the parent map (collection/exists/map-keys). It has no column: the
+    # body translates, and the `exists` override then refuses the map it ranges over.
+    "k": literal(None, String),
     "request.resource.attr.mainCategory.subCategories": MAIN_SUB,
     "request.resource.attr.mainCategory.subNames": MAIN_SUBNAMES,
 }
