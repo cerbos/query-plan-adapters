@@ -289,7 +289,7 @@ and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribu
 > - SQL Server: a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`).
 > - PostgreSQL: equality is exact by default, but string ordering (`<`, `>`, `<=`, `>=`) follows
 >   the column collation, and a linguistic default such as `en_US.utf8` does not order by code
->   point (`'OneSet' < 'b'` is false). Use `"C"` for columns compared by ordering, and avoid
+>   point (`'OneSet' < 'b'` is false, `'One' > 'a'` is true). Use `"C"` for columns compared by ordering, and avoid
 >   case-insensitive behaviour (nondeterministic ICU collations, `citext`).
 > - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour.
 
@@ -329,6 +329,9 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
   ./gradlew test --tests AdversarialConformanceTest
 # Case-sensitive but not byte-exact — FAILS on seed h6
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
+  ./gradlew test --tests AdversarialConformanceTest
+# PostgreSQL's linguistic glibc default — FAILS both comparison/*/string-code-point-order cases (#489)
+ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.utf8 \
   ./gradlew test --tests AdversarialConformanceTest
 ```
 
@@ -402,7 +405,7 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 265 / 286 |
+| adversarial | 267 / 288 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 18 are `unsupported`, where the adapter

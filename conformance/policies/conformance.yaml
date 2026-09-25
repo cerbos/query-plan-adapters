@@ -894,6 +894,15 @@ resourcePolicy:
       condition:
         match:
           expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+    # comparison/greater-than/string-code-point-order
+    - actions:
+        - comparison/greater-than/string-code-point-order
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString > "a"
     # comparison/less-or-equal/field-against-literal
     - actions:
         - comparison/less-or-equal/field-against-literal
@@ -921,6 +930,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
+    # comparison/less-or-equal/string-code-point-order
+    - actions:
+        - comparison/less-or-equal/string-code-point-order
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString <= "one"
     # comparison/less-or-equal/value-first
     - actions:
         - comparison/less-or-equal/value-first

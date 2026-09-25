@@ -174,12 +174,18 @@ a vacuous pass.
   - Materialise a *separate* parent row per resource.
   - An absent level is a missing attribute, so it is UNKNOWN under negation, never false. See
     [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
-- **Store configuration is part of conformance.** CEL string comparison is byte-exact:
+- **Store configuration is part of conformance.** CEL string comparison is byte-exact, and CEL
+  orders strings by code point:
   - MySQL must use `utf8mb4_0900_bin`.
   - SQLite needs `PRAGMA case_sensitive_like = ON`, or string matching lowered to something other than
     `LIKE`.
+  - PostgreSQL must order by byte: every PostgreSQL leg initialises its database with
+    `--lc-collate=C` rather than inheriting the image's libc order, and
+    `ADAPTER_TEST_POSTGRES_INITDB_ARGS` overrides it to reproduce a linguistic collation's
+    over-grant ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)).
 
-  The `string/*/case-sensitive` and soft-hyphen cases witness this.
+  The `string/*/case-sensitive`, soft-hyphen and `comparison/*/string-code-point-order` cases
+  witness this.
 
 ## Mapping hazards
 

@@ -289,19 +289,28 @@ neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) an
 ## The collation is part of the contract
 
 CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
-`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows.
+`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows. CEL also
+orders strings by code point, and `<`, `<=`, `>` and `>=` follow the collation.
 
-- **SQLite:** set `PRAGMA case_sensitive_like = ON`.
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
+  point.
+- **PostgreSQL:** every collation is deterministic, so equality is exact, but string ordering needs
+  a byte-order collation, `"C"`. A linguistic one such as glibc's `en_US.UTF-8` (the usual default
+  on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`, so
+  `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
+  `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders.
 - **MySQL:** use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every column your policies read. `_cs` is
   not enough — `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD
   SPACE (`'a' = 'a '` is TRUE) ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  Make the **connection** collation byte-exact too (`collation: utf8mb4_0900_bin` in the mysql2
-  config, which ActiveRecord applies with `SET NAMES`): `string()` of a column is a `CAST` or a
-  `CASE` over literals, so it takes the connection collation, and under the default
-  `utf8mb4_0900_ai_ci` `string(R.attr.owner) == "set"` also matches `Set`.
+  `utf8mb4_0900_bin` orders by code point. Make the **connection** collation byte-exact too
+  (`collation: utf8mb4_0900_bin` in the mysql2 config, which ActiveRecord applies with
+  `SET NAMES`): `string()` of a column is a `CAST` or a `CASE` over literals, so it takes the
+  connection collation, and under the default `utf8mb4_0900_ai_ci` `string(R.attr.owner) == "set"`
+  also matches `Set`.
 
-The conformance suite runs on SQLite, PostgreSQL and MySQL (`utf8mb4_0900_bin` on the columns
-and the connection). The other suites run on SQLite.
+The conformance suite runs on SQLite, PostgreSQL (initialised with `--lc-collate=C`) and MySQL
+(`utf8mb4_0900_bin` on the columns and the connection). The other suites run on SQLite.
 
 ## How the adapter keeps the three-valued logic
 
@@ -357,7 +366,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 217 / 286 |
+| adversarial | 219 / 288 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

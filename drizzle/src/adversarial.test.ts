@@ -414,6 +414,28 @@ const POSTGRES_IMAGE =
   "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
 
 /**
+ * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
+ *
+ * **This is a correctness requirement, not a preference.** CEL orders strings by code point, and
+ * `<`, `<=`, `>` and `>=` on a text column follow the column's collation. PostgreSQL collations are
+ * deterministic, so `=` is byte-exact under any of them, but a linguistic one orders case,
+ * accents and punctuation below the letter: under glibc's `en_US.utf8` `'One' > 'a'` is TRUE,
+ * which over-grants `comparison/greater-than/string-code-point-order`
+ * (cerbos/query-plan-adapters#489). `"C"` orders by byte, which for UTF-8 is code point order.
+ *
+ * Stated rather than inherited: the Alpine image reports `en_US.utf8` without it, and orders by
+ * byte only because musl's `strcoll` does. The same database on a glibc image, or on a managed
+ * service, orders linguistically.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust —
+ * `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" npm run
+ * test:adversarial:postgres` gives the pinned image ICU's linguistic order, which musl cannot, and
+ * fails both `string-code-point-order` cases. A measurement escape hatch, not a CI leg.
+ */
+const POSTGRES_INITDB_ARGS =
+  process.env["ADAPTER_TEST_POSTGRES_INITDB_ARGS"] ?? "--lc-collate=C";
+
+/**
  * The PostgreSQL leg (cerbos/query-plan-adapters#320).
  *
  * The column types are the point: `boolean` and `timestamptz` exercise the typed paths SQLite
@@ -423,9 +445,7 @@ const POSTGRES_IMAGE =
  * division by zero where SQLite returns NULL, which is what proves the adapter's IEEE CASE arms
  * guard the division rather than merely reshaping its NULL.
  *
- * The default collation the image initialises with is left alone: PostgreSQL collations are
- * deterministic, so `=` stays byte-exact and matches CEL string equality. (MySQL's default is
- * case-insensitive, which is why the ent harness has to pin a binary collation there.)
+ * The database is initialised under `POSTGRES_INITDB_ARGS`, below: a byte-order collation.
  */
 function postgresStore(): AdversarialStore {
   const schema = postgresSchema();
@@ -470,7 +490,9 @@ function postgresStore(): AdversarialStore {
     ],
 
     async start(): Promise<void> {
-      container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+      container = await new PostgreSqlContainer(POSTGRES_IMAGE)
+        .withEnvironment({ POSTGRES_INITDB_ARGS })
+        .start();
       pool = new Pool({ connectionString: container.getConnectionUri() });
       db = drizzlePostgres(pool);
 

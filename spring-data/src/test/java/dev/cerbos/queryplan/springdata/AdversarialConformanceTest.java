@@ -205,10 +205,14 @@ class AdversarialConformanceTest {
             case "h2":
                 return Persistence.createEntityManagerFactory("adversarial-pu");
             case "postgres": {
-                // Byte-exact collation. The image's default en_US.utf8 orders linguistically, so
-                // "OneSet" < "b" is false there while CEL orders by code point.
+                // Byte-order collation by default. CEL orders strings by code point; the image's
+                // default en_US.utf8 orders linguistically, so "One" > "a" is true there (#489).
+                // Override adapter.test.postgres.initdbArgs (--lc-collate=en_US.utf8) to
+                // reproduce the over-grant.
+                String initdbArgs = System.getProperty(
+                        "adapter.test.postgres.initdbArgs", "--lc-collate=C");
                 PostgreSQLContainer pg = new PostgreSQLContainer(DatabaseTestImages.POSTGRES)
-                        .withEnv("POSTGRES_INITDB_ARGS", "--lc-collate=C");
+                        .withEnv("POSTGRES_INITDB_ARGS", initdbArgs);
                 pg.start();
                 database = pg;
                 return Persistence.createEntityManagerFactory(

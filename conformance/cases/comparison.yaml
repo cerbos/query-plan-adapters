@@ -73,6 +73,13 @@ cases:
   condition:
     match:
       expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+- id: 'comparison/greater-than/string-code-point-order'
+  tier: adversarial
+  intent: 'A plain string attribute ordered greater-than a literal (aString > "a").'
+  trap: 'CEL orders strings by code point, so every upper-case or "[" initial sorts before "a"; a case- and punctuation-insensitive linguistic collation sorts c1 "One", d1 "[SEC]ret" and d2 "Secret" after it and over-grants them (glibc en_US.UTF-8 all three, ICU en-US c1 and d2).'
+  condition:
+    match:
+      expr: 'R.attr.aString > "a"'
 - id: 'comparison/less-or-equal/field-against-literal'
   tier: core
   intent: 'Less-or-equal on a numeric attribute (aNumber <= 2).'
@@ -103,6 +110,13 @@ cases:
     - 0.54.0
     reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
 
+- id: 'comparison/less-or-equal/string-code-point-order'
+  tier: adversarial
+  intent: 'A plain string attribute ordered less-or-equal a literal (aString <= "one").'
+  trap: 'CEL orders strings by code point, so "é" (U+00E9) sorts after "o". A linguistic collation weighs accents and case below the letter and skips punctuation, so it over-grants h7 "é-x-é" and i7 (KELVIN SIGN, U+212A, sorted as "k"), under-grants c1 "One" and d2 "Secret", and on glibc en_US.UTF-8 also over-grants h6 (soft hyphen ignored) and under-grants d1 "[SEC]ret".'
+  condition:
+    match:
+      expr: 'R.attr.aString <= "one"'
 - id: 'comparison/less-or-equal/value-first'
   tier: adversarial
   intent: Literal on the left of <= against a numeric attribute (3 <= aNumber).

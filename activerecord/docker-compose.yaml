@@ -30,6 +30,13 @@ services:
     environment:
       POSTGRES_PASSWORD: conformance
       POSTGRES_DB: conformance
+      # A byte-order collation, stated rather than inherited. CEL orders strings by code point,
+      # and <, <=, > and >= on a text column follow the column's collation: under glibc's
+      # en_US.utf8 'One' > 'a' is TRUE (#489). The Alpine image reports en_US.utf8 and orders by
+      # byte only because musl's strcoll does. ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it to
+      # reproduce the over-grant, for example "--locale-provider=icu --icu-locale=en-US"; a
+      # measurement, not a CI leg.
+      POSTGRES_INITDB_ARGS: ${ADAPTER_TEST_POSTGRES_INITDB_ARGS:---lc-collate=C}
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "conformance"]
       interval: 2s

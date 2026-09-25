@@ -240,6 +240,20 @@ collation. A case-insensitive collation is an **over-grant the adapter cannot de
 collation as part of your policy contract: use a deterministic collation (the PostgreSQL default)
 on every column policies compare. Nondeterministic ICU collations and `citext` are not safe.
 
+**String ordering needs more.** CEL orders strings by code point, and `<`, `<=`, `>` and `>=`
+follow the column's collation. A linguistic collation such as glibc's `en_US.UTF-8` (the usual
+default on Debian images and managed services) or ICU's `en-US` is deterministic, yet sorts
+`"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use a byte-order collation,
+`"C"`, on every column a policy orders: create the database with `LC_COLLATE 'C'`, or declare
+`COLLATE "C"` on the column.
+
+The conformance harness initialises its database with `--lc-collate=C` rather than trusting the
+Alpine image, whose musl libc orders by byte only by accident.
+`ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
+TestAdversarialConformance ./...` replays the corpus under a linguistic order and fails both
+`comparison/*/string-code-point-order` cases.
+
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
@@ -251,7 +265,7 @@ PDP's goldens (0.54.0) are replayed too.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 222 / 286 |
+| adversarial | 224 / 288 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.

@@ -277,8 +277,16 @@ collation, so a case- or accent-insensitive collation makes the filter return ro
 The adapter cannot set a collation or a pragma from inside a `where`.
 
 - **PostgreSQL:** a deterministic, case-sensitive collation. No `citext`, no `mode: "insensitive"`
-  on mapped fields.
-- **MySQL:** `utf8mb4_0900_bin` (MySQL 8.0.17+), the only collation that is byte-exact and NO PAD.
+  on mapped fields. **String ordering** (`<`, `<=`, `>`, `>=`) also needs a byte-order collation,
+  `"C"`: CEL orders strings by code point, and a linguistic collation such as glibc's
+  `en_US.UTF-8` (the usual default on Debian images and managed services) or ICU's `en-US` sorts
+  `"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
+  `LC_COLLATE 'C'`, or set `COLLATE "C"` in a migration on each column a policy orders. The conformance PostgreSQL legs initialise with `--lc-collate=C`;
+  `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US"` replays them
+  under a linguistic order and fails both `comparison/*/string-code-point-order` cases.
+- **MySQL:** `utf8mb4_0900_bin` (MySQL 8.0.17+), the only collation that is byte-exact and NO PAD,
+  and it orders by code point.
   `utf8mb4_0900_as_cs` is not enough: it ignores default-ignorable code points, so
   `'o­ne' = 'one'` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
   `utf8mb4_bin` is PAD SPACE, so `'a' = 'a '`. On MariaDB the equivalent is `utf8mb4_nopad_bin`
@@ -298,7 +306,8 @@ The adapter cannot set a collation or a pragma from inside a `where`.
   policy that allowed `"one"`); under `utf8mb4_0900_as_cs`, **17** disagree, all on the
   soft-hyphen seed `h6`.
 - **SQL Server:** a case-sensitive (`_CS_`) collation, not `_CI_`.
-- **SQLite:** no `COLLATE NOCASE` on mapped fields, **and** `PRAGMA case_sensitive_like = ON` on
+- **SQLite:** no `COLLATE NOCASE` on mapped fields (the default `BINARY` orders by code point, as
+  CEL does), **and** `PRAGMA case_sensitive_like = ON` on
   every connection. `contains`/`startsWith`/`endsWith` lower to `LIKE`, which is ASCII
   case-insensitive on SQLite regardless of column collation. The pragma is per connection, not per
   schema, and Prisma 6's query engine pools SQLite connections, so one `$executeRawUnsafe` reaches
@@ -404,7 +413,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 226 / 286 |
+| adversarial | 228 / 288 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -418,7 +427,8 @@ negates it as an ordinary condition, which a missing attribute leaves unsatisfia
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 **Providers.** `ADAPTER_TEST_MYSQL_COLLATION` replays the MySQL legs under another collation, which
-is how the figures in the collation section were measured. MySQL adds no refused shape. SQL Server
+is how the figures in the collation section were measured, and `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
+replays the PostgreSQL legs under another initdb locale. MySQL adds no refused shape. SQL Server
 and CockroachDB are **not** executed: refusal reasons naming them are reasoned from documented
 `LIKE` behaviour.
 

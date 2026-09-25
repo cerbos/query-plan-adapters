@@ -326,6 +326,16 @@ Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­n
 TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
 ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
 
+String ordering (`<`, `<=`, `>`, `>=`) follows the collation too, and CEL orders strings by code
+point. SQLite's default `BINARY` and MySQL's `utf8mb4_0900_bin` do. On PostgreSQL every collation
+is deterministic, so equality is exact, but a linguistic one such as glibc's `en_US.UTF-8` (the
+usual default on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`,
+so `R.attr.name > "a"` over-grants it
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use `"C"` on every column a
+policy orders: create the database with `LC_COLLATE 'C'`, or declare `COLLATE "C"` on the column.
+The conformance harness's PostgreSQL container initialises with `--lc-collate=C`, overridable
+through `ADAPTER_TEST_POSTGRES_INITDB_ARGS`.
+
 On MySQL a string literal, and `string()` of a column (`CAST(... AS CHAR)`, or the `'true'`/`'false'`
 of a boolean), take the **connection's** collation, not the column's, and a utf8mb4 session starts
 at `utf8mb4_0900_ai_ci` whatever the server default is. Set `utf8mb4_0900_bin` on every connection,
@@ -408,7 +418,7 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 221 / 286 |
+| adversarial | 223 / 288 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
