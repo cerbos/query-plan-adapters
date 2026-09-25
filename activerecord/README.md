@@ -294,8 +294,10 @@ instead of collapsing it to a boolean. You will see this in the SQL:
   `NOT`.
 - Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
   element is true, `all` if any element is false, `exists_one` never does.
-- `string()` over a boolean column becomes a `CASE` starting `WHEN col IS NULL THEN NULL`, then
-  spells `'true'`/`'false'` (a plain `CAST` gives `"1"` on SQLite and MySQL).
+- `string()` over a boolean — a boolean column, or any comparison, logical operator, `in` or
+  string predicate — becomes `CASE WHEN b THEN 'true' WHEN NOT (b) THEN 'false' END`, again with
+  no `ELSE`, so a NULL stays NULL (a plain `CAST` gives `"1"` on SQLite and MySQL). Any other
+  `string()` is a `CAST` to `TEXT`, or to `CHAR` on MySQL, whose `CAST` accepts no `TEXT`.
 
 ## Supported operators
 
@@ -336,7 +338,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 185 / 254 |
+| adversarial | 186 / 254 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

@@ -53,14 +53,23 @@ module Cerbos
         end
 
         # `CAST(x AS TEXT)` matches CEL except for booleans and doubles. SQLite and MySQL give
-        # "1" for a boolean, not "true": booleans go through {#boolean_to_string}. A double is
-        # held as a {Values::DoubleText} until a comparison resolves it: see
-        # {#compare_double_text}.
+        # "1" for a boolean, not "true", so anything CEL holds as a boolean goes through
+        # {#boolean_to_string}: a boolean column, and every comparison, logical operator,
+        # membership test or string predicate (see {#boolean_value?}). A double is held as a
+        # {Values::DoubleText} until a comparison resolves it: see {#compare_double_text}.
         def cast_to_string(value)
-          return boolean_to_string(value) if column_type(value) == :boolean
+          return value.to_s if value == true || value == false
+          return boolean_to_string(value) if boolean_value?(value)
           return Values::DoubleText.new(value) if cel_double?(value)
 
           cast(value, dialect.text_type)
+        end
+
+        # A resolved Arel node that CEL holds as a boolean: a boolean column, or the result of
+        # an operator that returns one (recorded by {Translator#evaluate_expression}).
+        def boolean_value?(value)
+          ArelSupport.arel_node?(value) &&
+            (column_type(value) == :boolean || cel_type(value) == :bool)
         end
 
         # A column or a computed value that CEL holds as a double. Every number in a request
@@ -138,19 +147,21 @@ module Cerbos
           end
         end
 
-        # `string()` on a boolean column, portable across dialects (#418):
+        # `string()` over a boolean, portable across dialects (#418, #471):
         #
-        #   CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+        #   CASE WHEN b THEN 'true' WHEN NOT (b) THEN 'false' END
         #
-        # The IS NULL arm matters: CEL errors on a null, so the row must stay out. Without it,
-        # NULL would become "false" and `string(x) != "true"` would return a denied row.
+        # No ELSE, as in {Translator#branches}: CEL errors on a null or a missing attribute, so
+        # the row must stay out under both polarities, and an UNKNOWN `b` matches neither WHEN.
+        # An ELSE would make it "false", and `string(x) != "true"` would return a denied row.
+        # `b` is used as a condition rather than tested with `IS NULL`: PostgreSQL binds
+        # `IS NULL` tighter than `>`, so `a > 3 IS NULL` would not parse as meant.
         #
         # The result is recorded as a string column. MySQL compares the literals in the
         # connection collation (README, "The collation is part of the contract").
-        def boolean_to_string(column)
+        def boolean_to_string(value)
           text = ArelSupport.case_node(
-            [[ArelSupport.comparison("eq", column, nil), nil], [column, "true"]],
-            else_value: "false"
+            [[value, "true"], [ArelSupport.not_node(value), "false"]]
           )
           record_column_type(text, :string)
         end
