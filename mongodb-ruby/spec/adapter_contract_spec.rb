@@ -22,6 +22,19 @@ RSpec.describe "adapter contract" do
     Cerbos::MongoDB.query_plan_to_filter(plan: plan(condition), mapper: mapper, **options).filter
   end
 
+  # Whether +target+ occurs anywhere in +node+ as a whole value: a key's value, an array
+  # element, or the node itself. Compared as data, so no assertion depends on how a Ruby version
+  # prints a Hash.
+  def contains_node?(node, target)
+    return true if node == target
+
+    case node
+    when Hash then node.values.any? { |value| contains_node?(value, target) }
+    when Array then node.any? { |element| contains_node?(element, target) }
+    else false
+    end
+  end
+
   describe "the result" do
     it "reports each plan kind and a filter that is safe to run as-is" do
       allowed = Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_ALLOWED"})
@@ -116,7 +129,7 @@ RSpec.describe "adapter contract" do
       from_json = filter(expr("eq", expr("index", var("request.resource.attr.list"), val(1)), val("x")), mapper)
       from_grpc = filter(expr("eq", expr("index", var("request.resource.attr.list"), val(1.0)), val("x")), mapper)
       expect(from_grpc).to eq(from_json)
-      expect(from_grpc.inspect).to include('"$arrayElemAt" => ["$list", 1]')
+      expect(contains_node?(from_grpc, {"$arrayElemAt" => ["$list", 1]})).to be(true)
     end
 
     # BSON has no integer wider than 64 bits, and the planner's number was a double all along.
@@ -285,7 +298,7 @@ RSpec.describe "adapter contract" do
       declared.merge(relation: relation.merge(fields: relation[:fields].transform_values { |field| declaring_nullable(field, nullable) }))
     end
 
-    def guard(field) = JSON.generate({field => {"$ne" => nil}})
+    def guard(field) = {field => {"$ne" => nil}}
 
     [
       ["string/equals/case-sensitive", "aString"],
@@ -309,8 +322,8 @@ RSpec.describe "adapter contract" do
     ].each do |(id, field)|
       it "#{id} guards #{field} outside the negation" do
         mapper = undeclared(field)
-        expect(JSON.generate(corpus_filter(id, mapper))).not_to include(guard(field))
-        expect(JSON.generate(omitted(id, mapper))).to include(guard(field))
+        expect(contains_node?(corpus_filter(id, mapper), guard(field))).to be(false)
+        expect(contains_node?(omitted(id, mapper), guard(field))).to be(true)
       end
     end
 
@@ -325,8 +338,8 @@ RSpec.describe "adapter contract" do
     # `tagNames` projects the `name` field of each `tags` element, which declares no `nullable`.
     it "a relation's element field takes the default too" do
       id = "collection/exists/scalar-list-equals"
-      expect(JSON.generate(corpus_filter(id))).not_to include(guard("name"))
-      expect(JSON.generate(omitted(id))).to include(guard("name"))
+      expect(contains_node?(corpus_filter(id), guard("name"))).to be(false)
+      expect(contains_node?(omitted(id), guard("name"))).to be(true)
     end
 
     # `nullable: false` is the per-entry opt-out: it asserts the field is always stored.
@@ -357,7 +370,7 @@ RSpec.describe "adapter contract" do
     it "keeps a $-prefixed string constant a constant inside $expr" do
       mapper = {"request.resource.attr.a" => {field: "a"}}
       emitted = filter(expr("eq", expr("add", var("request.resource.attr.a"), val("q")), val("$b")), mapper)
-      expect(emitted.inspect).to include('"right" => {"$literal" => "$b"}')
+      expect(contains_node?(emitted, {"$literal" => "$b"})).to be(true)
     end
 
     # Corpus gap. `!(R.attr.s < (R.attr.b ? 1 : 2))` over a string `s` is a no-such-overload
