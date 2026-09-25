@@ -53,10 +53,6 @@
       "status": "unsupported",
       "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
     },
-    "cast/int/double-truncation-bounds": {
-      "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
-    },
     "cast/int/malformed-string": {
       "status": "unsupported",
       "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
@@ -64,10 +60,6 @@
     "cast/int/negated-malformed-string": {
       "status": "unsupported",
       "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
-    },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
     },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",

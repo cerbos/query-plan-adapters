@@ -230,8 +230,8 @@ class ScalarLeafTest {
             assertSelects("cast/string/from-double", "r2")
 
         @Test
-        fun `int() and double() are refused, in every position`() {
-            listOf("cast/int/negative-fraction", "cast/int/malformed-string", "cast/double/malformed-string").forEach { action ->
+        fun `int() and double() over a string are refused`() {
+            listOf("cast/int/malformed-string", "cast/double/malformed-string").forEach { action ->
                 val error = assertThrows<UnsupportedPlanShapeException>(action) { Scalars.ids(action) }
                 assertTrue(
                     error.message!!.contains("SQL CAST reads the numeric prefix"),

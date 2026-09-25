@@ -559,11 +559,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 72 / 80 |
-| adversarial | 263 / 308 |
+| adversarial | 265 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-46 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+44 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -576,7 +576,9 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
 - `except()`, `filter()` or `map()` used as a value rather than inside `size()` or
   `hasIntersection()`, and whole-list equality against a relation;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
-  where CEL requires the whole string, and rounds where CEL truncates;
+  where CEL requires the whole string, and rounds where CEL truncates. `int()` of a numeric column
+  compared with a constant translates, solved for the column: `int(x) >= 1` is `x >= 1`,
+  `int(x) == 0` is `-1 < x < 1`, UNKNOWN outside `±2^63`, where CEL raises;
 - `string()` over a computed number (a conversion, a ternary of numbers) rather than a mapped
   column, and over a floating-point column compared with `"0"` or `"-0"`: SQL `CAST` prints numbers
   differently from CEL, and cannot read the sign of a stored `-0.0`. `string()` of a

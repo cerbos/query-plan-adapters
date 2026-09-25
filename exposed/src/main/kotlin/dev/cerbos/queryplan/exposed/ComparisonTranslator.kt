@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.NullLiteral
 import dev.cerbos.queryplan.exposed.sql.Params
@@ -111,6 +112,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
             fun instant(): Instant = parseInstant(PlanValues.toKotlin(operand.value))
         }
 
+        /** `int(variable)` — CEL's truncating conversion over a mapped column. */
+        class IntCast(val variable: String) : Resolved
+
         /** `string(variable)` — CEL's text conversion over a mapped column. */
         class TextCast(val variable: String) : Resolved
 
@@ -146,6 +150,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
                         else -> Resolved.Opaque
                     }
                 }
+                inner == "int" && expression.operandsCount == 1 &&
+                    expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
+                    Resolved.IntCast(expression.getOperands(0).variable)
                 inner == "string" && expression.operandsCount == 1 &&
                     expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
                     Resolved.TextCast(expression.getOperands(0).variable)
@@ -323,6 +330,12 @@ internal class ComparisonTranslator(private val translation: Translation) {
             return leafFieldValue(operator, field, constant.value(), scope)
         }
         if (operator in COMPARISON_OPERATORS) {
+            if (left is Resolved.IntCast && right is Resolved.Constant) {
+                return intCastComparison(operator, left.variable, right.value(), scope)
+            }
+            if (left is Resolved.Constant && right is Resolved.IntCast) {
+                return intCastComparison(NormalizedBinary.mirror(operator), right.variable, left.value(), scope)
+            }
             if (left is Resolved.Positional && right is Resolved.Constant) {
                 return positionalComparison(operator, left, right.value(), scope)
             }
@@ -336,6 +349,44 @@ internal class ComparisonTranslator(private val translation: Translation) {
         }
 
         throw leafOperandError(operator, operands)
+    }
+
+    /**
+     * `int(column) op constant` over a NUMERIC column, solved for the column rather than cast.
+     *
+     * CEL's `int()` of a double truncates toward zero, and raises for a value at or beyond ±2^63,
+     * for NaN and for an infinity (cel-go's `doubleToInt64Checked`); a NULL column is a missing
+     * attribute. So the answer is UNKNOWN unless `-2^63 < x < 2^63` holds, and otherwise decided
+     * on `x` itself: `trunc(x) >= m` is `x >= m` for `m >= 1` and `x > m - 1` below, and
+     * `trunc(x) <= m` is `x <= m` for `m <= -1` and `x < m + 1` above. CEL orders an int against a
+     * double numerically, so a fractional constant is an integral bound (`> 1.5` is `>= 2`), never
+     * equal. Every bound is a whole number within ±2^53, so the IEEE comparison against the column
+     * is exact; a constant outside that, or not finite, is refused. A text or boolean column is
+     * refused as before (`int()` of a string parses it).
+     */
+    private fun intCastComparison(operator: String, variable: String, value: Any?, scope: Scope): Op<Boolean> {
+        val target = scope.scalar(variable)
+        if (!ScalarColumnTypes.isNumeric(target.column)) throw ScalarRefusals.numericCastUnsupported("int")
+        val constant = (value as? Number)?.toDouble() ?: throw ScalarRefusals.numericCastUnsupported("int")
+        if (!constant.isFinite() || Math.abs(constant) > EXACT_DOUBLE_INTEGER) {
+            throw ScalarRefusals.numericCastUnsupported("int")
+        }
+        val x = IeeeDoubleCast(target.expression)
+        fun bound(m: Double) = Params.of(m)
+        fun atLeast(m: Double): Op<Boolean> = if (m >= 1) GreaterEqOp(x, bound(m)) else GreaterOp(x, bound(m - 1))
+        fun atMost(m: Double): Op<Boolean> = if (m <= -1) LessEqOp(x, bound(m)) else LessOp(x, bound(m + 1))
+        val whole = constant == Math.rint(constant)
+        val base: Op<Boolean> = when (operator) {
+            "eq" -> if (whole) TriLogic.and(atLeast(constant), atMost(constant)) else Op.FALSE
+            "ne" -> if (whole) TriLogic.not(TriLogic.and(atLeast(constant), atMost(constant))) else Op.TRUE
+            "gt" -> atLeast(Math.floor(constant) + 1)
+            "ge" -> atLeast(Math.ceil(constant))
+            "lt" -> atMost(Math.ceil(constant) - 1)
+            "le" -> atMost(Math.floor(constant))
+            else -> throw Refusals.internal("Unsupported int() comparison operator: $operator")
+        }
+        val inRange = TriLogic.and(GreaterOp(x, bound(-INT64_BOUND)), LessOp(x, bound(INT64_BOUND)))
+        return TriLogic.baseUnlessUnknown(base, TriLogic.not(inRange))
     }
 
     /**
@@ -870,6 +921,12 @@ internal class ComparisonTranslator(private val translation: Translation) {
     )
 
     companion object {
+        /** 2^63: cel-go's `int()` refuses a double at or beyond it in either direction. */
+        private const val INT64_BOUND: Double = 9.223372036854775808E18
+
+        /** 2^53: every whole double within it is exact, and so is its successor. */
+        private const val EXACT_DOUBLE_INTEGER: Double = 9.007199254740992E15
+
         val COMPARISON_OPERATORS: Set<String> = setOf("eq", "ne", "lt", "le", "gt", "ge")
         val STRING_MATCH_OPERATORS: Set<String> = setOf("contains", "startsWith", "endsWith")
 
