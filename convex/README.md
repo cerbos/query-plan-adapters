@@ -197,7 +197,8 @@ Pushed to Convex's filter engine (`filter`):
 | Category | Operators | Emits |
 | --- | --- | --- |
 | Logical | `and`, `or`, `not` | `q.and`, `q.or`, `q.not` |
-| Comparison | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | `q.eq`, `q.neq`, `q.lt`, `q.lte`, `q.gt`, `q.gte` |
+| Comparison | `eq`, `ne` | `q.eq`, `q.neq` |
+| Ordering | `lt`, `le`, `gt`, `ge` | `q.lt`, `q.lte`, `q.gt`, `q.gte`, each inside a guard confining the field to the literal's type ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)) |
 | Membership | `in` | `q.or(q.eq(field, v1), q.eq(field, v2), …)` — can be slow for long lists |
 | Null checks | `eq`/`ne` against `null` | The planner has no existence operator |
 
@@ -283,18 +284,19 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 315 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 332 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
-| Convex's filter engine, alone | 15 |
-| the adapter's `postFilter`, alone | 294 |
+| Convex's filter engine, alone | 18 |
+| the adapter's `postFilter`, alone | 308 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
-Convex's own comparison semantics only decide the 15, which include the null comparisons against
-the explicit-null `owner` field (`q.eq(field, null)` against a stored null).
+Convex's own comparison semantics only decide the 18, which include the null comparisons against
+the explicit-null `owner` field (`q.eq(field, null)` against a stored null) and its orderings
+against a string, where a stored null must not sort below `"m"`.
 The corpus's three most-read scalars, `aBool`, `aString` and `aNumber`, can each be absent (one
 seed apiece), so the harness declares them `nullable` and their predicates are post-filtered too:
 Convex's filter engine cannot tell an absent field from a present one the way CEL does.
@@ -353,6 +355,13 @@ See also [CHANGELOG.md](CHANGELOG.md).
   readmitted every document missing the path. Correct rows, but one more shape scanned, and such
   plans now need `allowPostFilter: true`
   ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- An ordering against a literal is pushed to Convex only inside a guard confining the field to the
+  literal's type, and a `not` above it is pushed inward so the guard is never negated. Convex
+  orders values across types (null < number < boolean < string), so `q.lt(field, "5")` held for
+  every number, where CEL's `5 < "5"` is an error that denies; under `!`, `!(x >= "5")`
+  returned every number. An ordering against a null, a list or a map is now a constant false.
+  Filters change shape; nothing that translated now throws
+  ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)).
 - **Breaking (Cerbos 0.55 compatibility):** ordered comparisons involving NaN evaluate to false, so
   their negation can allow a row; Cerbos 0.54 denied it. The adapter follows 0.55 — use it with
   Cerbos 0.55 when policies can produce NaN in a negated comparison. Missing attributes and nulls
