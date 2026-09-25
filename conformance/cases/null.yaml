@@ -114,13 +114,13 @@ cases:
 - id: 'null/has/missing-attribute'
   tier: extended
   intent: has() presence test over an optional attribute.
-  trap: 'has() must become a presence (IS NOT NULL) test; the planner currently folds it to always-allowed, so adapters return every row while check() denies rows missing the attribute.'
+  trap: 'has() reads as a presence (IS NOT NULL) test, but the planner folds it to always-allowed by design, so adapters return every row while check() denies rows missing the attribute.'
   condition:
     match:
       expr: has(R.attr.aOptionalString)
   plannerDivergence:
-    issue: Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED
-    reason: 'The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing.'
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    reason: 'The plan request omits aOptionalString, so the planner treats it as unknown and assumes the data layer supplies it; it reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED by design. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision.'
     pdp:
     - 0.54.0
     - 0.55.0
@@ -132,11 +132,11 @@ cases:
     match:
       expr: 'has(R.attr.aOptionalString) && R.attr.aNumber > 0'
   plannerDivergence:
-    issue: Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
     pdp:
     - 0.54.0
     - 0.55.0
-    reason: 'The planner folds the has() guard to true and drops it, so the plan is gt(aNumber, 0) alone. Every faithful translation returns a4, a8, c2 and e1, which lack aOptionalString and which check() denies: a live over-grant.'
+    reason: 'The plan request omits aOptionalString, so the planner treats it as unknown, assumes the data layer supplies it and folds the has() guard to true by design: the plan is gt(aNumber, 0) alone. The per-row check() calls send the same omission as absent, so check() denies a4, a8, c2 and e1, which lack aOptionalString. The two calls answer different questions, so no adapter can match the recorded decision.'
 - id: 'null/in/literal-list-of-only-null'
   tier: adversarial
   intent: 'Membership in a list whose only element is null (owner in [null]).'

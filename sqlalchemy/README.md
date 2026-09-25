@@ -184,11 +184,13 @@ comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issu
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
-> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
-> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ### Collection storage
 
@@ -423,14 +425,15 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 Every case that does not pass is either refused with `UnsupportedPlanError` (96 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
 harness does not compare. Under 0.55.0 those are four extended cases and three adversarial cases:
-`null/has/missing-attribute` and `null/has/composed-with-comparison` (the planner drops `has()` from
-the plan, so use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
+`null/has/missing-attribute` and `null/has/composed-with-comparison` (the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
+the omission as absent and denies the row; use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
 `arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
 `R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
 and three
-`composition/*` cases whose DENY condition reads an attribute a row is missing: `check()` skips the
-erroring DENY, while the plan's `not(...)` of it denies the row
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+`composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of
+it denies j2, while `check()` receives `aNumber` as absent and treats the erroring DENY as not
+matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 

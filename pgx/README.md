@@ -228,11 +228,13 @@ mapper := cerbospgx.MapperMap{
   of the same or undeclared scalar type is rejected.
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
-> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
-> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Collation
 
@@ -273,9 +275,10 @@ The total is every golden case in the tier for PDP 0.55.0. A case whose golden r
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the
-skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the Cerbos
-planner dropping `has()` from the plan while `check()` denies rows missing the attribute, so use
-`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the two
+calls answering different questions: the plan request leaves an omitted attribute unknown, so the
+planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
+the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
 planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
 while `check()` has no double + int overload and denies every row, so write `1.0`.
 

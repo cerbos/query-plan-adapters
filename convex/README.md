@@ -191,11 +191,14 @@ under `"omitted"` the adapter:
 comparisons go to Convex's filter engine as they do under `"explicit"`.
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
-> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns documents missing `x`
-> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
+> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
+> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
+> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
+> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Supported operators
 
@@ -271,14 +274,16 @@ total is every golden case in that tier:
 | extended | 67 / 80 |
 | adversarial | 275 / 308 |
 
-Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
+Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.55.0 there are seven, four extended and three
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
-`null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
-the plan while `checkResource` denies the missing-attribute documents, so use `R.attr.x != null` for
-database-backed attributes instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
-missing-`aNumber` document the DENY condition errors, so `check()` does not deny it, while the plan
-negates that condition and the negation is itself a missing-attribute error.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
+receives the omission as absent and denies the document; use `R.attr.x != null` instead of
+`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
+`not(...)` of it denies j2, which lacks `aNumber`, while `check()` receives `aNumber` as absent and
+treats the erroring DENY as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
 documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

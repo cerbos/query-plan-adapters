@@ -163,8 +163,9 @@ conformance/scripts/validate-corpus.sh      # offline: ledgers, pins, vendored G
 conformance/scripts/bump-pdp.sh [tag]       # run locally: current -> previous, re-record (default: latest release)
 ```
 
-A planner bug — the plan and `check()` disagree, so no adapter can pass — is declared **once**, as
-`plannerDivergence` on the case, optionally scoped to PDP tags, and every harness skips it for that
+A disagreement between the plan and `check()`, which no adapter can pass, is declared **once**, as
+`plannerDivergence` on the case, whether it is a planner bug or the two calls answering different
+questions (an omitted attribute is unknown to the planner and absent to `check()`), optionally scoped to PDP tags, and every harness skips it for that
 tag. An empty or total oracle is only legal when the case declares `degenerate` with its reason; the
 generator fails on an undeclared one, which usually means a discriminating seed is missing.
 
@@ -276,8 +277,8 @@ looking at leaves the identical bug live in every other adapter.
 3. **Run every adapter's harness and triage each failure** into exactly one of: a translation bug
    (fix it), a shape that store genuinely cannot express (make it throw the adapter's refusal type
    and add an `unsupported` ledger entry whose `reason` names the real mechanism), or a known wrong
-   result tracked by an issue (`divergent`). A planner bug is `plannerDivergence` on the case, not a
-   ledger entry.
+   result tracked by an issue (`divergent`). A plan/`check()` disagreement is `plannerDivergence` on
+   the case, not a ledger entry.
 4. **The ledger is an output of the run, not an input.** Declaring a case unsupported before
    watching it fail is how a translatable shape gets permanently skipped.
 5. **Update the affected READMEs' `Conformance contract` tables** in the same commit.

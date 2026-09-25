@@ -65,7 +65,7 @@
       "0.54.0",
       "0.55.0"
     ],
-    "reason": "j2 has no aNumber, so V.compose_large errors and check() does not apply the DENY: the ALLOW grants j2. The plan carries the DENY as not(gt(aNumber, 10)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2."
+    "reason": "j2 has no aNumber, and the two calls answer different questions about it. The plan request leaves aNumber unknown, so the plan carries the DENY as not(gt(aNumber, 10)), which over a NULL column denies j2: the expected answer for a column-backed store. The per-row check() call sends aNumber as absent, so V.compose_large errors and check() treats the DENY as not matching (known PDP behaviour): the ALLOW grants j2. No adapter can match the recorded decision."
   },
   "request": {
     "action": "composition/variable/allow-and-deny-through-variables",

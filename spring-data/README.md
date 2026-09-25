@@ -419,14 +419,15 @@ Every case that does not pass is listed with its reason in
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
 extended cases and three adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
-`null/has/composed-with-comparison`, where the planner drops `has()` from the plan (see
-[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)),
+`null/has/composed-with-comparison`, where the planner folds `has()` to true by design while
+`check()` receives the omitted attribute as absent (see
+[Gotchas](#has-does-not-filter-a-null-column--write--null-instead)),
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
 planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
 overload and denies every row (write `1.0`), and
-three `composition/*` cases whose DENY condition reads a missing attribute, which `check()` treats as
-not firing while the plan negates it
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
+`not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
+DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Other guarantees:
 
@@ -543,16 +544,17 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 - A ternary with a NULL condition column is UNKNOWN, so `!(ternary)` can't include the row.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
-### `has(...)` over-grants at the planner level — write `!= null` instead
+### `has(...)` does not filter a NULL column — write `!= null` instead
 
-An **upstream Cerbos planner issue that affects every adapter**: the planner folds
-`has(R.attr.aOptionalString)` to true and drops it from the plan, but `check()` denies resources
-missing the attribute. Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
-`has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter.
-Translating the plan faithfully returns rows with a NULL column that `check()` would deny, and the
-adapter, which only sees the plan, cannot restore the guard. The corpus records both forms as
-planner divergences, `null/has/missing-attribute` and `null/has/composed-with-comparison`, and the
-conformance suite skips them for the PDP versions they name.
+An attribute the plan request omits is unknown to the planner, which assumes the data layer supplies
+it: for a mapped column, the column exists and only its value is open. So the planner reads
+`has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to true by design.
+Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
+`has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter,
+so a row whose column is NULL is not excluded. The corpus's per-row `check()` calls send the same
+omission as absent, where `has()` is false, so the two calls answer different questions: the corpus
+declares both forms, `null/has/missing-attribute` and `null/has/composed-with-comparison`, as
+planner divergences, and the conformance suite skips them for the PDP versions they name.
 
 **Workaround (PDP-verified):**
 
@@ -562,7 +564,8 @@ R.attr.aOptionalString != null
 
 This plans as `ne(variable, null)` → `a_optional_string IS NOT NULL`, and `check()` agrees in every
 case (missing → deny, explicit `null` → deny, present → allow). `has(R.attr.x) && R.attr.x != null`
-produces the same plan, so it is a safe drop-in edit.
+produces the same plan, so it is a safe drop-in edit. The planner cannot make this rewrite for you:
+`has()` is true for an attribute explicitly set to `null`, where `!= null` is false.
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
