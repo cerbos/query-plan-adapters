@@ -124,6 +124,8 @@ internal object ScalarColumnTypes {
      * caller refuses as before.
      */
     fun knownMismatch(column: Column<*>, value: Any): Boolean {
+        // A list or map never equals the one scalar a column holds, whatever that scalar's type.
+        if (value is List<*> || value is Map<*, *>) return true
         val family = familyOf(column) ?: return false
         val valueFamily = familyOf(value) ?: return false
         return family != valueFamily

@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.exposed
 
 import com.google.protobuf.Value
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 
 /** Protobuf-to-Kotlin conversion of plan constants, and the folding rules the `add` shapes need. */
 internal object PlanValues {
@@ -42,6 +43,44 @@ internal object PlanValues {
         }
         Value.KindCase.KIND_NOT_SET, null ->
             throw Refusals.malformed("Protobuf Value has no kind set: the planner emitted a malformed operand")
+    }
+
+    /** The marker [builtConstant] answers for an operand that is not built from constants alone. */
+    object NotConstant
+
+    /**
+     * A `list(...)` or `struct(set-field(...)...)` expression the planner assembled from constants
+     * alone, as the Kotlin `List` / `Map` it denotes; a plain value as itself; or [NotConstant]
+     * when anything inside it is not a constant. A list holding an attribute is NOT a constant: the
+     * attribute may be missing, and CEL raises building the list before it compares it.
+     */
+    fun builtConstant(operand: PlanResourcesFilter.Expression.Operand): Any? = when (operand.nodeCase) {
+        PlanResourcesFilter.Expression.Operand.NodeCase.VALUE -> toKotlin(operand.value)
+        PlanResourcesFilter.Expression.Operand.NodeCase.EXPRESSION -> {
+            val expression = operand.expression
+            when (expression.operator) {
+                "list" -> expression.operandsList.map { element ->
+                    val value = builtConstant(element)
+                    if (value === NotConstant) return NotConstant
+                    value
+                }
+                "struct" -> LinkedHashMap<Any?, Any?>().also { struct ->
+                    expression.operandsList.forEach { field ->
+                        if (field.nodeCase != PlanResourcesFilter.Expression.Operand.NodeCase.EXPRESSION ||
+                            field.expression.operator != "set-field" || field.expression.operandsCount != 2
+                        ) {
+                            return NotConstant
+                        }
+                        val key = builtConstant(field.expression.getOperands(0))
+                        val value = builtConstant(field.expression.getOperands(1))
+                        if (key === NotConstant || value === NotConstant) return NotConstant
+                        struct[key] = value
+                    }
+                }
+                else -> NotConstant
+            }
+        }
+        else -> NotConstant
     }
 
     /**

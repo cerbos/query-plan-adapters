@@ -34,8 +34,10 @@ import org.jetbrains.exposed.v1.core.stringParam
 internal class LeafTranslator(@Suppress("unused") private val translation: Translation) {
 
     fun applyLeaf(operator: String, target: Resolution.Scalar, value: Any?): Op<Boolean> {
+        // A list or map is never equal to the one scalar a mapped column holds: CEL answers from
+        // the types alone, as for any other mismatch.
         if (value is List<*> || value is Map<*, *>) {
-            throw ScalarRefusals.structuredConstant(operator, target.variable, value)
+            return typeMismatch(operator, listOf(target))
         }
         if (value == null) {
             if (target.field.nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {

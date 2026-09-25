@@ -4,7 +4,6 @@ import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
-import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -149,22 +148,37 @@ class ComparisonSqlShapeTest {
     private fun hasTypeMismatchedEquality(operand: Operand): Boolean {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
         val expression = operand.expression
-        val families = expression.operandsList.map { familiesOf(it) }
+        val spread = expression.operator == "in"
+        val families = expression.operandsList.map { familiesOf(it, spread) }
         val direct = expression.operator in setOf("eq", "ne", "in") && families.size == 2 &&
             families[0].any { left -> families[1].any { right -> left != right } }
         return direct || expression.operandsList.any(::hasTypeMismatchedEquality)
     }
 
-    private fun familiesOf(operand: Operand): Set<ScalarValueFamily> = when (operand.nodeCase) {
-        // A list constant contributes its elements: `x in ["a", 1]` compares x with each.
-        Operand.NodeCase.VALUE -> when (val value = PlanValues.toKotlin(operand.value)) {
-            is List<*> -> value.filterNotNull().mapNotNull { ScalarColumnTypes.familyOf(it) }.toSet()
-            null -> emptySet()
-            else -> setOfNotNull(ScalarColumnTypes.familyOf(value))
+    /**
+     * The CEL types an operand can hold: a recognised column family, or `"structured"` for a list or
+     * map. Under `in` ([spread]) a list constant contributes its elements, since `x in ["a", 1]`
+     * compares x with each.
+     */
+    private fun familiesOf(operand: Operand, spread: Boolean): Set<String> {
+        fun of(value: Any?): String? = when (value) {
+            null -> null
+            is List<*>, is Map<*, *> -> "structured"
+            else -> ScalarColumnTypes.familyOf(value)?.name
         }
-        Operand.NodeCase.VARIABLE -> fieldsNamed(operand.variable)
-            .mapNotNull { ScalarColumnTypes.familyOf(it.column) }.toSet()
-        else -> emptySet()
+        return when (operand.nodeCase) {
+            Operand.NodeCase.VALUE, Operand.NodeCase.EXPRESSION -> {
+                val value = PlanValues.builtConstant(operand)
+                when {
+                    value === PlanValues.NotConstant -> emptySet()
+                    spread && value is List<*> -> value.mapNotNull(::of).toSet()
+                    else -> setOfNotNull(of(value))
+                }
+            }
+            Operand.NodeCase.VARIABLE -> fieldsNamed(operand.variable)
+                .mapNotNull { ScalarColumnTypes.familyOf(it.column)?.name }.toSet()
+            else -> emptySet()
+        }
     }
 
     private fun fieldsNamed(variable: String): List<AttributeMapping.Field> {
@@ -328,46 +342,6 @@ class ComparisonSqlShapeTest {
             ExposedQueryPlanAdapter.toFilter(unknown, Options.of(Scalars.MAPPING))
         }
         assertEquals("Unsupported operator: unsupported_op", error.message)
-    }
-
-    @Test
-    fun `a list or map constant against a scalar column is refused, and its elements never leak`() {
-        // Corpus gap. `R.attr.tags == ["a", "b"]` is policy-reachable and the corpus carries no
-        // action for it: `map-eq-list` reaches the refusal through a map() projection instead, so
-        // this exact shape is pinned in one adapter and asked of none of the others. Delete this
-        // test when the corpus action lands (cerbos/query-plan-adapters#414).
-        val listConstant = PlanResourcesFilter.newBuilder()
-            .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
-            .setCondition(
-                Operand.newBuilder().setExpression(
-                    PlanResourcesFilter.Expression.newBuilder()
-                        .setOperator("eq")
-                        .addOperands(Operand.newBuilder().setVariable("request.resource.attr.aString"))
-                        .addOperands(
-                            Operand.newBuilder().setValue(
-                                Value.newBuilder().setListValue(
-                                    com.google.protobuf.ListValue.newBuilder()
-                                        .addValues(Value.newBuilder().setStringValue("secret-a"))
-                                        .addValues(Value.newBuilder().setStringValue("secret-b")),
-                                ).build(),
-                            ),
-                        ),
-                ),
-            )
-            .build()
-        val error = assertThrows<UnsupportedPlanShapeException> {
-            ExposedQueryPlanAdapter.toFilter(listConstant, Options.of(Scalars.MAPPING))
-        }
-        assertEquals(
-            "eq comparison against a list of 2 elements constant is not supported for attribute " +
-                "request.resource.attr.aString. Whole-list equality is not translatable to a " +
-                "scalar column comparison; map the attribute as a relation and use " +
-                "in/hasIntersection, or compare elements individually.",
-            error.message,
-        )
-        // A plan constant can carry a folded principal attribute, and an exception message is
-        // logged, so the shape is reported and the values are not.
-        assertTrue(!error.message!!.contains("secret"), error.message)
     }
 
     @Test

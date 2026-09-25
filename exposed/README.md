@@ -264,6 +264,7 @@ val mapping = cerbosMapping {
 | A mapped column against a plan constant of another family | `==` is FALSE for a present value, `!=` TRUE, and anything else (an ordering) UNKNOWN. A NULL column is a missing attribute, which CEL denies, so `==` and `!=` are UNKNOWN for it, unless the attribute declares `EXPLICIT`, whose null is a value and compares FALSE. No constant is bound. A `null` constant is not a type mismatch: it renders `IS NULL` / `IS NOT NULL` |
 | Two mapped columns of different families | The same answer, UNKNOWN when either undeclared column is NULL |
 | The elements of an `in` or `hasIntersection` list, against a column or a relation's `element` column | An element of another family equals nothing, so it drops out of the disjunction; the rest compare as usual. A `null` element renders `IS NULL` |
+| A list or map — a constant, or one the planner builds with `list()` / `struct()` from constants alone — against a scalar column, or as the member of `in` over a relation | Never equal to a scalar, so answered as a type mismatch; `["a"] in tagNames` is FALSE. One built from an attribute is refused, since the attribute may be missing. Against a relation-mapped attribute it is whole-list equality, and refused |
 | A member column against a relation's `element` column | Same family, or refused |
 | `contains`, `startsWith`, `endsWith` (haystack **or** column needle) and `size()` over a number or boolean column | UNKNOWN: CEL has no overload, so the call raises and denies on every row, under either polarity |
 | Every hierarchy operator's path column | A **text** column, or refused |
@@ -519,11 +520,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 229 / 308 |
+| adversarial | 236 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-94 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+87 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -531,7 +532,7 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
 - a positional read of a list (`[i]`, `get-field`): a to-many relation is a correlated subquery,
   and its rows carry no order to index into;
 - `except()`, `filter()` or `map()` used as a value rather than inside `size()` or
-  `hasIntersection()`, whole-list equality, and a list or map constant compared with a column;
+  `hasIntersection()`, and whole-list equality against a relation;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
   where CEL requires the whole string, and rounds where CEL truncates;
 - `string()` over a computed value (a conversion, a ternary, a comparison) rather than a mapped
@@ -541,9 +542,10 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   `-0.0`, which CEL divides into the opposite infinity, and SQL compares `-0.0` equal to `0.0`;
 - a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has
   no key set SQL can read;
-- a list or map constant compared with a column or an element, a number or boolean column as a
-  hierarchy path, and two instant columns compared without `timestamp()`. A comparison between
-  recognised types that differ is not refused: it is answered from the types. See
+- a number or boolean column as a hierarchy path, and two instant columns compared without
+  `timestamp()`. A comparison between recognised types that differ, or between a scalar column or
+  element and a list or map built from constants, is not refused: it is answered from the types.
+  See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);
 - a hierarchy split on the empty delimiter anywhere but between a column and a constant (which
   translates as a code-point prefix test), a division as a divisor, and a macro over a principal

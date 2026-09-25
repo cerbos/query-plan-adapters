@@ -345,37 +345,9 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
-    "type-mismatch/equals/string-field-against-list-literal": {
-      "status": "unsupported",
-      "reason": "A mapped column holds one scalar, and CEL's equality between a string and a list is decided from the types alone (false), while SQL would compare the column with a list parameter by the driver's coercion or reject it. Refused as a structured constant before any comparison is built"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a literal list whose elements are maps: each element of a mapped collection is one scalar column value, which SQL equality cannot compare with a map"
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "The member is a list constant: `[\"public\"] in tagNames` asks whether the list is itself an element, which a scalar element column never holds. Spreading it into its elements would answer `\"public\" in tagNames` and return every row holding that tag"
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "The membership pair has no column-and-constant reading: the container is a literal list whose elements are themselves lists or maps, or a map() over a principal value, and a scalar column can equal neither"
-    },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
     }
   }
 }

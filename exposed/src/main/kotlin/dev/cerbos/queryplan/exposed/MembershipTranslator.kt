@@ -40,16 +40,20 @@ internal class MembershipTranslator(private val translation: Translation) {
         if (member.nodeCase == Operand.NodeCase.VARIABLE && container.nodeCase == Operand.NodeCase.VARIABLE) {
             return attributeInAttribute(member.variable, container.variable, scope)
         }
-        if (member.nodeCase != Operand.NodeCase.VARIABLE || container.nodeCase != Operand.NodeCase.VALUE) {
+        val constant = PlanValues.builtConstant(container)
+        if (member.nodeCase != Operand.NodeCase.VARIABLE || constant === PlanValues.NotConstant) {
             throw RelationRefusals.membershipOperands("in")
         }
-        val constant = PlanValues.toKotlin(container.value)
         // Value-first, `<constant> in collection`, the constant is ONE element, not a list of
         // candidates: `["public"] in tagNames` asks whether the list `["public"]` is itself an
-        // element, which a scalar element column can never hold. Spreading it into its elements
-        // would answer `"public" in tagNames` instead and return every row holding that tag.
-        if (operands[0].nodeCase == Operand.NodeCase.VALUE && (constant is List<*> || constant is Map<*, *>)) {
-            throw RelationRefusals.structuredMember("in")
+        // element. Spreading it into its elements would answer `"public" in tagNames` instead and
+        // return every row holding that tag. A list or map equals no scalar element, null elements
+        // included, so over a collection of scalars the membership is a definite FALSE — the
+        // never-matching body [collectionContainsAny] already gives an empty list.
+        if (operands[0].nodeCase != Operand.NodeCase.VARIABLE && (constant is List<*> || constant is Map<*, *>)) {
+            val resolved = scope.resolve(member.variable) as? Resolution.Collection
+                ?: throw RelationRefusals.structuredMember("in")
+            return collectionContainsAny(resolved, emptyList())
         }
         val values = elementsOf(constant)
         return when (val resolved = scope.resolve(member.variable)) {
@@ -69,16 +73,17 @@ internal class MembershipTranslator(private val translation: Translation) {
         val first = normalized[0]
         val second = normalized[1]
 
+        val constant = PlanValues.builtConstant(second)
         if (first.nodeCase == Operand.NodeCase.EXPRESSION && first.expression.operator == "map") {
-            if (second.nodeCase != Operand.NodeCase.VALUE) {
+            if (constant === PlanValues.NotConstant) {
                 throw RelationRefusals.membershipOperands("hasIntersection")
             }
-            return projectionIntersects(first.expression, elementsOf(PlanValues.toKotlin(second.value)), scope)
+            return projectionIntersects(first.expression, elementsOf(constant), scope)
         }
-        if (first.nodeCase != Operand.NodeCase.VARIABLE || second.nodeCase != Operand.NodeCase.VALUE) {
+        if (first.nodeCase != Operand.NodeCase.VARIABLE || constant === PlanValues.NotConstant) {
             throw RelationRefusals.membershipOperands("hasIntersection")
         }
-        val values = elementsOf(PlanValues.toKotlin(second.value))
+        val values = elementsOf(constant)
         return when (val resolved = scope.resolve(first.variable)) {
             is Resolution.Collection -> collectionContainsAny(resolved, values)
             is Resolution.Scalar -> scalarIsAnyOf(resolved, values)

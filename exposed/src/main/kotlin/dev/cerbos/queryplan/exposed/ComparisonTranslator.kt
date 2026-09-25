@@ -111,6 +111,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
         /** `string(variable)` — CEL's text conversion over a mapped column. */
         class TextCast(val variable: String) : Resolved
 
+        /** A `list(...)` or `struct(...)` the planner built from constants alone. */
+        class BuiltConstant(val value: Any) : Resolved
+
         /** An operand no leaf comparison understands; [leafOperandError] reports from the raw shape. */
         object Opaque : Resolved
     }
@@ -137,6 +140,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 inner == "string" && expression.operandsCount == 1 &&
                     expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
                     Resolved.TextCast(expression.getOperands(0).variable)
+                (inner == "list" || inner == "struct") &&
+                    PlanValues.builtConstant(operand).let { it !== PlanValues.NotConstant && it != null } ->
+                    Resolved.BuiltConstant(PlanValues.builtConstant(operand)!!)
                 inner !in ArithmeticTranslator.ARITHMETIC_OPS -> Resolved.Opaque
                 inner == "add" && expression.operandsCount == 2 -> {
                     val left = expression.getOperands(0)
@@ -287,7 +293,11 @@ internal class ComparisonTranslator(private val translation: Translation) {
         val field = (left as? Resolved.Field) ?: (right as? Resolved.Field)
         val constant = (left as? Resolved.Constant) ?: (right as? Resolved.Constant)
         if (field != null && constant != null) {
-            return leafFieldValue(operator, field, constant, scope)
+            return leafFieldValue(operator, field, constant.value(), scope)
+        }
+        val built = (left as? Resolved.BuiltConstant) ?: (right as? Resolved.BuiltConstant)
+        if (field != null && built != null) {
+            return leafFieldValue(operator, field, built.value, scope)
         }
 
         throw leafOperandError(operator, operands)
@@ -297,14 +307,18 @@ internal class ComparisonTranslator(private val translation: Translation) {
     private fun leafFieldValue(
         operator: String,
         field: Resolved.Field,
-        constant: Resolved.Constant,
+        value: Any?,
         scope: Scope,
     ): Op<Boolean> {
-        val value = constant.value()
-        // Checked BEFORE resolution so a relation-mapped attribute reports this shape too, rather
-        // than the generic "is mapped as a relation" message.
+        // A list or map against a relation-mapped attribute is whole-list equality, refused with
+        // its own message rather than the generic "is mapped as a relation" one. Against a scalar
+        // column it is a type mismatch [LeafTranslator.applyLeaf] answers from the types.
         if (value is List<*> || value is Map<*, *>) {
-            throw ScalarRefusals.structuredConstant(operator, field.variable, value)
+            val resolution = scope.resolve(field.variable)
+            if (resolution !is Resolution.Scalar) {
+                throw ScalarRefusals.structuredConstant(operator, field.variable, value)
+            }
+            return translation.leaf.applyLeaf(operator, resolution, value)
         }
         return translation.leaf.applyLeaf(operator, scope.scalar(field.variable), value)
     }
