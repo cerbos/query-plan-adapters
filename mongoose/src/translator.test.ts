@@ -321,8 +321,22 @@ describe("omitted: an undeclared entry is nullable", () => {
       : [filter];
   };
 
-  // `aString` declares no `nullable`; `owner` maps the nullable `aOptionalString` column without
+  // The corpus mapping declares the scalars it seeds as missing (`aString`, `aNumber`, `aBool`)
+  // nullable, so each test strips the declaration from the field it reads, leaving the entry for
+  // the call-level default to decide. `owner` maps the nullable `aOptionalString` column without
   // declaring it, as a caller on the explicit convention would.
+  const undeclared = (field: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER as Record<string, MapperConfig>).map(
+        ([key, config]) => {
+          if (config.field !== field) return [key, config];
+          const { nullable: _nullable, ...rest } = config;
+          return [key, rest];
+        },
+      ),
+    );
+  const guard = (field: string) => JSON.stringify({ [field]: { $ne: null } });
+
   test.each([
     ["string/equals/case-sensitive", "aString"],
     ["comparison/not-equals/value-first", "aString"],
@@ -330,36 +344,37 @@ describe("omitted: an undeclared entry is nullable", () => {
   ])(
     "%s requires the field to be present and non-null, outside any negation",
     (id, field) => {
-      const explicit = translate(id).filters;
-      expect(topLevelConjuncts(explicit)).not.toContainEqual({
+      const mapper = undeclared(field);
+      expect(topLevelConjuncts(translate(id, { mapper }).filters)).not.toContainEqual({
         [field]: { $ne: null },
       });
-      expect(topLevelConjuncts(omitted(id).filters)).toContainEqual({
+      expect(topLevelConjuncts(omitted(id, mapper).filters)).toContainEqual({
         [field]: { $ne: null },
       });
     },
   );
 
-  // A `not` over a nullable field is refused (the `$nor` it would build readmits the missing
-  // documents); so is every negation over an undeclared one now, a negated `in` included.
+  // A `not` over an undeclared entry is translated as one over a declared-nullable entry: the
+  // guard sits outside the `$nor`, which would otherwise readmit the missing documents. A negated
+  // `&&` is pushed down to its leaves first, so each leaf carries its own guard.
   test.each([
-    "null/equals/negated-explicit-null-against-literal",
-    "null/in/negated-explicit-null-in-literal-list",
-    "logic/not/over-and",
-  ])("%s is refused", (id) => {
-    expect(() => translate(id)).not.toThrow();
-    expect(() => omitted(id)).toThrow(UnsupportedQueryPlanError);
+    ["null/equals/negated-explicit-null-against-literal", "aOptionalString"],
+    ["null/in/negated-explicit-null-in-literal-list", "aOptionalString"],
+    ["logic/not/over-and", "aString"],
+  ])("%s guards %s outside the negation", (id, field) => {
+    const mapper = undeclared(field);
+    expect(JSON.stringify(translate(id, { mapper }).filters)).not.toContain(
+      guard(field),
+    );
+    expect(JSON.stringify(omitted(id, mapper).filters)).toContain(guard(field));
   });
 
   test("a function mapper takes the default too", () => {
-    const asFunction: Mapper = (key) =>
-      (MAPPER as Record<string, MapperConfig>)[key]!;
-    expect(omitted("string/equals/case-sensitive", asFunction)).toStrictEqual(
-      omitted("string/equals/case-sensitive"),
-    );
-    expect(() => omitted("logic/not/over-and", asFunction)).toThrow(
-      UnsupportedQueryPlanError,
-    );
+    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const asFunction: Mapper = (key) => mapper[key]!;
+    for (const id of ["string/equals/case-sensitive", "logic/not/over-and"]) {
+      expect(omitted(id, asFunction)).toStrictEqual(omitted(id, mapper));
+    }
   });
 
   // `tagNames` projects the `name` field of each `tags` element, which declares no `nullable`.

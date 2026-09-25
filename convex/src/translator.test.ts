@@ -386,8 +386,19 @@ describe("omitted: an undeclared entry is nullable", () => {
   const omitted = (id: string, options: TranslateOptions = {}) =>
     translate(id, { ...options, nullAttributeRepresentation: "omitted" });
 
-  // `aString`, `aNumber` and `owner` declare no `nullable`: `ne`, a negated ordering, and a
-  // negated `in`, each of which Convex's engine answers as a match on an absent path.
+  // The corpus mapping declares `aString` and `aNumber` nullable, so each case strips the
+  // declaration from the field it reads, leaving the entry for the call-level default to decide.
+  const undeclared = (field: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER).map(([key, config]) => {
+        if (key !== `request.resource.attr.${field}`) return [key, config];
+        const { nullable: _nullable, ...rest } = config;
+        return [key, rest];
+      }),
+    );
+
+  // `ne`, a negated ordering, and a negated `in` over an undeclared entry, each of which Convex's
+  // engine answers as a match on an absent path.
   const CASES = [
     ["string/equals/case-sensitive", "aString", "one", "two"],
     ["comparison/not-equals/value-first", "aString", "two", "one"],
@@ -395,12 +406,13 @@ describe("omitted: an undeclared entry is nullable", () => {
     ["null/in/negated-explicit-null-in-literal-list", "owner", "y", "x"],
   ] as const;
 
-  test.each(CASES.map(([id]) => id))(
+  test.each(CASES)(
     "%s stays off Convex's engine, and needs the post-filter opt-in",
-    (id) => {
-      expect(translate(id).path).toBe("db");
-      expect(omitted(id).path).toBe("post");
-      expect(() => omitted(id, { allowPostFilter: false })).toThrow(
+    (id, field, _allowed, _denied) => {
+      const mapper = undeclared(field);
+      expect(translate(id, { mapper }).path).toBe("db");
+      expect(omitted(id, { mapper }).path).toBe("post");
+      expect(() => omitted(id, { mapper, allowPostFilter: false })).toThrow(
         "allowPostFilter",
       );
     },
@@ -409,7 +421,7 @@ describe("omitted: an undeclared entry is nullable", () => {
   test.each(CASES)(
     "%s denies a document %s is missing or null in",
     (id, field, allowed, denied) => {
-      const { postFilter } = omitted(id);
+      const { postFilter } = omitted(id, { mapper: undeclared(field) });
       expect(postFilter!({ [field]: allowed })).toBe(true);
       expect(postFilter!({ [field]: denied })).toBe(false);
       expect(postFilter!({})).toBe(false);
@@ -418,7 +430,8 @@ describe("omitted: an undeclared entry is nullable", () => {
   );
 
   test("a function mapper takes the default too", () => {
-    const asFunction: Mapper = (reference) => MAPPER[reference]!;
+    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const asFunction: Mapper = (reference) => mapper[reference]!;
     expect(
       omitted("string/equals/case-sensitive", { mapper: asFunction }).path,
     ).toBe("post");
