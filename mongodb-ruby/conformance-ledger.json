@@ -1,89 +1,13 @@
 {
   "adapter": "mongodb-ruby",
   "cases": {
-    "arithmetic/add/int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int() the sum adds to a double field (a no-such-overload error in CEL) is never lowered"
-    },
-    "arithmetic/add/negated-int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation"
-    },
-    "arithmetic/divide/int-truncates": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int the division would divide is never lowered"
-    },
-    "arithmetic/divide/int-truncates-toward-zero": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, reached through a negative dividend"
-    },
-    "arithmetic/divide/negated-int-truncates": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, under negation"
-    },
-    "arithmetic/modulo/column-divisor-negative-and-zero": {
-      "status": "unsupported",
-      "reason": "int() over a numeric column has no faithful $convert lowering (it rounds where CEL truncates toward zero), the same refusal as `arithmetic/modulo/negative-dividend`; the column divisor would also need its zero row (a1) to deny, where $mod by zero aborts the whole query"
-    },
-    "arithmetic/modulo/negated-double-operand": {
-      "status": "unsupported",
-      "reason": "CEL's % has no double overload and every attribute number reaches CEL as a double, so the modulo is an error on every document; $mod computes a floating remainder instead, which the negation turns into a match, so the adapter refuses % unless its dividend is an integer size()"
-    },
-    "arithmetic/modulo/negative-dividend": {
-      "status": "unsupported",
-      "reason": "int() over a numeric column, needed to give `%` an integer operand, has no faithful $convert lowering — the same limitation that makes `cast/int/negative-fraction` unsupported. The cast is refused before the modulo is reached."
-    },
-    "cast/double/malformed-string": {
-      "status": "unsupported",
-      "reason": "double() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
-    },
-    "cast/double/negated-malformed-string": {
-      "status": "unsupported",
-      "reason": "The translator unconditionally refuses numeric casts; it has no implemented lowering that proves CEL conversion and error semantics under negation. MongoDB $convert rejects malformed prefixes, so the existing refusal message does not accurately describe that store behavior."
-    },
-    "cast/int/double-truncation-bounds": {
-      "status": "unsupported",
-      "reason": "int() over a numeric column: $convert to long rounds where CEL truncates toward zero, and raises nothing where CEL errors outside the int64 range, so the adapter refuses the cast rather than lower it."
-    },
-    "cast/int/malformed-string": {
-      "status": "unsupported",
-      "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
-    },
-    "cast/int/negated-malformed-string": {
-      "status": "unsupported",
-      "reason": "The translator unconditionally refuses numeric casts; it has no implemented lowering that proves CEL conversion and error semantics under negation. MongoDB $convert rejects malformed prefixes, so the existing refusal message does not accurately describe that store behavior."
-    },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "int() over a numeric column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, and rounds where CEL truncates toward zero, so the adapter refuses the cast rather than lower it."
-    },
-    "cast/int/string-beyond-double-precision": {
-      "status": "unsupported",
-      "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, so the adapter refuses the cast rather than lower it."
-    },
-    "cast/string/from-int-beyond-double-precision": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() over a string column as `cast/int/string-beyond-double-precision`: $convert parses a numeric prefix where CEL requires the whole string, so string() never sees the int"
-    },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() over a numeric column as `cast/int/negative-fraction`: $convert rounds where CEL truncates toward zero, so string() never sees the int"
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare number and $toString over a double renders the exponent form (\"1e+06\"), so the adapter refuses string() over an untyped integral constant of 1e6 or more"
     },
-    "cast/string/from-ternary-with-int-branch": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int() branch that fixes the ternary's type is never lowered"
-    },
     "cast/string/negated-from-boolean-ternary": {
       "status": "unsupported",
       "reason": "The negation is a $nor whose missing-attribute guard sits outside it, and the ternary reads aBool only when aNumber > 3: a guard on aBool would deny rows CEL allows through the false arm, and no guard would let a missing aBool on the taken arm through, so the negation is refused."
-    },
-    "cast/string/negated-from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refusal of int() as `cast/string/from-int-past-exponent-threshold`, under negation"
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",

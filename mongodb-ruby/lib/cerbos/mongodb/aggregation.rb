@@ -29,7 +29,7 @@ module Cerbos
       ARITHMETIC = {"add" => "$add", "sub" => "$subtract", "mult" => "$multiply", "div" => "$divide"}.freeze
 
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
-      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div].freeze
+      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod].freeze
 
       module_function
 
@@ -69,7 +69,8 @@ module Cerbos
         when "mod" then build_mod(operands, mapper)
         when "not" then {"$not" => [build(operand_at(operands, 0, "not operator requires an operand"), mapper)]}
         when "string" then build_string(operands, mapper)
-        when "double", "int" then refuse_numeric_conversion(operator)
+        when "int" then build_int(operands, mapper)
+        when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
         when "index"
           collection, index = constant_index(operands)
@@ -98,8 +99,32 @@ module Cerbos
         return [] unless expression?(operand)
 
         guard = guard_for(operand, mapper)
-        nested = operand.operands.flat_map { |child| evaluation_guards(child, mapper) }
+        nested = if operand.operator == "if" && operand.operands.length == 3
+          branch_guards(operand, mapper)
+        else
+          operand.operands.flat_map { |child| evaluation_guards(child, mapper) }
+        end
         guard ? [guard] + nested : nested
+      end
+
+      # A ternary evaluates only the branch its condition selects, so a branch's guards apply
+      # only where it is selected: {$cond: [condition, then-guards, else-guards]} inside $expr.
+      # A guard that is not an $expr cannot sit in a $cond, so then every guard applies
+      # unconditionally, which denies more than CEL does but never less.
+      def branch_guards(expression, mapper)
+        condition, then_branch, else_branch = expression.operands
+        condition_guards = evaluation_guards(condition, mapper)
+        then_guards = evaluation_guards(then_branch, mapper)
+        else_guards = evaluation_guards(else_branch, mapper)
+        return condition_guards if then_guards.empty? && else_guards.empty?
+
+        branches = [then_guards, else_guards]
+        unless branches.flatten.all? { |guard| guard.is_a?(Hash) && guard.keys == ["$expr"] }
+          return condition_guards + then_guards + else_guards
+        end
+
+        selected = branches.map { |guards| guards.empty? || {"$and" => guards.map { |guard| guard["$expr"] }} }
+        condition_guards + [{"$expr" => {"$cond" => [build(condition, mapper), *selected]}}]
       end
 
       def guard_for(expression, mapper)
@@ -110,6 +135,10 @@ module Cerbos
         when "lt", "le", "gt", "ge"
           left, right = operands.map { |op| build(op, mapper) }
           {"$expr" => orderable(left, right)}
+        when "if"
+          # A ternary over anything but a boolean condition raises in CEL; $cond reads any value
+          # as truthy or falsy instead.
+          {"$expr" => {"$eq" => [{"$type" => build(operand_at(operands, 0, "if requires a condition"), mapper)}, "bool"]}}
         when "timestamp"
           # A literal is validated at translation time; only a field can fail per document.
           (operands[0] && !value?(operands[0])) ? not_null_guard(expression, mapper) : nil
@@ -212,11 +241,9 @@ module Cerbos
       # is NaN when x is NaN or zero, and otherwise an infinity whose sign is x's, flipped by a
       # negative zero divisor ($toString spells -0.0 "-0").
       #
-      # size() is CEL's one int, and int division truncates, so a division over it is refused.
+      # Arithmetic over a CEL int is int arithmetic instead (build_int_arithmetic).
       def build_arithmetic(operator, operands, mapper)
-        if operator == "div" && operands.any? { |op| integer_valued?(op) }
-          raise UnsupportedError, "Integer division truncates in CEL, and $divide does not: a division over size() is unsupported"
-        end
+        return build_int_arithmetic(operator, operands, mapper) if operands.any? { |op| int_typed?(op) }
 
         with_operands(operands, mapper) { |values|
           doubles = values.map { |value| {"$toDouble" => value} }
@@ -250,35 +277,13 @@ module Cerbos
         ]}
       end
 
-      # Whether +operand+ evaluates to a CEL int: size(), or arithmetic over one.
-      def integer_valued?(operand)
-        return false unless expression?(operand)
-        return true if %w[size mod].include?(operand.operator)
-
-        ARITHMETIC.key?(operand.operator) && operand.operands.any? { |child| integer_valued?(child) }
-      end
-
       # CEL's `%` is integer-only: it has no double overload, and every number a resource
       # attribute carries reaches CEL as a double, so `R.attr.x % 2` is a no-such-overload error
       # that denies the document under either polarity, where $mod computes a floating remainder.
-      # The one int this pipeline produces is size() (int() is refused), and a zero divisor is an
-      # error that $mod turns into an aborted query, so the divisor must be a non-zero integer
-      # constant.
       def build_mod(operands, mapper)
-        dividend, divisor = operands
-        unless dividend && expression?(dividend) && dividend.operator == "size"
-          raise UnsupportedError,
-            "mod operator requires an integer dividend: CEL's % has no double overload and every " \
-            "attribute number reaches CEL as a double, so the modulo is an error on every " \
-            "document where $mod would compute a floating remainder"
-        end
-        unless divisor && value?(divisor) && divisor.value.is_a?(Numeric) && integral?(divisor.value) && !divisor.value.zero?
-          raise UnsupportedError,
-            "mod operator requires a non-zero integer constant divisor: $mod aborts the whole " \
-            "query on a zero divisor instead of denying that document"
-        end
+        return nil unless operands.any? { |op| int_typed?(op) }
 
-        {"$mod" => operands.map { |op| build(op, mapper) }}
+        build_int_arithmetic("mod", operands, mapper)
       end
 
       def build_string(operands, mapper)
@@ -291,6 +296,9 @@ module Cerbos
         end
 
         input = build(operand, mapper)
+        # A CEL int renders in plain decimal, which $toString of a long is.
+        return {"$cond" => [{"$isNumber" => input}, {"$toString" => input}, nil]} if int_typed?(operand)
+
         {"$switch" => {
           "branches" => [
             {"case" => {"$in" => [{"$type" => input}, %w[int long double decimal]]},
@@ -310,6 +318,8 @@ module Cerbos
           return number?(operand.value) && integral?(operand.value) && operand.value.abs >= 1_000_000
         end
         return false unless expression_with?(operand, "if")
+        # A branch CEL types int fixes the ternary's type, and so every literal branch's.
+        return false if int_typed?(operand)
 
         operand.operands.drop(1).any? { |branch| renders_untyped_integral_constant?(branch) }
       end
@@ -365,16 +375,120 @@ module Cerbos
         }}
       end
 
-      # CEL's int()/double() are not $convert. CEL reads a WHOLE string or raises, and an error
-      # DENIES; $convert parses a leading numeric prefix, so "100%_done" becomes 100 and the
-      # filter returns documents the PDP denies. The numeric direction is no safer: CEL truncates
-      # toward zero while $convert to "long" rounds. Nothing in the plan says what type the field
-      # holds, so no conversion is faithful for every document.
-      def refuse_numeric_conversion(operator)
-        raise UnsupportedError,
-          "'#{operator}()' cannot be translated: $convert parses a numeric prefix where CEL " \
-          "requires the whole string and raises otherwise, and rounds where CEL truncates toward zero"
+      # int() as cel-go converts: a number truncates toward zero, and raises outside
+      # (-2^63, 2^63), NaN and the infinities included; a string must be a whole base-10 int64,
+      # an optional sign then ASCII digits and nothing else. The number is read as the double
+      # CEL receives. Anything else raises, and is null here, which the not-null guard keeps out.
+      # $convert on its own would parse a numeric prefix and round.
+      def build_int(operands, mapper)
+        input = build(operand_at(operands, 0, "int conversion requires an operand"), mapper)
+        {"$let" => {
+          "vars" => {"input" => input},
+          "in" => {"$switch" => {
+            "branches" => [
+              {"case" => {"$isNumber" => "$$input"}, "then" => {"$let" => {
+                "vars" => {"double" => {"$toDouble" => "$$input"}},
+                "in" => {"$cond" => [
+                  {"$and" => [{"$gt" => ["$$double", {"$multiply" => [two_to_the_63, -1]}]}, {"$lt" => ["$$double", two_to_the_63]}]},
+                  {"$toLong" => {"$trunc" => ["$$double"]}},
+                  nil
+                ]}
+              }}},
+              {"case" => {"$eq" => [{"$type" => "$$input"}, "string"]}, "then" => {"$cond" => [
+                {"$regexMatch" => {"input" => "$$input", "regex" => '^[+-]?[0-9]+\\z'}},
+                {"$convert" => {"input" => "$$input", "to" => "long", "onError" => nil, "onNull" => nil}},
+                nil
+              ]}}
+            ],
+            "default" => nil
+          }}
+        }}
       end
+
+      # double() as cel-go converts: a number as itself, and a string that is a decimal
+      # floating-point literal. Go's ParseFloat also reads "Inf", "NaN" and hexadecimal forms,
+      # which this refuses to guess at: such a string is null here, and denied, where CEL might
+      # allow. A literal beyond the double range raises in CEL and is null here too.
+      def build_double(operands, mapper)
+        input = build(operand_at(operands, 0, "double conversion requires an operand"), mapper)
+        {"$let" => {
+          "vars" => {"input" => input},
+          "in" => {"$switch" => {
+            "branches" => [
+              {"case" => {"$isNumber" => "$$input"}, "then" => {"$toDouble" => "$$input"}},
+              {"case" => {"$eq" => [{"$type" => "$$input"}, "string"]}, "then" => {"$cond" => [
+                {"$regexMatch" => {"input" => "$$input", "regex" => '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?\\z'}},
+                {"$convert" => {"input" => "$$input", "to" => "double", "onError" => nil, "onNull" => nil}},
+                nil
+              ]}}
+            ],
+            "default" => nil
+          }}
+        }}
+      end
+
+      # 2^63 as a double, built on the server: an integral Float literal beyond int64 would be
+      # narrowed to an Integer BSON cannot encode on Mongoid's way through.
+      def two_to_the_63 = {"$toDouble" => "9223372036854775808"}
+      INT64_MIN = -9_223_372_036_854_775_808
+
+      # Whether CEL types +operand+ int: int(), size(), `%`, and arithmetic or a ternary over one.
+      # CEL's checker then types every literal beside it int too, since int never meets double
+      # in a well-typed expression.
+      def int_typed?(operand)
+        return false unless expression?(operand)
+
+        case operand.operator
+        when "int", "size", "mod" then true
+        when *ARITHMETIC.keys then operand.operands.any? { |child| int_typed?(child) }
+        when "if" then operand.operands.drop(1).any? { |child| int_typed?(child) }
+        else false
+        end
+      end
+
+      # CEL int arithmetic over int64. A literal beside an int is an int; an attribute beside
+      # one is a double, which has no overload with an int, so the whole expression raises and
+      # is null here. Overflow raises in CEL, where MongoDB widens a long to a double; division
+      # and `%` by zero raise; division truncates toward zero, spelled exactly as
+      # (n - n % d) / d while both are within 2^53 and null (denied) beyond.
+      def build_int_arithmetic(operator, operands, mapper)
+        return nil unless operands.all? { |op| int_typed?(op) || (value?(op) && number?(op.value)) }
+
+        operands.each do |op|
+          next unless value?(op) && !integral?(op.value)
+
+          raise UnsupportedError, "A fractional literal beside a CEL int does not type-check"
+        end
+
+        with_operands(operands, mapper) { |values|
+          longs = values.map { |value| {"$toLong" => value} }
+          result = case operator
+          when "div", "mod"
+            numerator, denominator = longs
+            invalid = if operator == "div"
+              {"$or" => [
+                {"$eq" => [denominator, 0]},
+                {"$gt" => [{"$abs" => numerator}, SAFE_INTEGER]},
+                {"$gt" => [{"$abs" => denominator}, SAFE_INTEGER]}
+              ]}
+            else
+              {"$or" => [{"$eq" => [denominator, 0]}, {"$and" => [{"$eq" => [numerator, INT64_MIN]}, {"$eq" => [denominator, -1]}]}]}
+            end
+            quotient = if operator == "div"
+              {"$toLong" => {"$divide" => [{"$subtract" => [numerator, {"$mod" => [numerator, denominator]}]}, denominator]}}
+            else
+              {"$mod" => [numerator, denominator]}
+            end
+            {"$cond" => [invalid, nil, quotient]}
+          else
+            computed = {ARITHMETIC.fetch(operator) => longs}
+            {"$let" => {"vars" => {"long" => computed}, "in" => {"$cond" => [{"$eq" => [{"$type" => "$$long"}, "long"]}, "$$long", nil]}}}
+          end
+          {"$cond" => [{"$and" => values.map { |value| {"$isNumber" => value} }}, result, nil]}
+        }
+      end
+
+      SAFE_INTEGER = 9_007_199_254_740_992
 
       def build_if(operands, mapper)
         condition, then_operand, else_operand = operands

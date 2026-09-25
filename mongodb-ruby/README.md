@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 54 / 80 |
-| adversarial | 233 / 308 |
+| extended | 55 / 80 |
+| adversarial | 251 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -213,17 +213,20 @@ none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.jso
 with its reason.
 
 The refused set is exact-one cardinality beyond an element field compared with a scalar constant (over a relation it is a `$size` of a `$filter`; over a literal list of up to 32 elements, and not under a negation, it expands to "this one and no other"), aggregation expressions or outer-document references
-inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), CEL's `int()`/`double()`
-(`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division
-over `size()` (CEL's int division truncates), `%` over anything but an
-integer `size()` (CEL's `%` has no double overload), `string()` over an untyped integral constant
-of 1e6 or more, `+` between two fields (nothing tells `$add` from `$concat`), negations over
+inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), `string()` over a ternary
+of integral constants of 1e6 or more whose int or double type the plan does not carry, `+` between two fields (nothing tells `$add` from `$concat`), negations over
 collection macros or over a nullable field CEL may not evaluate (a filter has no UNKNOWN), macros
 and `in` over a to-one relation (CEL iterates a map's keys), an empty hierarchy separator, regular
 expressions outside the common subset, and a comparison with a map constant or with a list holding
 a list, a map or NaN (MongoDB compares embedded documents in stored field order and NaN equal to
-NaN). Arithmetic is CEL's double
-arithmetic: each operand is converted with `$toDouble`, a division by zero gives IEEE 754's NaN or
+NaN). `int()` truncates a number toward
+zero inside (-2^63, 2^63) and reads a string only as a whole signed base-10 int64; `double()` reads
+a number, or a string that is a decimal floating-point literal (Go also reads `Inf`, `NaN` and
+hexadecimal forms, which are denied here rather than guessed at). Arithmetic over a CEL int
+(`int()`, `size()`, `%`) is int64 arithmetic: overflow, division and `%` by zero are errors, and
+division truncates toward zero; an attribute beside an int has no overload and is denied. A
+ternary's branch guards apply only where the condition selects that branch. Other arithmetic is
+CEL's double arithmetic: each operand is converted with `$toDouble`, a division by zero gives IEEE 754's NaN or
 signed infinity where `$divide` would abort the query, and every comparison inside `$expr` answers
 NaN as CEL does (false, but true for `!=`) where MongoDB orders NaN below every number and equal to
 itself. A list constant is compared whole inside `$expr` with a field, a to-many relation's
