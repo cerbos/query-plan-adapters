@@ -26,7 +26,7 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 41 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 42 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |

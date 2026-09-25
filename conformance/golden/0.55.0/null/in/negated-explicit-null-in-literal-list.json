@@ -38,7 +38,8 @@
     "i9",
     "j1",
     "j2",
-    "j3"
+    "j3",
+    "k1"
   ],
   "degenerateReason": null,
   "id": "null/in/negated-explicit-null-in-literal-list",

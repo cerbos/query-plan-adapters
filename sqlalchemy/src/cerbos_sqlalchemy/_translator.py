@@ -29,6 +29,7 @@ from cerbos_sqlalchemy._operators import (
     ConditionalValue,
     arith_over_conditional,
     require_lowerable,
+    scalar_kind,
 )
 from cerbos_sqlalchemy._plan import (
     LAMBDA_BINDING_OPERATORS,
@@ -321,12 +322,20 @@ class Translator:
 
         The CASE has no ELSE, so an UNKNOWN condition yields NULL rather than the
         else-branch. CEL denies that row, and NULL keeps it excluded under NOT.
+
+        Branches of two different types stay a ConditionalValue as well, so the
+        comparison is taken per branch: a branch of the other operand's type
+        compares, and the other is CEL's type-mismatch answer. A CASE would take
+        its first branch's type and compare the other branch by coercion.
         """
         condition = self.predicate(operands[0])
         then_value = self._resolve(operands[1])
         else_value = self._resolve(operands[2])
-        if isinstance(then_value, SYMBOLIC_NUMBERS) or isinstance(
-            else_value, SYMBOLIC_NUMBERS
+        then_kind, else_kind = scalar_kind(then_value), scalar_kind(else_value)
+        if (
+            isinstance(then_value, SYMBOLIC_NUMBERS)
+            or isinstance(else_value, SYMBOLIC_NUMBERS)
+            or (then_kind and else_kind and then_kind != else_kind)
         ):
             return ConditionalValue(condition, then_value, else_value)
         return case((condition, then_value), (not_(condition), else_value))

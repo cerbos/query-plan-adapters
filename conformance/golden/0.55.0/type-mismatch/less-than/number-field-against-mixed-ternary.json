@@ -1,0 +1,85 @@
+{
+  "allowed": [
+    "a3",
+    "a4",
+    "a7",
+    "a8",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/less-than/number-field-against-mixed-ternary",
+  "intent": "aNumber < (aBool ? 3.0 : aString) OR aNumber == 2: a number attribute ordered against a ternary whose branches have different types.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": 3
+                      },
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/less-than/number-field-against-mixed-ternary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber < (R.attr.aBool ? 3.0 : R.attr.aString) || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The number branch orders and the string branch is a CEL error, per row, so only the aBool-true rows below 3 and a3/a8 are allowed; comparing the CASE whole lets a store that orders numbers below every string return every aBool-false row, and SQL coerces both branches to one type."
+}

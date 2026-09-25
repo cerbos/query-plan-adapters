@@ -3110,6 +3110,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) != dyn(1.5)) || R.attr.aNumber > 10'
+    # string/concatenate/dollar-prefixed-literal
+    - actions:
+        - string/concatenate/dollar-prefixed-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString + "g" == "$aOptionalString"
     # string/concatenate/field-to-field
     - actions:
         - string/concatenate/field-to-field
@@ -3758,6 +3767,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
+    # type-mismatch/less-than/negated-string-field-against-arithmetic
+    - actions:
+        - type-mismatch/less-than/negated-string-field-against-arithmetic
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < R.attr.aNumber + 1.0) || R.attr.aNumber == 2'
     # type-mismatch/less-than/negated-string-field-against-number-literal
     - actions:
         - type-mismatch/less-than/negated-string-field-against-number-literal
@@ -3767,6 +3785,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.aString < 0) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/negated-string-field-against-ternary-number
+    - actions:
+        - type-mismatch/less-than/negated-string-field-against-ternary-number
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < (R.attr.aBool ? 1 : 2)) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/number-field-against-mixed-ternary
+    - actions:
+        - type-mismatch/less-than/number-field-against-mixed-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aNumber < (R.attr.aBool ? 3.0 : R.attr.aString) || R.attr.aNumber == 2'
     # type-mismatch/less-than/number-field-against-string-literal
     - actions:
         - type-mismatch/less-than/number-field-against-string-literal
@@ -3776,6 +3812,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber < "5" || R.attr.aNumber == 2
+    # type-mismatch/less-than/number-field-against-ternary-string
+    - actions:
+        - type-mismatch/less-than/number-field-against-ternary-string
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aNumber < (R.attr.aBool ? "a" : "b") || R.attr.aNumber == 2'
     # type-mismatch/less-than/number-literal-against-boolean-field-value-first
     - actions:
         - type-mismatch/less-than/number-literal-against-boolean-field-value-first
@@ -3785,6 +3830,15 @@ resourcePolicy:
       condition:
         match:
           expr: 0 < R.attr.aBool || R.attr.aNumber == 2
+    # type-mismatch/less-than/string-field-against-arithmetic
+    - actions:
+        - type-mismatch/less-than/string-field-against-arithmetic
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal

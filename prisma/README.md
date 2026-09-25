@@ -407,7 +407,7 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
-queries over the corpus's 41 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+queries over the corpus's 42 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
 `utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
 out of every golden case in the tier:
 
@@ -415,7 +415,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 232 / 308 |
+| adversarial | 236 / 314 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

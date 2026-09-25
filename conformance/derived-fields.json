@@ -43,6 +43,7 @@
     "i9": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 32.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "j1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 33.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "j2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 34.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
-    "j3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 35.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
+    "j3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 35.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "k1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 36.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
   }
 }

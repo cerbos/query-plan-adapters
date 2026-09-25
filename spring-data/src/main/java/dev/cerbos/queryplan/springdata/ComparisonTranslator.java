@@ -326,6 +326,9 @@ final class ComparisonTranslator {
                 return solveAddComparison(op, fpc, other, scope);
             }
             if (isAddRooted(left) || isAddRooted(right)) {
+                if (ORDERING_OPS.contains(op) && ordersStringAgainstNumericAdd(operands, scope)) {
+                    return tri.unknown();
+                }
                 Predicate concat = tryConcatComparison(op, operands, scope);
                 if (concat != null) {
                     return concat;
@@ -746,6 +749,45 @@ final class ComparisonTranslator {
                 : comparePredicate(op, sides.get(0), sides.get(1));
         return nullable.isEmpty() ? base : tri.baseUnlessUnknown(base,
                 () -> cb.or(nullable.stream().map(cb::isNull).toArray(Predicate[]::new)));
+    }
+
+    /**
+     * Whether one side is a string and the other a numeric {@code add}: one with no string
+     * under it and a number that makes it CEL's numeric {@code +}. CEL has no ordering between
+     * a string and a number, so {@code aString < aNumber + 1.0} is an error that denies under
+     * both polarities (cerbos/query-plan-adapters#575). Read as concatenation instead, the
+     * numeric column would be refused as a non-string operand.
+     */
+    private boolean ordersStringAgainstNumericAdd(List<Operand> operands, Scope scope) {
+        for (int side = 0; side < 2; side++) {
+            Operand add = operands.get(side);
+            Operand other = operands.get(1 - side);
+            if (add.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && "add".equals(add.getExpression().getOperator())
+                    && !isStringTyped(add, scope)
+                    && hasNumberLeaf(add, scope)
+                    && isStringTyped(other, scope)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a number constant or numeric column is anywhere under the {@code add} {@code o}. */
+    private boolean hasNumberLeaf(Operand o, Scope scope) {
+        return switch (o.getNodeCase()) {
+            case VALUE -> o.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE;
+            case VARIABLE -> isNumericType(scope.path(o.getVariable()).getJavaType());
+            case EXPRESSION -> "add".equals(o.getExpression().getOperator())
+                    && o.getExpression().getOperandsList().stream()
+                            .anyMatch(child -> hasNumberLeaf(child, scope));
+            default -> false;
+        };
+    }
+
+    private static boolean isNumericType(Class<?> type) {
+        return Number.class.isAssignableFrom(type)
+                || (type.isPrimitive() && type != boolean.class && type != char.class);
     }
 
     /** Whether a string constant or {@link String} column is anywhere under {@code o}. */

@@ -789,6 +789,14 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters cannot evaluate the retained ternary and arithmetic operands of this comparison. `allowPostFilter` does not lift it: `div` is applied to two integral literals (the ternary branches), and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN."
     },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `type-mismatch/less-than/string-field-against-arithmetic`, under negation."
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated. `allowPostFilter` does not lift it: `add` meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `struct`."

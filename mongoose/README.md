@@ -307,14 +307,14 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 42 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
 0.55.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 202 / 308 |
+| adversarial | 207 / 314 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -334,8 +334,13 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
   `5`), so `R.attr.aNumber == "5"` would match `5`. Declaring the field's `valueType` lets the
   adapter answer a literal of another type as CEL does — `==` and membership false, `!=` true where
   the field is present, and an ordering (`<`, `<=`, `>`, `>=`) false under either polarity —
-  including over a typed subdocument field. Membership in a native array
-  field is answered inside `$expr` with `$literal` needles for the same reason.
+  including over a typed subdocument field. The same declaration types a computed operand inside
+  `$expr`: `aString < aNumber + 1.0` and `aNumber < (aBool ? "a" : "b")` are false under either
+  polarity, where `$expr` would order them by BSON type, and an ordering against a ternary whose
+  branches have different types is refused. Membership in a native array
+  field is answered inside `$expr` with `$literal` needles for the same reason, and a constant
+  the pipeline would read as a field path or a variable (`"$aOptionalString"`, `"$$ROOT"`) is
+  wrapped in `$literal` wherever it reaches an aggregation expression.
 - **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
   from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
   demands. Under a negation its non-null guard is ANDed outside the `$nor`, so `!(x > 3)` denies

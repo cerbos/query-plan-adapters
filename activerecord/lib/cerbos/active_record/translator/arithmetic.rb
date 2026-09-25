@@ -22,7 +22,7 @@ module Cerbos
           if operator == "add" && (string_valued?(left) || string_valued?(right))
             return left + right if left.is_a?(::String) && right.is_a?(::String)
 
-            return dialect.concat(left, right)
+            return record_cel_type(dialect.concat(left, right), :string)
           end
 
           if operator == "mod" && !(cel_int?(left) && cel_int?(right))

@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "string/concatenate/dollar-prefixed-literal",
+  "intent": "A concatenation compared with a literal that spells a field path ((aString + \"g\") == \"$aOptionalString\").",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "g"
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": "$aOptionalString"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/concatenate/dollar-prefixed-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString + \"g\" == \"$aOptionalString\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Inside a MongoDB aggregation expression a raw \"$aOptionalString\" is the aOptionalString field, not a string: the filter misses k1 (whose aString + \"g\" is that literal) and matches any row whose aString + \"g\" equals its own aOptionalString. A constant there must be wrapped in $literal."
+}
