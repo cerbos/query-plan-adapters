@@ -233,14 +233,6 @@
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
     },
-    "principal/exists-one/duplicate-elements": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection value is not supported; only exists() and all() fold into a flat filter"
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "exists_one over a principal literal list has no flat form: it needs a count of matching elements, and only exists() and all() fold a literal list into a disjunction or conjunction"
-    },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
       "reason": "The collection is a principal value computed by another macro (a filter, a map or a struct projection), not a mapped relation or a literal list, so there is no table for a correlated subquery to range over"

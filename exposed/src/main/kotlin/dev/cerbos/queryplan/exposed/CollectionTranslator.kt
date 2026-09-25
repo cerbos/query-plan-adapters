@@ -171,7 +171,7 @@ internal class CollectionTranslator(private val translation: Translation) {
         lambdaOperand: Operand,
         scope: Scope,
     ): Op<Boolean> {
-        if (operator != "exists" && operator != "all") {
+        if (operator != "exists" && operator != "all" && operator != "exists_one") {
             throw RelationRefusals.unfoldableValueCollection(operator)
         }
         if (collection.kindCase != Value.KindCase.LIST_VALUE) {
@@ -185,10 +185,15 @@ internal class CollectionTranslator(private val translation: Translation) {
             "$operator lambda variable must be a variable operand",
         )
         val elements = collection.listValue.valuesList
-        // CEL identity over the empty collection: exists() matches nothing, all() matches
-        // everything. Both are DEFINITE, so a constant is the whole answer.
+        // CEL identity over the empty collection: exists() and exists_one() match nothing, all()
+        // matches everything. All DEFINITE, so a constant is the whole answer.
         if (elements.isEmpty()) {
-            return if (operator == "exists") Op.FALSE else Op.TRUE
+            return if (operator == "all") Op.TRUE else Op.FALSE
+        }
+        if (operator == "exists_one") {
+            return exactlyOneOf(elements.map { element ->
+                translation.walker.traverse(substitute(lambda.body, lambda.variable, element), scope)
+            })
         }
         val combined = PlanResourcesFilter.Expression.newBuilder()
             .setOperator(if (operator == "exists") "or" else "and")
@@ -196,6 +201,35 @@ internal class CollectionTranslator(private val translation: Translation) {
             combined.addOperands(substitute(lambda.body, lambda.variable, element))
         }
         return translation.walker.traverse(Operand.newBuilder().setExpression(combined).build(), scope)
+    }
+
+    /**
+     * `exists_one` over a literal list, from one body per element POSITION (a repeated element is
+     * two positions, and two TRUE bodies are not "exactly one").
+     *
+     * `OR_i (b_i AND AND_{j != i} NOT b_j)` is exact while every body is two-valued. CEL's
+     * `exists_one` has no error absorption, so one erroring element errors the macro whatever the
+     * others say; the pairwise form can instead read FALSE there (two TRUE bodies beside an UNKNOWN
+     * one), which a negation would flip. The witness `OR_i NOT (b_i OR NOT b_i)` is FALSE when every
+     * body is determined and UNKNOWN otherwise, and [TriLogic.baseUnlessUnknown] turns an UNKNOWN
+     * witness into an UNKNOWN macro. The pairwise form is quadratic in the list, so a list past
+     * [EXISTS_ONE_FOLD_LIMIT] elements is refused rather than emitted.
+     */
+    private fun exactlyOneOf(bodies: List<Op<Boolean>>): Op<Boolean> {
+        if (bodies.size > EXISTS_ONE_FOLD_LIMIT) {
+            throw Refusals.unsupported(
+                "exists_one over a literal list of ${bodies.size} elements is not supported: it " +
+                    "lowers to a pairwise exclusion, quadratic in the list, and is refused past " +
+                    "$EXISTS_ONE_FOLD_LIMIT elements",
+            )
+        }
+        val exactlyOne = TriLogic.or(
+            bodies.indices.map { i ->
+                TriLogic.and(listOf(bodies[i]) + bodies.indices.filter { it != i }.map { TriLogic.not(bodies[it]) })
+            },
+        )
+        val undetermined = TriLogic.or(bodies.map { TriLogic.not(TriLogic.determined(it)) })
+        return TriLogic.baseUnlessUnknown(exactlyOne, undetermined)
     }
 
     /**
@@ -266,5 +300,8 @@ internal class CollectionTranslator(private val translation: Translation) {
     private companion object {
         /** Operators whose second operand is a lambda that binds an iteration variable. */
         val LAMBDA_BINDING_OPERATORS = setOf("exists", "exists_one", "all", "filter", "map", "except")
+
+        /** The longest literal list `exists_one` is folded over; see [exactlyOneOf]. */
+        const val EXISTS_ONE_FOLD_LIMIT = 32
     }
 }

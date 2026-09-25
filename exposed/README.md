@@ -518,12 +518,12 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 57 / 80 |
-| adversarial | 226 / 308 |
+| extended | 58 / 80 |
+| adversarial | 227 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-98 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+96 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -548,8 +548,9 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   recognised types that differ is not refused: it is answered from the types. See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);
 - a hierarchy split on the empty delimiter anywhere but between a column and a constant (which
-  translates as a code-point prefix test), a division as a divisor, a macro over a principal value
-  another macro computes, and `exists_one` over a principal list;
+  translates as a code-point prefix test), a division as a divisor, and a macro over a principal
+  value another macro computes (`exists_one` over a principal list of up to 32 elements folds into
+  a pairwise exclusion that stays UNKNOWN when any element errors);
 - `!=` between two columns under mixed null conventions.
 
 The cases the corpus declares a planner divergence (`plannerDivergence`: the plan and `check()`

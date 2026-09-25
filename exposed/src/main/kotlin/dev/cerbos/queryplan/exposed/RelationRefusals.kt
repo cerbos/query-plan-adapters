@@ -24,7 +24,7 @@ internal object RelationRefusals {
 
     /** A macro the fold cannot express over a literal list, because SQL has no per-element UNKNOWN. */
     fun unfoldableValueCollection(operator: String): UnsupportedPlanShapeException = Refusals.unsupported(
-        "$operator over a literal collection value is not supported; only exists() and all() fold " +
+        "$operator over a literal collection value is not supported; only exists(), all() and exists_one() fold " +
             "into a flat filter",
     )
 
