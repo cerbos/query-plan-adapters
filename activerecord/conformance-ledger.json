@@ -53,9 +53,21 @@
       "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused.",
       "status": "unsupported"
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "string() wraps int() over a string column, which is refused: CEL reads the whole string or errors, but a SQL CAST reads the leading digits and gives a number."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "string() wraps int() over a double column, which is refused: CEL truncates toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number."
+    },
     "cast/string/from-negative-zero-double": {
       "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused",
       "status": "unsupported"
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refused int() over a double column as cast/string/from-int-past-exponent-threshold, under negation."
     },
     "cast/timestamp/malformed-string": {
       "reason": "timestamp() over a column holding a formatted string would compare text in SQL, not instants; the attribute must map to a datetime column.",
@@ -76,6 +88,14 @@
     "collection/except/size-of-difference": {
       "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
       "status": "unsupported"
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "exists() over the parent ranges over the keys of a map, and the parent is a to-one association, which the adapter refuses as a macro's collection: a subquery over it ranges over rows, and SQL has no way to enumerate which of a row's columns are non-NULL as the map's keys."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same to-one parent read as a map as collection/exists/map-keys, under negation."
     },
     "collection/filter/as-conjunct": {
       "reason": "filter() yields a list, not a boolean; a filtered relation cannot be used as a condition, even as one conjunct.",

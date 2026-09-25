@@ -65,8 +65,10 @@ module Cerbos
         end
 
         # Divides as doubles, like CEL. Otherwise SQLite and PostgreSQL make `5 / 2` into `2`.
+        # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
+          return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 
           if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)
             return divide_constants(numerator.to_f, denominator.to_f)
@@ -78,6 +80,30 @@ module Cerbos
           end
 
           divide_with_zero_denominator(numerator, denominator)
+        end
+
+        # Int division: both operands are CEL ints and at least one is an int() result (or int
+        # arithmetic on one), since a bare whole constant may have been written `2.0`.
+        def int_division?(numerator, denominator)
+          (cel_type(numerator) == :int || cel_type(denominator) == :int) &&
+            cel_int?(numerator) && cel_int?(denominator)
+        end
+
+        # CEL's `int / int` truncates toward zero, as SQLite's and PostgreSQL's integer `/`
+        # and MySQL's `DIV` do. A zero divisor is a CEL error that denies the row under either
+        # polarity, where PostgreSQL aborts the query, so only a non-zero constant divisor is
+        # translated.
+        def int_divide(numerator, denominator)
+          unless denominator.is_a?(Numeric) && !denominator.zero?
+            raise UnsupportedOperatorError,
+              "int division by a value that may be zero: CEL makes an error that denies the " \
+              "row, but PostgreSQL aborts the whole query, so only a non-zero constant divisor " \
+              "is translated"
+          end
+
+          return (numerator.to_i.to_r / denominator.to_i).truncate if numerator.is_a?(Numeric)
+
+          record_cel_type(dialect.int_divide(numerator, denominator.to_i), :int)
         end
 
         def divide_constants(numerator, denominator)

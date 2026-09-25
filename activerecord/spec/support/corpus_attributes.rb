@@ -39,6 +39,9 @@ module CorpusAttributes
     # The corpus's one real to-one relation (ADR 0005). Unlike `obj.inner`, this is a join:
     # each hop becomes a scalar subquery, and a missing parent gives NULL, which denies like
     # check()'s missing-path error. An absent level is a missing attribute, hence `:omitted`.
+    # Read whole, the parent is a map (collection/exists/map-keys). Mapped as what it is, a
+    # to-one association, which the adapter refuses as a macro's collection.
+    "request.resource.attr.parent" => relation(:parent),
     "request.resource.attr.parent.aBool" => omitted("parent.a_bool"),
     "request.resource.attr.parent.aString" => omitted("parent.a_string"),
     "request.resource.attr.parent.aNumber" => omitted("parent.a_number"),

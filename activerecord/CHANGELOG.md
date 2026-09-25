@@ -77,6 +77,10 @@
   They previously went through `CAST(... AS TEXT)`, which gives `"1"`/`"0"` on SQLite and MySQL, so `!(string(R.attr.n > 3) == "true")` returned rows the policy denies.
   A NULL or missing operand still leaves the row out under both polarities.
 
+- **Breaking:** a division whose operands are both CEL ints, at least one an `int()` result or int arithmetic on one, is int division truncating toward zero, as CEL's is ([#545](https://github.com/cerbos/query-plan-adapters/issues/545))
+
+  `int(R.attr.n) / 2 == 1` used to divide as doubles, so `int(3) / 2` was `1.5`, the row was dropped, and the negation returned it though the PDP denies it. The division is now `/` over integers (`DIV` on MySQL). Its divisor must be a non-zero constant: CEL's int division by zero is an error that denies the row, where PostgreSQL aborts the query, so any other int divisor raises `Cerbos::ActiveRecord::UnsupportedOperatorError`.
+
 ### Removed
 
 - Support for Ruby 3.2 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))
