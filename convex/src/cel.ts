@@ -78,23 +78,50 @@ export const compareValues = (
     const equal = valuesEqual(left, right);
     return operator === "eq" ? equal : !equal;
   }
+  // An ordering against NaN is false, whatever the other operand is.
   if (Number.isNaN(left) || Number.isNaN(right)) return false;
-  if (
-    !(isNumeric(left) && isNumeric(right)) &&
-    (typeof left !== "string" || typeof right !== "string")
-  ) {
+  let a: number | bigint;
+  let b: number | bigint;
+  if (typeof left === "string" && typeof right === "string") {
+    // cel-go orders strings by their UTF-8 bytes, which is code point order. JavaScript's `<`
+    // compares UTF-16 code units instead, and puts an astral character (a surrogate pair, from
+    // 0xD800) before U+E000–U+FFFF.
+    a = compareCodePoints(left, right);
+    b = 0;
+  } else if (typeof left === "boolean" && typeof right === "boolean") {
+    // CEL orders bools, false before true.
+    a = Number(left);
+    b = Number(right);
+  } else if (isNumeric(left) && isNumeric(right)) {
+    a = left;
+    b = right;
+  } else {
     return EVALUATION_ERROR;
   }
   switch (operator) {
     case "lt":
-      return left < right;
+      return a < b;
     case "le":
-      return left <= right;
+      return a <= b;
     case "gt":
-      return left > right;
+      return a > b;
     case "ge":
-      return left >= right;
+      return a >= b;
   }
+};
+
+/** Negative, zero or positive as `a` orders before, with or after `b` by Unicode code point. */
+const compareCodePoints = (a: string, b: string): number => {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i)!;
+    const y = b.codePointAt(j)!;
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return Number(i < a.length) - Number(j < b.length);
 };
 
 // -- hierarchies ---------------------------------------------------------------------------------
@@ -265,10 +292,23 @@ const formatGoDouble = (value: number): string => {
 // A bool renders "true"/"false" in CEL and in JavaScript alike. That is why convex is one of the
 // two adapters that lower `string()` over a boolean rather than refusing it — the SQL adapters
 // cannot, because SQLite and MySQL store 1/0.
-export const convertToString = (value: unknown): string | EvaluationError => {
+//
+// A number renders as a double unless `int` says the operand is certainly a CEL int (`int()`,
+// `size()`, int arithmetic). The two differ from 1e6 up ("1000000" against "1e+06"), and a number
+// in a plan carries no type, so the caller decides from the expression. A bigint is only ever an
+// int.
+export const convertToString = (
+  value: unknown,
+  int = false,
+): string | EvaluationError => {
   if (typeof value === "string") return value;
   if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") return formatGoDouble(value);
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number") {
+    return int && Number.isInteger(value)
+      ? BigInt(value).toString()
+      : formatGoDouble(value);
+  }
   return EVALUATION_ERROR;
 };
 
@@ -276,6 +316,7 @@ export const convertToDouble = (value: unknown): number | EvaluationError => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : EVALUATION_ERROR;
   }
+  if (typeof value === "bigint") return Number(value);
   if (typeof value !== "string" || !CEL_DOUBLE_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
@@ -300,6 +341,7 @@ const celInt = (value: bigint): number | bigint | EvaluationError => {
 export const convertToInt = (
   value: unknown,
 ): number | bigint | EvaluationError => {
+  if (typeof value === "bigint") return celInt(value);
   if (typeof value === "number") {
     // cel-go refuses a double at or beyond either int64 bound, -2^63 included.
     if (!Number.isFinite(value) || value <= -(2 ** 63) || value >= 2 ** 63) {
@@ -313,4 +355,44 @@ export const convertToInt = (
     return EVALUATION_ERROR;
   }
   return celInt(BigInt(value));
+};
+
+// -- int arithmetic ------------------------------------------------------------------------------
+
+const toBigInt = (value: unknown): bigint | undefined => {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  return undefined;
+};
+
+export type ArithmeticOperator = "add" | "sub" | "mult" | "div" | "mod";
+
+/**
+ * CEL int arithmetic, exact over bigints. `/` and `%` truncate toward zero, as bigint division
+ * does, where JavaScript's `/` over numbers gives 1.5 for 3 / 2. A zero divisor and an int64
+ * overflow are errors.
+ */
+export const intArithmetic = (
+  operator: ArithmeticOperator,
+  left: unknown,
+  right: unknown,
+): number | bigint | EvaluationError => {
+  const a = toBigInt(left);
+  const b = toBigInt(right);
+  if (a === undefined || b === undefined) return EVALUATION_ERROR;
+  switch (operator) {
+    case "add":
+      return celInt(a + b);
+    case "sub":
+      return celInt(a - b);
+    case "mult":
+      return celInt(a * b);
+    case "div":
+      // INT64_MIN / -1 overflows, which celInt reports.
+      return b === 0n ? EVALUATION_ERROR : celInt(a / b);
+    case "mod":
+      return b === 0n ? EVALUATION_ERROR : celInt(a % b);
+  }
 };
