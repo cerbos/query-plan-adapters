@@ -262,7 +262,7 @@ total is every golden case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 67 / 80 |
-| adversarial | 226 / 254 |
+| adversarial | 239 / 267 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.55.0 there are four, all extended, which is why
