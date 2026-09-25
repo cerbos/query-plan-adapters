@@ -485,11 +485,13 @@ func buildMapper() cerbosent.Mapper {
 		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
 		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
 		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
-		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool"},
+		// The two aBool hops are declared boolean, like the root aBool, because that is what they
+		// hold; string() over one is refused until the translator spells it (#470).
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool},
 		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},
 		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string"},
-		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool"},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool},
 		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string"},
 		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number"},
 		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string"},

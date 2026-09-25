@@ -4,6 +4,7 @@
 package cerbosent
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -374,6 +375,13 @@ func writeSeparated(b *sql.Builder, args []queryplan.Expr, separator string) err
 }
 
 func writeCast(b *sql.Builder, t queryplan.Cast) error {
+	if t.To == queryplan.CastText && booleanValued(t.X) {
+		return errors.New("string() over a boolean-valued expression, or over a column declared " +
+			"ValueBool and read through a to-one hop, is only lowered to a CAST, which SQLite and " +
+			"MySQL render as 1/0 where CEL says \"true\"/\"false\"; refused on every dialect so " +
+			"one plan translates alike on all three (cerbos/query-plan-adapters#470)")
+	}
+
 	target, err := castType(b.Dialect(), t.To)
 	if err != nil {
 		return err
@@ -395,6 +403,29 @@ func writeCast(b *sql.Builder, t queryplan.Cast) error {
 		b.WriteString(" COLLATE utf8mb4_0900_bin")
 	}
 	return nil
+}
+
+// booleanValued reports whether a text cast's operand is a boolean the shared translator has not
+// spelled through its CASE: a predicate node, or a scalar subquery projecting a column declared
+// ValueBool. The translator gives CEL's "true"/"false" only to a declared plain column, and a bare
+// CAST says "1"/"0" on SQLite and MySQL, so `!(string(x) == "true")` would return every row whose
+// x is true. PostgreSQL's CAST does say "true", but the conformance ledger cannot tell engines
+// apart, so the refusal holds on every dialect until the translator spells these operands itself
+// (cerbos/query-plan-adapters#470). An undeclared column keeps the plain CAST, through a hop or
+// not: declaring ValueBool is what tells the adapter a column holds a boolean.
+func booleanValued(x queryplan.Expr) bool {
+	switch t := x.(type) {
+	case queryplan.Cmp, queryplan.Logic, queryplan.Not, queryplan.IsNull, queryplan.TruthTest,
+		queryplan.Like, queryplan.NotDistinct, queryplan.InList, queryplan.BoolConst:
+		return true
+	case queryplan.Subquery:
+		if t.Kind == queryplan.SubqueryExists {
+			return true
+		}
+		c, ok := t.Select.(queryplan.Column)
+		return t.Kind == queryplan.SubqueryScalar && ok && c.Type == queryplan.ValueBool
+	}
+	return false
 }
 
 func writeSubquery(b *sql.Builder, s queryplan.Subquery) error {
