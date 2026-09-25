@@ -5,6 +5,18 @@
       "status": "unsupported",
       "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
     },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "int() is solved only against a constant (int(column) == literal), never inside arithmetic: CEL int division truncates toward zero, and a JPA division over the column has neither int() nor that truncation, so int(aNumber) / 2 is refused."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same refusal as arithmetic/divide/int-truncates: int() inside arithmetic has no JPA Criteria form that truncates toward zero as CEL int division does."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refusal as arithmetic/divide/int-truncates, under negation: int() inside arithmetic has no JPA Criteria form that truncates toward zero as CEL int division does."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The divisor aDouble / aNumber is zero with the sign of aDouble's zero, and CEL's quotient is an infinity of that sign; SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
@@ -33,6 +45,14 @@
       "status": "unsupported",
       "reason": "The plan carries the int literal as a double, which at 2^53 and beyond no longer pins a single integer, so int() compared with such a bound is refused rather than compared through double arithmetic."
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "string() is solved only over a mapped attribute compared with a constant. string(int(column)) nests a conversion JPA Criteria cannot spell: int() parses the whole string exactly to int64, and string() renders the int in plain decimal."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "string() is solved only over a mapped attribute compared with a constant. string(int(column)) nests a conversion JPA Criteria cannot spell: int() truncates the double toward zero, and string() renders the int in plain decimal (\"1000000\", not the double's \"1e+06\")."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
@@ -44,6 +64,10 @@
     "cast/string/negated-from-boolean-ternary": {
       "status": "unsupported",
       "reason": "string() is solved only over a mapped attribute compared with a constant. A ternary is not an attribute, and JPA Criteria has no boolean-to-text conversion that renders CEL's \"true\"/\"false\" on every store."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal as cast/string/from-int-past-exponent-threshold, under negation: string(int(column)) has no JPA Criteria form."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -57,6 +81,14 @@
       "status": "unsupported",
       "reason": "except() returns a list, not a boolean, so in boolean position it has no Criteria meaning and is refused; it translates only under size() or compared with a list of at most one element."
     },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "A macro over a map ranges over its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to iterate, so R.attr.parent itself is an unmapped attribute."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/exists/map-keys, under negation: the to-one parent is mapped per field, and a JPA relation row has no key set to range over."
+    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a filter() conjunct is refused rather than dropped (dropping it would over-grant)."
@@ -68,6 +100,14 @@
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() returns a list, not a boolean; it translates as the collection of hasIntersection, in list equality and in membership, and used as the whole condition it is refused."
+    },
+    "comparison/less-than/astral-string-against-high-bmp": {
+      "status": "unsupported",
+      "reason": "CEL orders strings by code point; H2 compares VARCHAR by UTF-16 code unit (Java's String.compareTo), which sorts a6's astral U+1F680 (high surrogate 0xD83D) before U+FFFD. An ordering against a literal holding a code unit at or above U+D800 is refused, since only such a literal can be ordered differently."
+    },
+    "comparison/less-than/negated-astral-string-against-high-bmp": {
+      "status": "unsupported",
+      "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",

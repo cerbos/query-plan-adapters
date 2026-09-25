@@ -291,7 +291,11 @@ and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribu
 >   the column collation, and a linguistic default such as `en_US.utf8` does not order by code
 >   point (`'OneSet' < 'b'` is false, `'One' > 'a'` is true). Use `"C"` for columns compared by ordering, and avoid
 >   case-insensitive behaviour (nondeterministic ICU collations, `citext`).
-> - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour.
+> - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour. H2 orders strings
+>   by UTF-16 code unit (Java's `String.compareTo`), not by code point as CEL does, so on every
+>   store the adapter refuses an ordering against a literal holding a character at or above
+>   U+D800 (an astral character, or U+E000–U+FFFF): only such a literal can be ordered
+>   differently by the two.
 
 CEL string comparison is exact: `R.attr.department == "finance"` denies a row holding `"Finance"`.
 The adapter emits string predicates without collation control, so the column collation decides.
@@ -376,7 +380,8 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 ## Not yet supported
 
 These throw `UnsupportedPlanShapeException` naming the operator — except the ambiguous-column
-timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it.
+timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it, and the
+map-valued attribute row, which names an attribute no mapping can declare.
 **Overridable: no** means the refusal happens while resolving an operand, before any override is
 consulted.
 
@@ -384,6 +389,8 @@ consulted.
 |---|---|---|---|
 | `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
 | Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
+| Ordering a string against a literal holding a character at or above U+D800 | `R.attr.s < "h\u00e9llo\uFFFD"` | yes | CEL orders strings by code point; H2 compares UTF-16 code units, which put a surrogate pair before U+E000–U+FFFF |
+| A macro over a map-valued attribute (a to-one relation or embedded object as a whole) | `R.attr.parent.exists(k, k == "inner")` | no | CEL ranges over the map's keys, and a JPA row has no key set; the whole object is not a mappable attribute, so this is `UnmappedAttributeException` |
 | List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
 | Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
@@ -410,8 +417,8 @@ total but not as passed:
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 19 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the fix is a mapping change) rather than emit a filter. Four extended cases and three adversarial
-cases are planner divergences the corpus skips: `null/has/missing-attribute` and
+when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
+extended cases and three adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
 `null/has/composed-with-comparison`, where the planner drops `has()` from the plan (see
 [Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)),
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
