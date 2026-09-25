@@ -45,6 +45,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble + 0.7 != 0.1
+    # arithmetic/add/int-beside-double-field
+    - actions:
+        - arithmetic/add/int-beside-double-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5
     # arithmetic/add/int-literal-negated
     - actions:
         - arithmetic/add/int-literal-negated
@@ -63,6 +72,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber + 1 > 2.0
+    # arithmetic/add/negated-int-beside-double-field
+    - actions:
+        - arithmetic/add/negated-int-beside-double-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) + R.attr.aDouble > 0.0) || R.attr.aNumber == 5'
     # arithmetic/add/on-both-sides
     - actions:
         - arithmetic/add/on-both-sides
@@ -414,6 +432,24 @@ resourcePolicy:
       condition:
         match:
           expr: string(int(R.attr.aDouble)) == "1000000"
+    # cast/string/from-integral-ternary
+    - actions:
+        - cast/string/from-integral-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'string(R.attr.aBool ? 1000000 : 0) == "1000000"'
+    # cast/string/from-ternary-with-int-branch
+    - actions:
+        - cast/string/from-ternary-with-int-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'string(R.attr.aBool ? int(R.attr.aDouble) : 1000000) == "1000000"'
     # cast/string/negated-from-int-past-exponent-threshold
     - actions:
         - cast/string/negated-from-int-past-exponent-threshold
@@ -423,6 +459,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(string(int(R.attr.aDouble)) == "1000000")'
+    # cast/string/negated-from-integral-ternary
+    - actions:
+        - cast/string/negated-from-integral-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aBool ? 1000000 : 0) == "1000000")'
     # cast/string/from-negative-zero-double
     - actions:
         - cast/string/from-negative-zero-double
@@ -1742,6 +1787,15 @@ resourcePolicy:
       condition:
         match:
           expr: 2 in R.attr.aNumberList
+    # membership/in/map-attribute-keys
+    - actions:
+        - membership/in/map-attribute-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"inner" in R.attr.parent'
     # membership/in/map-literal-keys
     - actions:
         - membership/in/map-literal-keys
@@ -1751,6 +1805,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aString in {"one": 1, "same": 2}'
+    # membership/in/negated-map-attribute-keys
+    - actions:
+        - membership/in/negated-map-attribute-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("inner" in R.attr.parent)'
     # membership/in/negated-field-in-resource-list
     - actions:
         - membership/in/negated-field-in-resource-list

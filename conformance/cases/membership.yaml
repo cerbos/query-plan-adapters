@@ -27,6 +27,13 @@ cases:
   condition:
     match:
       expr: 2 in R.attr.aNumberList
+- id: 'membership/in/map-attribute-keys'
+  tier: adversarial
+  intent: 'A string literal in the map-valued parent attribute, which tests its keys ("inner" in parent).'
+  trap: 'in over a map tests its keys, so every row whose parent has a parent of its own is allowed; treating a map haystack as an error under-grants them, and a row with no parent is a missing attribute that denies.'
+  condition:
+    match:
+      expr: '"inner" in R.attr.parent'
 - id: 'membership/in/map-literal-keys'
   tier: adversarial
   intent: 'A string attribute in a map literal, which tests the map''s keys.'
@@ -34,6 +41,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString in {"one": 1, "same": 2}'
+- id: 'membership/in/negated-map-attribute-keys'
+  tier: adversarial
+  intent: '!("inner" in parent): key membership in a map-valued attribute under negation.'
+  trap: 'CEL allows each row whose parent has no parent of its own; answering a map haystack false over-grants the rows that have one, an error under-grants the rest, and a row with no parent stays denied.'
+  condition:
+    match:
+      expr: '!("inner" in R.attr.parent)'
 - id: 'membership/in/negated-field-in-resource-list'
   tier: adversarial
   intent: Negated membership of one resource attribute in a resource list attribute.

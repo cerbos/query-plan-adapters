@@ -346,6 +346,28 @@ const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
 };
 
 /**
+ * Whether one operand is certainly a CEL int and the other certainly a double: an attribute read
+ * (CEL reads every attribute number as a double), a fractional constant, or `double()`. CEL has no
+ * overload mixing the two, so `int(x) + R.attr.d` is an error that denies the row under both
+ * polarities; it is lowered to a NULL, which SQL's three-valued logic carries the same way.
+ */
+const mixesIntWithDouble = (
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+): boolean => {
+  const isDouble = (operand: PlanExpressionOperand): boolean =>
+    isNameOperand(operand) ||
+    isOperatorCall(operand, "double") ||
+    (isValueOperand(operand) &&
+      typeof operand.value === "number" &&
+      !Number.isInteger(operand.value));
+  return (
+    (isCelIntExpression(left) && isDouble(right)) ||
+    (isDouble(left) && isCelIntExpression(right))
+  );
+};
+
+/**
  * CEL's `/` over ints truncates toward zero, where a double division makes `int(3) / 2` 1.5; a
  * zero divisor is an error, and an int beside a double is a no-overload error. It is lowered only
  * for `int()` of an integer column divided by a non-zero whole constant, with each store's
@@ -550,6 +572,9 @@ const buildArithmeticExpression = (
   }
   if (operator === "mod") {
     return buildModulo(leftOperand, rightOperand, mapper, options);
+  }
+  if (mixesIntWithDouble(leftOperand, rightOperand)) {
+    return sql`cast(null as float(53))`;
   }
   if (operator === "div" && (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand))) {
     return buildIntDivision(leftOperand, rightOperand, mapper, options);

@@ -283,6 +283,21 @@ const buildMembershipFilter = (
       options,
     );
   }
+  if (collectionOperand !== undefined && isNameOperand(collectionOperand)) {
+    const haystack = getMappingEntry(collectionOperand.name, mapper);
+    if (
+      haystack !== undefined && isMappingConfig(haystack) &&
+      haystack.relation?.type === "one"
+    ) {
+      // CEL reads a to-one relation as a map, and `in` over a map tests its KEYS: the attribute
+      // names present on the related row, which a comparison against its columns cannot test.
+      throw new UnsupportedQueryPlanError(
+        `Cannot translate 'in' over '${collectionOperand.name}': it is a to-one relation, which ` +
+          "CEL reads as a map whose keys (the attribute names present on the related row) 'in' " +
+          "tests, and SQL has no row of attribute names to search",
+      );
+    }
+  }
   if (operands.every(isNameOperand)) {
     return buildVariableMembershipFilter(operands, mapper, options);
   }

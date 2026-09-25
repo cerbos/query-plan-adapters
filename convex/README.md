@@ -269,7 +269,7 @@ total is every golden case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 67 / 80 |
-| adversarial | 270 / 301 |
+| adversarial | 275 / 308 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.55.0 there are seven, four extended and three
@@ -291,13 +291,13 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 332 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 349 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
 | Convex's filter engine, alone | 18 |
-| the adapter's `postFilter`, alone | 308 |
+| the adapter's `postFilter`, alone | 325 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
@@ -369,6 +369,13 @@ See also [CHANGELOG.md](CHANGELOG.md).
   returned every number. An ordering against a null, a list or a map is now a constant false.
   Filters change shape; nothing that translated now throws
   ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)).
+- **Breaking:** `string()` over an integral constant whose int or double type no other operand
+  fixes, such as `string(R.attr.flag ? 1000000 : 0)`, now throws at translation. CEL renders the
+  int as `"1000000"` and the double as `"1e+06"`, and the plan ships both as the same number; it
+  used to render the double and deny what the PDP allowed. A constant whose two renderings agree
+  (`0`, `42`) and a ternary whose other branch is `int()` still translate. `int()` added to a
+  document field is now the no-such-overload error CEL raises, and `in` over a map-valued attribute
+  tests its keys ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - **Breaking (Cerbos 0.55 compatibility):** ordered comparisons involving NaN evaluate to false, so
   their negation can allow a row; Cerbos 0.54 denied it. The adapter follows 0.55 — use it with
   Cerbos 0.55 when policies can produce NaN in a negated comparison. Missing attributes and nulls

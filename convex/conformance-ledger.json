@@ -9,6 +9,14 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare JSON number and neither branch fixes the type, so the post-filter cannot tell \"1000000\" from \"1e+06\" and refuses the string() conversion"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`"
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."

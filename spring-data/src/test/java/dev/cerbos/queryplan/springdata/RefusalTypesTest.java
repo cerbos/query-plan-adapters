@@ -57,15 +57,18 @@ class RefusalTypesTest {
     /**
      * The corpus refusals the mapping raises before any Criteria limit is reached:
      * {@code createdBy} is a String column, which does not pin an instant; and the to-one
-     * {@code parent} is mapped per field, so a macro over the whole parent (a CEL map, ranged
-     * over its keys) names an attribute the mapping does not declare. Every other corpus
+     * {@code parent} is mapped per field, so a macro or an {@code in} over the whole parent (a CEL
+     * map, ranged over or tested by its keys) names an attribute the mapping does not declare.
+     * Every other corpus
      * refusal is an {@link UnsupportedPlanShapeException}.
      */
     private static final Set<String> UNMAPPED = Set.of(
             "cast/timestamp/malformed-string",
             "cast/timestamp/negated-malformed-string",
             "collection/exists/map-keys",
-            "collection/exists/negated-map-keys");
+            "collection/exists/negated-map-keys",
+            "membership/in/map-attribute-keys",
+            "membership/in/negated-map-attribute-keys");
 
     private static EntityManagerFactory emf;
 

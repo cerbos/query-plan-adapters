@@ -189,7 +189,7 @@ const lambdaOf = (call: Call): ((element: unknown) => unknown) => {
     });
 };
 
-/** What a macro ranges over: a list's elements, or a map's keys, as CEL iterates a map. */
+/** What a macro ranges over, and what `in` tests: a list's elements, or a map's keys. */
 const macroItems = (collection: unknown): unknown[] | undefined => {
   if (Array.isArray(collection)) return collection;
   if (isRecord(collection)) return Object.keys(collection);
@@ -240,6 +240,14 @@ const arithmetic = (call: Call): unknown => {
   if (isIntExpression({ operator, operands: call.operands })) {
     return intArithmetic(operator as ArithmeticOperator, left, right);
   }
+  // CEL has no overload mixing int and double, so `int(x) + R.attr.aDouble` is an error, where
+  // JavaScript adds the two numbers and a negation would turn the sum into a grant.
+  if (
+    call.operands.some(isIntExpression) &&
+    call.operands.some((operand) => isDoubleOperand(operand, call.scope))
+  ) {
+    return EVALUATION_ERROR;
+  }
   // CEL overloads `+` on strings, and JavaScript's `+` concatenates identically. Only `add`
   // has the overload — `sub`/`mult`/`div`/`mod` over strings stay a CEL error, which is what
   // falling through to the numeric guard below already produces. Before this, a string `add`
@@ -279,9 +287,34 @@ const arithmetic = (call: Call): unknown => {
 /** Whether the operand at `index` is a document field, rather than a constant or lambda binding. */
 const readsDocument = ({ operands, scope }: Call, index: number): boolean => {
   const operand = operands[index];
-  if (operand === undefined || !isVariable(operand)) return false;
+  return operand !== undefined && isDocumentField(operand, scope);
+};
+
+const isDocumentField = (
+  operand: PlanExpressionOperand,
+  scope: Scope,
+): boolean => {
+  if (!isVariable(operand)) return false;
   const root = operand.name.split(".")[0] ?? operand.name;
   return !(root in scope.bindings);
+};
+
+/**
+ * Whether the operand is certainly not a CEL int, so that beside a certain int it is a
+ * no-such-overload error: a document field (every number an attribute carries is a double, and
+ * any other type is no number at all), a fractional constant, or `double()`.
+ */
+const isDoubleOperand = (
+  operand: PlanExpressionOperand,
+  scope: Scope,
+): boolean => {
+  if (isValue(operand)) {
+    return (
+      typeof operand.value === "number" && !Number.isInteger(operand.value)
+    );
+  }
+  if (isVariable(operand)) return isDocumentField(operand, scope);
+  return isExpression(operand) && operand.operator === "double";
 };
 
 // CEL's `%` has int and uint overloads only. Every number an attribute carries is a double (a
@@ -325,6 +358,70 @@ const isIntExpression = (operand: PlanExpressionOperand): boolean => {
       );
     default:
       return false;
+  }
+};
+
+type NumericType = "int" | "double";
+
+/**
+ * The CEL numeric type the plan says the operand certainly has: `int` for a certain int (see
+ * `isIntExpression`), `double` for `double()` or a fractional constant, and for a ternary whatever
+ * one of its branches fixes, since CEL gives both branches one type. Undefined when the plan does
+ * not say: a document field, or an integral constant, which the plan ships as a bare number
+ * whether the policy wrote `1000000` or `1000000.0`.
+ */
+const numericTypeOf = (
+  operand: PlanExpressionOperand,
+): NumericType | undefined => {
+  if (isValue(operand)) {
+    return typeof operand.value === "number" && !Number.isInteger(operand.value)
+      ? "double"
+      : undefined;
+  }
+  if (isIntExpression(operand)) return "int";
+  if (!isExpression(operand)) return undefined;
+  if (operand.operator === "double") return "double";
+  if (operand.operator !== "if") return undefined;
+  const [, whenTrue, whenFalse] = operand.operands;
+  return (
+    (whenTrue && numericTypeOf(whenTrue)) ??
+    (whenFalse && numericTypeOf(whenFalse))
+  );
+};
+
+/**
+ * Whether `string()` over the operand could render an integral constant whose type the plan
+ * dropped, where the int and double renderings differ ("1000000" and "1e+06"). `type` is the
+ * type an enclosing ternary fixes for its branches.
+ */
+const rendersUntypedConstant = (
+  operand: PlanExpressionOperand,
+  type: NumericType | undefined,
+): boolean => {
+  if (isValue(operand)) {
+    const { value } = operand;
+    return (
+      type === undefined &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      convertToString(value, true) !== convertToString(value, false)
+    );
+  }
+  if (!isExpression(operand) || operand.operator !== "if") return false;
+  const branchType = type ?? numericTypeOf(operand);
+  return operand.operands
+    .slice(1)
+    .some((branch) => rendersUntypedConstant(branch, branchType));
+};
+
+const validateStringConversion = ({ operands }: PlanExpression): void => {
+  const operand = operands[0];
+  if (operand !== undefined && rendersUntypedConstant(operand, undefined)) {
+    throw new UnsupportedQueryPlanError(
+      "string() over an integral constant whose int or double type the plan does not carry: " +
+        'CEL renders the int 1000000 as "1000000" and the double as "1e+06", and the plan ' +
+        "ships both as the same bare number",
+    );
   }
 };
 
@@ -423,8 +520,11 @@ const OPERATORS: Record<string, Operator> = {
       if (isEvaluationError(needle) || isEvaluationError(haystack)) {
         return EVALUATION_ERROR;
       }
-      if (!Array.isArray(haystack)) return EVALUATION_ERROR;
-      return haystack.some((value) => valuesEqual(value, needle));
+      // CEL's `in` over a map tests its keys. Only a map-valued attribute reaches here as a map:
+      // the planner rewrites a map literal, or a principal map, into its key list first.
+      const members = macroItems(haystack);
+      if (members === undefined) return EVALUATION_ERROR;
+      return members.some((value) => valuesEqual(value, needle));
     },
   },
 
@@ -562,8 +662,9 @@ const OPERATORS: Record<string, Operator> = {
     evaluate: (call) =>
       convertToString(
         arg(call, 0, "operand"),
-        isIntExpression(operandAt(call.operands, 0, "string operand")),
+        numericTypeOf(operandAt(call.operands, 0, "string operand")) === "int",
       ),
+    validate: validateStringConversion,
   },
   double: { evaluate: (call) => convertToDouble(arg(call, 0, "operand")) },
   int: { evaluate: (call) => convertToInt(arg(call, 0, "operand")) },

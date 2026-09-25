@@ -311,7 +311,7 @@ queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on 
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 202 / 301 |
+| adversarial | 202 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -372,6 +372,13 @@ asserts that, since five of the rows below depend on it.
   denies. Declare `nullable: false` on an entry that is always stored and never null to keep its old
   translation. `"explicit"` output is unchanged
   ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+- **Breaking:** `string()` over an integral constant of 1e6 or more, bare or as a ternary branch
+  (`string(R.attr.flag ? 1000000 : 0)`), throws `UnsupportedQueryPlanError`. CEL renders the int
+  as `"1000000"` and the double as `"1e+06"`, and the plan ships both as the same number; the old
+  filter rendered the double and denied what the PDP allowed, or allowed it under negation. A
+  literal `in` over a `type: "one"` relation (`"k" in R.attr.parent`), which CEL answers from the
+  subdocument's keys, throws `UnsupportedQueryPlanError` instead of reaching Mongoose, which failed
+  the query with a `CastError` ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - A macro (`exists`, `all`, `filter`, `map`, …) over a `type: "one"` relation throws
   `UnsupportedQueryPlanError` instead of a plain `Error` ("requires a collection relation"). CEL
   ranges a macro over a map's keys, and a filter has no form that iterates a subdocument's field

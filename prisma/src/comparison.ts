@@ -17,6 +17,7 @@ import {
   isExplicitNullReference,
   isResolvedFieldReference,
   isResolvedValue,
+  namesToOneRelation,
   resolveFieldReference,
 } from "./mapping";
 import type {
@@ -724,6 +725,13 @@ export function handleInOperator(
   }
 
   if (isValueOperand(member) && isNamedOperand(collection)) {
+    if (namesToOneRelation(context.mapper, collection.name)) {
+      throw new UnsupportedQueryPlanError(
+        `in over ${collection.name}: it is a to-one relation, which CEL reads as a map, and ` +
+          "`in` over a map tests its keys (the attribute names present on the related row); " +
+          "a Prisma relation filter tests rows, not attribute names"
+      );
+    }
     return buildMembershipFilter(
       context,
       resolveFieldReference(collection.name, context),

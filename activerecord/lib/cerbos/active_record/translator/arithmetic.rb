@@ -15,6 +15,7 @@ module Cerbos
         def arithmetic(operator, left, right)
           # Arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
+          reject_int_beside_non_int(operator, left, right)
 
           # SQLite and MySQL treat `'a' + 'b'` as numeric (0), so strings need the dialect's
           # concatenation.
@@ -54,6 +55,22 @@ module Cerbos
           ArelSupport.arel_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
 
+        # CEL has no overload mixing an int with a double: `int(x) + R.attr.d` is an error that
+        # denies the row under either polarity, where SQL adds the two numbers and a negation
+        # turns the sum into a grant. An int() result beside an operand that is not certainly an
+        # int (a column, whose attribute is a double, or a fractional constant) is refused.
+        def reject_int_beside_non_int(operator, left, right)
+          mixed = (cel_type(left) == :int && !cel_int?(right)) ||
+            (cel_type(right) == :int && !cel_int?(left))
+          return unless mixed
+
+          raise UnsupportedOperatorError,
+            "#{operator} of an int() result and an operand that is not an int: CEL has no " \
+            "overload mixing int and double, so the expression is an error that denies the row, " \
+            "but SQL computes it. Every number in a request attribute is a double; wrap both " \
+            "operands in int(), or neither."
+        end
+
         # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole
         # constant counts too, since the plan does not say whether a literal was `2` or `2.0`
         # and CEL's type checker rejects an int mixed with a double.
@@ -68,6 +85,7 @@ module Cerbos
         # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
+          reject_int_beside_non_int("div", numerator, denominator)
           return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 
           if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)

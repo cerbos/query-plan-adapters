@@ -33,9 +33,17 @@
       "status": "unsupported",
       "reason": "Same refusal as `cast/string/from-int-beyond-double-precision`: string() of an int() conversion has no CAST-free lowering, and CEL renders an int in plain decimal (\"1000000\") where it renders the double it came from as \"1e+06\", so the number-column inversion does not apply."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() over a ternary: string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. The ternary's int literals reach the plan as bare numbers, and CEL renders the int 1000000 as \"1000000\" where the double renders \"1e+06\", so there is no column to invert and no CAST that spells either rendering on SQLite, PostgreSQL and MySQL."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-integral-ternary`: string() over a ternary, here of an int() conversion and an int literal, has no CAST-free lowering."
     },
     "cast/string/negated-from-boolean-expression": {
       "status": "unsupported",
@@ -52,6 +60,10 @@
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-integral-ternary`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -80,6 +92,14 @@
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "map() translates only inside hasIntersection, where the projection becomes the inner column of an EXISTS. Comparing the ordered projection itself to a literal list has no SQL form the adapter builds."
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A comparison against the related row's columns tests values, not attribute names, so `in` over a to-one relation is refused."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",

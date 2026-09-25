@@ -77,6 +77,10 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as `cast/string/from-double`: Chroma has no cast, so the double-to-string spellings this action probes are never reached. `allowPostFilter` does not lift it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0, so a stored zero's sign is lost where `string()` renders -0.0 as \"-0\"."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `cast/string/from-double`: a Where clause has neither a conditional nor a cast, so string() over a ternary cannot be translated"
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "Same missing computed operand as `cast/string/from-double`, reached through the negative-zero spelling. `allowPostFilter` does not lift it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0, so a stored zero's sign is lost where `string()` renders -0.0 as \"-0\"."
@@ -84,6 +88,10 @@
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
       "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `cast/string/from-integral-ternary`, under negation"
     },
     "cast/string/negated-missing-attribute": {
       "status": "unsupported",
@@ -345,9 +353,17 @@
       "status": "unsupported",
       "reason": "Value-first membership in a list-valued attribute. The adapter refuses `literal in field` when mirroring it, because Chroma's $in tests a field against a literal list, not the reverse. The pinned stack's list metadata and its $contains cannot stand in for it here: it stores an empty list as an absent key and rejects a null element outright, and these seeds carry both (a2 [], a6 [null, 2]), so the list cannot be stored as the PDP sees it. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or nested-object model, and $in tests a field against a literal list, never a literal against a field, so key membership in the to-one parent cannot be translated"
+    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same flat metadata and missing literal-in-field operator as `membership/in/map-attribute-keys`, under negation"
     },
     "null/all/negated-null-element": {
       "status": "unsupported",

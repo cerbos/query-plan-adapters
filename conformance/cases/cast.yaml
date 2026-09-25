@@ -122,6 +122,20 @@ cases:
   condition:
     match:
       expr: 'string(int(R.attr.aDouble)) == "1000000"'
+- id: 'cast/string/from-integral-ternary'
+  tier: adversarial
+  intent: 'string() of a ternary over int literals (string(aBool ? 1000000 : 0) == "1000000").'
+  trap: 'Both arms are ints, so CEL renders "1000000" and every aBool true row is allowed; the plan carries 1000000 as a bare number, and rendering it as a double gives "1e+06" and under-grants them. A missing aBool (j3) is denied.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool ? 1000000 : 0) == "1000000"'
+- id: 'cast/string/from-ternary-with-int-branch'
+  tier: adversarial
+  intent: 'string() of a ternary whose one branch is int() and the other an int literal (string(aBool ? int(aDouble) : 1000000) == "1000000").'
+  trap: 'CEL gives both branches one type, so the literal is an int as well: i1 and every aBool false row render "1000000". Rendering either branch as a double gives "1e+06" and under-grants them; refusing the literal as untyped refuses a shape whose type the other branch fixes.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool ? int(R.attr.aDouble) : 1000000) == "1000000"'
 - id: 'cast/string/negated-from-int-past-exponent-threshold'
   tier: adversarial
   intent: '!(string(int(aDouble)) == "1000000"): the int rendering under negation.'
@@ -129,6 +143,13 @@ cases:
   condition:
     match:
       expr: '!(string(int(R.attr.aDouble)) == "1000000")'
+- id: 'cast/string/negated-from-integral-ternary'
+  tier: adversarial
+  intent: '!(string(aBool ? 1000000 : 0) == "1000000"): the int rendering of a ternary under negation.'
+  trap: 'CEL allows only the aBool false rows; rendering the int 1000000 as the double "1e+06" makes the equality false for every aBool true row, so the negation over-grants them. A missing aBool (j3) stays denied.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aBool ? 1000000 : 0) == "1000000")'
 - id: 'cast/string/from-negative-zero-double'
   tier: adversarial
   intent: 'string(aDouble) == "-0", where i5 holds the double -0.0.'

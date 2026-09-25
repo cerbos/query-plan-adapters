@@ -876,6 +876,14 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 		if len(n.operands) != unaryOperands {
 			return nil, fmt.Errorf("'%s' requires exactly one operand", n.operator)
 		}
+		if rendersNumericConstant(n.operands[0]) {
+			return nil, fmt.Errorf(
+				"string() over a numeric constant cannot be lowered: the plan ships an int and a " +
+					"double constant as the same number, which CEL renders differently " +
+					"(\"1000000\" and \"1e+06\"), and a SQL CAST of the bound parameter spells " +
+					"neither reliably (SQLite says \"1000000.0\")",
+			)
+		}
 		v, err := b.value(n.operands[0], m)
 		if err != nil {
 			return nil, err
@@ -1165,6 +1173,20 @@ func addValue(lv, rv value) (value, error) {
 	return numericArith(OpAdd, lv, rv)
 }
 
+// rendersNumericConstant reports whether string() over n could render a numeric constant: n is
+// one, or is a ternary with one in a branch. The plan does not say whether the policy wrote an int
+// or a double, and CEL spells the two differently.
+func rendersNumericConstant(n *node) bool {
+	if n.isValue() {
+		_, number := n.value.(float64)
+		return number
+	}
+	if !n.isExpr() || n.operator != "if" || len(n.operands) != ternaryOperands {
+		return false
+	}
+	return rendersNumericConstant(n.operands[1]) || rendersNumericConstant(n.operands[2])
+}
+
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
 //
@@ -1276,6 +1298,14 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 	if entry.Relation != nil {
 		return nil, fmt.Errorf(
 			"attribute %q maps to a collection and cannot be used as a scalar value", reference,
+		)
+	}
+	if entry.ScalarRelation != nil && entry.Column == "" {
+		return nil, fmt.Errorf(
+			"attribute %q is a to-one relation, one joined row, but is used as a value: a CEL "+
+				"map's keys are the row's present columns (`\"k\" in m` tests them), and SQL has "+
+				"no form for the set of a row's present columns",
+			reference,
 		)
 	}
 	if entry.ScalarRelation != nil {

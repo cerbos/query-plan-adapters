@@ -426,7 +426,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 280 / 301 |
+| adversarial | 282 / 308 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -506,6 +506,13 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   an instant throws `UnsupportedQueryPlanError` instead of binding a text constant. That covers a
   SQLite `integer` in `timestamp` or `timestamp_ms` mode, which SQLite ranked below every text
   constant so `<` matched every row, and a PostgreSQL or MySQL text column.
+- **Breaking:** `in` over a to-one relation (`"k" in R.attr.parent`) now throws
+  `UnsupportedQueryPlanError`. CEL tests the related row's attribute names; it used to compare the
+  relation's columns against the literal and returned the wrong rows under both polarities.
+  Arithmetic between a certain int (`int()`, `size()`) and a double (an attribute, a fractional
+  constant, `double()`) is CEL's no-such-overload error and now translates to a NULL, so
+  `!(int(x) + R.attr.d > 0.0)` no longer returns rows the PDP denies
+  ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - **Breaking:** `/` over a CEL int (`int()`, `size()`, or int arithmetic over them) is CEL's
   truncating int division. `int(<integer column>) / <non-zero whole constant>` now translates to
   the store's integer division (`/` on SQLite and PostgreSQL, `DIV` on MySQL), so `int(3) / 2` is

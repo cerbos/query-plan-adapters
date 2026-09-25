@@ -10,6 +10,16 @@
   always stored and never null to keep it on Convex's filter engine. `"explicit"` output is
   unchanged ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 
+- **Breaking:** `postFilter` evaluates three more shapes as cel-go does (#554). Arithmetic between a
+  certain int (`int()`, `size()`) and a double (a document field, a fractional constant,
+  `double()`) is CEL's no-such-overload error, so `!(int(R.attr.n) + R.attr.d > 0.0)` no longer
+  returns the rows the PDP denies. `in` over a map-valued attribute tests its keys, where it used
+  to be an evaluation error. `string()` over an integral constant whose int or double type neither
+  it nor a sibling ternary branch fixes, and whose int and double renderings differ
+  (`string(R.attr.flag ? 1000000 : 0)`), now throws `UnsupportedQueryPlanError` at translation; it
+  used to render the constant as the double `"1e+06"`. A ternary with an `int()` branch renders its
+  int-literal branch as an int.
+
 - `postFilter` evaluates five shapes as cel-go does (#545). Arithmetic over two ints (`int()`,
   `size()`, int arithmetic, next to an integral constant) is exact int64 arithmetic, so
   `int(R.attr.n) / 2` truncates toward zero instead of dividing to 1.5, and its negation no
