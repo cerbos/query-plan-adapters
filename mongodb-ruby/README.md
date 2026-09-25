@@ -288,6 +288,12 @@ No suite starts a PDP.
   shapes accepted, the line between a refusal and a mapping mistake, and that no source file
   reaches a second collection.
 
+A document whose number field holds NaN is outside this contract, since the PDP cannot receive one
+([conformance mapping hazards](../conformance/README.md#mapping-hazards),
+[#573](https://github.com/cerbos/query-plan-adapters/issues/573)). Comparisons inside `$expr` answer
+NaN as CEL would, but a negated ordering against a constant, such as `!(x >= 1)`, is translated as
+its complement and denies a NaN document.
+
 ## Mapping hazards
 
 This adapter **builds no subquery**: a relation is a path inside the same document, so the filter
