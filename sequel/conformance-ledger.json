@@ -321,22 +321,6 @@
       "status": "unsupported",
       "reason": "The planner folds `now() - duration(\"24h\")` to a literal with nanosecond precision, and Sequel literalizes a Time into SQL at microsecond precision at best — SQLite stores a formatted string and MySQL DATETIME(6) truncates. Rounding the literal compares against a different instant than the policy names, in the direction that admits rows just outside the window, so the adapter refuses rather than move the boundary"
     },
-    "type-mismatch/contains/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/contains/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/ends-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/ends-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "The cross-type probe `aBoolList[0] == 1 || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-boolean-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite holds a boolean column as the integer 1, so a positional lowering that compared the stored `aBoolList` element with the literal would return b4 and c1, whose first element is true, where CEL's heterogeneous equality is false for every row"
@@ -368,22 +352,6 @@
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
-    "type-mismatch/size/boolean-field": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/size/number-field": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/starts-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
-    },
-    "type-mismatch/starts-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL requires a string for this operation; the mapped column is numeric or boolean, so SQL coercion would over-grant."
     }
   }
 }

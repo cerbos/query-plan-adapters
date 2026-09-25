@@ -154,6 +154,8 @@ module Cerbos
           when ::String
             target.length
           else
+            return cel_type_error if known_non_string?(target)
+
             require_string_operand("size", target)
             dialect.char_length(target)
           end
