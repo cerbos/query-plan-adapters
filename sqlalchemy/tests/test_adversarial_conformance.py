@@ -39,6 +39,7 @@ from corpus import (
     reads_declared_collection,
 )
 from sqlalchemy import create_engine, event, insert, text
+from sqlalchemy.engine import make_url
 
 from cerbos_sqlalchemy import UnsupportedPlanError, get_query
 
@@ -282,7 +283,9 @@ def mysql_engine():
         f"--character-set-server=utf8mb4 --collation-server={MYSQL_COLLATION}"
     )
     with container:
-        engine = create_engine(container.get_connection_url())
+        # Name the driver: testcontainers 4 leaves it out, which picks MySQLdb.
+        url = make_url(container.get_connection_url()).set(drivername="mysql+pymysql")
+        engine = create_engine(url)
         event.listen(engine, "connect", _mysql_connection_collation)
         _seed(engine)
         with engine.connect() as conn:
