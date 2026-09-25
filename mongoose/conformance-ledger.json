@@ -77,10 +77,6 @@
       "status": "unsupported",
       "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, so the adapter refuses the cast rather than lower it."
     },
-    "cast/string/negated-missing-attribute": {
-      "status": "unsupported",
-      "reason": "MongoDB query negation would turn a missing-field evaluation error into a match."
-    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Same top-level-only $expr restriction as `collection/exists/nested-over-same-collection`, reached through all(): the inner $elemMatch cannot compare its element's id and name with the enclosing element's"
@@ -220,6 +216,10 @@
     "conditional/ternary/inside-exists": {
       "status": "unsupported",
       "reason": "$cond exists only as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so a conditional cannot be evaluated inside the $elemMatch that establishes the element scope"
+    },
+    "conditional/ternary/negated": {
+      "status": "unsupported",
+      "reason": "A negated ternary over nullable fields: aNumber is read only on the branch aBool selects, so a missing aNumber is an error only where aBool is true. A `$ne: null` guard ANDed outside the `$nor` would also drop an aBool=false row with no aNumber, which the PDP allows; without it the `$nor` matches the missing field and returns the row the PDP denies (j2). The adapter refuses rather than pick a direction."
     },
     "conditional/ternary/negated-branch-on-relation": {
       "status": "unsupported",
@@ -401,49 +401,13 @@
       "status": "unsupported",
       "reason": "size(filter(...)) requires an aggregation pipeline expression"
     },
-    "size/equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
-    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
-    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
-    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
-    "size/less-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
-    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "size() of the nullable aOptionalString under NOT: MongoDB query negation would turn the missing-field evaluation error into a match."
-    },
     "string/concatenate/field-to-field": {
       "status": "unsupported",
       "reason": "a CONSTANT is what tells CEL's two `+` overloads apart, and between two field paths there is none. MongoDB spells the two differently — $add accepts numeric and date types only, $concat strings — and the mapper carries no field types, so neither can be chosen. Sending $add anyway is what the server aborts the whole query on, so the shape is refused at translation instead"
     },
-    "string/concatenate/negated-unsatisfiable-equals": {
-      "status": "unsupported",
-      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
-    },
     "string/concatenate/ordering": {
       "status": "unsupported",
       "reason": "Same refusal as `string/concatenate/field-to-field`: `+` between two field paths has no constant to tell CEL's string and numeric overloads apart, and the mapper carries no field types, so neither $concat nor $add can be chosen"
-    },
-    "string/contains/negated-field-to-field": {
-      "status": "unsupported",
-      "reason": "The needle is a nullable COLUMN. Mongoose's guard refuses `not` over a nullable field outright, because a missing field matches a negated aggregation predicate and the row the PDP denies would be returned — the same rejection that protects the other negated nullable shapes"
-    },
-    "string/starts-with/negated-field-to-field": {
-      "status": "unsupported",
-      "reason": "Same nullable-needle refusal as `string/contains/negated-field-to-field`: the operator differs, the guard is the field's nullability under a negation"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
@@ -460,10 +424,6 @@
     "type-mismatch/descendent-of/number-field-as-path": {
       "status": "unsupported",
       "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."
-    },
-    "type-mismatch/equals/negated-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics — aDouble is nullable, and a missing field matches a negated predicate the PDP denies."
     },
     "type-mismatch/equals/string-field-against-list-literal": {
       "status": "unsupported",
