@@ -3209,6 +3209,69 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, t.name == 0) || R.attr.aNumber == 5
+    # type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal
+    - actions:
+        - type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.owner >= "m")'
+    # type-mismatch/greater-or-equal/negated-number-field-against-string-literal
+    - actions:
+        - type-mismatch/greater-or-equal/negated-number-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aNumber >= "5") || R.attr.aNumber == 2'
+    # type-mismatch/greater-or-equal/string-field-against-number-literal-value-first
+    - actions:
+        - type-mismatch/greater-or-equal/string-field-against-number-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 0 >= R.attr.aString || R.attr.aNumber == 2
+    # type-mismatch/greater-than/boolean-field-against-number-literal
+    - actions:
+        - type-mismatch/greater-than/boolean-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBool > 0 || R.attr.aNumber == 2
+    # type-mismatch/greater-than/number-field-against-string-literal-value-first
+    - actions:
+        - type-mismatch/greater-than/number-field-against-string-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"5" > R.attr.aNumber || R.attr.aNumber == 2'
+    # type-mismatch/greater-than/string-field-against-number-literal
+    - actions:
+        - type-mismatch/greater-than/string-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString > 0 || R.attr.aNumber == 2
+    # type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first
+    - actions:
+        - type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"m" > R.attr.owner'
     # type-mismatch/has-intersection/mapped-names-against-mixed-literal-list
     - actions:
         - type-mismatch/has-intersection/mapped-names-against-mixed-literal-list
@@ -3290,6 +3353,33 @@ resourcePolicy:
       condition:
         match:
           expr: '"2" in R.attr.aNumberList || R.attr.aNumber == 5'
+    # type-mismatch/less-or-equal/negated-boolean-field-against-number-literal
+    - actions:
+        - type-mismatch/less-or-equal/negated-boolean-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aBool <= 0) || R.attr.aNumber == 2'
+    # type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first
+    - actions:
+        - type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("5" <= R.attr.aNumber) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/explicit-null-field-against-string-literal
+    - actions:
+        - type-mismatch/less-than/explicit-null-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.owner < "m"
     # type-mismatch/less-than/negated-nan-against-string-field
     - actions:
         - type-mismatch/less-than/negated-nan-against-string-field
@@ -3299,6 +3389,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
+    # type-mismatch/less-than/negated-string-field-against-number-literal
+    - actions:
+        - type-mismatch/less-than/negated-string-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < 0) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/number-field-against-string-literal
+    - actions:
+        - type-mismatch/less-than/number-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber < "5" || R.attr.aNumber == 2
+    # type-mismatch/less-than/number-literal-against-boolean-field-value-first
+    - actions:
+        - type-mismatch/less-than/number-literal-against-boolean-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 0 < R.attr.aBool || R.attr.aNumber == 2
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal

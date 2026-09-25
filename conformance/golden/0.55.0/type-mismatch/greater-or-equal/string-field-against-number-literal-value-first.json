@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a3",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/greater-or-equal/string-field-against-number-literal-value-first",
+  "intent": "0 >= aString OR aNumber == 2: a number literal ordered against a string attribute, value first.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": 0
+                },
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "ge"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/greater-or-equal/string-field-against-number-literal-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "0 >= R.attr.aString || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ordering is a CEL error, so only a3/a8 are allowed; MySQL reads every non-numeric string as 0 and returns most rows, and a store that coerces 0 to text orders it against each string."
+}

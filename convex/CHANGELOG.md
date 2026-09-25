@@ -9,6 +9,13 @@
   field was missing from, which `check()` denies. Declare `nullable: false` on an entry that is
   always stored and never null to keep it on Convex's filter engine. `"explicit"` output is
   unchanged ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+
+- An ordering (`<`, `<=`, `>`, `>=`) against a literal is pushed to Convex only inside a guard
+  confining the field to the literal's type, and `not` is pushed inward so the guard is never
+  negated. Convex orders values across types, so a non-nullable field compared with a literal of
+  another type used to match every document of the lower type (and, negated, of the higher one);
+  CEL denies both. An ordering against null, a list or a map is now a constant false (#516).
+
 - A shape the adapter cannot translate now throws `UnsupportedQueryPlanError`, an exported subclass
   of `Error`. What it translates is unchanged; an unmapped reference and a missing
   `allowPostFilter` opt-in stay a plain `Error`.

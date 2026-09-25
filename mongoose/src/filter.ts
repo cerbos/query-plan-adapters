@@ -326,6 +326,23 @@ const translateNot = (
       [dual]: operand.operands.map((child) => translateNot([child], ctx)),
     };
   }
+  // `!!x` is `x`, errors included, and eliminating the pair keeps a leaf that answers an error
+  // as `false` from being flipped twice by nested `$nor`s.
+  if (isExpression(operand) && operand.operator === "not") {
+    return buildFilter(
+      getOperandAt(operand.operands, 0, "not operator requires at least one operand"),
+      ctx,
+    );
+  }
+  // An ordering between a field and a constant negates to its complement, so it keeps the
+  // positive leaf's semantics: MongoDB's `$lt` compares only values of the constant's own BSON
+  // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
+  // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
+  // raises an error and denies (cerbos/query-plan-adapters#516).
+  const complement = complementedOrdering(operand);
+  if (complement) {
+    return buildFilter(complement, ctx);
+  }
   if (
     (isExpression(operand) &&
       ["exists", "exists_one", "all"].includes(operand.operator)) ||
@@ -353,6 +370,33 @@ const MIRRORED_COMPARISON: Record<ComparisonOperator, ComparisonOperator> = {
   le: "ge",
   gt: "lt",
   ge: "le",
+};
+
+/** `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all. */
+const COMPLEMENTED_ORDERING: Partial<Record<string, ComparisonOperator>> = {
+  lt: "ge",
+  le: "gt",
+  gt: "le",
+  ge: "lt",
+};
+
+/** The complement of an ordering between one field and one constant; undefined for anything else. */
+const complementedOrdering = (
+  operand: PlanExpressionOperand,
+): PlanExpression | undefined => {
+  if (!isExpression(operand)) return undefined;
+  const complement = COMPLEMENTED_ORDERING[operand.operator];
+  const [left, right] = operand.operands;
+  if (
+    complement === undefined ||
+    operand.operands.length !== 2 ||
+    !left ||
+    !right ||
+    !((isVariable(left) && isValue(right)) || (isValue(left) && isVariable(right)))
+  ) {
+    return undefined;
+  }
+  return { operator: complement, operands: operand.operands };
 };
 
 function comparison(operator: ComparisonOperator): FilterOperator {
@@ -443,6 +487,21 @@ const translateComparison = (
 
   const effectiveOperator =
     variableOperand === leftOperand ? operator : MIRRORED_COMPARISON[operator];
+  // CEL has no ordering between types, so `aNumber < "5"` is an error that denies, where
+  // Mongoose would cast `"5"` to the declared Number and compare. A negation reaches here as the
+  // complemented ordering (`translateNot`), so this `false` holds under both polarities.
+  if (
+    effectiveOperator !== "eq" &&
+    effectiveOperator !== "ne" &&
+    !canOrderAgainstDeclaredType(variableOperand.name, valueOperand.value, mapper)
+  ) {
+    return emitLeafComparison(
+      ctx,
+      variableOperand.name,
+      { $in: [] },
+      { nullable: false, requireExists: false },
+    );
+  }
   // A constant of a different scalar type than the declared field never equals it.
   if (
     (effectiveOperator === "eq" || effectiveOperator === "ne") &&
@@ -819,6 +878,27 @@ const canEqualDeclaredType = (
   return (
     declared === undefined || constant === null || typeof constant === declared
   );
+};
+
+/**
+ * False when CEL cannot order `reference` against `constant`: the constant is not a number, a
+ * string or a boolean (ordering against null, a list or a map is always an error), or it is a
+ * scalar of another type than the one `reference` declares.
+ */
+const canOrderAgainstDeclaredType = (
+  reference: string,
+  constant: unknown,
+  mapper: Mapper,
+): boolean => {
+  if (
+    typeof constant !== "number" &&
+    typeof constant !== "string" &&
+    typeof constant !== "boolean"
+  ) {
+    return false;
+  }
+  const declared = declaredScalarType(reference, mapper);
+  return declared === undefined || typeof constant === declared;
 };
 
 /** A constant list without the elements `reference`'s declared type can never equal. */
