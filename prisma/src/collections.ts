@@ -183,6 +183,15 @@ function buildCollectionLambdaParts(
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError(`${operator} operator requires a relation mapping`);
   }
+  if (relations[relations.length - 1]!.type === "one") {
+    // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
+    // attribute names present on the related row — which no Prisma relation filter enumerates.
+    throw new UnsupportedQueryPlanError(
+      `${operator} over ${collection.name}: it is a to-one relation, which CEL reads as a map ` +
+        "whose keys (the attribute names present on the related row) the macro ranges over, " +
+        "and a Prisma relation filter tests rows, not attribute names"
+    );
+  }
   const head = relations[0]!;
   const restRelations = relations.slice(1);
 

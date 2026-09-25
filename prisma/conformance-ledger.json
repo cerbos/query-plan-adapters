@@ -9,6 +9,18 @@
       "status": "unsupported",
       "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express"
     },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator, so int() is refused wherever it appears: the int division over it (CEL's truncating int64 division, where int(3) / 2 is 1) has no column to solve a where-filter against."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() has no Prisma filter form, so its truncating division toward zero (int(-5) / 2 is -2) is never reached."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`, under negation."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: div."
@@ -53,6 +65,14 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: int() over a string column cannot be expressed, and CEL's exact int64 parse (2^53 + 1 stays distinct from 2^53) has no filter form"
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: string() over int() has no column to solve for, and CEL's exact decimal rendering of an int past 2^53 has no filter form."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: string() over int() has no column to solve for, and CEL renders the int as \"1000000\" where the double it came from would be \"1e+06\", so it cannot be solved as a string() over the number column."
+    },
     "cast/string/negated-from-boolean-expression": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a boolean-valued comparison has no column to solve for."
@@ -64,6 +84,10 @@
     "cast/string/negated-from-boolean-through-relation": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, and string(column) == literal is solved for the column only on a root field, not on a field reached through a relation filter such as the to-one parent."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -92,6 +116,14 @@
     "collection/exists/element-field-to-outer-field": {
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model; comparing an element column with an outer column is cross-model, so the adapter throws"
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so a macro over a to-one relation is refused."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as `collection/exists/map-keys`: a macro over the to-one `parent` ranges over its attribute names, which no Prisma relation filter enumerates."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
