@@ -101,8 +101,10 @@ the seed ids that `check()` allowed, one call per seed, using that seed's resour
   the case declares `degenerate` with the reason, for example a planner fold or a type error that
   denies every row. The generator fails on an undeclared degenerate oracle, which usually means a
   discriminating seed is missing. A declaration can be limited to some PDP tags with `pdp: [...]`.
-- **`plannerDivergence`** marks a planner bug: the plan and `check()` disagree, so no adapter can
-  pass. Harnesses skip the comparison for that PDP tag. It is declared once, on the case.
+- **`plannerDivergence`** marks a case where the plan and `check()` disagree, so no adapter can
+  pass: either a planner bug, or the two calls answering different questions (an attribute the
+  request omits is unknown to the planner but absent to `check()`). Harnesses skip the comparison
+  for that PDP tag. It is declared once, on the case.
 - **Time.** The literal a plan folds `now() - duration("24h")` into is recorded as
   `"__NOW_MINUS_24H__"`. A harness substitutes the real value before translating. Seed timestamps are
   absolute and far from today, so the recorded decisions stay valid.

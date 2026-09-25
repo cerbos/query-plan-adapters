@@ -47,12 +47,12 @@
   },
   "planError": null,
   "plannerDivergence": {
-    "issue": "Cerbos planner folds has(unknown attribute) to KIND_ALWAYS_ALLOWED",
+    "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
     "pdp": [
       "0.54.0",
       "0.55.0"
     ],
-    "reason": "The planner folds has(unknown attr) to KIND_ALWAYS_ALLOWED (a Cerbos planner bug, not an adapter bug), so the adapter returns all rows while check() denies rows where the attribute is missing."
+    "reason": "The plan request omits aOptionalString, so the planner treats it as unknown and assumes the data layer supplies it; it reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED by design. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision."
   },
   "request": {
     "action": "null/has/missing-attribute",
@@ -72,5 +72,5 @@
     }
   ],
   "tier": "extended",
-  "trap": "has() must become a presence (IS NOT NULL) test; the planner currently folds it to always-allowed, so adapters return every row while check() denies rows missing the attribute."
+  "trap": "has() reads as a presence (IS NOT NULL) test, but the planner folds it to always-allowed by design, so adapters return every row while check() denies rows missing the attribute."
 }
