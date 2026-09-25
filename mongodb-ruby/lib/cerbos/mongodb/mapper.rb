@@ -12,7 +12,8 @@ module Cerbos
     #
     #   {
     #     field: "title",                 # the document path, dotted for a subdocument
-    #     nullable: true,                 # a stored null IS a missing Cerbos attribute
+    #     nullable: true,                 # a stored null IS a missing Cerbos attribute; left
+    #                                     # undeclared, it follows the call's convention
     #     value_parser: ->(v) { ... },    # rewrites each constant compared with this field
     #     value_type: :string,            # :number, :string, :boolean or :date_time
     #     relation: {
@@ -26,6 +27,14 @@ module Cerbos
     #
     # Keys may be Symbols or Strings. An unknown key raises {MapperError}: a misspelt +nullable+
     # silently ignored would drop a guard, which is an over-grant rather than a typo.
+    #
+    # An entry that does not declare +nullable+ takes the mapper's +nullable_default+, which is
+    # the call's +null_attribute_representation+: false under +:explicit+, true under +:omitted+.
+    # Under +:omitted+ a NULL field sends no attribute and CEL denies the document on a
+    # missing-attribute error, while MongoDB's +$ne+ and +$nor+ match a document the path is
+    # absent from or null in, so refusing null operands alone left <tt>R.attr.x != "a"</tt>
+    # returning those documents (cerbos/query-plan-adapters#493). +nullable: false+ still opts an
+    # entry out.
     class Mapper
       Config = Struct.new(:field, :nullable, :value_parser, :value_type, :relation)
       Relation = Struct.new(:name, :type, :field, :requires_parent, :fields)
@@ -36,13 +45,17 @@ module Cerbos
       RELATION_TYPES = %i[one many].freeze
 
       # @param source [Hash, #call, Mapper]
-      def self.wrap(source)
-        return source if source.is_a?(Mapper)
-        return new(->(reference) { source.call(reference) }) if source.respond_to?(:call)
+      # @param nullable_default [Boolean] whether an entry that does not declare +nullable+ is
+      #   nullable
+      def self.wrap(source, nullable_default: false)
+        return source.with_nullable_default(nullable_default) if source.is_a?(Mapper)
+        if source.respond_to?(:call)
+          return new(->(reference) { source.call(reference) }, nullable_default: nullable_default)
+        end
         raise MapperError, "mapper must be a Hash or respond to #call, got #{source.class}" unless source.is_a?(Hash)
 
         entries = source.to_h { |key, config| [key.to_s, normalise_config(config, key.to_s)] }
-        new(->(reference) { entries[reference] })
+        new(->(reference) { entries[reference] }, nullable_default: nullable_default)
       end
 
       # @return [Config, nil]
@@ -54,8 +67,8 @@ module Cerbos
         config = symbolise(config, CONFIG_KEYS, "mapper entry #{label}")
         field = config[:field]
         raise MapperError, "mapper entry #{label}: field must be a String" unless field.nil? || field.is_a?(String)
-        nullable = config.fetch(:nullable, false)
-        raise MapperError, "mapper entry #{label}: nullable must be true or false" unless [true, false].include?(nullable)
+        nullable = config[:nullable]
+        raise MapperError, "mapper entry #{label}: nullable must be true or false" unless [true, false, nil].include?(nullable)
         parser = config[:value_parser]
         unless parser.nil? || parser.respond_to?(:call)
           raise MapperError, "mapper entry #{label}: value_parser must respond to #call"
@@ -95,8 +108,18 @@ module Cerbos
         hash
       end
 
-      def initialize(lookup)
+      attr_reader :nullable_default
+
+      def initialize(lookup, nullable_default: false)
         @lookup = lookup
+        @nullable_default = nullable_default
+      end
+
+      # This mapper with +nullable_default+ for every entry that does not declare +nullable+.
+      def with_nullable_default(nullable_default)
+        return self if nullable_default == @nullable_default
+
+        Mapper.new(@lookup, nullable_default: nullable_default)
       end
 
       # The caller's entry for exactly +reference+.
@@ -119,8 +142,13 @@ module Cerbos
         lookup(reference) || relation_field_config(reference)
       end
 
+      # Whether a stored null in +reference+ is a missing Cerbos attribute: its own declaration,
+      # or the mapper's default when it declares none. An unmapped reference is never nullable.
       def nullable?(reference)
-        resolve_config(reference)&.nullable == true
+        config = resolve_config(reference)
+        return false if config.nil?
+
+        config.nullable.nil? ? @nullable_default : config.nullable
       end
 
       def value_type(reference)
@@ -174,13 +202,13 @@ module Cerbos
           relation = outer.lookup(collection_path)&.relation
           if key == variable
             field = relation&.field
-            next Config.new(key, false, nil, nil, nil) if field.nil?
+            next Config.new(key, nil, nil, nil, nil) if field.nil?
 
-            next relation.fields[field] || Config.new(field, false, nil, nil, nil)
+            next relation.fields[field] || Config.new(field, nil, nil, nil, nil)
           end
           element_field = key[(variable.length + 1)..]
-          relation&.fields&.[](element_field) || Config.new(element_field, false, nil, nil, nil)
-        })
+          relation&.fields&.[](element_field) || Config.new(element_field, nil, nil, nil, nil)
+        }, nullable_default: @nullable_default)
       end
 
       private

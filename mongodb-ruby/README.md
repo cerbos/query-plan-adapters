@@ -119,7 +119,7 @@ silently ignored would drop a guard.
 | Key | Meaning |
 | --- | --- |
 | `field` | The document path; dotted for a subdocument. |
-| `nullable` | A stored `null` is a **missing** Cerbos attribute (the application omits it from `check()`). Comparisons then keep null documents out, and a `not` CEL is certain to evaluate keeps the guard outside its `$nor`; a `not` that may skip the field (a ternary branch, a lambda body) or reads it through a to-many relation is refused. Do not set it where `null` is an explicit Cerbos value. |
+| `nullable` | A stored `null` is a **missing** Cerbos attribute (the application omits it from `check()`). Comparisons then keep null documents out, and a `not` CEL is certain to evaluate keeps the guard outside its `$nor`; a `not` that may skip the field (a ternary branch, a lambda body) or reads it through a to-many relation is refused. Do not set it where `null` is an explicit Cerbos value. Left undeclared, it follows the call's [`null_attribute_representation:`](#null-attribute-representation): off under `:explicit`, on under `:omitted`. |
 | `value_parser` | Rewrites each constant compared with the field — for example a string id into a `BSON::ObjectId`. |
 | `value_type` | `:number`, `:string`, `:boolean` or `:date_time`. Settles an equality or an ordering against a constant of another type without a query, and refuses shapes a stored `Date` cannot answer (a bare comparison of two date fields: MongoDB has discarded the strings CEL compares). |
 | `relation` | `type: :one` for an embedded subdocument (a to-one hop, required to be present outside any negation), `type: :many` for an array of subdocuments (`$elemMatch`). `field` names the element field the relation stands for, `fields` maps element fields, `requires_parent` names an optional to-one parent array the path is reached through. |
@@ -142,10 +142,32 @@ field to `check()`, so it has to be told:
 | `{"x" => nil}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
-`null_attribute_representation:` defaults to `:explicit`. Pass `:omitted` and every null comparison
-operand is refused instead of translated
-([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). `nullable: true` states the
-same thing per field, and is what lets one mapping mix the two conventions.
+`null_attribute_representation:` defaults to `:explicit`. If you omit NULL attributes, pass
+`:omitted`:
+
+```ruby
+Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: mapper, null_attribute_representation: :omitted)
+```
+
+The call-level option is the default for every mapper entry that does not declare `nullable`, so
+under `:omitted` the adapter:
+
+- refuses every null comparison operand instead of translating it. The refusal is wider than the
+  shapes that actually over-grant, because a leaf cannot tell whether an enclosing `not` will flip
+  it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
+- treats every entry that does not declare `nullable` as `nullable: true`, relation `fields` and
+  the element fields of a collection macro included. A comparison ANDs `{field => {"$ne" => nil}}`
+  in front of it, so `R.attr.x != "a"` no longer returns the documents `x` is missing or null in,
+  which `check()` denies. A `not` over such a field is handled as it is for a declared-nullable
+  field: the guard is ANDed outside the `$nor`, and where CEL may leave the field unread (a ternary
+  branch, a lambda body) the adapter raises `Cerbos::MongoDB::UnsupportedError` instead
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+
+`nullable: false` opts an entry out: it asserts the field is always stored and never null, and the
+entry translates as it does under `:explicit`. Declare it where you know that, because a nullable
+guard is a `$ne: null`, which MongoDB applies per element to an array field: an array that holds a
+`null` element is excluded too. Under `:explicit`, `nullable: true` on one entry is the
+per-attribute way to declare the omitted convention, and is what lets one mapping mix the two.
 
 ## Supported operators
 

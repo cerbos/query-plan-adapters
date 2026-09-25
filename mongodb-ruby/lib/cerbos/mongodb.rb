@@ -56,12 +56,18 @@ module Cerbos
     #   <tt>R.attr.x == null</tt> is true for that document and matching null agrees with the
     #   PDP. With +:omitted+ it sends no attribute at all; CEL then raises a missing-attribute
     #   error and the PDP denies, so every null comparison operand is refused rather than
-    #   translated (cerbos/query-plan-adapters#302). Declare +nullable: true+ on a mapper entry
-    #   to state per field that a stored null is a missing attribute.
+    #   translated (cerbos/query-plan-adapters#302), and every mapper entry that does not declare
+    #   +nullable+ is treated as +nullable: true+, relation +fields+ included, so a comparison
+    #   keeps out the documents the field is missing or null in (cerbos/query-plan-adapters#493).
+    #   Declare +nullable: true+ on a mapper entry to state per field that a stored null is a
+    #   missing attribute, and +nullable: false+ to opt one out under +:omitted+.
     # @return [Result]
     # @raise [Error] if the plan cannot be translated faithfully
     def self.query_plan_to_filter(plan:, mapper: {}, null_attribute_representation: :explicit)
-      translator = Translator.new(mapper: Mapper.wrap(mapper), null_representation: null_attribute_representation)
+      translator = Translator.new(
+        mapper: Mapper.wrap(mapper, nullable_default: null_attribute_representation == :omitted),
+        null_representation: null_attribute_representation
+      )
       normalised = Plan.normalise(plan)
       case normalised.kind
       when Plan::ALWAYS_ALLOWED then Result.new(Plan::ALWAYS_ALLOWED, MATCH_ALL)

@@ -253,4 +253,97 @@ RSpec.describe "adapter contract" do
         .to eq({"$and" => [{"x" => {"$ne" => nil}}, {"$nor" => [{"$and" => [{"x" => {"$ne" => nil}}, {"x" => {"$eq" => "a"}}]}]}]})
     end
   end
+
+  # Under :omitted a NULL field sends no attribute, so CEL denies every comparison against it,
+  # while MongoDB's $ne and $nor match a document the path is absent from or null in. An entry
+  # that declares no `nullable` therefore takes the call-level convention as its default, exactly
+  # as if it declared `nullable: true` (#493). A caller-supplied argument no corpus case can vary:
+  # the harness runs one mapping, under :explicit.
+  describe "omitted: an undeclared entry is nullable" do
+    def corpus_filter(id, mapper = CorpusMapper::MAPPER, **options)
+      Cerbos::MongoDB.query_plan_to_filter(plan: ConformanceCorpus.golden(id).fetch("plan"), mapper: mapper, **options).filter
+    end
+
+    def omitted(id, mapper = CorpusMapper::MAPPER) = corpus_filter(id, mapper, null_attribute_representation: :omitted)
+
+    def top_level_conjuncts(filter)
+      filter.key?("$and") ? filter["$and"].flat_map { |clause| top_level_conjuncts(clause) } : [filter]
+    end
+
+    # The corpus mapping declares the scalars it seeds as missing (aString, aNumber, aBool)
+    # nullable, so each test strips the declaration from the field it reads, leaving the entry for
+    # the call-level default to decide. `owner` maps the nullable aOptionalString field without
+    # declaring it, as a caller on the explicit convention would.
+    def undeclared(field)
+      CorpusMapper::MAPPER.to_h { |key, config| [key, (config[:field] == field) ? config.except(:nullable) : config] }
+    end
+
+    # Every entry, and every relation field beneath it, declaring `nullable`.
+    def declaring_nullable(config, nullable)
+      declared = config.merge(nullable: nullable)
+      relation = config[:relation]
+      return declared unless relation&.key?(:fields)
+
+      declared.merge(relation: relation.merge(fields: relation[:fields].transform_values { |field| declaring_nullable(field, nullable) }))
+    end
+
+    def guard(field) = JSON.generate({field => {"$ne" => nil}})
+
+    [
+      ["string/equals/case-sensitive", "aString"],
+      ["comparison/not-equals/value-first", "aString"],
+      ["null/not-equals/explicit-null-against-literal", "aOptionalString"]
+    ].each do |(id, field)|
+      it "#{id} requires #{field} to be present and non-null, outside any negation" do
+        mapper = undeclared(field)
+        expect(top_level_conjuncts(corpus_filter(id, mapper))).not_to include({field => {"$ne" => nil}})
+        expect(top_level_conjuncts(omitted(id, mapper))).to include({field => {"$ne" => nil}})
+      end
+    end
+
+    # A `not` over an undeclared entry is translated as one over a declared-nullable entry: the
+    # guard sits outside the $nor, which would otherwise readmit the missing documents. A negated
+    # `&&` is pushed down to its leaves first, so each leaf carries its own guard.
+    [
+      ["null/equals/negated-explicit-null-against-literal", "aOptionalString"],
+      ["null/in/negated-explicit-null-in-literal-list", "aOptionalString"],
+      ["logic/not/over-and", "aString"]
+    ].each do |(id, field)|
+      it "#{id} guards #{field} outside the negation" do
+        mapper = undeclared(field)
+        expect(JSON.generate(corpus_filter(id, mapper))).not_to include(guard(field))
+        expect(JSON.generate(omitted(id, mapper))).to include(guard(field))
+      end
+    end
+
+    it "a callable mapper takes the default too" do
+      mapper = undeclared("aString")
+      callable = ->(key) { mapper[key] }
+      %w[string/equals/case-sensitive logic/not/over-and].each do |id|
+        expect(omitted(id, callable)).to eq(omitted(id, mapper))
+      end
+    end
+
+    # `tagNames` projects the `name` field of each `tags` element, which declares no `nullable`.
+    it "a relation's element field takes the default too" do
+      id = "collection/exists/scalar-list-equals"
+      expect(JSON.generate(corpus_filter(id))).not_to include(guard("name"))
+      expect(JSON.generate(omitted(id))).to include(guard("name"))
+    end
+
+    # `nullable: false` is the per-entry opt-out: it asserts the field is always stored.
+    it "declaring nullable: false keeps the explicit translation" do
+      mapper = CorpusMapper::MAPPER.transform_values { |config| declaring_nullable(config, false) }
+      %w[string/equals/case-sensitive comparison/not-equals/value-first logic/not/over-and].each do |id|
+        expect(omitted(id, mapper)).to eq(corpus_filter(id, mapper))
+      end
+    end
+
+    it "leaves the :explicit translation of an undeclared entry as it was" do
+      mapper = {"request.resource.attr.x" => {field: "x"}}
+      expect(filter(expr("ne", var("request.resource.attr.x"), val("a")), mapper)).to eq({"x" => {"$ne" => "a"}})
+      expect(filter(expr("ne", var("request.resource.attr.x"), val("a")), mapper, null_attribute_representation: :omitted))
+        .to eq({"$and" => [{"x" => {"$ne" => nil}}, {"x" => {"$ne" => "a"}}]})
+    end
+  end
 end
