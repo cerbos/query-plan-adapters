@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 50 / 80 |
-| adversarial | 204 / 308 |
+| extended | 52 / 80 |
+| adversarial | 214 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -220,8 +220,10 @@ integer `size()` (CEL's `%` has no double overload), `string()` over an untyped 
 of 1e6 or more, `+` between two fields (nothing tells `$add` from `$concat`), negations over
 collection macros or over a nullable field CEL may not evaluate (a filter has no UNKNOWN), macros
 and `in` over a to-one relation (CEL iterates a map's keys), an empty hierarchy separator, regular
-expressions outside the common subset, whole-list comparisons and list equality over a `map()`
-projection.
+expressions outside the common subset, and a comparison with a map constant or with a list holding
+a list, a map or NaN (MongoDB compares embedded documents in stored field order and NaN equal to
+NaN). A list constant is compared whole inside `$expr` with a field, a to-many relation's
+projection or a `map()` over one, element by element and in order, as CEL does.
 
 It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/), and its ledger is the
 same but for one case: the driver sends a filter to the server untouched, so a comparison between

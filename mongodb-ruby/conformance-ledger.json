@@ -217,18 +217,6 @@
       "status": "unsupported",
       "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
     },
-    "collection/map/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "This adapter handles map() only as the collection operand of hasIntersection, where it becomes an $elemMatch. Comparing the projection itself to a literal list would need $map inside an aggregation expression, which the adapter's expression builder has no case for."
-    },
-    "comparison/equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
-    },
-    "comparison/equals/whole-list-literal-order-and-multiplicity": {
-      "status": "unsupported",
-      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
-    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "$divide by a zero denominator fails when MongoDB optimizes the query ('can't $divide by zero'), aborting it before any document is read rather than yielding CEL's +Inf/-Inf; constant folding means even a $cond arm no document takes still aborts, so the adapter rejects the literal 1.0/0.0 and -1.0/0.0 branches."
@@ -248,10 +236,6 @@
     "comparison/less-than/nan-from-ternary-value-first": {
       "status": "unsupported",
       "reason": "same non-finite arithmetic limitation in value-first form."
-    },
-    "comparison/not-equals/whole-list-literal": {
-      "status": "unsupported",
-      "reason": "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value."
     },
     "conditional/ternary/as-whole-exists-body": {
       "status": "unsupported",
@@ -356,14 +340,6 @@
     "principal/exists-one/long-list": {
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Invalid operands for collection operation."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Invalid operands for collection operation."
     },
     "principal/exists/negated-long-list": {
       "status": "unsupported",
@@ -477,37 +453,13 @@
       "status": "unsupported",
       "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."
     },
-    "type-mismatch/equals/string-field-against-list-literal": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: a list literal compared with a field is read as whole-list comparison, which a relation mapping cannot express."
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: struct."
-    },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Invalid operands for hasIntersection."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
+      "reason": "hasIntersection against a map element: the relation's element field declares no scalar type, and a query $in with an embedded-document needle compares it field by field in stored order, and also matches an array-valued element field that merely contains it, where CEL's map equality ignores order and a list never equals a map."
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "The numeric expression lowering refuses the zero denominator before it can compare the NaN arm; MongoDB arithmetic does not reproduce CEL floating-point division by zero."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: struct."
     }
   }
 }

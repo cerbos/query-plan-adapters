@@ -47,7 +47,11 @@ module Cerbos
       # element, so `R.attr.a + "q" == "$b"` would compare with the document's own `b` field and
       # return documents the PDP denies. $literal keeps each such constant the value it is.
       def constant(value)
-        return {"$literal" => value} if value.is_a?(Array) || value.is_a?(Hash) || (value.is_a?(String) && value.start_with?("$"))
+        if value.is_a?(Hash) || (value.is_a?(Array) && value.any? { |element| element.is_a?(Hash) || element.is_a?(Array) })
+          raise UnsupportedError,
+            "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it"
+        end
+        return {"$literal" => value} if value.is_a?(Array) || (value.is_a?(String) && value.start_with?("$"))
 
         value
       end

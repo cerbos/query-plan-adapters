@@ -42,7 +42,7 @@ module Cerbos
 
       def translate(condition)
         reject_null_constructor(condition)
-        build(condition, @mapper, ROOT)
+        build(fold_constants(condition), @mapper, ROOT)
       end
 
       private
@@ -75,6 +75,36 @@ module Cerbos
           operand.operands.each { |child| reject_null_constructor(child, nested) }
         end
       end
+
+      # A list or map constructor whose every element is a constant, as the constant it builds:
+      # `list` becomes an Array and `struct` a Hash. A map with a non-string or repeated key is
+      # left as it is (CEL raises on a repeated key, and a document has string keys only), and so
+      # is anything that reads a variable.
+      def fold_constants(operand)
+        return operand unless expression?(operand)
+
+        operands = operand.operands.map { |child| fold_constants(child) }
+        case operand.operator
+        when "list"
+          return Plan::Value.new(operands.map(&:value)) if operands.all? { |child| value?(child) }
+        when "struct"
+          pairs = operands.map { |field|
+            next nil unless expression_with?(field, "set-field") && field.operands.length == 2
+
+            key, value = field.operands
+            next nil unless value?(key) && string?(key.value) && value?(value)
+
+            [key.value, value.value]
+          }
+          if pairs.none?(&:nil?) && pairs.map(&:first).uniq.length == pairs.length
+            return Plan::Value.new(pairs.to_h)
+          end
+        end
+        Plan::Expression.new(operand.operator, operands)
+      end
+
+      # Whether a constant is a list or a map, which a scalar field never equals.
+      def composite?(value) = value.is_a?(Array) || value.is_a?(Hash)
 
       # Inside a collection predicate, only the iteration variable can be expressed per element.
       def assert_scoped(reference, scope)
@@ -262,10 +292,13 @@ module Cerbos
             "Bare temporal field comparison cannot preserve CEL string equality: stored Dates " \
             "discard the original lexical spelling; compare timestamp(...) values instead"
         end
-        if (variable?(left) || variable?(right)) && both.any? { |op| value?(op) && op.value.is_a?(Array) }
-          raise UnsupportedError,
-            "Whole-list comparison is not supported: a relation mapping exposes scalar element " \
-            "fields, not an ordered list value"
+        composite = both.find { |op| value?(op) && composite?(op.value) }
+        other = composite && both.find { |op| !op.equal?(composite) }
+        if composite && %w[eq ne].include?(operator) && !value?(other)
+          return translate_composite_equality(operator, other, composite.value, mapper, scope)
+        end
+        if composite && expression?(other)
+          raise UnsupportedError, "An ordering against a list or map constant inside an expression is unsupported"
         end
 
         # Either operand an expression, or two fields: compare inside $expr.
@@ -304,6 +337,97 @@ module Cerbos
         )
       end
 
+      # `==`/`!=` between a field or a map() projection and a list or map constant.
+      #
+      # A field that declares a scalar value_type never equals a list or a map, so the answer is
+      # settled without a query, as for any constant of another type. Otherwise the list is
+      # compared whole inside $expr, where $eq compares two arrays element by element and in
+      # order, as CEL's list equality does: numbers by value across int and double, strings byte
+      # by byte, null equal to null, and a boolean never equal to a number. Only a list of such
+      # scalars is compared this way: MongoDB's NaN equals NaN where CEL's does not, and it
+      # compares embedded documents field by field in stored order where CEL's map equality
+      # ignores order.
+      def translate_composite_equality(operator, other, constant, mapper, scope)
+        if scope.collection?
+          raise UnsupportedError, "Whole-value comparison inside a collection predicate needs $expr, which MongoDB accepts only at the top level"
+        end
+        if variable?(other)
+          config = mapper.resolve_config(other.name)
+          if config&.value_type && config.value_parser.nil?
+            return Guards.with_nullable({"$expr" => {"$eq" => [operator == "ne", true]}}, [other], mapper)
+          end
+        end
+        unless constant.is_a?(Array) && constant.all? { |element| comparable_scalar?(element) }
+          raise UnsupportedError,
+            "Whole-value comparison with a map, or with a list holding a list, a map or NaN, is " \
+            "unsupported: MongoDB compares embedded documents in stored field order and NaN equal to NaN"
+        end
+        list, guard = list_expression(other, mapper)
+        compared = {"$expr" => {Aggregation::COMPARISONS.fetch(operator) => [list, {"$literal" => constant}]}}
+        filter = Guards.with_evaluation(compared, [other], mapper)
+        guard ? {"$and" => [guard, filter]} : filter
+      end
+
+      # A scalar CEL and MongoDB's $eq agree on: a string, a boolean, null, or a number other
+      # than NaN.
+      def comparable_scalar?(value)
+        value.nil? || string?(value) || boolean?(value) || (number?(value) && !(value.is_a?(Float) && value.nan?))
+      end
+
+      # The list +operand+ stands for, as an aggregation expression, and the filter requiring it
+      # to be stored as an array (nil for a plain field, whose non-array value simply compares
+      # unequal): a plain field as itself, and a to-many relation's projection or a map() over
+      # one as a $map over its elements. $map reads a missing element field as null.
+      #
+      # @return [Array(Object, Hash or nil)]
+      def list_expression(operand, mapper)
+        if variable?(operand)
+          resolved = mapper.resolve_field(operand.name)
+          return ["$#{resolved.path.join(".")}", nil] if resolved.relation.nil?
+
+          relation = mapper.lookup(operand.name)&.relation
+          unless relation&.type == :many && relation.field && relation.requires_parent.nil?
+            raise UnsupportedError, "Whole-list comparison needs a plain field or a to-many relation's projected field"
+          end
+
+          return projected_list(relation, relation.field, mapper)
+        end
+        unless expression_with?(operand, "map") && operand.operands.length == 2
+          raise UnsupportedError, "Whole-list comparison needs a field, a relation projection or a map() over a relation"
+        end
+
+        collection, lambda = operand.operands
+        unless variable?(collection) && expression_with?(lambda, "lambda") && variable?(lambda.operands[0]) && variable?(lambda.operands[1])
+          raise UnsupportedError, "map() in a whole-list comparison must project one field of each element"
+        end
+
+        relation = mapper.lookup(collection.name)&.relation
+        raise UnsupportedError, "map() in a whole-list comparison needs a to-many relation" unless relation&.type == :many && relation.requires_parent.nil?
+
+        projection = lambda.operands[0].name
+        element = lambda.operands[1].name
+        field = if projection == element
+          relation.field
+        elsif projection.start_with?("#{element}.")
+          projection[(element.length + 1)..]
+        end
+        raise UnsupportedError, "map() in a whole-list comparison must project one field of each element" if field.nil?
+
+        projected_list(relation, field, mapper)
+      end
+
+      def projected_list(relation, field, mapper)
+        config = relation.fields[field]
+        nullable = (config.nil? || config.nullable.nil?) ? mapper.nullable_default : config.nullable
+        if nullable
+          raise UnsupportedError,
+            "Whole-list comparison over a nullable element field: a null element is a missing attribute, which CEL raises on"
+        end
+
+        path = config&.field || field
+        [{"$map" => {"input" => "$#{relation.name}", "in" => "$$this.#{path}"}}, {relation.name => {"$type" => "array"}}]
+      end
+
       # False when CEL cannot order +reference+ against +constant+: the constant is not a number,
       # a string or a boolean (ordering against null, a list or a map is always an error), or it
       # is a scalar of another type than the one +reference+ declares.
@@ -323,15 +447,27 @@ module Cerbos
         if variable?(left) && value?(right)
           raise UnsupportedError, "in with a field on the left requires an array value" unless right.value.is_a?(Array)
 
+          elements = right.value
+          if elements.any? { |element| composite?(element) }
+            # A field that declares a scalar value_type never equals a list or a map element.
+            # Undeclared, a query $in against an array field would also match the field's own
+            # elements, which CEL does not.
+            config = mapper.resolve_config(left.name)
+            unless config&.value_type && config.value_parser.nil?
+              raise UnsupportedError, "A list or map element in an `in` list needs the field's scalar value_type declared"
+            end
+
+            elements = elements.reject { |element| composite?(element) }
+          end
+
           return value_comparison(
             mapper, scope, left.name,
-            {"$in" => right.value.map { |element| mapper.apply_value_parser(left.name, element) }},
-            right.value, "a null element in an `in` list"
+            {"$in" => elements.map { |element| mapper.apply_value_parser(left.name, element) }},
+            elements, "a null element in an `in` list"
           )
         end
-        if value?(left) && left.value.is_a?(Array)
-          raise UnsupportedError,
-            "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element"
+        if value?(left) && composite?(left.value)
+          return translate_composite_membership(left.value, right, mapper, scope)
         end
         if value?(left) && variable?(right)
           if mapper.relation_of(right.name)&.type == :one
@@ -348,6 +484,28 @@ module Cerbos
         end
 
         raise UnsupportedError, "in supports only field-in-value-list or value-in-mapped-collection shapes"
+      end
+
+      # `[..] in list`: a list needle, compared whole with each element inside $expr (see
+      # translate_composite_equality for when that agrees with CEL). The aggregation $in raises on
+      # a non-array, so the list is required to be an array first: a null or absent list is an
+      # error to CEL too.
+      def translate_composite_membership(needle, haystack, mapper, scope)
+        unless needle.is_a?(Array) && needle.all? { |element| comparable_scalar?(element) }
+          raise UnsupportedError,
+            "Membership of a map, or of a list holding a list, a map or NaN, is unsupported: MongoDB " \
+            "compares embedded documents in stored field order and NaN equal to NaN"
+        end
+        if scope.collection?
+          raise UnsupportedError, "List-element membership inside a collection predicate needs $expr, which MongoDB accepts only at the top level"
+        end
+        unless variable?(haystack)
+          raise UnsupportedError, "List-element membership needs a field or a to-many relation's projected field"
+        end
+
+        list, guard = list_expression(haystack, mapper)
+        guard ||= {mapper.resolve_field(haystack.name).path.join(".") => {"$type" => "array"}}
+        {"$and" => [guard, Guards.with_evaluation({"$expr" => {"$in" => [{"$literal" => needle}, list]}}, [haystack], mapper)]}
       end
 
       def translate_matches(operands, mapper, scope)
@@ -403,6 +561,9 @@ module Cerbos
         return translate_map_intersection(collection, values, mapper) if expression_with?(collection, "map")
         raise UnsupportedError, "Invalid operands for hasIntersection" unless variable?(collection) && value?(values)
         raise UnsupportedError, "hasIntersection requires an array value" unless values.value.is_a?(Array)
+        if values.value.any? { |element| composite?(element) }
+          raise UnsupportedError, "hasIntersection with a list or map element is unsupported: a query $in reads it against the element's own contents"
+        end
 
         leaf(mapper, scope, collection.name, {"$in" => values.value}, nullable: false, require_exists: values.value.include?(nil))
       end
