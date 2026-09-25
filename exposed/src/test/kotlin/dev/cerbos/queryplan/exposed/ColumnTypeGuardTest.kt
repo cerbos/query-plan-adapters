@@ -25,6 +25,13 @@ import org.junit.jupiter.api.assertThrows
  * raises a no-overload error for every one of them, which DENIES, so every match is a row the PDP
  * refuses.
  *
+ * A number or boolean column against a text operation, or against a constant or column of another
+ * recognised type, is no longer refused: CEL answers it from the types alone (equality is a
+ * definite false, anything else a no-overload error, SQL UNKNOWN), so the adapter answers it the
+ * same way and never hands the store a coercion. The corpus type-mismatch cases prove those
+ * answers. What stays refused here is the rest: a type the adapter has no CEL reading for, a
+ * hierarchy path, a concatenation, and a member/element pair.
+ *
  * The cases below are NOT all of one kind, and the banner over each block says which. Most are
  * KIND 3 corpus gaps and are deleted when their action lands; a few are KIND 2 — the column type is
  * a caller-supplied MAPPING, and `actions.json` classifies every action against ONE mapping per
@@ -49,85 +56,6 @@ class ColumnTypeGuardTest {
     // ============================================================================================
 
     // -- a string match needs a text column, on whichever side the column lands ------------------
-
-    @Test
-    fun `a string match against a non-text column is refused, whichever operator`() {
-        // Corpus gap. CEL: `R.attr.aNumber.contains("2")`, `R.attr.aNumber.startsWith("1")`,
-        // `R.attr.aBool.endsWith("e")`. All three compile over a `dyn` attribute and raise a
-        // no-overload error at check time, which denies; `a_number LIKE '%2%'` is TRUE for 123 on
-        // MySQL and on SQLite.
-        listOf(
-            "contains" to "request.resource.attr.aNumber",
-            "startsWith" to "request.resource.attr.aNumber",
-            "endsWith" to "request.resource.attr.aBool",
-        ).forEach { (operator, variable) ->
-            val error = assertThrows<UnmappedAttributeException>("$operator $variable") {
-                translate(ReviewPlans.expression(operator, ReviewPlans.variable(variable), ReviewPlans.value("2")))
-            }
-            assertTrue(
-                error.message!!.startsWith("$operator over '$variable' requires a text column"),
-                error.message,
-            )
-            assertTrue(error.message!!.contains("no-overload error"), error.message)
-        }
-    }
-
-    @Test
-    fun `a column NEEDLE is checked as well as the haystack`() {
-        // Corpus gap. CEL: `R.attr.aString.contains(R.attr.aNumber)`. The needle is escaped and concatenated
-        // into a LIKE pattern, so a numeric needle is coerced by the same stores.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "contains",
-                    ReviewPlans.variable("request.resource.attr.aString"),
-                    ReviewPlans.variable("request.resource.attr.aNumber"),
-                ),
-            )
-        }
-        assertEquals(
-            "contains over 'request.resource.attr.aNumber' requires a text column, but it maps to " +
-                "a IntegerColumnType column. CEL has no contains overload for that type, so the " +
-                "expression raises a no-overload error and denies, while SQL coerces the column — " +
-                "MySQL and SQLite match and PostgreSQL aborts the statement.",
-            error.message,
-        )
-    }
-
-    @Test
-    fun `a constant RECEIVER whose needle is a non-text column is refused`() {
-        // Corpus gap. CEL: `"12,34".contains(R.attr.aNumber)` — the CONSTANT is the haystack and the COLUMN is
-        // the needle, which NormalizedBinary deliberately leaves in source order.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "contains",
-                    ReviewPlans.value("12,34"),
-                    ReviewPlans.variable("request.resource.attr.aNumber"),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("requires a text column"), error.message)
-    }
-
-    @Test
-    fun `size() of a non-text column is refused rather than counting its characters`() {
-        // Corpus gap. CEL: `size(R.attr.aBool) > 0`. `CHAR_LENGTH(a_bool)` is 1 on MySQL and on SQLite, so
-        // every row came back where check() allows none.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "gt",
-                    ReviewPlans.expression("size", ReviewPlans.variable("request.resource.attr.aBool")),
-                    ReviewPlans.value(0),
-                ),
-            )
-        }
-        assertTrue(
-            error.message!!.startsWith("size() over 'request.resource.attr.aBool' requires a text column"),
-            error.message,
-        )
-    }
 
     @Test
     fun `a hierarchy path read from a non-text column is refused`() {
@@ -184,82 +112,12 @@ class ColumnTypeGuardTest {
     // -- the constant's type against the column's kind -------------------------------------------
 
     @Test
-    fun `a constant of the wrong type is refused for every comparison operator and both orders`() {
-        // Corpus gap. CEL: `R.attr.aString == P.attr.level` for a principal whose level is a number, and the
-        // value-first spelling of each. CEL answers the equality FALSE from the values alone and
-        // raises for every ordering; MySQL coerces the COLUMN, so `'abc' = 0` is TRUE.
-        listOf("eq", "ne", "lt", "le", "gt", "ge").forEach { operator ->
-            val fieldFirst = assertThrows<UnmappedAttributeException>(operator) {
-                translate(
-                    ReviewPlans.expression(
-                        operator,
-                        ReviewPlans.variable("request.resource.attr.aString"),
-                        ReviewPlans.value(3.5),
-                    ),
-                )
-            }
-            assertTrue(
-                fieldFirst.message!!.contains("maps to a VarCharColumnType column"),
-                "$operator: ${fieldFirst.message}",
-            )
-            // Value-first: NormalizedBinary mirrors the operator, and the leaf is reached either
-            // way, so the refusal must not depend on which side the planner put the constant.
-            assertThrows<UnmappedAttributeException>("$operator value-first") {
-                translate(
-                    ReviewPlans.expression(
-                        operator,
-                        ReviewPlans.value(3.5),
-                        ReviewPlans.variable("request.resource.attr.aString"),
-                    ),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `the refusal names the constant's TYPE and never its value`() {
-        // Corpus gap. A plan constant can carry a folded principal attribute, and an exception message is
-        // logged, so the shape is reported and the value is not.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "eq",
-                    ReviewPlans.variable("request.resource.attr.aNumber"),
-                    ReviewPlans.value("s3cret-level"),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("against a String constant"), error.message)
-        assertTrue(!error.message!!.contains("s3cret"), error.message)
-    }
-
-    @Test
-    fun `every element of an in-list is checked, and one mismatch refuses the whole membership`() {
-        // Corpus gap. `hasIntersection(R.attr.tagNames, P.attr.groups)` for a principal whose
-        // groups are `["a", 1]` — legal principal data, and the list shape a principal attribute
-        // really lands in.
-        //
-        // The mismatched element refuses the WHOLE membership rather than being dropped from the
-        // disjunction. Dropping it was tried, on the argument that CEL answers `textColumn == 1`
-        // with a definite FALSE and `x OR false` is `x` under either polarity — and the argument
-        // is only available where the adapter KNOWS CEL's answer, which the test below is the
-        // over-grant for. Refusing needs no such knowledge.
-        listOf(listOf("a", 1), listOf(1, "a"), listOf(1, 2)).forEach { groups ->
-            val error = assertThrows<UnmappedAttributeException>(groups.toString()) {
-                translate(
-                    ReviewPlans.expression(
-                        "hasIntersection",
-                        ReviewPlans.variable("request.resource.attr.tagNames"),
-                        ReviewPlans.value(groups),
-                    ),
-                )
-            }
-            assertTrue(error.message!!.contains("against a Long constant"), error.message)
-        }
-
-        // A null element is still never refused: it is not a type mismatch, it renders IS NULL,
-        // and it coerces nothing. Spelled as a value-first hasIntersection: `["a", null] in
-        // tagNames` would ask whether the LIST is an element, which is refused (`in-list-element`).
+    fun `a null element in an in-list still renders IS NULL beside a text constant`() {
+        // Corpus gap. The mismatched-type half of this shape is carried by the corpus
+        // (`type-mismatch/has-intersection/*`); what it does not carry is a null element next to a
+        // text constant, which is not a type mismatch, renders IS NULL, and coerces nothing.
+        // Spelled as a value-first hasIntersection: `["a", null] in tagNames` would ask whether
+        // the LIST is an element, which is refused (`in-list-element`).
         val withNull = render(
             translate(
                 ReviewPlans.expression(
@@ -294,32 +152,6 @@ class ColumnTypeGuardTest {
                 ReviewPlans.variable("request.resource.attr.createdAt"),
                 ReviewPlans.value(listOf("2024-01-01T00:00:00Z", null)),
             ),
-        )
-    }
-
-    @Test
-    fun `two columns of different kinds are refused, with neither side constant`() {
-        // Corpus gap. CEL: `R.attr.aString == R.attr.aNumber`. Nothing here is a constant, so the constant
-        // check cannot see it — and MySQL coerces the text column exactly the same way.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "eq",
-                    ReviewPlans.variable("request.resource.attr.aString"),
-                    ReviewPlans.variable("request.resource.attr.aNumber"),
-                ),
-            )
-        }
-        assertEquals(
-            "eq compares 'request.resource.attr.aString' with 'request.resource.attr.aNumber', " +
-                "which map to a VarCharColumnType and a IntegerColumnType column. CEL decides a " +
-                "comparison between those from the values alone — equality is false and an " +
-                "ordering raises a no-overload error — while SQL coerces one side, and MySQL " +
-                "coerces the text one, so the filter returns rows the PDP denies. Compare it against " +
-                "a value of the column's own type, or map the attribute onto one of the kinds this " +
-                "adapter compares: text, integer, floating-point, decimal or boolean. A temporal " +
-                "column is compared by wrapping both sides in timestamp().",
-            error.message,
         )
     }
 
@@ -496,27 +328,32 @@ class ColumnTypeGuardTest {
         // `id-eq-const`, `id-concat` and hierarchy actions all compare it with strings. Reading the
         // WRAPPER type would classify a varchar key as unrecognised and refuse all of them — which
         // only a mapping that HAS the wrapper can show, and the corpus's maps a bare varchar.
-        translate(
-            ReviewPlans.expression(
-                "eq",
-                ReviewPlans.variable("request.resource.id"),
-                ReviewPlans.value("doc-1"),
+        val text = render(
+            translate(
+                ReviewPlans.expression(
+                    "eq",
+                    ReviewPlans.variable("request.resource.id"),
+                    ReviewPlans.value("doc-1"),
+                ),
             ),
         )
-        val error = assertThrows<UnmappedAttributeException> {
+        assertEquals(1, Regex("\\?").findAll(text).count(), text)
+        // A number against the text key is a type mismatch CEL answers from the types alone, so
+        // it is decided here and the number is never bound for the store to coerce.
+        val number = render(
             translate(
                 ReviewPlans.expression(
                     "eq",
                     ReviewPlans.variable("request.resource.id"),
                     ReviewPlans.value(1),
                 ),
-            )
-        }
-        assertTrue(error.message!!.contains("maps to a VarCharColumnType column"), error.message)
+            ),
+        )
+        assertEquals(0, Regex("\\?").findAll(number).count(), number)
     }
 
     @Test
-    fun `a column reached through a to-one hop is checked by its DECLARED type`() {
+    fun `a column reached through a to-one hop is answered by its DECLARED type`() {
         // `Resolution.Scalar.expression` is a correlated scalar subquery there, and `column` is
         // still the declared column — which is what the guard reads. The corpus maps every hop
         // member onto a column of the type its actions compare it with, so only a mapping written
@@ -528,16 +365,18 @@ class ColumnTypeGuardTest {
                 ReviewPlans.value("x"),
             ),
         )
-        val error = assertThrows<UnmappedAttributeException> {
+        // A number has no contains() overload, so the declared type decides the answer: UNKNOWN,
+        // with the hop's correlated subquery never rendered at all.
+        val numeric = render(
             translate(
                 ReviewPlans.expression(
                     "contains",
                     ReviewPlans.variable("request.resource.attr.parent.aNumber"),
                     ReviewPlans.value("x"),
                 ),
-            )
-        }
-        assertTrue(error.message!!.contains("requires a text column"), error.message)
+            ),
+        )
+        assertEquals("1 = NULL", numeric)
     }
 
     @Test

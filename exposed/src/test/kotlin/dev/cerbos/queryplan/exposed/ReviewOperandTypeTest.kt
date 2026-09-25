@@ -55,29 +55,25 @@ class ReviewOperandTypeTest {
         // `0 = 'oneset'` coerces the CONSTANT to 0 too … a silent over-grant"), reached here
         // without any `add` for ConcatTranslator to catch.
         //
-        // The fix REFUSES rather than folding, which is why this asserts an exception where the
-        // review asked for an empty id list: `Op.FALSE` would be right under the positive polarity
-        // and wrong under a negation, where CEL denies a row whose attribute is MISSING; a
-        // three-valued fold would then have to guess the null convention of an attribute the
-        // policy never mentions. The reviewer's own recommendation was a refusal, and this is it.
-        // The server leg stays because the coercion it demonstrates is the whole justification.
+        // The adapter now answers it from the types alone, as CEL does: FALSE for a present value
+        // and UNKNOWN for a NULL one (a missing attribute is an error), so no constant is bound
+        // and no store is left to coerce. The corpus's `type-mismatch/*` cases prove the answer on
+        // every store; this server leg stays because the coercion it demonstrates is the whole
+        // justification for never handing MySQL the comparison.
         withMySql { ids ->
-            val error = assertThrows<UnmappedAttributeException> { ids(numericAgainstText()) }
-            assertTrue(error.message!!.contains("maps to a VarCharColumnType column"), error.message)
+            assertEquals(emptyList<String>(), ids(numericAgainstText()))
             // …and the predicate the adapter USED to emit, built by hand here, still returns every
-            // seeded row against this very server. The refusal is not theoretical.
+            // seeded row against this very server. The over-grant is not theoretical.
             assertEquals(listOf("d1", "d2", "d3"), ids.raw(EqOp(TypedDocs.aString, longParam(0))))
         }
     }
 
     @Test
-    fun `the same comparison is a loud failure on H2 rather than a silent over-grant`() {
-        // Why the four-store conformance run did not catch this: H2 raised a conversion error, so
-        // the shape was loud here and silent on MySQL. It is still a loud failure — now the
-        // adapter's own named refusal, raised before a statement exists, on every store alike.
-        val error = runCatching { idsOnH2(numericAgainstText()) }.exceptionOrNull()
-        assertEquals(true, error != null, "H2 accepted a numeric constant against a VARCHAR column")
-        assertEquals(UnmappedAttributeException::class, error!!::class)
+    fun `the same comparison is answered on H2 without reaching its conversion error`() {
+        // Why the four-store conformance run did not catch the old over-grant: H2 raised a
+        // conversion error, so the shape was loud here and silent on MySQL. Answered from the
+        // types, it binds nothing, so H2 has nothing to convert and agrees with MySQL.
+        assertEquals(emptyList<String>(), idsOnH2(numericAgainstText()))
     }
 
     @Test

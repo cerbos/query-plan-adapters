@@ -255,46 +255,40 @@ val mapping = cerbosMapping {
 ### The operand's type has to match the column's
 
 > [!IMPORTANT]
-> A comparison is translated only when the mapped column and the thing it is compared with are in
-> the **same CEL value family** — text, numeric or boolean. A mismatch raises
-> `UnmappedAttributeException` before any SQL exists.
+> A comparison between a mapped column and something of **another CEL value family** — text,
+> numeric or boolean — is answered from the types, never handed to the store. A column type the
+> adapter has no CEL reading for raises `UnmappedAttributeException` before any SQL exists.
 
-| What is compared | Requirement |
+| What is compared | What the adapter does |
 | --- | --- |
-| A mapped column against a plan constant | Same family. `R.attr.aString == 0` is refused. A `null` constant is exempt: it renders as `IS NULL` / `IS NOT NULL`, which coerces nothing |
-| Two mapped columns | Same family. `R.attr.aString == R.attr.aNumber` is refused |
-| A member column against a relation's `element` column, and the elements of an `in` list | Same family, for **every** element: one element of another family refuses the whole membership. A `null` element is exempt for the same reason a `null` constant is — it renders `IS NULL` and coerces nothing — but it never rescues a list that also carries a mismatched value |
-| `contains`, `startsWith`, `endsWith` — haystack **and** column needle | A **text** column, on whichever side the column lands |
-| `size()` over a string attribute, and every hierarchy operator's path column | A **text** column. `size()` over a *relation* counts rows and needs none |
-| A column type the adapter has no CEL reading for — temporal, binary, array, enum, a custom `ColumnType` | Refused against any constant, **against every element of an `in` list**, and **against any other column, including one of its own type**. Nothing would be coerced, but that is not the failure: Cerbos carries a timestamp attribute as an RFC 3339 **string**, so `R.attr.createdAt == R.attr.updatedAt` compares strings in CEL and instants in SQL, and `"…T00:00:00Z"` and `"…T00:00:00.000Z"` are one instant and two strings. A DAO key lands here too — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)` — so `request.resource.id in [...]` is refused there while a `varchar` key is fine. Compare two temporal columns as `timestamp(R.attr.a) < timestamp(R.attr.b)`, which means the instant on both sides and translates when both columns pin an absolute instant in the same representation |
+| A mapped column against a plan constant of another family | `==` is FALSE for a present value, `!=` TRUE, and anything else (an ordering) UNKNOWN. A NULL column is a missing attribute, which CEL denies, so `==` and `!=` are UNKNOWN for it, unless the attribute declares `EXPLICIT`, whose null is a value and compares FALSE. No constant is bound. A `null` constant is not a type mismatch: it renders `IS NULL` / `IS NOT NULL` |
+| Two mapped columns of different families | The same answer, UNKNOWN when either undeclared column is NULL |
+| The elements of an `in` or `hasIntersection` list, against a column or a relation's `element` column | An element of another family equals nothing, so it drops out of the disjunction; the rest compare as usual. A `null` element renders `IS NULL` |
+| A member column against a relation's `element` column | Same family, or refused |
+| `contains`, `startsWith`, `endsWith` (haystack **or** column needle) and `size()` over a number or boolean column | UNKNOWN: CEL has no overload, so the call raises and denies on every row, under either polarity |
+| Every hierarchy operator's path column | A **text** column, or refused |
+| A column type the adapter has no CEL reading for — temporal, binary, array, enum, a custom `ColumnType` | Refused against any constant, **against every element of an `in` list**, **against any other column, including one of its own type**, and under a string match or `size()`. Cerbos carries a timestamp attribute as an RFC 3339 **string**, so `R.attr.createdAt == R.attr.updatedAt` compares strings in CEL and instants in SQL, and `"…T00:00:00Z"` and `"…T00:00:00.000Z"` are one instant and two strings. A DAO key lands here too — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)` — so `request.resource.id in [...]` is refused there while a `varchar` key is fine. Compare two temporal columns as `timestamp(R.attr.a) < timestamp(R.attr.b)`, which means the instant on both sides and translates when both columns pin an absolute instant in the same representation |
 
 A DAO id column and a `transform`ed column are read through the type underneath, so a `varchar`
-primary key is text; a column reached through a to-one hop is checked by its **declared** type, not
+primary key is text; a column reached through a to-one hop is judged by its **declared** type, not
 by the subquery that reads it.
 
-**Why this is a refusal and not a `FALSE`.** `R.attr.aString == P.attr.level` is legal CEL and
-arrives as `eq(variable, value)` with nothing in it naming a type. CEL answers it from the *values*:
-equality is a definite `false`, and every ordering raises a no-overload error, which denies. Either
-way `check()` refuses the row. SQL has to coerce one side instead, and **MySQL coerces the string** —
-`'abc' = 0` is TRUE there. Against the pinned MySQL server, the predicate the adapter used to emit
-returned *every* seeded row for a policy the PDP allows none of. H2 raises a conversion error and
-PostgreSQL aborts the statement, which is exactly why four green store legs never showed it.
-Folding the comparison to `Op.FALSE` instead would be right unnegated and wrong under `not(...)`,
-where CEL denies a row whose attribute is *missing*; and a three-valued fold would have to guess the
-null convention of an attribute the policy never names. So the adapter refuses.
+**Why the store is never asked.** `R.attr.aString == P.attr.level` is legal CEL and arrives as
+`eq(variable, value)` with nothing in it naming a type. CEL answers it from the *values*: equality
+is a definite `false`, and every ordering raises a no-overload error, which denies. SQL has to
+coerce one side instead, and **MySQL coerces the string** — `'abc' = 0` is TRUE there. Against the
+pinned MySQL server, the predicate an earlier version emitted returned *every* seeded row for a
+policy the PDP allows none of; H2 raises a conversion error and PostgreSQL aborts the statement. A
+plain `Op.FALSE` would be right unnegated and wrong under `not(...)` for a row whose attribute is
+missing, which is why the NULL column stays UNKNOWN. The same holds for the string matches and
+`size()`: `a_number LIKE '%2%'` is TRUE for `123` on MySQL and SQLite, and `CHAR_LENGTH(1)` is `1`,
+where CEL raises.
 
-The same hole existed for the string matches, `size()` and the hierarchy operators over a non-text
-column: CEL has no overload there either, so it raises and denies, while `a_number LIKE '%2%'` is
-TRUE for `123` on MySQL and SQLite and `CHAR_LENGTH(1)` is `1`.
-
-**What to do about it**, which is what the message itself says. Compare the attribute against a
-value of the column's own type, or map it onto one of the kinds this adapter compares: text,
-integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in
-`timestamp()`. The remedy is put that way rather than as "map it onto a column of the constant's
-type", because for a column whose kind the adapter has no CEL reading for there is no such column to
-reach for — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)`, so `request.resource.id == "…"`
-is refused and no remapping makes the id a string. It is an `UnmappedAttributeException` rather than
-an `UnsupportedPlanShapeException` all the same: the plan is fine, and the fix is in your mapping.
+**When it is refused**, the message says what to do: compare the attribute against a value of the
+column's own type, or map it onto one of the kinds this adapter compares: text, integer,
+floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in
+`timestamp()`. It is an `UnmappedAttributeException` rather than an `UnsupportedPlanShapeException`:
+the plan is fine, and the fix is in your mapping.
 
 ### A resolver instead of a table
 
@@ -525,11 +519,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 190 / 308 |
+| adversarial | 223 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-134 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+101 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -549,8 +543,9 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   point, and H2 by UTF-16 code unit, which puts a surrogate pair before U+E000–U+FFFF;
 - a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has
   no key set SQL can read;
-- a comparison whose operand type the mapped column does not hold (the `type-mismatch/*` cases, and
-  two instant columns compared without `timestamp()`): CEL does not coerce, and SQL does. See
+- a list or map constant compared with a column or an element, a number or boolean column as a
+  hierarchy path, and two instant columns compared without `timestamp()`. A comparison between
+  recognised types that differ is not refused: it is answered from the types. See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);
 - a hierarchy with an empty delimiter, a division as a divisor, a macro over a principal value
   another macro computes, and `exists_one` over a principal list;
@@ -612,7 +607,7 @@ is a whole class of silent over-grant that the declaration-free mapping here clo
 and that `ValueString`-style declarations close only for the attributes someone remembered to
 declare. [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns)
 is the rule; the over-grant it prevents was reproduced against the pinned MySQL server before it
-was.
+was, and the corpus's type-mismatch cases now prove the answer on every store.
 
 ### `size(string)` counts characters, and astral characters count differently
 
@@ -627,9 +622,9 @@ outside the Basic Multilingual Plane — emoji, some CJK extensions — counts a
 that difference, or keep `size(string)` out of policies over data that carries astral characters.
 The Spring Data adapter documents the same caveat.
 
-Two more rules about `size()`, whatever it counts. Its argument has to be a **text column** or a
-mapped relation — counting the characters of a number or a boolean is a CEL no-overload error, so it
-denies, while `CHAR_LENGTH(1)` is `1`. And a **NaN threshold** is refused: `size(x) > NaN` is false
+Two more rules about `size()`, whatever it counts. Over a **number or boolean column** it is a CEL
+no-overload error, which denies, so the comparison is UNKNOWN rather than `CHAR_LENGTH(1)`, which is
+`1`; over a column the adapter has no CEL reading for it is refused. And a **NaN threshold** is refused: `size(x) > NaN` is false
 under IEEE for every length, and the rounding the threshold arithmetic does has no answer for a NaN
 at all. The **infinities** are deliberately not refused — IEEE orders them totally, so
 `size(x) > +Infinity` is false and `size(x) < +Infinity` is true for every present value, which is
@@ -734,10 +729,9 @@ dead code on every other engine.
 
 It is not a claim that no store-specific divergence exists, only that no *corpus shape* has one. A
 code review found one the corpus cannot reach: a comparison mixing a text column with a number,
-which MySQL answered by coercing the string and matching every row. The corpus compares every
-attribute against a value of its own type, so no action discriminates it. It is refused now — see
-[The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns) — and
-the shape belongs in the corpus, where every adapter would be asked it.
+which MySQL answered by coercing the string and matching every row. The corpus now carries it as
+its type-mismatch cases, and the adapter answers it from the types — see
+[The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns).
 
 MariaDB is not proved and is therefore not claimed.
 

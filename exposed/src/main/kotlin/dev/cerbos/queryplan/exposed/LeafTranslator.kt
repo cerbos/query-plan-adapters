@@ -4,6 +4,7 @@ import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.Params
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.GreaterEqOp
@@ -57,7 +58,11 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         // no operand types, so this is the only place a comparison CEL decides from the values
         // alone can be told apart from one a store would decide by coercing the column.
         if (operator in ComparisonTranslator.STRING_MATCH_OPERATORS) {
+            if (lacksTextOverload(target)) return TriLogic.unknown()
             requireText(operator, target)
+        }
+        if (ScalarColumnTypes.knownMismatch(target.column, value)) {
+            return typeMismatch(operator, listOf(target))
         }
         if (!ScalarColumnTypes.accepts(target.column, value)) {
             throw ScalarRefusals.constantTypeMismatch(operator, target.variable, target.column, value)
@@ -90,6 +95,30 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
 
     private companion object {
         val ORDERING_OPERATORS = setOf("lt", "le", "gt", "ge")
+    }
+
+    /**
+     * A comparison between values CEL knows to be of different types, answered from the types
+     * alone rather than handed to a store that would coerce one side (MySQL coerces the column:
+     * `'abc' = 0` is TRUE there).
+     *
+     * CEL's heterogeneous equality makes `==` a definite FALSE and `!=` a definite TRUE between
+     * two PRESENT values, and an ordering or any other operator a no-overload error, which denies
+     * under both polarities (SQL UNKNOWN). A missing attribute is itself an error, so an [operands]
+     * column that is NULL without declaring the explicit-null convention drives the equality to
+     * UNKNOWN: `(a IS NULL OR ...) AND UNKNOWN`, FALSE for every present row. A NULL under the
+     * explicit convention is a null VALUE, and `null == "x"` is also a definite FALSE, so it adds
+     * no witness.
+     */
+    fun typeMismatch(operator: String, operands: List<Resolution.Scalar>): Op<Boolean> {
+        if (operator != "eq" && operator != "ne" && operator != "in") return TriLogic.unknown()
+        val missing = operands.filterNot(::isExplicitNull).map { IsNullOp(it.expression) }
+        val equality: Op<Boolean> = if (missing.isEmpty()) {
+            Op.FALSE
+        } else {
+            TriLogic.and(TriLogic.or(missing), TriLogic.unknown())
+        }
+        return if (operator == "ne") TriLogic.not(equality) else equality
     }
 
     /**
@@ -129,6 +158,18 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
      */
     fun isExplicitNull(target: Resolution.Scalar): Boolean =
         target.field.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
+
+    /**
+     * Whether [target] maps to a number or boolean column, which CEL's string matches, `size()`
+     * and `hierarchy()` have NO overload for. At check time the call raises a no-overload error on
+     * every row, present or NULL, and `check()` denies under both polarities: SQL UNKNOWN, with
+     * no coercion left for a store to apply. A temporal or unrecognised column is not this case:
+     * a timestamp attribute reaches CEL as a string, so [requireText] still refuses it.
+     */
+    fun lacksTextOverload(target: Resolution.Scalar): Boolean = when (ScalarColumnTypes.familyOf(target.column)) {
+        ScalarValueFamily.NUMERIC, ScalarValueFamily.BOOLEAN -> true
+        else -> false
+    }
 
     /**
      * Refuses [target] unless its declared column type is one CEL's string matches and `size()`

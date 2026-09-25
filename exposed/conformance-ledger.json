@@ -361,45 +361,13 @@
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
     },
-    "type-mismatch/contains/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/contains/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
     "type-mismatch/descendent-of/number-field-as-path": {
       "status": "unsupported",
       "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
     },
-    "type-mismatch/ends-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/ends-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/equals/boolean-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "eq compares 'request.resource.attr.aBool' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "type-mismatch/equals/negated-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "eq compares 'request.resource.attr.aDouble' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "eq compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/equals/number-field-against-string-principal": {
-      "status": "unsupported",
-      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
     },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
@@ -417,54 +385,6 @@
       "status": "unsupported",
       "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
     },
-    "type-mismatch/equals/string-field-against-number-field": {
-      "status": "unsupported",
-      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
-    },
-    "type-mismatch/equals/string-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "eq compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/equals/string-field-against-number-principal": {
-      "status": "unsupported",
-      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
-    },
-    "type-mismatch/exists/element-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "eq compares 't.name' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/greater-or-equal/negated-number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "ge compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/greater-or-equal/string-field-against-number-literal-value-first": {
-      "status": "unsupported",
-      "reason": "le compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/greater-than/boolean-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "gt compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/greater-than/number-field-against-string-literal-value-first": {
-      "status": "unsupported",
-      "reason": "lt compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/greater-than/string-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "gt compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "in compares 't.name' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list": {
-      "status": "unsupported",
-      "reason": "in compares 'request.resource.attr.aBoolList' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "in compares 'request.resource.attr.aNumberList' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
       "reason": "hasIntersection over a literal list whose elements are maps: each element of a mapped collection is one scalar column value, which SQL equality cannot compare with a map"
@@ -473,69 +393,17 @@
       "status": "unsupported",
       "reason": "The member is a list constant: `[\"public\"] in tagNames` asks whether the list is itself an element, which a scalar element column never holds. Spreading it into its elements would answer `\"public\" in tagNames` and return every row holding that tag"
     },
-    "type-mismatch/in/number-field-in-mixed-literal-list": {
-      "status": "unsupported",
-      "reason": "eq compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
     "type-mismatch/in/string-field-in-list-of-lists": {
       "status": "unsupported",
       "reason": "The membership pair has no column-and-constant reading: the container is a literal list whose elements are themselves lists or maps, or a map() over a principal value, and a scalar column can equal neither"
-    },
-    "type-mismatch/in/string-literal-in-resource-boolean-list": {
-      "status": "unsupported",
-      "reason": "in compares 'request.resource.attr.aBoolList' against a String constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/in/string-literal-in-resource-number-list": {
-      "status": "unsupported",
-      "reason": "in compares 'request.resource.attr.aNumberList' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
-    "type-mismatch/less-or-equal/negated-boolean-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "le compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first": {
-      "status": "unsupported",
-      "reason": "ge compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
     },
-    "type-mismatch/less-than/negated-string-field-against-number-literal": {
-      "status": "unsupported",
-      "reason": "lt compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/less-than/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "lt compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/less-than/number-literal-against-boolean-field-value-first": {
-      "status": "unsupported",
-      "reason": "gt compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
-    },
-    "type-mismatch/not-equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "ne compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
-    },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "A map the planner builds with struct() compared with a column: a mapped column holds one scalar, which SQL equality cannot compare with a map"
-    },
-    "type-mismatch/size/boolean-field": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/size/number-field": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/starts-with/number-field-needle": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
-    "type-mismatch/starts-with/number-field-receiver": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
     }
   }
 }

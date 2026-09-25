@@ -206,6 +206,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 val target = scope.scalar(right.variable)
                 // The column is the NEEDLE here, and a needle is escaped and concatenated into a
                 // LIKE pattern, so it has to be text for exactly the reason a haystack does.
+                if (translation.leaf.lacksTextOverload(target)) return TriLogic.unknown()
                 translation.leaf.requireText(operator, target)
                 val needle = target.expression
                 return when (operator) {
@@ -700,8 +701,13 @@ internal class ComparisonTranslator(private val translation: Translation) {
         val left = scope.scalar(leftVariable)
         val right = scope.scalar(rightVariable)
         if (operator in STRING_MATCH_OPERATORS) {
+            if (translation.leaf.lacksTextOverload(left) || translation.leaf.lacksTextOverload(right)) {
+                return TriLogic.unknown()
+            }
             translation.leaf.requireText(operator, left)
             translation.leaf.requireText(operator, right)
+        } else if (ScalarColumnTypes.knownMismatch(left.column, right.column)) {
+            return translation.leaf.typeMismatch(operator, listOf(left, right))
         } else if (!ScalarColumnTypes.comparable(left.column, right.column)) {
             // `R.attr.aString == R.attr.aNumber` is the constant case with neither side constant,
             // and MySQL coerces the text column exactly the same way.

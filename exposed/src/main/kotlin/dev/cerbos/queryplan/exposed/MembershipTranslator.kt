@@ -251,30 +251,35 @@ internal class MembershipTranslator(private val translation: Translation) {
     /**
      * The subquery body of a membership test: the element column against each constant.
      *
-     * EVERY element is type-checked against the column, and one mismatch refuses the WHOLE
-     * membership, for the reason [ScalarRefusals.constantTypeMismatch] gives — a number tested
-     * against a text element column is a definite FALSE in CEL and an almost-total match on MySQL.
+     * EVERY element is type-checked against the column. A constant of a recognised family other
+     * than the column's is a definite FALSE in CEL and drops out; a column of an unrecognised
+     * family refuses the WHOLE membership, for the reason [ScalarRefusals.constantTypeMismatch]
+     * gives — a number tested against a text element column is an almost-total match on MySQL.
      * A null element is inert to the check: it renders as `IS NULL`, which coerces nothing.
      *
-     * Dropping a mismatched element instead — on the argument that CEL answers that one equality
+     * Dropping EVERY mismatched element — on the argument that CEL answers that one equality
      * `false`, so `x OR false` is `x` under either polarity — was tried and reverted. The argument
      * only holds where the adapter KNOWS what CEL would answer, and it does not for the column
      * kinds [ScalarColumnTypes.familyOf] reads as unrecognised: there `accepts` is false for
      * EVERY value, so `["<uuid>", null]` against a `UUIDTable` id kept the null alone, emitted
      * `IS NULL` by itself, and `NOT (id IS NULL)` handed back every row the PDP denies.
      */
-    private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> = TriLogic.or(
-        values.map { value ->
-            if (value == null) {
-                IsNullOp(element)
-            } else {
-                if (!ScalarColumnTypes.accepts(element, value)) {
+    private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> {
+        val arms = values.mapNotNull { value ->
+            when {
+                value == null -> IsNullOp(element)
+                // A constant CEL KNOWS to be of another type than every element: that equality is
+                // a definite FALSE for every element, null elements included, so it drops out of
+                // the disjunction under either polarity. Only where both families are recognised:
+                // see the note above on why an unrecognised column still refuses.
+                ScalarColumnTypes.knownMismatch(element, value) -> null
+                !ScalarColumnTypes.accepts(element, value) ->
                     throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
-                }
-                EqOp(element, Params.of(value))
+                else -> EqOp(element, Params.of(value))
             }
-        },
-    )
+        }
+        return if (arms.isEmpty()) Op.FALSE else TriLogic.or(arms)
+    }
 
     /**
      * A plan constant as the list of elements the operator ranges over.

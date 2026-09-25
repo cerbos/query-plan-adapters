@@ -117,6 +117,26 @@ internal object ScalarColumnTypes {
     }
 
     /**
+     * Whether [column] and the non-null [value] are values CEL knows to be of DIFFERENT types: both
+     * families recognised, and not equal. CEL then decides equality as a definite `false` and an
+     * ordering as a no-overload error from the types alone, with no coercion to reproduce. An
+     * unrecognised column family is never "known different": it answers `false` here, and the
+     * caller refuses as before.
+     */
+    fun knownMismatch(column: Column<*>, value: Any): Boolean {
+        val family = familyOf(column) ?: return false
+        val valueFamily = familyOf(value) ?: return false
+        return family != valueFamily
+    }
+
+    /** [knownMismatch], for two mapped columns. */
+    fun knownMismatch(left: Column<*>, right: Column<*>): Boolean {
+        val leftFamily = familyOf(left) ?: return false
+        val rightFamily = familyOf(right) ?: return false
+        return leftFamily != rightFamily
+    }
+
+    /**
      * [accepts], for two mapped columns compared against each other.
      *
      * Both families must be KNOWN, and equal. Two columns of one unrecognised type used to pass

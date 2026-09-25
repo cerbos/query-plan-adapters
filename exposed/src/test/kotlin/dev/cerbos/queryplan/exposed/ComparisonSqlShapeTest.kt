@@ -3,6 +3,8 @@ package dev.cerbos.queryplan.exposed
 import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -66,7 +68,10 @@ class ComparisonSqlShapeTest {
         //    undeclared member carries its own missing-attribute witness (`in-var-var-omitted`);
         //  - a string concatenation the comparison cannot solve, folded to a constant that still
         //    carries the missing-attribute witness of the column it concatenates
-        //    (`not-concat-unsolvable`).
+        //    (`not-concat-unsolvable`);
+        //  - an equality between values CEL knows to be of different types, answered FALSE from
+        //    the types alone and carrying the missing-attribute witness of its column
+        //    (`type-mismatch/equals/*`).
         //
         // Every disjunct names an operator or a declaration IN THE PLAN, never an action, so an
         // action added tomorrow is covered and one that reaches a seventh source fails here.
@@ -77,7 +82,8 @@ class ComparisonSqlShapeTest {
                     hasColumnNeedle(plan.condition) ||
                     operatorsOf(plan.condition).any { it in SELF_GUARDING_OPERATORS } ||
                     hasAttributeInAttribute(plan.condition) ||
-                    hasStringConcatenation(plan.condition),
+                    hasStringConcatenation(plan.condition) ||
+                    hasTypeMismatchedEquality(plan.condition),
                 "$action emits IS NULL with no null operand, no declared explicit-null attribute, " +
                     "no column LIKE needle and none of $SELF_GUARDING_OPERATORS",
             )
@@ -133,6 +139,46 @@ class ComparisonSqlShapeTest {
             it.nodeCase == Operand.NodeCase.VALUE && it.value.kindCase == Value.KindCase.STRING_VALUE
         }
         return direct || expression.operandsList.any(::hasStringConcatenation)
+    }
+
+    /**
+     * Whether the subtree holds `eq` / `ne` / `in` between an attribute and a constant or another
+     * attribute whose type families are both recognised and differ. A lambda variable (`t.name`)
+     * is looked up among the fields of every mapped relation.
+     */
+    private fun hasTypeMismatchedEquality(operand: Operand): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
+        val expression = operand.expression
+        val families = expression.operandsList.map { familiesOf(it) }
+        val direct = expression.operator in setOf("eq", "ne", "in") && families.size == 2 &&
+            families[0].any { left -> families[1].any { right -> left != right } }
+        return direct || expression.operandsList.any(::hasTypeMismatchedEquality)
+    }
+
+    private fun familiesOf(operand: Operand): Set<ScalarValueFamily> = when (operand.nodeCase) {
+        // A list constant contributes its elements: `x in ["a", 1]` compares x with each.
+        Operand.NodeCase.VALUE -> when (val value = PlanValues.toKotlin(operand.value)) {
+            is List<*> -> value.filterNotNull().mapNotNull { ScalarColumnTypes.familyOf(it) }.toSet()
+            null -> emptySet()
+            else -> setOfNotNull(ScalarColumnTypes.familyOf(value))
+        }
+        Operand.NodeCase.VARIABLE -> fieldsNamed(operand.variable)
+            .mapNotNull { ScalarColumnTypes.familyOf(it.column) }.toSet()
+        else -> emptySet()
+    }
+
+    private fun fieldsNamed(variable: String): List<AttributeMapping.Field> {
+        (MAPPING.resolve(variable) as? AttributeMapping.Field)?.let { return listOf(it) }
+        val member = variable.substringAfter('.', "")
+        if (member.isEmpty()) return emptyList()
+        fun walk(relation: AttributeMapping.Relation): List<AttributeMapping.Field> =
+            relation.fields.values.flatMap { child ->
+                when (child) {
+                    is AttributeMapping.Relation -> walk(child)
+                    is AttributeMapping.Field -> emptyList()
+                }
+            } + listOfNotNull(relation.fields[member] as? AttributeMapping.Field)
+        return MAPPING.entries.values.filterIsInstance<AttributeMapping.Relation>().flatMap(::walk)
     }
 
     /** Whether the subtree holds `in(attribute, attribute)`: a member tested against a collection. */
