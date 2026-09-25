@@ -401,7 +401,7 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 208 / 270 |
+| adversarial | 221 / 283 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the

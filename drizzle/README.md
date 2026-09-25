@@ -406,7 +406,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 258 / 270 |
+| adversarial | 271 / 283 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -440,7 +440,7 @@ detect a missing one.
 | Subtype discrimination | **Caller-owned**, reproducible with `subqueryFilter` | A `type`/`kind` discriminator column where one table holds several row kinds. Declare `eq(table.type, "…")` |
 | To-one relation used as a collection | **Caller-owned** | A `type: "one"` relation whose target column has no unique index. `type` is declarative and emits the same `EXISTS` either way, so add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `sourceColumn`/`targetColumn` are each a single `AnyColumn`, so a two-column key is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and the rest of the `relation/*` cases) | None — every operator reached through a relation requires each to-one hop, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375), [#430](https://github.com/cerbos/query-plan-adapters/issues/430)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and the rest of the `relation/*` cases) | None — every operator reached through a relation requires each to-one hop, so a missing parent, or a NULL leaf column on it, is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315), [#375](https://github.com/cerbos/query-plan-adapters/issues/375), [#430](https://github.com/cerbos/query-plan-adapters/issues/430), [#553](https://github.com/cerbos/query-plan-adapters/issues/553)) |
 
 ### Declaring the application's own predicate
 
@@ -604,6 +604,12 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 - The absent-parent guard now applies over a **single** to-one hop, including a bare boolean read
   through it; a negation over one hop used to return every row with no parent — an over-grant fix
   ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- A predicate read through a chain of to-one relations now keeps its UNKNOWN: it is TRUE when the
+  related row satisfies it, FALSE when the row refutes it, and NULL otherwise, rather than one
+  `EXISTS` that turned an UNKNOWN leaf into FALSE. `!(R.attr.parent.aOptionalString == null)` used
+  to return every row whose parent holds a NULL `aOptionalString` on the omitted convention, which
+  CEL denies as a missing attribute — an over-grant fix
+  ([#553](https://github.com/cerbos/query-plan-adapters/issues/553)).
 - Indexed scalar equality (and its negated, null, number and boolean variants) is now executed
   against the corpus oracle on SQLite, PostgreSQL (JSON, JSONB and zero-based native arrays) and
   MySQL. Each query still runs entirely in the database.
