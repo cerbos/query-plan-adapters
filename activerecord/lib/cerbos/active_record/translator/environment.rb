@@ -21,7 +21,10 @@ module Cerbos
 
         def resolve(name)
           mapping = translator.attributes[name]
-          return resolve_mapping(mapping, translator.model, translator.root_table) if mapping
+          if mapping
+            resolved = resolve_mapping(mapping, translator.model, translator.root_table)
+            return translator.register_attribute_field(resolved, mapping)
+          end
 
           head, rest = name.split(".", 2)
           unless bindings.key?(head)

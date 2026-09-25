@@ -217,6 +217,7 @@ module Cerbos
         @timestamp_operands = {}.compare_by_identity
         @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
+        @omitted_attributes = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
       end
@@ -243,6 +244,27 @@ module Cerbos
       def register_null_representation(node, representation)
         @null_representations[node] = representation if representation
         node
+      end
+
+      # Records the column a top-level field attribute resolved to when its convention, declared
+      # or inherited from the call, is `:omitted`. Only such a column may meet a null constant in
+      # `eq` or `ne`; {#assert_no_null_operands} refuses every other null operand under `:omitted`.
+      #
+      # @private
+      def register_attribute_field(node, mapping)
+        if mapping.is_a?(AttributeMapping::Field) &&
+            (mapping.null_representation || null_attribute_representation) == :omitted
+          @omitted_attributes[node] = true
+        end
+        node
+      end
+
+      # True if the node is a top-level field attribute under `:omitted`. See
+      # {#register_attribute_field}.
+      #
+      # @private
+      def omitted_attribute?(node)
+        @omitted_attributes.key?(node)
       end
 
       # True if the node's attribute declares `:explicit`. Only then does CEL see a null value,
