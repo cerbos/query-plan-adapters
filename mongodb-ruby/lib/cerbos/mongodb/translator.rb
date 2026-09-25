@@ -315,7 +315,9 @@ module Cerbos
           end
 
           expr = Aggregation.compare(operator, Aggregation.build(left, mapper), Aggregation.build(right, mapper))
-          return Guards.with_evaluation({"$expr" => expr}, both, mapper)
+          # The comparison itself is guarded too: an ordering between two types CEL cannot order
+          # is an error, which the guard keeps out under either polarity.
+          return Guards.with_evaluation({"$expr" => expr}, [Plan::Expression.new(operator, both)], mapper)
         end
 
         variable = both.find { |op| variable?(op) }

@@ -107,6 +107,9 @@ module Cerbos
         operands = expression.operands
         case operator
         when *NOT_NULL_GUARDED then not_null_guard(expression, mapper)
+        when "lt", "le", "gt", "ge"
+          left, right = operands.map { |op| build(op, mapper) }
+          {"$expr" => orderable(left, right)}
         when "timestamp"
           # A literal is validated at translation time; only a field can fail per document.
           (operands[0] && !value?(operands[0])) ? not_null_guard(expression, mapper) : nil
@@ -164,6 +167,25 @@ module Cerbos
             {"$or" => [{"$eq" => ["$$left", Float::NAN]}, {"$eq" => ["$$right", Float::NAN]}]},
             operator == "ne",
             {COMPARISONS.fetch(operator) => ["$$left", "$$right"]}
+          ]}
+        }}
+      end
+
+      # Whether CEL can order +left+ against +right+ at all: two numbers, two strings, two
+      # booleans or two timestamps. Anything else is a no-such-overload error, which denies under
+      # either polarity, where MongoDB orders every pair of BSON types. cel-go answers an ordering
+      # with NaN false rather than raising, whatever the other side is.
+      def orderable(left, right)
+        {"$let" => {
+          "vars" => {"left" => left, "right" => right},
+          "in" => {"$or" => [
+            {"$eq" => ["$$left", Float::NAN]},
+            {"$eq" => ["$$right", Float::NAN]},
+            {"$and" => [{"$isNumber" => "$$left"}, {"$isNumber" => "$$right"}]},
+            {"$and" => [
+              {"$eq" => [{"$type" => "$$left"}, {"$type" => "$$right"}]},
+              {"$in" => [{"$type" => "$$left"}, %w[string bool date]]}
+            ]}
           ]}
         }}
       end

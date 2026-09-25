@@ -359,5 +359,16 @@ RSpec.describe "adapter contract" do
       emitted = filter(expr("eq", expr("add", var("request.resource.attr.a"), val("q")), val("$b")), mapper)
       expect(emitted.inspect).to include('"right" => {"$literal" => "$b"}')
     end
+
+    # Corpus gap. `!(R.attr.s < (R.attr.b ? 1 : 2))` over a string `s` is a no-such-overload
+    # error that denies, where MongoDB orders every string after every number, so the $nor over
+    # $lt matched. The ordering's own guard, outside the $nor, requires two orderable operands.
+    it "keeps an ordering between types CEL cannot order out of a negation" do
+      mapper = {"request.resource.attr.s" => {field: "s"}, "request.resource.attr.b" => {field: "b"}}
+      ordering = expr("lt", var("request.resource.attr.s"), expr("if", var("request.resource.attr.b"), val(1), val(2)))
+      emitted = filter(expr("not", ordering), mapper)
+      expect(emitted.fetch("$and").first.fetch("$expr").fetch("$let").fetch("in")).to include("$or")
+      expect(emitted.fetch("$and").last).to include("$nor")
+    end
   end
 end
