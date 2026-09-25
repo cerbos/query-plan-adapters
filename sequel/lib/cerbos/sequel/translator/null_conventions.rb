@@ -93,32 +93,6 @@ module Cerbos
           )
         end
 
-        # Two columns under different conventions have no faithful rendering, so the adapter
-        # refuses the comparison instead of a direction.
-        #
-        # The declared side needs a DEFINITE answer for its NULL, because CEL holds a null value
-        # there and `null != "x"` is TRUE. The other side needs UNKNOWN for its NULL, because
-        # that is a missing attribute and CEL denies it under both polarities. A definite
-        # predicate gives rows that the PDP refuses; a plain one loses rows that the PDP
-        # permits. No one predicate is both. Declare the convention on both attributes, or on
-        # neither (cerbos/query-plan-adapters#308).
-        #
-        # The arity of +operator+ is already asserted, so +values+ holds two operands.
-        def assert_uniform_null_conventions(operator, values)
-          return unless %w[eq ne].include?(operator)
-
-          left, right = values
-          return unless SqlSupport.sql_node?(left) && SqlSupport.sql_node?(right)
-          return if explicit_null?(left) == explicit_null?(right)
-
-          raise UnsupportedOperatorError,
-            "Cannot translate #{operator} between two columns under mixed null conventions. " \
-            "One attribute declares null_representation: :explicit and the other does not, so " \
-            "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
-            "one predicate does both. Declare null_representation on both attributes, or on " \
-            "neither."
-        end
-
         # The comparison with the declared conventions applied, or +plain+ when no attribute in
         # it declares +:explicit+.
         #
@@ -192,8 +166,17 @@ module Cerbos
 
           equal = SqlSupport.and_node(present + [SqlSupport.comparison("eq", left, right)])
           equal = SqlSupport.or_node([both_null(left, right), equal]) if left_explicit && right_explicit
+          result = (operator == "ne") ? SqlSupport.not_node(equal) : equal
 
-          (operator == "ne") ? SqlSupport.not_node(equal) : equal
+          # A column that does not declare `:explicit` is a missing attribute when NULL, and CEL
+          # raises on it whatever the explicit side holds. Without the guard, an explicit NULL
+          # beside it would make `eq` FALSE and `ne` TRUE, a grant the PDP never makes. With it,
+          # the explicit side still answers its null definitely wherever the other side is
+          # present (cerbos/query-plan-adapters#308).
+          missing = [[left, left_explicit], [right, right_explicit]].filter_map { |operand, explicit|
+            SqlSupport.is_null(operand) if !explicit && SqlSupport.sql_node?(operand)
+          }
+          unknown_if_any(missing, result)
         end
 
         # `in` gains a presence guard beside whatever the membership translated to. It does not

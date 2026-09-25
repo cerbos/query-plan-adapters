@@ -153,10 +153,6 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
     },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side declares the explicit-null convention and the other does not; no single SQL predicate is both definite for the declared NULL and UNKNOWN for the omitted one, so the comparison is refused."
-    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position."

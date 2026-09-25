@@ -868,14 +868,6 @@ RSpec.describe Cerbos::Sequel do
       expect(sql).to match(/`title` IS NULL\) AND .*`n` IS NULL/)
     end
 
-    it "refuses a comparison between two columns under mixed conventions" do
-      expect { declared_sql(expression("ne", variable("e"), variable("u"))) }
-        .to raise_error(
-          Cerbos::Sequel::UnsupportedOperatorError,
-          /between two columns under mixed null conventions/
-        )
-    end
-
     it "leaves the order operators alone" do
       # A null receiver raises a no-overload error in CEL, which denies under both polarities.
       # UNKNOWN already does that, so a guard here would change the meaning.

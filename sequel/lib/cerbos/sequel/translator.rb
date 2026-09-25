@@ -421,7 +421,6 @@ module Cerbos
 
       def apply(operator, values)
         assert_arity(operator, values)
-        assert_uniform_null_conventions(operator, values)
 
         override = operator_overrides[operator]
         # Only the built-in eq and ne can resolve string() of a double.

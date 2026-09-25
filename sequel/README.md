@@ -54,7 +54,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 246 / 308 |
+| adversarial | 247 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -99,7 +99,7 @@ The refusals fall into a few mechanisms:
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
 | A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |
 | A list or map as a list element, a struct built in the policy, a list difference, `filter`/`map` over a list of constants, a map's keys | None has a scalar SQL form. |
-| Two raw temporal columns, or two columns under mixed NULL conventions | CEL compares RFC-3339 spellings without `timestamp()`; a mixed pair needs both a definite and an UNKNOWN answer for NULL. |
+| Two raw temporal columns | CEL compares RFC-3339 spellings without `timestamp()`. |
 
 The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any
 operator that carries the wrong number of operands. The planner does not make those shapes, but
@@ -174,8 +174,15 @@ in(col, [cs])  ->  col IS NOT NULL AND col IN (cs)
 eq(a, b)       ->  (a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)
 ```
 
-A comparison between two columns must not mix the conventions, and the adapter refuses one
-that does. Refer to [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+Two columns may mix the conventions. The side that does not declare `:explicit` is a missing
+attribute when NULL, so the comparison is UNKNOWN there, and the explicit side answers its null
+definitely wherever the other side is present:
+
+```
+eq(e, o)  ->  CASE WHEN o IS NULL THEN NULL ELSE (e IS NOT NULL AND e = o) END
+ne(e, o)  ->  CASE WHEN o IS NULL THEN NULL ELSE NOT (e IS NOT NULL AND e = o) END
+```
+Refer to [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 ### The collation is part of the contract
