@@ -33,7 +33,10 @@ module Cerbos
       LAMBDA_OPERATORS = %w[exists exists_one all filter map lambda].freeze
 
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
-      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod in except].freeze
+      NOT_NULL_GUARDED = %w[
+        string double int size contains startsWith endsWith add sub mult div mod in except
+        hierarchy ancestorOf descendentOf overlaps
+      ].freeze
 
       module_function
 
@@ -120,6 +123,10 @@ module Cerbos
         when "in" then build_in(operands, mapper)
         when "filter" then Logic.filter_value(expression, mapper)
         when "except" then build_except(operands, mapper)
+        when "hierarchy" then build_hierarchy(operands, mapper)
+        when "ancestorOf" then hierarchy_prefix(operands.map { |op| build(op, mapper) }, :ancestor)
+        when "descendentOf" then hierarchy_prefix(operands.map { |op| build(op, mapper) }.reverse, :ancestor)
+        when "overlaps" then hierarchy_prefix(operands.map { |op| build(op, mapper) }, :overlaps)
         when "list" then operands.map { |op| build(op, mapper) }
         when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
@@ -295,6 +302,54 @@ module Cerbos
             ]},
             nil
           ]}
+        }}
+      end
+
+      # Cerbos's hierarchy(): the segments of a string split on the separator ("." when none is
+      # given; an empty one splits into code points, as Go's strings.Split does), or a list of
+      # strings as it is. Anything else is null (a CEL error).
+      def build_hierarchy(operands, mapper)
+        path, separator = operands
+        raise InvalidPlanError, "hierarchy requires a path" if path.nil?
+        if separator && !(value?(separator) && string?(separator.value))
+          raise UnsupportedError, "hierarchy separator must be a string constant"
+        end
+
+        delimiter = separator ? separator.value : "."
+        split = if delimiter.empty?
+          {"$map" => {"input" => {"$range" => [0, {"$strLenCP" => "$$cerbos_path"}]}, "in" => {"$substrCP" => ["$$cerbos_path", "$$this", 1]}}}
+        else
+          {"$split" => ["$$cerbos_path", constant(delimiter)]}
+        end
+        branches = [{"case" => {"$eq" => [{"$type" => "$$cerbos_path"}, "string"]}, "then" => split}]
+        if separator.nil?
+          every_string = {"$allElementsTrue" => [{"$map" => {"input" => "$$cerbos_path", "in" => {"$eq" => [{"$type" => "$$this"}, "string"]}}}]}
+          branches << {"case" => {"$and" => [{"$isArray" => "$$cerbos_path"}, every_string]}, "then" => "$$cerbos_path"}
+        end
+        {"$let" => {"vars" => {"cerbos_path" => build(path, mapper)}, "in" => {"$switch" => {"branches" => branches, "default" => nil}}}}
+      end
+
+      # ancestorOf (the second strictly longer, starting with the first) and overlaps (the shorter
+      # starting the longer) between two hierarchies; null where either is not one.
+      def hierarchy_prefix(hierarchies, relation)
+        first, second = hierarchies
+        raise InvalidPlanError, "a hierarchy comparison requires two operands" unless first && second
+
+        starts = ->(short, long) {
+          {"$cond" => [{"$eq" => [{"$size" => short}, 0]}, true, {"$eq" => [{"$slice" => [long, {"$size" => short}]}, short]}]}
+        }
+        compared = if relation == :ancestor
+          {"$and" => [{"$gt" => [{"$size" => "$$cerbos_second"}, {"$size" => "$$cerbos_first"}]}, starts.call("$$cerbos_first", "$$cerbos_second")]}
+        else
+          {"$cond" => [
+            {"$lte" => [{"$size" => "$$cerbos_first"}, {"$size" => "$$cerbos_second"}]},
+            starts.call("$$cerbos_first", "$$cerbos_second"),
+            starts.call("$$cerbos_second", "$$cerbos_first")
+          ]}
+        end
+        {"$let" => {
+          "vars" => {"cerbos_first" => first, "cerbos_second" => second},
+          "in" => {"$cond" => [{"$and" => [{"$isArray" => "$$cerbos_first"}, {"$isArray" => "$$cerbos_second"}]}, compared, nil]}
         }}
       end
 

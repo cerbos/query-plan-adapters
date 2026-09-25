@@ -159,7 +159,8 @@ module Cerbos
           # A ternary evaluates only the branch its condition selects, and CEL's three-valued
           # logic (Logic) says exactly which document that leaves an error.
           {"$expr" => {"$eq" => [Logic.truth(expression, mapper), true]}}
-        when "ancestorOf", "descendentOf", "overlaps" then Hierarchy.build(operator, operands, mapper)
+        when "ancestorOf", "descendentOf", "overlaps"
+          with_logic_fallback(expression, mapper, scope, true) { Hierarchy.build(operator, operands, mapper) }
         else
           raise UnsupportedError, "Unsupported operator: #{operator}"
         end

@@ -41,7 +41,8 @@ module Cerbos
         when "not" then negate(truth(single(node), mapper, bound))
         when "exists", "all", "exists_one" then macro(node, mapper, bound)
         when "if" then ternary(node, mapper, bound)
-        when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in"
+        when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in",
+          "ancestorOf", "descendentOf", "overlaps"
           leaf(node, mapper, bound)
         when "filter", "map", "except", "list", "struct"
           # A list or map where CEL needs a boolean is a runtime type error.

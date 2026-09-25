@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 74 / 80 |
-| adversarial | 290 / 308 |
+| extended | 75 / 80 |
+| adversarial | 295 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -215,8 +215,7 @@ with its reason.
 The refused set is `map()` anywhere but as a `hasIntersection` or whole-list operand, macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
 carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of a
-date field with anything but null (a stored date has lost the string CEL compares), an empty hierarchy separator or a
-constructed hierarchy path, a regular expression using a case-insensitive non-ASCII character, a
+date field with anything but null (a stored date has lost the string CEL compares), a regular expression using a case-insensitive non-ASCII character, a
 group flag or named group, `\p`/`\Q` and other escapes RE2 has and PCRE2 reads otherwise, or a counted
 repetition nested in another, and a comparison with
 a map constant or with a list holding a list, a map or NaN (MongoDB compares embedded documents in
@@ -242,7 +241,9 @@ error. A list constant is compared whole inside `$expr` with a field, a to-many 
 projection or a `map()` over one, element by element and in order, as CEL does; `filter()` keeps
 the elements whose condition is true and raises if any raises; `except()` keeps the elements of
 the first list the second does not contain, repeats included (null where either holds a list or a
-map); and exists_one()
+map); a hierarchy the filter cannot compare with a literal prefix (a field on both sides, a path
+built with `list()`, an empty separator, which splits into code points as Go's `strings.Split` does)
+is compared as an array of segments; and exists_one()
 over a literal list of up to 32 elements expands to "this one and no other". A `matches()`
 pattern is parsed as RE2 and written as the PCRE2 pattern that matches the same strings: `$` as
 `\z`, `.` as `[^\n]`, `\s` as RE2's `[\t\n\f\r ]` (PCRE2's also holds the vertical tab), a POSIX

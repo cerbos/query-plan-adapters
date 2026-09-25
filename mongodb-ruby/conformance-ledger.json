@@ -17,26 +17,6 @@
       "status": "unsupported",
       "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation: neither the filter nor the three-valued evaluation has a form that iterates a subdocument's field names."
     },
-    "hierarchy/ancestor-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Same empty-separator refusal as `hierarchy/descendent-of/empty-delimiter`: the ancestor $in list is built by splitting the path on its separator, and an empty separator splits it into characters whose prefixes leave out the empty string (a8's zero-segment ancestor)"
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "The hierarchy operand parser refuses an empty separator before the anchored `^prefix + separator` regex is built: with an empty separator that regex would match the path itself (a2, never its own descendant) as well as every string extension of it."
-    },
-    "hierarchy/overlaps/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Same empty-separator refusal as `hierarchy/descendent-of/empty-delimiter`: overlaps is the ancestor $in list and the anchored descendant regex joined, and neither has a form for an empty separator"
-    },
-    "hierarchy/overlaps/path-built-from-identifier": {
-      "status": "unsupported",
-      "reason": "the descendant path is CONSTRUCTED by list() from a constant segment and the primary key rather than read from a field, and the adapter resolves a hierarchy operand only from a mapped field or a string constant — it has no form for a path assembled at query time."
-    },
-    "hierarchy/overlaps/path-built-from-list-value-first": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: hierarchy path must be a field or string value."
-    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a to-one relation, which CEL reads as a map and tests by KEY; the keys are the fields the embedded subdocument carries, and the adapter has no filter over a subdocument's field names, so it refuses"
@@ -60,10 +40,6 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."
-    },
-    "type-mismatch/descendent-of/number-field-as-path": {
-      "status": "unsupported",
-      "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."
     },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
