@@ -196,7 +196,7 @@ case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 54 / 80 |
-| adversarial | 218 / 308 |
+| adversarial | 233 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -214,15 +214,19 @@ with its reason.
 
 The refused set is exact-one cardinality beyond an element field compared with a scalar constant (over a relation it is a `$size` of a `$filter`; over a literal list of up to 32 elements, and not under a negation, it expands to "this one and no other"), aggregation expressions or outer-document references
 inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), CEL's `int()`/`double()`
-(`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division by
-anything but a non-zero constant (`$divide` by zero aborts the query), `%` over anything but an
+(`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division
+over `size()` (CEL's int division truncates), `%` over anything but an
 integer `size()` (CEL's `%` has no double overload), `string()` over an untyped integral constant
 of 1e6 or more, `+` between two fields (nothing tells `$add` from `$concat`), negations over
 collection macros or over a nullable field CEL may not evaluate (a filter has no UNKNOWN), macros
 and `in` over a to-one relation (CEL iterates a map's keys), an empty hierarchy separator, regular
 expressions outside the common subset, and a comparison with a map constant or with a list holding
 a list, a map or NaN (MongoDB compares embedded documents in stored field order and NaN equal to
-NaN). A list constant is compared whole inside `$expr` with a field, a to-many relation's
+NaN). Arithmetic is CEL's double
+arithmetic: each operand is converted with `$toDouble`, a division by zero gives IEEE 754's NaN or
+signed infinity where `$divide` would abort the query, and every comparison inside `$expr` answers
+NaN as CEL does (false, but true for `!=`) where MongoDB orders NaN below every number and equal to
+itself. A list constant is compared whole inside `$expr` with a field, a to-many relation's
 projection or a `map()` over one, element by element and in order, as CEL does.
 
 It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/), and its ledger is the

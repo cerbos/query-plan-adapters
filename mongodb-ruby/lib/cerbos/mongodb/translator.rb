@@ -314,7 +314,7 @@ module Cerbos
             raise UnsupportedError, "#{operator} aggregation expressions inside collection predicates are unsupported"
           end
 
-          expr = {Aggregation::COMPARISONS.fetch(operator) => [Aggregation.build(left, mapper), Aggregation.build(right, mapper)]}
+          expr = Aggregation.compare(operator, Aggregation.build(left, mapper), Aggregation.build(right, mapper))
           return Guards.with_evaluation({"$expr" => expr}, both, mapper)
         end
 

@@ -9,18 +9,6 @@
       "status": "unsupported",
       "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation"
     },
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through arithmetic composed on the division."
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "Same zero-denominator abort as `arithmetic/add/self-division-plus-constant-greater-than`, reached through an inequality."
-    },
-    "arithmetic/divide/field-by-field": {
-      "status": "unsupported",
-      "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator."
-    },
     "arithmetic/divide/int-truncates": {
       "status": "unsupported",
       "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int the division would divide is never lowered"
@@ -33,26 +21,6 @@
       "status": "unsupported",
       "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, under negation"
     },
-    "arithmetic/divide/negated-self-division-equals": {
-      "status": "unsupported",
-      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through a negated equality."
-    },
-    "arithmetic/divide/negative-zero-divisor": {
-      "status": "unsupported",
-      "reason": "$divide aborts the whole query on a zero denominator instead of producing CEL's signed infinity for that document, so the adapter requires a non-zero constant denominator and rejects a literal zero."
-    },
-    "arithmetic/divide/nested-division-divisor": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: div operator requires a non-zero constant denominator."
-    },
-    "arithmetic/divide/self-division-greater-than": {
-      "status": "unsupported",
-      "reason": "a row-dependent zero denominator aborts a Mongo query instead of denying that row."
-    },
-    "arithmetic/divide/self-division-not-equals": {
-      "status": "unsupported",
-      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through an inequality."
-    },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
       "reason": "int() over a numeric column has no faithful $convert lowering (it rounds where CEL truncates toward zero), the same refusal as `arithmetic/modulo/negative-dividend`; the column divisor would also need its zero row (a1) to deny, where $mod by zero aborts the whole query"
@@ -64,10 +32,6 @@
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "int() over a numeric column, needed to give `%` an integer operand, has no faithful $convert lowering — the same limitation that makes `cast/int/negative-fraction` unsupported. The cast is refused before the modulo is reached."
-    },
-    "arithmetic/multiply/nan-times-zero-plus-column": {
-      "status": "unsupported",
-      "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`: the NaN comes from a row-dependent 0/0, and $divide aborts the query on a zero denominator instead of producing NaN for that document"
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -212,26 +176,6 @@
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
-    },
-    "comparison/greater-than/infinity-from-ternary": {
-      "status": "unsupported",
-      "reason": "$divide by a zero denominator fails when MongoDB optimizes the query ('can't $divide by zero'), aborting it before any document is read rather than yielding CEL's +Inf/-Inf; constant folding means even a $cond arm no document takes still aborts, so the adapter rejects the literal 1.0/0.0 and -1.0/0.0 branches."
-    },
-    "comparison/greater-than/nan-from-ternary": {
-      "status": "unsupported",
-      "reason": "MongoDB division by zero aborts rather than producing CEL non-finite values."
-    },
-    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
-      "status": "unsupported",
-      "reason": "Both sides are conditionals, which MongoDB compares correctly inside $expr, but the 0.0/0.0 branch is a $divide by zero, which fails at query-optimization time ('can't $divide by zero') and aborts the whole query even though no document takes that branch. The constant-denominator check refuses it at translation instead."
-    },
-    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
-      "status": "unsupported",
-      "reason": "Both sides are conditionals, which MongoDB compares correctly inside $expr, but the 0.0/0.0 branch is a $divide by zero, which fails at query-optimization time ('can't $divide by zero') and aborts the whole query even though no document takes that branch. The constant-denominator check refuses it at translation instead."
-    },
-    "comparison/less-than/nan-from-ternary-value-first": {
-      "status": "unsupported",
-      "reason": "same non-finite arithmetic limitation in value-first form."
     },
     "conditional/ternary/as-whole-exists-body": {
       "status": "unsupported",
@@ -432,10 +376,6 @@
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
       "reason": "hasIntersection against a map element: the relation's element field declares no scalar type, and a query $in with an embedded-document needle compares it field by field in stored order, and also matches an array-valued element field that merely contains it, where CEL's map equality ignores order and a list never equals a map."
-    },
-    "type-mismatch/less-than/negated-nan-against-string-field": {
-      "status": "unsupported",
-      "reason": "The numeric expression lowering refuses the zero denominator before it can compare the NaN arm; MongoDB arithmetic does not reproduce CEL floating-point division by zero."
     }
   }
 }

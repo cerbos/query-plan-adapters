@@ -23,12 +23,13 @@ module Cerbos
         "eq" => "$eq", "ne" => "$ne", "lt" => "$lt", "le" => "$lte", "gt" => "$gt", "ge" => "$gte"
       }.freeze
 
-      VARIADIC = COMPARISONS.merge(
-        "and" => "$and", "or" => "$or", "sub" => "$subtract", "mult" => "$multiply"
-      ).freeze
+      VARIADIC = {"and" => "$and", "or" => "$or"}.freeze
+
+      # CEL's double arithmetic, spelled as MongoDB's.
+      ARITHMETIC = {"add" => "$add", "sub" => "$subtract", "mult" => "$multiply", "div" => "$divide"}.freeze
 
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
-      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith].freeze
+      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div].freeze
 
       module_function
 
@@ -60,11 +61,12 @@ module Cerbos
         operator = expression.operator
         operands = expression.operands
         return {VARIADIC.fetch(operator) => operands.map { |op| build(op, mapper) }} if VARIADIC.key?(operator)
+        return compare(operator, *operands.map { |op| build(op, mapper) }) if COMPARISONS.key?(operator)
 
         case operator
         when "add" then build_add(operands, mapper)
+        when "sub", "mult", "div" then build_arithmetic(operator, operands, mapper)
         when "mod" then build_mod(operands, mapper)
-        when "div" then build_div(operands, mapper)
         when "not" then {"$not" => [build(operand_at(operands, 0, "not operator requires an operand"), mapper)]}
         when "string" then build_string(operands, mapper)
         when "double", "int" then refuse_numeric_conversion(operator)
@@ -137,8 +139,12 @@ module Cerbos
       # paths there is no constant and the plan carries no field types, so neither spelling can
       # be chosen and the shape is refused.
       def build_add(operands, mapper)
-        built = -> { operands.map { |op| build(op, mapper) } }
-        return {"$concat" => built.call} if operands.any? { |op| value?(op) && string?(op.value) }
+        if operands.any? { |op| value?(op) && string?(op.value) }
+          # $concat raises on anything but a string, where CEL has no overload: null instead.
+          return with_operands(operands, mapper) { |values|
+            {"$cond" => [{"$and" => values.map { |value| {"$eq" => [{"$type" => value}, "string"]} }}, {"$concat" => values}, nil]}
+          }
+        end
 
         if operands.all? { |op| variable?(op) }
           raise UnsupportedError,
@@ -146,7 +152,88 @@ module Cerbos
             "CEL overloads '+' on strings and the query plan carries no field types, so neither " \
             "$add nor $concat can be chosen"
         end
-        {"$add" => built.call}
+        build_arithmetic("add", operands, mapper)
+      end
+
+      # A CEL comparison inside $expr. MongoDB orders NaN below every number and equal to itself,
+      # where every CEL comparison with NaN is false but `!=`, which is true.
+      def compare(operator, left, right)
+        {"$let" => {
+          "vars" => {"left" => left, "right" => right},
+          "in" => {"$cond" => [
+            {"$or" => [{"$eq" => ["$$left", Float::NAN]}, {"$eq" => ["$$right", Float::NAN]}]},
+            operator == "ne",
+            {COMPARISONS.fetch(operator) => ["$$left", "$$right"]}
+          ]}
+        }}
+      end
+
+      # Binds each operand to a variable (+$$operand0+, ...) so an expression can read it more
+      # than once without building it twice.
+      def with_operands(operands, mapper)
+        names = operands.each_index.map { |index| "operand#{index}" }
+        {"$let" => {
+          "vars" => names.zip(operands.map { |op| build(op, mapper) }).to_h,
+          "in" => yield(names.map { |name| "$$#{name}" })
+        }}
+      end
+
+      # CEL arithmetic over doubles: every attribute number reaches CEL as a double, and a plan
+      # literal is read as the double it was spelled as (an int literal beside an attribute is a
+      # planner divergence the corpus declares). MongoDB keeps an int an int, so int 0 times -1 is
+      # 0 where CEL's double is -0.0, and 1 over that is +Infinity where CEL's is -Infinity; so
+      # every operand is converted with $toDouble first. A non-number operand is an error to CEL
+      # and null here (MongoDB would abort the query instead), which the expression's not-null
+      # guard keeps out.
+      #
+      # Division is IEEE 754's, which $divide is except by zero, where it aborts the query: x / 0
+      # is NaN when x is NaN or zero, and otherwise an infinity whose sign is x's, flipped by a
+      # negative zero divisor ($toString spells -0.0 "-0").
+      #
+      # size() is CEL's one int, and int division truncates, so a division over it is refused.
+      def build_arithmetic(operator, operands, mapper)
+        if operator == "div" && operands.any? { |op| integer_valued?(op) }
+          raise UnsupportedError, "Integer division truncates in CEL, and $divide does not: a division over size() is unsupported"
+        end
+
+        with_operands(operands, mapper) { |values|
+          doubles = values.map { |value| {"$toDouble" => value} }
+          result = if operator == "div"
+            numerator, denominator = doubles
+            divisor = operands[1]
+            if value?(divisor) && number?(divisor.value)
+              divisor.value.zero? ? divide_by_zero(numerator, denominator, divisor.value) : {"$divide" => doubles}
+            else
+              {"$cond" => [{"$eq" => [denominator, 0]}, divide_by_zero(numerator, denominator), {"$divide" => doubles}]}
+            end
+          else
+            {ARITHMETIC.fetch(operator) => doubles}
+          end
+          {"$cond" => [{"$and" => values.map { |value| {"$isNumber" => value} }}, result, nil]}
+        }
+      end
+
+      # A constant denominator's sign is settled here rather than read back from the server:
+      # Mongoid's leg does not keep the sign of a -0.0 literal.
+      def divide_by_zero(numerator, denominator, constant = nil)
+        negative_zero = if constant.nil?
+          {"$eq" => [{"$toString" => denominator}, "-0"]}
+        else
+          (1.0 / constant.to_f).negative?
+        end
+        {"$cond" => [
+          {"$or" => [{"$eq" => [numerator, Float::NAN]}, {"$eq" => [numerator, 0]}]},
+          Float::NAN,
+          {"$cond" => [{"$eq" => [{"$lt" => [numerator, 0]}, negative_zero]}, Float::INFINITY, -Float::INFINITY]}
+        ]}
+      end
+
+      # Whether +operand+ evaluates to a CEL int: size(), or arithmetic over one.
+      def integer_valued?(operand)
+        return false unless expression?(operand)
+        return true if %w[size mod].include?(operand.operator)
+
+        ARITHMETIC.key?(operand.operator) && operand.operands.any? { |child| integer_valued?(child) }
       end
 
       # CEL's `%` is integer-only: it has no double overload, and every number a resource
@@ -170,15 +257,6 @@ module Cerbos
         end
 
         {"$mod" => operands.map { |op| build(op, mapper) }}
-      end
-
-      def build_div(operands, mapper)
-        denominator = operands[1]
-        unless denominator && value?(denominator) && number?(denominator.value) && !denominator.value.zero?
-          raise UnsupportedError, "div operator requires a non-zero constant denominator"
-        end
-
-        {"$divide" => operands.map { |op| build(op, mapper) }}
       end
 
       def build_string(operands, mapper)
