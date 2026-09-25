@@ -244,13 +244,22 @@ module Cerbos
           }
         end
 
-        if operands.all? { |op| variable?(op) }
-          raise UnsupportedError,
-            "Cannot tell numeric addition from string concatenation in '+' between two fields: " \
-            "CEL overloads '+' on strings and the query plan carries no field types, so neither " \
-            "$add nor $concat can be chosen"
-        end
-        build_arithmetic("add", operands, mapper)
+        return build_arithmetic("add", operands, mapper) if operands.any? { |op| int_typed?(op) || value?(op) }
+
+        # No constant settles the overload, so the operands' runtime types do, as they do in
+        # CEL: two strings concatenate, two numbers add as doubles, two lists concatenate, and
+        # anything else has no overload (null).
+        with_operands(operands, mapper) { |values|
+          all = ->(check) { {"$and" => values.map { |value| check.call(value) }} }
+          {"$switch" => {
+            "branches" => [
+              {"case" => all.call(->(value) { {"$eq" => [{"$type" => value}, "string"]} }), "then" => {"$concat" => values}},
+              {"case" => all.call(->(value) { {"$isNumber" => value} }), "then" => {"$add" => values.map { |value| {"$toDouble" => value} }}},
+              {"case" => all.call(->(value) { {"$isArray" => value} }), "then" => {"$concatArrays" => values}}
+            ],
+            "default" => nil
+          }}
+        }
       end
 
       # `needle in list` inside $expr: null (a CEL error) where the list is not an array. $in

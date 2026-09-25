@@ -29,14 +29,6 @@
       "status": "unsupported",
       "reason": "map() over a literal list whose projection reads a resource attribute: the plan's list is built per document, and the adapter has no aggregation form for map(), which a lambda over a constant list would need; membership in it is refused."
     },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "a CONSTANT is what tells CEL's two `+` overloads apart, and between two field paths there is none. MongoDB spells the two differently — $add accepts numeric and date types only, $concat strings — and the mapper carries no field types, so neither can be chosen. Sending $add anyway is what the server aborts the whole query on, so the shape is refused at translation instead."
-    },
-    "string/concatenate/ordering": {
-      "status": "unsupported",
-      "reason": "Same refusal as `string/concatenate/field-to-field`: `+` between two field paths has no constant to tell CEL's string and numeric overloads apart, and the plan carries no field types, so neither $concat nor $add can be chosen"
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."

@@ -196,7 +196,7 @@ case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 75 / 80 |
-| adversarial | 295 / 308 |
+| adversarial | 297 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -214,7 +214,7 @@ with its reason.
 
 The refused set is `map()` anywhere but as a `hasIntersection` or whole-list operand, macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
-carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of a
+carry, a bare comparison of a
 date field with anything but null (a stored date has lost the string CEL compares), a regular expression using a case-insensitive non-ASCII character, a
 group flag or named group, `\p`/`\Q` and other escapes RE2 has and PCRE2 reads otherwise, or a counted
 repetition nested in another, and a comparison with
@@ -232,8 +232,9 @@ zero inside (-2^63, 2^63) and reads a string only as a whole signed base-10 int6
 a number, or a string that is a decimal floating-point literal (Go also reads `Inf`, `NaN` and
 hexadecimal forms, which are denied here rather than guessed at). Arithmetic over a CEL int
 (`int()`, `size()`, `%`) is int64 arithmetic: overflow, division and `%` by zero are errors, and
-division truncates toward zero; an attribute beside an int has no overload and is denied. Other
-arithmetic is CEL's double arithmetic: each operand is converted with `$toDouble`, a division by
+division truncates toward zero; an attribute beside an int has no overload and is denied. `+` with no constant
+to settle its overload follows the operands' runtime types, as CEL does: two strings concatenate,
+two numbers add, two lists concatenate. Other arithmetic is CEL's double arithmetic: each operand is converted with `$toDouble`, a division by
 zero gives IEEE 754's NaN or signed infinity where `$divide` would abort the query, and every
 comparison inside `$expr` answers NaN as CEL does (false, but true for `!=`) where MongoDB orders
 NaN below every number and equal to itself; an ordering between two types CEL cannot order is an
