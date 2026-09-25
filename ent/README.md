@@ -126,8 +126,9 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
 - `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
-  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`)
-  and a boolean-valued expression (`string(R.attr.n > 3)`). An undeclared column, through a hop or
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`),
+  a boolean-valued expression (`string(R.attr.n > 3)`) and a ternary whose arms are all boolean
+  (`string(R.attr.n > 3 ? R.attr.flag : false)`). An undeclared column, through a hop or
   not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
   tells the adapter the column holds a boolean. Declare every boolean column you pass to `string()`,
   since SQLite and MySQL render a stored boolean as `"1"`/`"0"` under a `CAST`.
@@ -258,7 +259,7 @@ adversarial cases.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 224 / 288 |
+| adversarial | 225 / 289 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
@@ -360,6 +361,11 @@ tags := &cerbosent.Relation{
   plain `CAST`. On SQLite and MySQL that `CAST` said `"1"`/`"0"`, so `!(string(x) == "true")`
   returned rows whose `x` is true (`cast/string/negated-from-boolean-expression`,
   `cast/string/negated-from-boolean-through-relation`).
+- [#538](https://github.com/cerbos/query-plan-adapters/issues/538): `string()` over a ternary whose
+  arms are all boolean (`string(R.attr.n > 3 ? R.attr.flag : false)`) is spelled through the same
+  `CASE`. It used to get a plain `CAST` of the ternary's `CASE`, which SQLite and MySQL render as
+  `"1"`/`"0"`, so `!(string(...) == "true")` returned rows the PDP denies
+  (`cast/string/negated-from-boolean-ternary`).
 - **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
   disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
   attribute number is a double — so the PDP denies every row

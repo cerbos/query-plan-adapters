@@ -23,6 +23,9 @@
   `ValueBool` and read through a to-one `ScalarRelation`, is spelled through the same `CASE` as a
   plain `ValueBool` column. It used to emit a plain `CAST`, which SQLite and MySQL render as
   `"1"`/`"0"`, so a negated comparison with `"true"` returned rows the PDP denies (#470).
+- `string()` over a ternary whose arms are all boolean (`string(R.attr.n > 3 ? R.attr.flag : false)`)
+  is spelled through the same `CASE`, instead of a plain `CAST` of the ternary that SQLite and MySQL
+  render as `"1"`/`"0"` (#538).
 - **Breaking:** `Translate` rejects unknown `WithDialect` values with a configuration error.
   Use `dialect.SQLite` (the default), `dialect.Postgres` or `dialect.MySQL`; aliases and empty
   strings are no longer accepted.

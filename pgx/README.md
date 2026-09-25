@@ -172,8 +172,9 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
 - `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
-  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`)
-  and a boolean-valued expression (`string(R.attr.n > 3)`). An undeclared column, through a hop or
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`),
+  a boolean-valued expression (`string(R.attr.n > 3)`) and a ternary whose arms are all boolean
+  (`string(R.attr.n > 3 ? R.attr.flag : false)`). An undeclared column, through a hop or
   not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
   tells the adapter the column holds a boolean. PostgreSQL's own `CAST` of a `boolean` column already
   says `"true"`/`"false"`, so an undeclared boolean column is right here too.
@@ -265,7 +266,7 @@ PDP's goldens (0.54.0) are replayed too.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 224 / 288 |
+| adversarial | 225 / 289 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -366,6 +367,10 @@ tags := &cerbospgx.Relation{
   `ScalarRelation`, is spelled through the same `CASE` as a plain `ValueBool` column, instead of a
   plain `CAST`. PostgreSQL's `CAST` already said `"true"`/`"false"`, so results do not change;
   the vendored translator is shared with the ent module, where SQLite and MySQL said `"1"`/`"0"`.
+- [#538](https://github.com/cerbos/query-plan-adapters/issues/538): `string()` over a ternary whose
+  arms are all boolean (`string(R.attr.n > 3 ? R.attr.flag : false)`) is spelled through the same
+  `CASE`. PostgreSQL's `CAST` was already right, so results do not change
+  (`cast/string/negated-from-boolean-ternary`).
 - **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
   disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
   attribute number is a double — so the PDP denies every row

@@ -1,0 +1,98 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b2",
+    "b3",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "cast/string/negated-from-boolean-ternary",
+  "intent": "!(string(aNumber > 3 ? aBool : false) == \"true\"): string() over a ternary whose arms are both boolean, under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aNumber"
+                                  },
+                                  {
+                                    "value": 3
+                                  }
+                                ],
+                                "operator": "gt"
+                              }
+                            },
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "value": false
+                            }
+                          ],
+                          "operator": "if"
+                        }
+                      }
+                    ],
+                    "operator": "string"
+                  }
+                },
+                {
+                  "value": "true"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/string/negated-from-boolean-ternary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(string(R.attr.aNumber > 3 ? R.attr.aBool : false) == \"true\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ternary is boolean-valued, so CEL renders \"true\"/\"false\"; a plain CAST of a SQL CASE yields \"1\"/\"0\" on SQLite and MySQL, which never equals \"true\" and over-grants every row with aNumber > 3 and aBool true. A missing aNumber (j2), or a missing aBool on the taken arm, must still deny."
+}

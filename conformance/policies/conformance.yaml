@@ -342,6 +342,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(string(R.attr.parent.aBool) == "true")'
+    # cast/string/negated-from-boolean-ternary
+    - actions:
+        - cast/string/negated-from-boolean-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aNumber > 3 ? R.attr.aBool : false) == "true")'
     # cast/string/from-double
     - actions:
         - cast/string/from-double
