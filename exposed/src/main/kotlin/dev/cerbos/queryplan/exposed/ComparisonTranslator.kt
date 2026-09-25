@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.NullLiteral
@@ -9,6 +10,7 @@ import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import dev.cerbos.queryplan.exposed.sql.TextCastExpression
 import dev.cerbos.queryplan.exposed.sql.TimestampBinder
+import org.jetbrains.exposed.v1.core.Alias
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.GreaterEqOp
@@ -19,6 +21,7 @@ import org.jetbrains.exposed.v1.core.LessOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.booleanParam
 import org.jetbrains.exposed.v1.core.stringParam
 import java.time.Instant
@@ -111,6 +114,12 @@ internal class ComparisonTranslator(private val translation: Translation) {
         /** `string(variable)` — CEL's text conversion over a mapped column. */
         class TextCast(val variable: String) : Resolved
 
+        /**
+         * `index(collection, position)`, or `get-field(index(collection, position), member)`: a
+         * positional read of a relation's element, or of one member of it.
+         */
+        class Positional(val variable: String, val position: Operand, val member: String?) : Resolved
+
         /** A `list(...)` or `struct(...)` the planner built from constants alone. */
         class BuiltConstant(val value: Any) : Resolved
 
@@ -140,6 +149,14 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 inner == "string" && expression.operandsCount == 1 &&
                     expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
                     Resolved.TextCast(expression.getOperands(0).variable)
+                inner == "index" && positionalOf(expression) != null -> positionalOf(expression)!!
+                inner == "get-field" && expression.operandsCount == 2 &&
+                    expression.getOperands(0).nodeCase == Operand.NodeCase.EXPRESSION &&
+                    expression.getOperands(1).nodeCase == Operand.NodeCase.VARIABLE &&
+                    positionalOf(expression.getOperands(0).expression) != null ->
+                    positionalOf(expression.getOperands(0).expression)!!.let {
+                        Resolved.Positional(it.variable, it.position, expression.getOperands(1).variable)
+                    }
                 (inner == "list" || inner == "struct") &&
                     PlanValues.builtConstant(operand).let { it !== PlanValues.NotConstant && it != null } ->
                     Resolved.BuiltConstant(PlanValues.builtConstant(operand)!!)
@@ -163,6 +180,16 @@ internal class ComparisonTranslator(private val translation: Translation) {
         }
         else -> Resolved.Opaque
     }
+
+    private fun positionalOf(expression: PlanResourcesFilter.Expression): Resolved.Positional? =
+        if (expression.operator == "index" && expression.operandsCount == 2 &&
+            expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE &&
+            expression.getOperands(1).nodeCase == Operand.NodeCase.VALUE
+        ) {
+            Resolved.Positional(expression.getOperands(0).variable, expression.getOperands(1), null)
+        } else {
+            null
+        }
 
     private fun isAddRooted(resolved: Resolved): Boolean =
         resolved is Resolved.ConstantAdd ||
@@ -295,12 +322,81 @@ internal class ComparisonTranslator(private val translation: Translation) {
         if (field != null && constant != null) {
             return leafFieldValue(operator, field, constant.value(), scope)
         }
+        if (operator in COMPARISON_OPERATORS) {
+            if (left is Resolved.Positional && right is Resolved.Constant) {
+                return positionalComparison(operator, left, right.value(), scope)
+            }
+            if (left is Resolved.Constant && right is Resolved.Positional) {
+                return positionalComparison(NormalizedBinary.mirror(operator), right, left.value(), scope)
+            }
+        }
         val built = (left as? Resolved.BuiltConstant) ?: (right as? Resolved.BuiltConstant)
         if (field != null && built != null) {
             return leafFieldValue(operator, field, built.value, scope)
         }
 
         throw leafOperandError(operator, operands)
+    }
+
+    /**
+     * `list[k] op constant`, or `list[k].member op constant`, over a relation that declares its
+     * [AttributeMapping.Relation.position] column.
+     *
+     * CEL reads the element at position `k` and raises when there is none (`k` past the end), when
+     * `k` is negative, or when it is not a whole number; each is UNKNOWN here. The element itself
+     * is compared by [LeafTranslator.applyLeaf], against the one row at that position: a scalar
+     * element as a VALUE (a NULL element is CEL's null element, so the explicit-null convention),
+     * a member under its own declared convention. `EXISTS` is two-valued, so the three answers are
+     * read as two existence tests, `t` (the row at `k` compares TRUE) and `f` (it compares FALSE):
+     * `t OR (NOT f AND UNKNOWN)` is TRUE, FALSE, or UNKNOWN when neither holds — no row at `k`, or
+     * a comparison CEL raises on. Both tests go through [Subqueries.chainContains], so an absent
+     * to-one hop stays UNKNOWN. A position read through a to-MANY leading hop has no single list to
+     * index and is refused.
+     */
+    private fun positionalComparison(
+        operator: String,
+        positional: Resolved.Positional,
+        value: Any?,
+        scope: Scope,
+    ): Op<Boolean> {
+        val collection = scope.resolve(positional.variable) as? Resolution.Collection
+            ?: throw RelationRefusals.positionalRead(positional.variable, "it is not mapped as a relation")
+        if (collection.leadingHops.any { it.cardinality != AttributeMapping.Relation.Cardinality.ONE }) {
+            throw RelationRefusals.positionalRead(
+                positional.variable,
+                "it flattens a to-many relation, so there is no single list to index",
+            )
+        }
+        val index = PlanValues.toKotlin(positional.position.value)
+        if (index !is Long || index < 0) return TriLogic.unknown()
+        val tail = collection.tail
+        val position = tail.position ?: throw RelationRefusals.positionalRead(
+            positional.variable,
+            "the relation declares no position column; declare one with position(column)",
+        )
+        val field = if (positional.member == null) {
+            val element = tail.element ?: throw RelationRefusals.noElementColumn(collection.variable, tail)
+            AttributeMapping.field(element.column, NullAttributeRepresentation.EXPLICIT)
+        } else {
+            tail.fields[positional.member] as? AttributeMapping.Field ?: throw RelationRefusals.positionalRead(
+                positional.variable,
+                "its element declares no field '${positional.member}'",
+            )
+        }
+        fun atPosition(alias: Alias<Table>, holds: Boolean): Op<Boolean> {
+            val leaf = translation.leaf.applyLeaf(
+                operator,
+                Resolution.Scalar(positional.variable, alias[field.column], field.column, field),
+                value,
+            )
+            return TriLogic.and(
+                EqOp(alias[position], Params.of(index)),
+                if (holds) leaf else TriLogic.not(leaf),
+            )
+        }
+        val isTrue = translation.subqueries.chainContains(collection) { atPosition(it, holds = true) }
+        val isFalse = translation.subqueries.chainContains(collection) { atPosition(it, holds = false) }
+        return TriLogic.or(isTrue, TriLogic.and(TriLogic.not(isFalse), TriLogic.unknown()))
     }
 
     /** `field op value`, or value-first for the operators normalisation leaves alone. */

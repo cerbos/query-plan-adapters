@@ -79,6 +79,9 @@ internal object Tags : Table("adversarial_tags") {
     val tagId = varchar("tag_id", 64)
     val name = varchar("name", 255).nullable()
     val resourceId = varchar("resource_id", 64)
+
+    /** The tag's index in the seed's `tags` list, for positional reads (`tags[0]`). */
+    val position = integer("position")
     override val primaryKey = PrimaryKey(tagId)
 }
 
@@ -112,6 +115,7 @@ internal object NumberListElements : Table("adversarial_number_list") {
     val id = varchar("id", 64)
     val element = double("element").nullable()
     val resourceId = varchar("resource_id", 64)
+    val position = integer("position")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -120,6 +124,7 @@ internal object BoolListElements : Table("adversarial_bool_list") {
     val id = varchar("id", 64)
     val element = bool("element").nullable()
     val resourceId = varchar("resource_id", 64)
+    val position = integer("position")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -185,18 +190,26 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
         }
     }
     // Scalar lists, one related row per element; a NULL element column is a null element.
+    // Each carries its seed-list index as a position column, for positional reads (`list[0]`).
     "request.resource.attr.aNumberList" to
-        many(NumberListElements, from = Resources.id, to = NumberListElements.resourceId, element = NumberListElements.element)
+        many(NumberListElements, from = Resources.id, to = NumberListElements.resourceId, element = NumberListElements.element) {
+            position(NumberListElements.position)
+        }
     "request.resource.attr.aBoolList" to
-        many(BoolListElements, from = Resources.id, to = BoolListElements.resourceId, element = BoolListElements.element)
+        many(BoolListElements, from = Resources.id, to = BoolListElements.resourceId, element = BoolListElements.element) {
+            position(BoolListElements.position)
+        }
     "request.resource.attr.tags" to many(Tags, from = Resources.id, to = Tags.resourceId) {
         "id" to Tags.tagId
         "name" to Tags.name
+        position(Tags.position)
     }
     // The scalar projection of the same relation, for `null in R.attr.tagNames`: each element IS a
     // value, and a NULL name column is an explicit null list element on the check side.
     "request.resource.attr.tagNames" to
-        many(Tags, from = Resources.id, to = Tags.resourceId, element = Tags.name)
+        many(Tags, from = Resources.id, to = Tags.resourceId, element = Tags.name) {
+            position(Tags.position)
+        }
     "request.resource.attr.categories" to
         many(Categories, from = Resources.id, to = Categories.resourceId) {
             "name" to Categories.name

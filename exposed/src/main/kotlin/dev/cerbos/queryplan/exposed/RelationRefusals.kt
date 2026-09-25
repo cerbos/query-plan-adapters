@@ -22,6 +22,12 @@ internal object RelationRefusals {
             "correlated subquery to range over; only a mapped relation or a literal list can be ranged over",
     )
 
+    /** A positional read (`list[k]`) the mapping cannot answer, and why. */
+    fun positionalRead(variable: String, why: String): UnsupportedPlanShapeException = Refusals.unsupported(
+        "Cannot translate a positional read of $variable: $why. A list element is addressed by " +
+            "its position, which only a declared position column records.",
+    )
+
     /** A macro the fold cannot express over a literal list, because SQL has no per-element UNKNOWN. */
     fun unfoldableValueCollection(operator: String): UnsupportedPlanShapeException = Refusals.unsupported(
         "$operator over a literal collection value is not supported; only exists(), all() and exists_one() fold " +

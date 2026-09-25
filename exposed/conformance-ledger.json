@@ -145,50 +145,6 @@
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
     },
-    "collection/index/first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "Cannot translate get-field(): it projects a member out of a single element, and a relation subquery has no single element to project from."
-    },
-    "collection/index/first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a scalar list. tagNames is a related table read through a correlated subquery, and the rows a SQL relation returns carry no order for a position to index into, so there is no first element to read. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/first-element-of-string-list-equals-null": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/negated-first-element-of-boolean-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/negated-first-element-of-number-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/negated-first-element-of-string-list": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/negated-out-of-bounds": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() returns a list, not a boolean, so it cannot be a condition on its own; only hasIntersection(map(...), [...]) gives the list a scalar meaning"
@@ -332,14 +288,6 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
-    },
-    "type-mismatch/equals/boolean-list-element-against-number-literal": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
-    },
-    "type-mismatch/equals/number-list-element-against-boolean-literal": {
-      "status": "unsupported",
-      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",

@@ -27,10 +27,13 @@ import org.junit.jupiter.api.assertThrows
 class ComparisonSqlShapeTest {
 
     @Test
-    fun `IS NOT NULL has exactly two sources, and no corpus action reaches a third`() {
+    fun `IS NOT NULL has exactly three sources, and no corpus action reaches a fourth`() {
         // A presence test is the over-grant direction: emitted where the plan did not ask for one,
-        // it readmits exactly the rows an omitted-convention comparison has to drop. It has two
-        // legitimate origins and no third —
+        // it readmits exactly the rows an omitted-convention comparison has to drop. It has three
+        // legitimate origins and no fourth —
+        //
+        //  - a positional read of a scalar list element (`tagNames[0] != "x"`): an element is a
+        //    null VALUE, never a missing attribute, so it earns the explicit-null expansion;
         //
         //  - the asymmetric expansion an attribute DECLARED explicit-null earns, which is what
         //    makes its equality definite (`null-ne`, `vf-null-ne`, `null-value-*`);
@@ -41,8 +44,10 @@ class ComparisonSqlShapeTest {
         // cannot fall out of a property quantified over the corpus.
         val reached = sweepFor("IS NOT NULL") { action, plan ->
             assertTrue(
-                declaresExplicitNull(plan) || carriesBareNullOperand(plan.condition),
-                "$action emits IS NOT NULL with neither a declared explicit-null attribute nor a null literal",
+                declaresExplicitNull(plan) || carriesBareNullOperand(plan.condition) ||
+                    "index" in operatorsOf(plan.condition),
+                "$action emits IS NOT NULL with neither a declared explicit-null attribute, a null " +
+                    "literal nor a positional read of a list element",
             )
         }
         assertAntiVacuous("IS NOT NULL", reached, PRESENCE_TEST_FLOOR)
@@ -345,12 +350,7 @@ class ComparisonSqlShapeTest {
     }
 
     @Test
-    fun `an index or projection in a leaf operand names what has no column shape`() {
-        listOf("collection/index/first-element-of-string-list" to "Cannot translate index()", "collection/index/first-element-of-object-list" to "Cannot translate get-field()")
-            .forEach { (action, lead) ->
-                val error = assertThrows<UnsupportedPlanShapeException>(action) { Scalars.op(action) }
-                assertTrue(error.message!!.startsWith(lead), "$action: ${error.message}")
-            }
+    fun `a map() projection in a leaf operand names what has no column shape`() {
         val mapComparison = assertThrows<UnsupportedPlanShapeException> { Scalars.op("collection/map/equals-list-literal") }
         assertTrue(
             mapComparison.message!!.startsWith("Direct comparison of map(...) to a value is not supported"),
