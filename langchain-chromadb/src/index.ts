@@ -15,6 +15,8 @@ export interface FieldNameMapperConfig {
   field: string;
   required?: boolean;
   numericType?: "integer" | "float";
+  /** Every value stored under the key is a boolean. Mutually exclusive with `numericType`. */
+  valueType?: "boolean";
 }
 
 type FieldNameMapperValue = string | FieldNameMapperConfig;
@@ -242,6 +244,7 @@ function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
 type ResolvedField = {
   name: string;
   numericType?: "integer" | "float";
+  valueType?: "boolean";
   required: boolean;
 };
 
@@ -250,7 +253,8 @@ type FieldResolver = (key: string) => ResolvedField;
 // Fields default to optional: Chroma's $ne/$nin match records where the metadata key is absent,
 // while Cerbos denies on a missing attribute. Without an explicit `required: true` assertion from
 // the integrator the adapter cannot know the key is always present, so those operators are
-// rejected rather than allowed to over-grant.
+// rejected rather than allowed to over-grant — unless the key's declared type gives the inequality
+// a spelling that needs no `$ne` (`inequalityWithoutNe`).
 function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
   return (key) => {
     const mapped =
@@ -264,14 +268,61 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
           ? {
               name: mapped.field,
               numericType: mapped.numericType,
+              valueType: mapped.valueType,
               required: mapped.required ?? false,
             }
           : { name: key, required: false };
     if (!field.name) {
       throw Error("Field name is required");
     }
+    if (field.valueType !== undefined && field.valueType !== "boolean") {
+      throw Error(
+        `Unknown valueType ${JSON.stringify(field.valueType)} for field ${field.name}`,
+      );
+    }
+    if (field.valueType !== undefined && field.numericType !== undefined) {
+      throw Error(
+        `Field ${field.name} cannot declare both valueType and numericType`,
+      );
+    }
     return field;
   };
+}
+
+/**
+ * `key != literal` spelled without `$ne`, over a key whose declared type allows it; `undefined` when
+ * it does not. Chroma's `$ne` matches a record missing the key, where CEL raises a missing-attribute
+ * error and the PDP denies. `$eq`, `$lt`, `$gt` and `$gte` match only a record that carries the key,
+ * so these spellings are sound whether or not the key is `required`. Each relies on the declaration
+ * holding for every stored value: a string stored under a key declared boolean would be missed.
+ */
+function inequalityWithoutNe(
+  field: ResolvedField,
+  value: ChromaLiteral,
+): Where | undefined {
+  const key = field.name;
+  if (field.valueType === "boolean" && typeof value === "boolean") {
+    // A stored boolean that differs from one boolean is the other one.
+    return { [key]: { $eq: !value } } as Where;
+  }
+  if (field.numericType === "integer") {
+    if (typeof value === "number" && Number.isInteger(value)) {
+      return {
+        $or: [{ [key]: { $lt: value } }, { [key]: { $gt: value } }],
+      } as Where;
+    }
+    if (typeof value !== "number") {
+      // CEL equality across types is false, so every present integer differs from a string or
+      // boolean literal. Chroma has no existence test, so presence is spelled as the whole integer
+      // line, split at zero. A fractional literal is not lowered: the pinned server compares a
+      // fractional threshold with integer metadata inexactly (`$lt: 0.5` misses a stored 0), so it
+      // keeps the `$ne` path and its `required` gate.
+      return {
+        $or: [{ [key]: { $lt: 0 } }, { [key]: { $gte: 0 } }],
+      } as Where;
+    }
+  }
+  return undefined;
 }
 
 function requirePresenceFor(field: ResolvedField, operator: string): void {
@@ -342,10 +393,7 @@ function mapBooleanVariable(
   resolveField: FieldResolver,
   negate: boolean,
 ): Where {
-  const field = resolveField(variable.name);
-  const operator = negate ? "ne" : "eq";
-  requirePresenceFor(field, operator);
-  return emit(field.name, operator, true);
+  return compare(resolveField(variable.name), negate ? "ne" : "eq", true);
 }
 
 function mapComparison(
@@ -366,10 +414,19 @@ function mapComparison(
   const oriented = literalFirst ? mirrorOf(planOperator) : planOperator;
   const operator = negate ? negationOf(oriented) : oriented;
 
-  const field = resolveField(variable.name);
+  return compare(resolveField(variable.name), operator, value);
+}
+
+/** `key <operator> literal`, with the operator already mirrored and negated into key-first form. */
+function compare(field: ResolvedField, operator: string, value: unknown): Where {
   const comparison = COMPARISONS.get(operator);
   if (!comparison) {
     throw unsupported(operator);
+  }
+  // A literal Chroma cannot hold (a null, a list) is left to the `$ne` path, which refuses it.
+  if (operator === "ne" && isChromaLiteral(value)) {
+    const lowered = inequalityWithoutNe(field, value);
+    if (lowered !== undefined) return lowered;
   }
   requirePresenceFor(field, operator);
   if (

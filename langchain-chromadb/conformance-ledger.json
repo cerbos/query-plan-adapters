@@ -373,18 +373,6 @@
       "status": "unsupported",
       "reason": "ne is unsafe for optional Chroma metadata because missing fields match the filter."
     },
-    "composition/allow-and-deny/two-deny-rules": {
-      "status": "unsupported",
-      "reason": "The negated deny condition lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
-    },
-    "composition/derived-role/unconditional-deny-for-derived-role": {
-      "status": "unsupported",
-      "reason": "The negated deny condition lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
-    },
-    "composition/multiple-allow/none-of-condition": {
-      "status": "unsupported",
-      "reason": "The `none` rule's negated `aBool == true` lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
-    },
     "conditional/ternary/as-whole-exists-body": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
@@ -521,21 +509,9 @@
       "status": "unsupported",
       "reason": "The `aString != \"one\"` conjunct lowers to $ne over `aString`, and a Chroma $ne matches a record whose metadata key is absent. `aString` is missing on j1 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
     },
-    "logic/not/bare-boolean-attribute": {
-      "status": "unsupported",
-      "reason": "`!aBool` lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
-    },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
-    },
-    "logic/not/over-and": {
-      "status": "unsupported",
-      "reason": "The negation, pushed down to the leaves, lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
-    },
-    "logic/not/triple-negation": {
-      "status": "unsupported",
-      "reason": "The odd negation lowers to $ne over `aBool`, and a Chroma $ne matches a record whose metadata key is absent. `aBool` is missing on j3 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
     },
     "logic/or/comparison-or-exists": {
       "status": "unsupported",
@@ -833,10 +809,6 @@
       "status": "unsupported",
       "reason": "The conjunction itself is expressible, but its second conjunct is a contains against the chain key, which Chroma has no substring operator for — the walk reaches that limitation before the conjunction is assembled"
     },
-    "relation/bare-attribute/negated-one-hop-boolean": {
-      "status": "unsupported",
-      "reason": "Chroma lowers a negated boolean to $ne, and a document whose to-one parent is absent carries no parent.aBool key at all — a missing metadata key MATCHES $ne, which is exactly the parentless rows the PDP denies. The mapping therefore leaves every chain key optional and the adapter refuses $ne over an optional field rather than emitting the over-grant"
-    },
     "relation/contains/negated-one-hop": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no string-contains predicate or its negation; the raw contains operator is rejected before field resolution."
@@ -875,7 +847,7 @@
     },
     "relation/not-equals/one-hop-null-literal": {
       "status": "unsupported",
-      "reason": "Same optional-metadata $ne limitation as `relation/bare-attribute/negated-one-hop-boolean`, reached through the null comparison: `!= null` over a chain key lowers to $ne, which a document missing that key satisfies. Both flavours of absence — no parent at all, and a parent whose optional column is NULL — are stored as a missing key, so there is nothing for Chroma to distinguish them with"
+      "reason": "`!= null` over the chain key parent.aOptionalString lowers to $ne, and a Chroma $ne matches a document missing that key, where CEL denies on the missing-attribute error; a null literal has no other Chroma spelling, since Chroma metadata has no null. Both flavours of absence — no parent at all, and a parent whose optional column is NULL — are stored as a missing key, so there is nothing for Chroma to distinguish them with"
     },
     "relation/or/two-hops-or-collection-exists": {
       "status": "unsupported",
@@ -1184,10 +1156,6 @@
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "Chroma metadata filters cannot evaluate the retained ternary and arithmetic operands of this comparison."
-    },
-    "type-mismatch/not-equals/number-field-against-string-literal": {
-      "status": "unsupported",
-      "reason": "The cross-type `aNumber != \"5\"` lowers to $ne over `aNumber`, and a Chroma $ne matches a record whose metadata key is absent. `aNumber` is missing on j2 (a NULL column writes no key), where Cerbos denies on the missing-attribute error, so the key is not declared required and the adapter refuses rather than return that record."
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
