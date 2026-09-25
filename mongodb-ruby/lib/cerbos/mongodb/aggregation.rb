@@ -57,6 +57,11 @@ module Cerbos
         when "if" then build_if(operands, mapper)
         when "index"
           collection, index = constant_index(operands)
+          # A negative or fractional position is an error on every document; its guard (below)
+          # keeps every document out, so the value the expression stands for is never read.
+          # $arrayElemAt would instead count a negative position from the end.
+          return nil if index.nil?
+
           # $arrayElemAt keeps each element's BSON type, so `true` is never `1` here and a null
           # element stays a null value, as it is to CEL.
           {"$arrayElemAt" => [build(collection, mapper), index]}
@@ -92,6 +97,9 @@ module Cerbos
         when "index"
           # An out-of-range index is an error to CEL, not a missing value.
           collection_operand, index = constant_index(operands)
+          # CEL raises for a negative or fractional list position whatever the document holds.
+          return {"$expr" => false} if index.nil?
+
           collection = build(collection_operand, mapper)
           {"$expr" => {"$cond" => {
             "if" => {"$isArray" => collection},
@@ -380,15 +388,22 @@ module Cerbos
         }}
       end
 
-      # @return [Array(Plan node, Integer)]
+      # The position of an index expression: a non-negative Integer, or nil for a numeric
+      # constant CEL can never index with (negative, or fractional: cel-go accepts a double
+      # position only when it is integral), which raises on every document.
+      #
+      # @return [Array(Plan node, Integer or nil)]
       def constant_index(operands)
         collection, index = operands
         raise InvalidPlanError, "index operator requires two operands" unless collection && index
-        unless value?(index) && integral?(index.value) && index.value >= 0
-          raise UnsupportedError, "index operator requires a non-negative integer constant"
+        unless value?(index) && number?(index.value)
+          raise UnsupportedError, "index operator requires a numeric constant position"
         end
 
-        [collection, index.value.to_i]
+        position = index.value
+        return [collection, nil] if !integral?(position) || position.negative?
+
+        [collection, position.to_i]
       end
     end
   end

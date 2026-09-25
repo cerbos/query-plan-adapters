@@ -117,8 +117,6 @@ RSpec.describe "adapter contract" do
       from_grpc = filter(expr("eq", expr("index", var("request.resource.attr.list"), val(1.0)), val("x")), mapper)
       expect(from_grpc).to eq(from_json)
       expect(JSON.generate(from_grpc)).to include('"$arrayElemAt":["$list",1]')
-      expect { filter(expr("eq", expr("index", var("request.resource.attr.list"), val(1.5)), val("x")), mapper) }
-        .to raise_error(Cerbos::MongoDB::UnsupportedError, /non-negative integer constant/)
     end
 
     # BSON has no integer wider than 64 bits, and the planner's number was a double all along.

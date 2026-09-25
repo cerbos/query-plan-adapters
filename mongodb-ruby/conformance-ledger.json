@@ -213,14 +213,6 @@
       "status": "unsupported",
       "reason": "filter() used as the whole condition returns a list, not a boolean; only size(filter(...)) has a boolean meaning, so there is no MongoDB filter to emit."
     },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."
-    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
