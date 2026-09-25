@@ -480,6 +480,14 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
             )
         return _apply_comparison(operator, left_value, right_value)
 
+    if operator not in ("eq", "ne"):
+        # CEL orders bools, false before true, and so does SQL's boolean (SQLite and
+        # MySQL store 0/1). SQLAlchemy refuses to order against a bare Python bool, so
+        # bind it as a typed parameter instead.
+        if isinstance(left, bool):
+            left = literal(left, Boolean)
+        if isinstance(right, bool):
+            right = literal(right, Boolean)
     return _apply_comparison(operator, left, right)
 
 

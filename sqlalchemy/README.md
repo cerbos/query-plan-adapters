@@ -526,6 +526,10 @@ chain.
     with `CASE types text and boolean cannot be matched`.
   - **Widening:** `collection_columns` storage `"json"` renders on MySQL 8.0.17+, where it used to
     raise `CompileError`.
+- [#545](https://github.com/cerbos/query-plan-adapters/issues/545): an ordering between a boolean
+  column and a boolean literal (`R.attr.aBool < true`) now translates, binding the literal as a
+  typed parameter, where SQLAlchemy used to raise `ArgumentError` at translation. CEL orders bools
+  `false < true`, as SQL's boolean does. A widening.
 - **Breaking:** shapes that used to return a wrong filter now raise `UnsupportedPlanError`:
   - `string()` over a numeric column. CEL prints an attribute double in Go's shortest `%g` form
     (`1e+06`, `2`, `-0`), where `CAST` prints `1000000` or `2.0`, and SQL cannot keep the sign of a
