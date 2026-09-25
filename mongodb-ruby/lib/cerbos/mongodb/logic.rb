@@ -43,6 +43,9 @@ module Cerbos
         when "if" then ternary(node, mapper, bound)
         when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in"
           leaf(node, mapper, bound)
+        when "filter", "map", "except", "list", "struct"
+          # A list or map where CEL needs a boolean is a runtime type error.
+          nil
         else
           raise UnsupportedError, "#{node.operator} has no three-valued aggregation form"
         end
@@ -102,6 +105,7 @@ module Cerbos
             {"$cond" => [selected, evaluates(then_branch, mapper, bound), evaluates(else_branch, mapper, bound)]}
           ])
         end
+        return {"$ne" => [filter_value(node, mapper, bound), nil]} if node.operator == "filter"
         if Aggregation::LAMBDA_OPERATORS.include?(node.operator)
           raise UnsupportedError, "#{node.operator} inside a value has no three-valued form"
         end
@@ -197,6 +201,29 @@ module Cerbos
         guarded(list_ok, {"$let" => {"vars" => {"cerbos_values" => values}, "in" => folded}})
       end
 
+      # filter(): the elements whose condition is true, or null (a CEL error) where the list is
+      # not an array or any element's condition raises. A relation's projection yields the
+      # projected field of each kept element.
+      def filter_value(node, mapper, bound = mapper.bound)
+        collection, lambda = node.operands
+        unless collection && expression_with?(lambda, "lambda") && variable?(lambda.operands[1])
+          raise UnsupportedError, "filter requires a collection and a single-variable lambda"
+        end
+
+        variable = lambda.operands[1].name
+        binding = "#{BINDING_PREFIX}#{variable}"
+        input, list_ok, scoped = element_scope(collection, variable, mapper, bound)
+        condition = truth(lambda.operands[0], scoped, bound + [variable])
+        kept = {"$filter" => {"input" => input, "as" => binding, "cond" => {"$eq" => [condition, true]}}}
+        relation = variable?(collection) ? mapper.lookup(collection.name)&.relation : nil
+        if relation&.field
+          field = relation.fields[relation.field]&.field || relation.field
+          kept = {"$map" => {"input" => kept, "as" => binding, "in" => "$$#{binding}.#{field}"}}
+        end
+        values = {"$map" => {"input" => input, "as" => binding, "in" => condition}}
+        guarded(list_ok, {"$cond" => [{"$in" => [nil, values]}, nil, kept]})
+      end
+
       # The array a macro ranges over, what must hold for it to be one, and the mapper its body
       # reads the element with.
       def element_scope(collection, variable, mapper, bound)
@@ -242,7 +269,7 @@ module Cerbos
             "#{prefix}.#{config.relation.name}", config.relation.type, config.relation.field, config.relation.requires_parent, config.relation.fields
           )
           Mapper::Config.new(path, config&.nullable, config&.value_parser, config&.value_type, nested)
-        }, nullable_default: outer.nullable_default)
+        }, nullable_default: outer.nullable_default, bound: outer.bound + [variable])
       end
     end
   end

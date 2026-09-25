@@ -4,6 +4,7 @@ require_relative "errors"
 require_relative "operands"
 require_relative "regex"
 require_relative "timestamp"
+require_relative "logic"
 
 module Cerbos
   module MongoDB
@@ -117,6 +118,7 @@ module Cerbos
         when "string" then build_string(operands, mapper)
         when "int" then build_int(operands, mapper)
         when "in" then build_in(operands, mapper)
+        when "filter" then Logic.filter_value(expression, mapper)
         when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
         when "index"
@@ -146,6 +148,10 @@ module Cerbos
         return [] unless expression?(operand)
 
         guard = guard_for(operand, mapper)
+        # A lambda's body reads its own element, and its value (Logic) is already null where
+        # the body raises; the collection is guarded where the value is.
+        return guard ? [guard] : [] if LAMBDA_OPERATORS.include?(operand.operator)
+
         nested = if operand.operator == "if" && operand.operands.length == 3
           branch_guards(operand, mapper)
         else

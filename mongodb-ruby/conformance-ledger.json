@@ -9,10 +9,6 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator: except."
-    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
@@ -28,18 +24,6 @@
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
       "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation: neither the filter nor the three-valued evaluation has a form that iterates a subdocument's field names."
-    },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() as a conjunct returns a list, not a boolean; dropping the untranslatable half would over-grant, so the whole plan is refused."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() used as the whole condition returns a list, not a boolean; only size(filter(...)) has a boolean meaning, so there is no MongoDB filter to emit."
-    },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
     },
     "hierarchy/ancestor-of/empty-delimiter": {
       "status": "unsupported",
@@ -72,10 +56,6 @@
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: filter."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
@@ -140,10 +120,6 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset, and PCRE2's \\s also matches a vertical tab that RE2's does not."
-    },
-    "size/equals/filtered-collection": {
-      "status": "unsupported",
-      "reason": "size(filter(...)) requires an aggregation pipeline expression."
     },
     "string/concatenate/field-to-field": {
       "status": "unsupported",

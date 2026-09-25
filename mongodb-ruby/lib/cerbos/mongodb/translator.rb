@@ -145,16 +145,12 @@ module Cerbos
           with_logic_fallback(expression, mapper, scope, true) { translate_quantifier(operator, operands, mapper, scope) }
         when "exists_one"
           with_logic_fallback(expression, mapper, scope, true) { translate_exists_one(operands, mapper, scope, negated: false) }
-        when "filter"
-          # filter() yields a list. In boolean position there is no meaning to pick: `filter(...)`
-          # is not `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
-          raise UnsupportedError,
-            "filter() returns a list, not a boolean, so it cannot be a condition on its own; " \
-            "only size(filter(...)) has a boolean meaning"
-        when "map"
-          raise UnsupportedError,
-            "map() returns a list, not a boolean, so it cannot be a condition on its own; " \
-            "only hasIntersection(map(...), [...]) gives the projection a boolean meaning"
+        when "filter", "map", "except"
+          # A list where CEL needs a boolean is a runtime type error, which denies under either
+          # polarity: `filter(...)` is not `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
+          raise UnsupportedError, "#{operator}() returns a list, not a boolean" if scope.collection?
+
+          {"$expr" => {"$eq" => [Logic.truth(expression, mapper), true]}}
         when "lambda" then translate_lambda(operands, mapper, scope)
         when "if"
           raise UnsupportedError, "if aggregation expressions inside collection predicates are unsupported" if scope.collection?

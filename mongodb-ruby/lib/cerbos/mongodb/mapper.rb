@@ -110,16 +110,20 @@ module Cerbos
 
       attr_reader :nullable_default
 
-      def initialize(lookup, nullable_default: false)
+      # The macro variables whose elements this mapper reads (Logic), innermost last.
+      attr_reader :bound
+
+      def initialize(lookup, nullable_default: false, bound: [])
         @lookup = lookup
         @nullable_default = nullable_default
+        @bound = bound
       end
 
       # This mapper with +nullable_default+ for every entry that does not declare +nullable+.
       def with_nullable_default(nullable_default)
         return self if nullable_default == @nullable_default
 
-        Mapper.new(@lookup, nullable_default: nullable_default)
+        Mapper.new(@lookup, nullable_default: nullable_default, bound: @bound)
       end
 
       # The caller's entry for exactly +reference+.
