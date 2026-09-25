@@ -475,7 +475,7 @@ would change the security and performance profile of every filter.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
-indexes the 41 seed documents in a real Elasticsearch, translates every plan recorded from the
+indexes the 42 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
 the current PDP (0.55.0), where the total is every golden case in the tier:
 
@@ -483,7 +483,7 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 25 / 26 |
 | extended | 28 / 80 |
-| adversarial | 113 / 308 |
+| adversarial | 113 / 314 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in

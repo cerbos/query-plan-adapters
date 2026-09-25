@@ -833,6 +833,10 @@
       "status": "unsupported",
       "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
     },
+    "string/concatenate/dollar-prefixed-literal": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as string/concatenate/field-to-field: a term query compares a field against a literal, and there is no place to append the suffix to the field first"
+    },
     "string/concatenate/field-to-field": {
       "status": "unsupported",
       "reason": "Same missing computed operand as identifier/equals/concatenation, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks"
@@ -948,6 +952,26 @@
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate the retained conditional numeric operand without scripts; the translator refuses the ternary before comparing it with the string field."
+    },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/string-field-against-arithmetic, under negation"
+    },
+    "type-mismatch/less-than/negated-string-field-against-ternary-number": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string, under negation"
+    },
+    "type-mismatch/less-than/number-field-against-mixed-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string: the ternary is a conditional value the Query DSL cannot evaluate without scripts"
+    },
+    "type-mismatch/less-than/number-field-against-ternary-string": {
+      "status": "unsupported",
+      "reason": "Same missing conditional value as conditional/ternary/compared-to-literal: Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as arithmetic/add/on-both-sides: a range query compares a field against a literal, and Elasticsearch Query DSL cannot evaluate aNumber + 1.0 per document without scripts"
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",

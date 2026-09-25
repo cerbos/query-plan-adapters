@@ -517,6 +517,10 @@
       "status": "unsupported",
       "reason": "The numeric expression lowering refuses the zero denominator before it can compare the NaN arm; MongoDB arithmetic does not reproduce CEL floating-point division by zero."
     },
+    "type-mismatch/less-than/number-field-against-mixed-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary's branches have different types, so CEL orders aNumber against the number branch and raises a no-overload error on the string branch, per document. $expr compares the $cond's result whole and falls back to BSON's cross-type order, where every number sorts below every string, which would return every aBool-false document; the comparison is refused instead."
+    },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: Unsupported operator inside aggregation expression: struct."

@@ -31,7 +31,8 @@
     "i8",
     "i9",
     "j1",
-    "j3"
+    "j3",
+    "k1"
   ],
   "degenerateReason": null,
   "id": "arithmetic/divide/fractional-threshold",

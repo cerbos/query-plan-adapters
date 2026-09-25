@@ -356,6 +356,14 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
+    },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same refusal as `type-mismatch/less-than/string-field-against-arithmetic`, under negation."
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "aNumber + 1 has a second column on the other side of the comparison, so no constant is left to solve the sum against, and a Prisma where-filter cannot compare a column with column arithmetic; the translator refuses before it could tell that CEL has no string-vs-number ordering either way."
     }
   }
 }

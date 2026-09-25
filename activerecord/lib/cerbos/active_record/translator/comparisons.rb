@@ -83,7 +83,16 @@ module Cerbos
           when true, false then :boolean
           when Array then :list
           else
-            kind_of_column_type(column_type(value))
+            kind_of_column_type(column_type(value)) || kind_of_cel_type(cel_type(value))
+          end
+        end
+
+        # The kind a computed node (arithmetic, a concatenation, a ternary) was recorded with.
+        def kind_of_cel_type(type)
+          case type
+          when :int, :double, :ambiguous_number, :number then :number
+          when :string then :string
+          when :bool then :boolean
           end
         end
 

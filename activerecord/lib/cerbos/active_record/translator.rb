@@ -380,8 +380,12 @@ module Cerbos
         reject_double_text("if", then_value)
         reject_double_text("if", else_value)
 
-        # A non-finite arm must not reach SQL, so defer to the enclosing comparison.
-        if deferred_value?(then_value) || deferred_value?(else_value)
+        # A non-finite arm must not reach SQL, so defer to the enclosing comparison. So must
+        # a string arm beside a number arm: CEL compares the operand with one branch and errors
+        # on the other, per row, where one CASE would compare both through a single coercion.
+        arm_kinds = [scalar_kind(then_value), scalar_kind(else_value)]
+        mixed_arms = arm_kinds.uniq.length == 2 && arm_kinds.all? { |kind| %i[string number].include?(kind) }
+        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
           )
@@ -390,7 +394,10 @@ module Cerbos
         result = branches(condition, then_value, else_value)
         return record_boolean(result) if boolean_arm?(then_value) || boolean_arm?(else_value)
 
-        record_cel_type(result, branch_cel_type(then_value, else_value))
+        # Arms of one kind that fix no finer CEL type still give the CASE that kind, so an ordering
+        # against an operand of another type is answered as one (see {Comparisons#scalar_kind}).
+        shared_kind = arm_kinds.first if arm_kinds.uniq.length == 1 && %i[string number].include?(arm_kinds.first)
+        record_cel_type(result, branch_cel_type(then_value, else_value) || shared_kind)
       end
 
       def boolean_arm?(value)
