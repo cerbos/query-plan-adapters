@@ -275,6 +275,18 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		cmpOp = cmpOp.Mirror()
 	}
 
+	if comparison && omittedNullOperand(cmpOp, left, right, m) {
+		lv, err := b.value(left, m)
+		if err != nil {
+			return nil, err
+		}
+		x, err := asExpr(lv)
+		if err != nil {
+			return nil, err
+		}
+		return negate(omittedNullComparison(cmpOp, x), negated), nil
+	}
+
 	lv, err := b.value(left, m)
 	if err != nil {
 		return nil, err
@@ -1351,7 +1363,8 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 	return out, nil
 }
 
-// assertNoNullOperands rejects every null literal operand under the omitted representation.
+// assertNoNullOperands rejects every null literal operand under the omitted representation, except
+// the one shape omittedNullComparison renders.
 //
 // The scan matches on the OPERAND, never on an allowlist of operators: a null constant reaches a
 // NULL-selecting predicate through more shapes than the obvious eq/ne/in — hasIntersection carries
@@ -1361,7 +1374,9 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 // The rejection is deliberately wider than the over-granting shapes. `ne(x, null)` on its own is
 // aligned, but a leaf cannot tell whether an enclosing `not` will flip IS NOT NULL back into a
 // NULL-selecting predicate, so rejecting every null operand is what stays correct under any
-// nesting. Narrowing it would require negation-parity tracking.
+// nesting. The exception is a bare null compared with eq/ne against an attribute that itself
+// declares NullConventionOmitted: omittedNullComparison renders that as UNKNOWN for a NULL column,
+// which no enclosing `not` can flip.
 func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error {
 	if n.isValue() {
 		if carriesNull(n.value) && fallback == NullOmitted {
@@ -1375,7 +1390,8 @@ func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error 
 	// nothing here can say which column it will land against, so those keep using the fallback.
 	if variable, literal, ok := comparedAttributeAndLiteral(n); ok {
 		if entry, found := m.Resolve(variable); found && entry.NullConvention != NullConventionUnset {
-			if carriesNull(literal.value) && entry.NullConvention == NullConventionOmitted {
+			rendersUnknown := literal.value == nil && (n.operator == "eq" || n.operator == "ne")
+			if carriesNull(literal.value) && entry.NullConvention == NullConventionOmitted && !rendersUnknown {
 				return errNullOperandUnderOmitted()
 			}
 			return nil
@@ -1387,6 +1403,17 @@ func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error 
 		}
 	}
 	return nil
+}
+
+// omittedNullOperand reports whether a column-first comparison is `x == null` or `x != null` over
+// an attribute declaring NullConventionOmitted: the shape assertNoNullOperands lets through for
+// omittedNullComparison to render.
+func omittedNullOperand(op CmpOp, left, right *node, m Mapper) bool {
+	if (op != OpEq && op != OpNe) || !left.isVariable() || !right.isValue() || right.value != nil {
+		return false
+	}
+	entry, ok := m.Resolve(left.variable)
+	return ok && entry.NullConvention == NullConventionOmitted
 }
 
 func errNullOperandUnderOmitted() error {

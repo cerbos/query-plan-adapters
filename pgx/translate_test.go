@@ -774,10 +774,17 @@ func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
 	require.NoError(t, err,
 		"an attribute declaring NullConventionExplicit is not the call-level option's business")
 
+	// Under the call-level default, an omitted entry still does not render the explicit
+	// convention's IS NULL: its `== null` is UNKNOWN for a NULL column, and a null operand it
+	// cannot render that way is refused.
 	omitted := cerbospgx.MapperMap{
 		"request.resource.attr.owner": {Column: "owner", NullConvention: cerbospgx.NullConventionOmitted},
 	}
-	_, err = cerbospgx.Translate(conditional(nullEq), "resource", omitted)
+	unset := cerbospgx.MapperMap{"request.resource.attr.owner": {Column: "owner"}}
+	require.NotEqual(t, translateWith(t, unset, nullEq).Where, translateWith(t, omitted, nullEq).Where)
+
+	nullIn := expr("in", variable("request.resource.attr.owner"), val(t, []any{"a", nil}))
+	_, err = cerbospgx.Translate(conditional(nullIn), "resource", omitted)
 	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 	require.Contains(t, err.Error(), "null operand")
 }

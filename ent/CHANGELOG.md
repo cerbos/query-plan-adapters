@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `x == null` and `x != null` over an attribute declared `NullConventionOmitted` now translate, to
+  `CASE WHEN x IS NULL THEN NULL ELSE FALSE END` (`ELSE TRUE` for `!=`), instead of returning an
+  error wrapping `ErrUnsupported`. A NULL column is CEL's missing-attribute error, which the `CASE`
+  keeps UNKNOWN under any negation, and a column read through a to-one `ScalarRelation` renders the
+  same way. Every other null operand against such an attribute is still refused, and the
+  call-level `NullOmitted` is unchanged (#551).
 - **Breaking:** `%` over an attribute, a comparison decided by the sign of an infinity from a zero
   column denominator, and `string()` over a `ValueNumber` column outside `==`/`!=` against a
   string constant (or against `"0"`/`"-0"`) now return an error wrapping `ErrUnsupported` instead of
