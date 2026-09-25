@@ -5,7 +5,7 @@
 groups = ["default", "lint", "test", "testcontainers", "tools"]
 strategy = ["cross_platform"]
 lock_version = "4.5.1"
-content_hash = "sha256:0dc480b185eaaa1c6cee50918e8d78a648829b05b343890c5cc1ef8f7b4c9f89"
+content_hash = "sha256:c37e85a25058b45f0973612adb376f6056be04a2b3c9e20e4d20a7ab25b668a9"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
@@ -740,6 +740,16 @@ summary = "Pygments is a syntax highlighting package written in Python."
 files = [
     {file = "pygments-2.17.2-py3-none-any.whl", hash = "sha256:b27c2826c47d0f3219f29554824c30c5e8945175d888647acd804ddd04af846c"},
     {file = "pygments-2.17.2.tar.gz", hash = "sha256:da46cec9fd2de5be3a8a784f434e4c4ab670b4ff54d605c4c2717e9d49c4c367"},
+]
+
+[[package]]
+name = "pymysql"
+version = "1.2.3"
+requires_python = ">=3.9"
+summary = "Pure Python MySQL Driver"
+files = [
+    {file = "pymysql-1.2.3-py3-none-any.whl", hash = "sha256:14f1c68e2ed859243ae5ca41ffbe677027fc46bc136a9f0be8a4e928e5e7415a"},
+    {file = "pymysql-1.2.3.tar.gz", hash = "sha256:d5b288529782e536ae171866df3ca9dc4f6cbfb3cc2f18e6f837fbb90dbc262b"},
 ]
 
 [[package]]

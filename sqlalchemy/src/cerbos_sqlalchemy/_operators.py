@@ -34,9 +34,12 @@ from sqlalchemy import (
     not_,
     null,
     or_,
+    true,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
+from sqlalchemy.sql.functions import FunctionElement
 
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
@@ -72,6 +75,80 @@ class ConditionalValue:
 
 #: Possibly non-finite numbers, folded by the enclosing comparison instead of bound into SQL.
 SYMBOLIC_NUMBERS = (IEEEConstant, ConditionalValue)
+
+
+class _CharLength(FunctionElement):
+    """A string's length in characters, as CEL's ``size()`` counts it.
+
+    SQLite's and PostgreSQL's ``length()`` count characters; MySQL's counts bytes.
+    """
+
+    name = "cerbos_char_length"
+    type = Integer()
+    inherit_cache = True
+
+
+@compiles(_CharLength)
+def _char_length(element, compiler, **kw):
+    return f"length({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(_CharLength, "mysql")
+@compiles(_CharLength, "mariadb")
+def _mysql_char_length(element, compiler, **kw):
+    return f"char_length({compiler.process(element.clauses, **kw)})"
+
+
+class _AsDouble(FunctionElement):
+    """An exact numeric column read as a double, as CEL reads every attribute number.
+
+    PostgreSQL multiplies an integer by the literal ``0.1`` in exact ``numeric``, so
+    ``3 * 0.1 == 0.3`` is true there and false in CEL. ``cast(x, Float)`` is no help:
+    SQLAlchemy skips a ``FLOAT`` cast on MySQL.
+    """
+
+    name = "cerbos_as_double"
+    type = Float(precision=53)
+    inherit_cache = True
+
+
+@compiles(_AsDouble)
+def _as_double_standard(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS DOUBLE PRECISION)"
+
+
+@compiles(_AsDouble, "sqlite")
+def _as_double_sqlite(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS REAL)"
+
+
+@compiles(_AsDouble, "mysql")
+@compiles(_AsDouble, "mariadb")
+def _as_double_mysql(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS DOUBLE)"
+
+
+def _as_double(value: Any) -> Any:
+    """Read an exact numeric column as a double; leave anything else alone."""
+    type_ = _base_type(getattr(value, "type", None))
+    if isinstance(type_, Integer) or (
+        isinstance(type_, Numeric) and not isinstance(type_, Float)
+    ):
+        return _AsDouble(value)
+    return value
+
+
+def _arithmetic(op_fn: Callable[[Any, Any], Any]) -> Callable[[Any, Any], Any]:
+    return lambda c, v: op_fn(_as_double(c), _as_double(v))
+
+
+def _unknown() -> Any:
+    """SQL UNKNOWN typed as a boolean.
+
+    A bare ``NULL`` is untyped, and PostgreSQL resolves a ``CASE`` whose every arm is
+    one as ``text``, which it then refuses to mix with a boolean arm.
+    """
+    return func.nullif(true(), true())
 
 
 @dataclass(frozen=True)
@@ -165,7 +242,7 @@ def _string_size(value: Any, _: Any) -> Any:
             'attribute in collection_columns with storage "json" or "pgArray"'
         )
     kind = scalar_kind(value)
-    return null() if kind and kind != "string" else func.length(value)
+    return null() if kind and kind != "string" else _CharLength(value)
 
 
 # -- casts -------------------------------------------------------------------------------------
@@ -367,7 +444,7 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
         )
     left_kind, right_kind = scalar_kind(left), scalar_kind(right)
     if left_kind and right_kind and left_kind != right_kind:
-        result = literal(operator == "ne") if operator in ("eq", "ne") else null()
+        result = literal(operator == "ne") if operator in ("eq", "ne") else _unknown()
         for value in (left, right):
             if hasattr(value, "is_"):
                 result = case((value.isnot(None), result))
@@ -576,9 +653,9 @@ OPERATOR_FNS = MappingProxyType(
         "ge": _comparison("ge"),
         "in": _in,
         # Arithmetic returns values, composed inside comparisons.
-        "add": lambda c, v: c + v,
-        "sub": lambda c, v: c - v,
-        "mult": lambda c, v: c * v,
+        "add": _arithmetic(lambda c, v: c + v),
+        "sub": _arithmetic(lambda c, v: c - v),
+        "mult": _arithmetic(lambda c, v: c * v),
         "div": _float_div,
         "mod": _modulo,
         # Receiver-style string matches. Operands arrive receiver first.
