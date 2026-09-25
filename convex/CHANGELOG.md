@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Breaking:** under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
+  declare `nullable` is treated as `nullable: true`, and `postFilter` reads a stored `null` as a
+  missing attribute. Comparisons over such an entry are answered by `postFilter`, so they need
+  `allowPostFilter: true`; the old pushed-down `q.neq(...)` and negations matched documents the
+  field was missing from, which `check()` denies. Declare `nullable: false` on an entry that is
+  always stored and never null to keep it on Convex's filter engine. `"explicit"` output is
+  unchanged ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 - A shape the adapter cannot translate now throws `UnsupportedQueryPlanError`, an exported subclass
   of `Error`. What it translates is unchanged; an unmapped reference and a missing
   `allowPostFilter` opt-in stay a plain `Error`.

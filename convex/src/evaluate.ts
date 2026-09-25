@@ -48,6 +48,11 @@ interface Scope {
   mapper: Mapper;
   /** Lambda variables in scope, by name. */
   bindings: Bindings;
+  /**
+   * Whether a stored `null` reads as a missing attribute: the `"omitted"` convention, under which
+   * the caller sends no attribute for a NULL field and CEL raises a missing-attribute error.
+   */
+  nullIsMissing: boolean;
 }
 
 interface Call {
@@ -85,18 +90,28 @@ export const evaluate = (
   });
 };
 
-/** A lambda variable (or a path through one) first, then the mapped document field. */
-const lookUp = (name: string, { doc, mapper, bindings }: Scope): unknown => {
+/**
+ * A lambda variable (or a path through one) first, then the mapped document field. A bare lambda
+ * variable is a list element, which a caller cannot omit, so only a path reads a null as missing.
+ */
+const lookUp = (name: string, scope: Scope): unknown => {
+  const { doc, mapper, bindings } = scope;
   const dotIdx = name.indexOf(".");
   if (dotIdx !== -1) {
     const root = name.substring(0, dotIdx);
     if (root in bindings) {
-      return getNestedValue(bindings[root], name.substring(dotIdx + 1));
+      return readPath(
+        getNestedValue(bindings[root], name.substring(dotIdx + 1)),
+        scope,
+      );
     }
   }
   if (name in bindings) return bindings[name];
-  return getNestedValue(doc, resolveField(name, mapper));
+  return readPath(getNestedValue(doc, resolveField(name, mapper)), scope);
 };
+
+const readPath = (value: unknown, { nullIsMissing }: Scope): unknown =>
+  nullIsMissing && value === null ? EVALUATION_ERROR : value;
 
 /** Evaluates the operand at `index`, failing with `"<operator> <role>"` when it is missing. */
 const arg = (call: Call, index: number, role: string): unknown =>
@@ -500,7 +515,9 @@ const OPERATORS: Record<string, Operator> = {
         : isValue(fieldOperand) && typeof fieldOperand.value === "string"
           ? fieldOperand.value
           : undefined;
-      return field ? getNestedValue(target, field) : EVALUATION_ERROR;
+      return field
+        ? readPath(getNestedValue(target, field), call.scope)
+        : EVALUATION_ERROR;
     },
   },
   size: {
