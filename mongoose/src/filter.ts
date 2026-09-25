@@ -15,6 +15,7 @@ import type { TranslateContext } from "./context";
 import {
   buildFieldFilter,
   buildGuardedFieldFilter,
+  buildListShapeGuard,
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
@@ -354,12 +355,15 @@ const translateNot = (
   }
   // withEvaluationGuards ANDs its conjuncts OUTSIDE this $nor, which is where the
   // absent-parent requirement has to sit: inside, the negation would flip it along with
-  // the predicate and readmit every parentless document (#315, #316).
-  return withEvaluationGuards(
+  // the predicate and readmit every parentless document (#315, #316). A null or absent list
+  // is the same kind of error CEL denies, so its array requirement sits there too (#534).
+  const guarded = withEvaluationGuards(
     { $nor: [buildFilter(operand, ctx)] },
     [operand],
     ctx.mapper,
   );
+  const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
+  return listShape ? { $and: [listShape, guarded] } : guarded;
 };
 
 /** `value OP field` is `field MIRROR(OP) value`. */
