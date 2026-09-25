@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "b1",
+    "b6",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/map-attribute-keys",
+  "intent": "A string literal in the map-valued parent attribute, which tests its keys (\"inner\" in parent).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "inner"
+          },
+          {
+            "variable": "request.resource.attr.parent"
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/map-attribute-keys",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"inner\" in R.attr.parent"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "in over a map tests its keys, so every row whose parent has a parent of its own is allowed; treating a map haystack as an error under-grants them, and a row with no parent is a missing attribute that denies."
+}

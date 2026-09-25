@@ -1,0 +1,81 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "cast/string/negated-from-integral-ternary",
+  "intent": "!(string(aBool ? 1000000 : 0) == \"1000000\"): the int rendering of a ternary under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "value": 1000000
+                            },
+                            {
+                              "value": 0
+                            }
+                          ],
+                          "operator": "if"
+                        }
+                      }
+                    ],
+                    "operator": "string"
+                  }
+                },
+                {
+                  "value": "1000000"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/string/negated-from-integral-ternary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(string(R.attr.aBool ? 1000000 : 0) == \"1000000\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL allows only the aBool false rows; rendering the int 1000000 as the double \"1e+06\" makes the equality false for every aBool true row, so the negation over-grants them. A missing aBool (j3) stays denied."
+}

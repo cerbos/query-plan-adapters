@@ -34,6 +34,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aDouble + 0.7 != 0.1'
+- id: 'arithmetic/add/int-beside-double-field'
+  tier: adversarial
+  intent: 'An int() conversion added to a double attribute, OR''d with aNumber == 5 (int(aNumber) + aDouble > 0.0 || aNumber == 5).'
+  trap: 'CEL has no int + double overload, so the sum is an error for every row and only a1 is allowed, through aNumber == 5; adding the two as plain numbers over-grants every row whose sum is positive.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5'
 - id: 'arithmetic/add/int-literal-negated'
   tier: adversarial
   intent: 'The int-literal sum under negation (!(aNumber + 1 > 2.0)).'
@@ -66,6 +73,13 @@ cases:
     - 0.54.0
     - 0.55.0
     reason: 'The planner drops the int type of the literal 1: the plan is byte-identical to aNumber + 1.0 > 2.0, which allows rows, while check() has no double + int overload and denies every row.'
+- id: 'arithmetic/add/negated-int-beside-double-field'
+  tier: adversarial
+  intent: 'A negated int() + double sum, OR''d with aNumber == 5 (!(int(aNumber) + aDouble > 0.0) || aNumber == 5).'
+  trap: 'The missing overload is an error under both polarities, so only a1 is allowed; adding the two as plain numbers makes the negation true for a2, a5, b3 and g1, whose sums are not positive, and over-grants them.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) + R.attr.aDouble > 0.0) || R.attr.aNumber == 5'
 - id: 'arithmetic/add/on-both-sides'
   tier: extended
   intent: 'Arithmetic over the same attribute on both sides of a comparison (aNumber + 1.0 > aNumber * 2.0).'
