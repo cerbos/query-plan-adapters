@@ -347,6 +347,11 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
   under `"omitted"` it is nullable, and every null operand is refused
   ([NULL attribute representation](#null-attribute-representation)).
 
+A document whose number field holds NaN is outside this contract, since the PDP cannot receive one
+([conformance mapping hazards](../conformance/README.md#mapping-hazards)). Mongoose's `Number` schema
+type already refuses NaN on save, so it only arrives through the raw driver or another writer: a
+negated ordering such as `!(x >= 1)` denies it, and a comparison inside `$expr` may match it.
+
 ## Mapping hazards
 
 The contract above proves the plan side. The other half is the mapping: **the documents the filter

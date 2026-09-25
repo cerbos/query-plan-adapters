@@ -203,6 +203,13 @@ a value the store has already lost:
   PDP the stored (truncated) value. The corpus carries no case for this, because the fault is in the
   mapping, not the translation, and every millisecond store would ledger it
   ([#519](https://github.com/cerbos/query-plan-adapters/issues/519)).
+- **A value the PDP cannot receive.** `check()` rejects a NaN attribute
+  (`google.protobuf.Value.number_value: invalid NaN value`), and a policy spelling `double("NaN")`
+  fails to plan, so a row whose number column holds NaN can never be the resource the PDP decided.
+  What any adapter returns for such a row is outside the contract: stores disagree on where NaN
+  orders (MongoDB's `$expr` sorts it below every number, PostgreSQL above), and no golden can
+  record a decision to hold them to. Normalise NaN before it is stored, or before the filter runs
+  ([#573](https://github.com/cerbos/query-plan-adapters/issues/573)).
 
 ## Changing the corpus
 
