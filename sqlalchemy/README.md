@@ -183,6 +183,13 @@ undeclared attribute keeps the old rendering, where `!=` against a constant unde
 comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns rows missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ### Collection storage
 
 `size(R.attr.tags)` and `R.attr.tags[0]` need to know how the collection is stored. Declare it per
@@ -401,12 +408,13 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 221 / 283 |
+| adversarial | 221 / 284 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.55.0 those are four extended cases: `null/has/missing-attribute`
-(`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the planner), and three
+harness does not compare. Under 0.55.0 those are four extended cases and one adversarial case:
+`null/has/missing-attribute` and `null/has/composed-with-comparison` (the planner drops `has()` from
+the plan, so use `R.attr.x != null` instead), and three
 `composition/*` cases whose DENY condition reads an attribute a row is missing: `check()` skips the
 erroring DENY, while the plan's `not(...)` of it denies the row
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).

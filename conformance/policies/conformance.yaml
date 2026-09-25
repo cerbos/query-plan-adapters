@@ -1769,6 +1769,15 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.aOptionalString)
+    # null/has/composed-with-comparison
+    - actions:
+        - null/has/composed-with-comparison
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.aOptionalString) && R.attr.aNumber > 0
     # null/in/literal-list-of-only-null
     - actions:
         - null/in/literal-list-of-only-null

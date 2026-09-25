@@ -190,6 +190,13 @@ under `"omitted"` the adapter:
 `nullable: false` opts an entry out: it asserts the field is always stored and never null, and its
 comparisons go to Convex's filter engine as they do under `"explicit"`.
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns documents missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Supported operators
 
 Pushed to Convex's filter engine (`filter`):
@@ -262,14 +269,14 @@ total is every golden case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 67 / 80 |
-| adversarial | 255 / 283 |
+| adversarial | 255 / 284 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there are four, all extended, which is why
-that tier's passed and refused cases add up to four fewer than its total. `null/has/missing-attribute`:
-the planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies
-the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead
-of `has(R.attr.x)`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
+them, because the plan and `check()` disagree. On 0.55.0 there are five, four extended and one
+adversarial, which is why those tiers' passed and refused cases fall short of their totals.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
+the plan while `checkResource` denies the missing-attribute documents, so use `R.attr.x != null` for
+database-backed attributes instead of `has(R.attr.x)`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
 missing-`aNumber` document the DENY condition errors, so `check()` does not deny it, while the plan
 negates that condition and the negation is itself a missing-attribute error.
 

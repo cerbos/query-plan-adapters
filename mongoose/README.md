@@ -222,6 +222,13 @@ guard is a `$ne: null`, which MongoDB applies per element to an array field: an 
 `null` element is excluded too. Under `"explicit"`, `nullable: true` on one entry is the
 per-attribute way to declare the omitted convention.
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** The Cerbos planner folds `has(R.attr.x)`
+> to true and drops it from the plan: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. The filter then returns documents missing `x`
+> that `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it.
+
 ## Timestamps and conversions
 
 - **Timestamps** accept BSON dates or RFC 3339 strings with at most 3 fractional-second digits, in
@@ -302,13 +309,13 @@ queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on 
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 196 / 283 |
+| adversarial | 196 / 284 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases. `null/has/missing-attribute`: the planner folds
-`has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
-missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`. Three `composition/*` cases whose DENY condition reads a missing attribute: the
+pass them. On 0.55.0 that is four extended cases and one adversarial case.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
+the plan while `checkResource` denies the missing-attribute documents, so use `R.attr.x != null`
+for database-backed attributes instead of `has(R.attr.x)`. Three `composition/*` cases whose DENY condition reads a missing attribute: the
 plan negates the deny condition with the same `not` as CEL's `!`, while `checkResource` treats the
 erroring deny rule as not matching and allows the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
