@@ -1,6 +1,14 @@
 {
   "adapter": "mongoose",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int() the sum adds to a double field (a no-such-overload error in CEL) is never lowered"
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation"
+    },
     "arithmetic/add/self-division-plus-constant-greater-than": {
       "status": "unsupported",
       "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through arithmetic composed on the division"
@@ -97,6 +105,14 @@
       "status": "unsupported",
       "reason": "Same refusal of int() over a numeric column as `cast/int/negative-fraction`: $convert rounds where CEL truncates toward zero, so string() never sees the int"
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare number and $toString over a double renders the exponent form (\"1e+06\"), so the adapter refuses string() over an untyped integral constant of 1e6 or more"
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int() branch that fixes the ternary's type is never lowered"
+    },
     "cast/string/negated-from-boolean-ternary": {
       "status": "unsupported",
       "reason": "The negation is a $nor whose missing-attribute guard sits outside it, and the ternary reads aBool only when aNumber > 3: a guard on aBool would deny rows CEL allows through the false arm, and no guard would let a missing aBool on the taken arm through, so the negation is refused."
@@ -104,6 +120,10 @@
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same refusal of int() as `cast/string/from-int-past-exponent-threshold`, under negation"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
     },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
@@ -297,9 +317,17 @@
       "status": "unsupported",
       "reason": "variable-in-variable membership requires correlated aggregation scoping"
     },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`in` over a to-one relation, which CEL reads as a map and tests by KEY; the keys are the fields the embedded subdocument carries, and the adapter has no filter over a subdocument's field names, so it refuses rather than let Mongoose cast the needle to the subdocument"
+    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "same variable-in-variable limitation under negation"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
     },
     "null/all/negated-null-element": {
       "status": "unsupported",

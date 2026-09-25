@@ -273,6 +273,13 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       if (!operand) {
         throw new UnsupportedQueryPlanError("string conversion requires an operand");
       }
+      if (rendersUntypedIntegralConstant(operand)) {
+        throw new UnsupportedQueryPlanError(
+          "string() over an integral constant whose int or double type the plan does not carry: " +
+            'CEL renders the int 1000000 as "1000000" and the double as "1e+06", and the plan ' +
+            "ships both as the same bare number",
+        );
+      }
       const input = buildAggregationExpression(operand, mapper);
       return {
         $switch: {
@@ -575,6 +582,25 @@ function notNullGuard(
       $ne: [buildAggregationExpressionFromExpression(expression, mapper), null],
     },
   };
+}
+
+/**
+ * Whether `string()` over the operand could render a numeric constant, bare or as a ternary
+ * branch, whose int or double type the plan dropped: the plan ships `1000000` and `1000000.0`
+ * alike. Only an integral magnitude of 1e6 or more renders differently, since Go's shortest `%g`
+ * switches a double to an exponent there ("1e+06") while an int stays plain decimal. `int()` and
+ * `double()`, which would fix a branch's type, are refused on their own.
+ */
+function rendersUntypedIntegralConstant(operand: PlanExpressionOperand): boolean {
+  if (isValue(operand)) {
+    return (
+      typeof operand.value === "number" &&
+      Number.isInteger(operand.value) &&
+      Math.abs(operand.value) >= 1e6
+    );
+  }
+  if (!isExpression(operand) || operand.operator !== "if") return false;
+  return operand.operands.slice(1).some(rendersUntypedIntegralConstant);
 }
 
 function refuseNumericConversion({ operator }: PlanExpression): never {

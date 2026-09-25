@@ -27,6 +27,7 @@ import {
   applyValueParser,
   createScopedMapper,
   isNullableReference,
+  relationOfReference,
   resolveFieldReference,
   resolveMapperConfig,
   withOmittedNullDefault,
@@ -593,6 +594,13 @@ const translateIn = (
     );
   }
   if (isValue(leftOperand) && isVariable(rightOperand)) {
+    if (relationOfReference(rightOperand.name, ctx.mapper)?.type === "one") {
+      throw new UnsupportedQueryPlanError(
+        "`in` over a to-one relation tests the related object's keys in CEL, which are the " +
+          "fields its subdocument carries, and the adapter has no filter for a subdocument's " +
+          "field names",
+      );
+    }
     if (
       !canEqualDeclaredType(rightOperand.name, leftOperand.value, ctx.mapper)
     ) {
