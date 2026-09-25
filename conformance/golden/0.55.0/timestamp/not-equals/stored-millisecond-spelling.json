@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/not-equals/stored-millisecond-spelling",
+  "intent": "timestamp(updatedAt) != a literal at the instant a1 stores, which a1 spells with a zero fraction (2020-03-15T10:30:00.000Z).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.updatedAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/not-equals/stored-millisecond-spelling",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.updatedAt) != timestamp(\"2020-03-15T10:30:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL compares instants, so a1 is equal and denied; comparing the stored text with the canonical literal (…00Z) as strings finds them different and over-grants a1."
+}

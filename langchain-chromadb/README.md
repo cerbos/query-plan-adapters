@@ -311,9 +311,9 @@ caller must. Passed cases on the current PDP, 0.55.0, out of every golden case i
 | --- | --- |
 | core | 20 / 26 |
 | extended | 39 / 80 |
-| adversarial | 132 / 267 |
+| adversarial | 134 / 269 |
 
-Without `allowPostFilter`, the 127 cases the post-filter answers throw `UnsupportedOperatorError`
+Without `allowPostFilter`, the 129 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 64
 passing: 18, 10 and 36 in the three tiers.
 
