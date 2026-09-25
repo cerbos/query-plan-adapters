@@ -12,6 +12,10 @@
 
 - Support for Ruby 4.0 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))
 
+- `==` and `!=` between a field attribute and `null` under the `:omitted` NULL convention, rendered as `CASE WHEN col IS NULL THEN NULL ELSE FALSE END` (`ELSE TRUE` for `!=`) ([#551](https://github.com/cerbos/query-plan-adapters/issues/551))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
+
 ### Changed
 
 - The conformance suite runs on PostgreSQL and MySQL as well as SQLite, and the fixes below are what those stores exposed ([#500](https://github.com/cerbos/query-plan-adapters/issues/500))

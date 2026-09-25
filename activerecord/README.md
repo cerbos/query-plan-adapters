@@ -222,19 +222,31 @@ both, so you must tell the adapter which one you use:
 | `:explicit` (default) | An attribute whose value is null | true in Cerbos; `IS NULL` agrees |
 | `:omitted` | No attribute | Missing-attribute error; Cerbos denies the row |
 
-Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` the
-adapter refuses every null constant in the plan (including `!= null`, because a `not` above it
-could flip it back into a NULL-selecting predicate):
+Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` a
+NULL column is a missing attribute, which CEL answers with an error, and a present column is never
+null. So `==` and `!=` between a field attribute and `null` are rendered UNKNOWN for a NULL column,
+which stays UNKNOWN under any `not` above it:
+
+```
+eq(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE FALSE END
+ne(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE TRUE END
+```
+
+This holds for a column reached through a to-one path such as `parent.tag`, where an absent parent
+is NULL too. Every other null constant is refused under `:omitted`: a null in an `in` or
+`hasIntersection` list, and a null given to an operator override of `eq` or `ne`, since the
+override would receive it:
 
 ```ruby
 Cerbos::ActiveRecord.query_plan_to_relation(
   plan: plan, model: Document, attributes: MAPPING,
   null_attribute_representation: :omitted
 )
-# => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan contains a null constant
+# => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan holds such a null constant
 ```
 
-See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+See [#302](https://github.com/cerbos/query-plan-adapters/issues/302) and
+[#551](https://github.com/cerbos/query-plan-adapters/issues/551).
 
 ### Declare the convention on the attribute
 
@@ -338,7 +350,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 201 / 270 |
+| adversarial | 204 / 270 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

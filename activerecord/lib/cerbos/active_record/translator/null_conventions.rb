@@ -13,11 +13,14 @@ module Cerbos
       module NullConventions
         private
 
-        # Refuses every null constant under `:omitted`. There the PDP denies a NULL column,
-        # but `IS NULL` would return it (#302).
+        # Refuses a null constant under `:omitted`, where the PDP denies a NULL column but
+        # `IS NULL` would return it (#302).
+        #
+        # One shape is allowed: a field attribute compared with a scalar null by the built-in
+        # `eq` or `ne`. {#with_null_conventions} renders it UNKNOWN for a NULL column, the
+        # missing-attribute error CEL raises, so a `not` above it cannot flip it (#551).
         #
         # Scans operands, not operators: `in` and `hasIntersection` can carry a null in a list.
-        # Refuses even `ne(x, null)`, since a `not` above it would flip it back to `IS NULL`.
         def assert_no_null_operands(node)
           case node
           when Plan::Value
@@ -25,14 +28,26 @@ module Cerbos
           when Plan::Expression
             # Attribute-vs-constant uses the attribute's own convention (#308). Other shapes,
             # such as a null inside a macro over a constant list, use the call's convention.
-            declared = declared_operand_convention(node)
-            unless declared.nil?
-              raise null_operand_error if declared == :omitted && node.operands.any? { |o| carries_null?(o) }
+            convention = operand_convention(node)
+            unless convention.nil?
+              if convention == :omitted && node.operands.any? { |o| carries_null?(o) } &&
+                  !unknown_when_null?(node)
+                raise null_operand_error
+              end
               return
             end
 
             node.operands.each { |operand| assert_no_null_operands(operand) }
           end
+        end
+
+        # True if the built-in `eq` or `ne` compares an attribute with a scalar null. An operator
+        # override owns its comparison and would receive the null, so it keeps the refusal.
+        def unknown_when_null?(node)
+          return false unless %w[eq ne].include?(node.operator)
+          return false if operator_overrides.key?(node.operator)
+
+          node.operands.any? { |operand| operand.is_a?(Plan::Value) && operand.value.nil? }
         end
 
         def carries_null?(node)
@@ -41,9 +56,9 @@ module Cerbos
           node.value.nil? || (node.value.is_a?(Array) && node.value.any?(&:nil?))
         end
 
-        # The convention declared by the attribute in an attribute-vs-constant equality, in
-        # either order. Nil if the node is another shape or the attribute declares none.
-        def declared_operand_convention(node)
+        # The convention of the attribute in an attribute-vs-constant equality, in either order:
+        # its own declaration, else the call's. Nil if the node is another shape.
+        def operand_convention(node)
           return nil unless EQUALITY_FAMILY.include?(node.operator)
           return nil unless node.operands.length == 2
 
@@ -54,7 +69,7 @@ module Cerbos
           mapping = attributes[variable.name]
           return nil unless mapping.is_a?(AttributeMapping::Field)
 
-          mapping.null_representation
+          mapping.null_representation || null_attribute_representation
         end
 
         def null_operand_error
@@ -91,6 +106,9 @@ module Cerbos
           return plain unless EQUALITY_FAMILY.include?(operator)
 
           left, right = values
+          omitted = omitted_null_comparison(operator, left, right, overridden)
+          return omitted if omitted
+
           # A null constant is already correct: `IS NULL` matches CEL's null value.
           return plain if left.nil? || right.nil?
 
@@ -106,6 +124,24 @@ module Cerbos
           return plain if overridden
 
           definite_equality(operator, left, right, left_explicit, right_explicit)
+        end
+
+        # `eq`/`ne` of an `:omitted` attribute against null. A NULL column sends no attribute,
+        # so CEL errors and denies the row; a present one is never null. Hence
+        # `CASE WHEN col IS NULL THEN NULL ELSE FALSE END` for `eq` and `... ELSE TRUE END` for
+        # `ne`. UNKNOWN stays UNKNOWN under NOT, so the result is right under any nesting (#551).
+        # Nil for any other shape.
+        def omitted_null_comparison(operator, left, right, overridden)
+          return nil if overridden || !%w[eq ne].include?(operator)
+          return nil unless left.nil? || right.nil?
+
+          column = right.nil? ? left : right
+          return nil unless omitted_attribute?(column)
+
+          ArelSupport.case_node(
+            [[ArelSupport.comparison("eq", column, nil), nil]],
+            else_value: operator == "ne"
+          )
         end
 
         # An equality that is never SQL UNKNOWN on an explicit side. In CEL, null == value is

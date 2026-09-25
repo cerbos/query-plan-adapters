@@ -149,14 +149,6 @@
       "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
       "status": "unsupported"
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "reason": "aOptionalString is omitted when NULL, so the mapping declares null_representation: :omitted, and the adapter refuses a null constant under it: the wire node is the same as an explicit-null equality, and IS NULL would return the rows check() denies as a missing-attribute error.",
-      "status": "unsupported"
-    },
-    "null/equals/null-literal-on-missing-attribute-under-or": {
-      "reason": "scope is omitted when NULL, so the mapping declares null_representation: :omitted, and the adapter refuses a null constant under it: CEL answers == null over a missing scope with an error that only a true sibling in the OR absorbs, while a filter selecting NULL would return the NULL-scope rows check() denies.",
-      "status": "unsupported"
-    },
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "reason": "One side declares the explicit-null convention and the other does not; no single SQL predicate is both definite for the declared NULL and UNKNOWN for the omitted one, so the comparison is refused.",
       "status": "unsupported"
@@ -267,10 +259,6 @@
     },
     "regex/matches/whitespace-class": {
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "relation/not-equals/one-hop-null-literal": {
-      "reason": "parent.aOptionalString is omitted when NULL or when the parent row is absent, so the mapping declares null_representation: :omitted, and the adapter refuses every null constant under it, `!= null` included: a NOT above the IS NOT NULL would flip it to IS NULL and return rows check() denies.",
       "status": "unsupported"
     },
     "timestamp/equals/field-to-field-without-conversion": {
