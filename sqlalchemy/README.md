@@ -361,13 +361,16 @@ run on PostgreSQL under both storage shapes, `json` and `pgArray`. Results for t
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 60 / 80 |
+| extended | 57 / 80 |
 | adversarial | 187 / 250 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (82 cases) or is
-skipped because its golden file records a planner divergence: under 0.55.0 that is the one case
-`null/has/missing-attribute` (`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the
-planner), which no adapter can pass and the harness does not compare.
+skipped because its golden file records a planner divergence, which no adapter can pass and the
+harness does not compare. Under 0.55.0 those are four extended cases: `null/has/missing-attribute`
+(`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the planner), and three
+`composition/*` cases whose DENY condition reads an attribute a row is missing: `check()` skips the
+erroring DENY, while the plan's `not(...)` of it denies the row
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 
