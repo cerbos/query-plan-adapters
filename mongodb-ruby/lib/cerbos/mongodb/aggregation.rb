@@ -28,19 +28,65 @@ module Cerbos
       # CEL's double arithmetic, spelled as MongoDB's.
       ARITHMETIC = {"add" => "$add", "sub" => "$subtract", "mult" => "$multiply", "div" => "$divide"}.freeze
 
+      # Operators whose second operand is a lambda, which Logic evaluates rather than guards.
+      LAMBDA_OPERATORS = %w[exists exists_one all filter map except lambda].freeze
+
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
-      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod].freeze
+      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod in].freeze
 
       module_function
 
       # A plan operand as an aggregation expression: a variable becomes a +$field.path+, a
       # value becomes a constant (see #constant), an expression recurses.
       def build(operand, mapper)
-        return "$#{mapper.resolve_field(operand.name).path.join(".")}" if variable?(operand)
+        return field_path(operand, mapper) if variable?(operand)
         return constant(operand.value) if value?(operand)
         return build_expression(operand, mapper) if expression?(operand)
 
         raise InvalidPlanError, "Invalid operand structure"
+      end
+
+      # A variable's value. A to-many relation's projected field is a $map over its elements,
+      # where the dotted path would skip an element that lacks the field instead of reading it
+      # as null, and so shorten the list.
+      def field_path(variable, mapper)
+        resolved = mapper.resolve_field(variable.name)
+        relation = resolved.relation
+        return "$#{resolved.path.join(".")}" unless relation&.type == :many
+
+        field = resolved.path[1]
+        return relation_elements(relation, field) if relation.requires_parent
+        return "$#{relation.name}" if field.nil?
+
+        {"$map" => {"input" => "$#{relation.name}", "as" => "cerbos_element", "in" => "$$cerbos_element.#{field}"}}
+      end
+
+      # The elements of a to-many relation reached through a to-one parent stored as an array
+      # (+requires_parent+): the parent's list, or null (a CEL error) where no parent is stored.
+      def relation_elements(relation, field)
+        parent = relation.requires_parent
+        unless relation.name.start_with?("#{parent}.")
+          raise UnsupportedError, "A relation's requires_parent must be a prefix of its path"
+        end
+
+        child = relation.name.delete_prefix("#{parent}.")
+        element = field ? "$$cerbos_element.#{field}" : "$$cerbos_element"
+        elements = {"$reduce" => {
+          "input" => "$#{parent}",
+          "initialValue" => [],
+          "in" => {"$concatArrays" => ["$$value", {"$cond" => [
+            {"$isArray" => "$$this.#{child}"},
+            {"$map" => {"input" => "$$this.#{child}", "as" => "cerbos_element", "in" => element}},
+            []
+          ]}]}
+        }}
+        parents = {"$cond" => [{"$isArray" => "$#{parent}"}, "$#{parent}", []]}
+        # The parent is stored, and holds the list: a parent without it is a missing attribute.
+        stored = {"$and" => [
+          {"$gt" => [{"$size" => parents}, 0]},
+          {"$allElementsTrue" => [{"$map" => {"input" => parents, "in" => {"$isArray" => "$$this.#{child}"}}}]}
+        ]}
+        {"$cond" => [stored, elements, nil]}
       end
 
       # A plan constant as an aggregation expression. Inside $expr a string that starts with `$`
@@ -70,6 +116,7 @@ module Cerbos
         when "not" then {"$not" => [build(operand_at(operands, 0, "not operator requires an operand"), mapper)]}
         when "string" then build_string(operands, mapper)
         when "int" then build_int(operands, mapper)
+        when "in" then build_in(operands, mapper)
         when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
         when "index"
@@ -185,6 +232,31 @@ module Cerbos
             "$add nor $concat can be chosen"
         end
         build_arithmetic("add", operands, mapper)
+      end
+
+      # `needle in list` inside $expr: null (a CEL error) where the list is not an array. $in
+      # compares as $eq does, which agrees with CEL's equality for scalars but NaN, which CEL
+      # never finds; a map or list needle is null too, since MongoDB compares embedded documents
+      # in stored field order where CEL's maps ignore it (which denies where CEL might allow).
+      def build_in(operands, mapper)
+        needle, list = operands
+        raise InvalidPlanError, "in requires two operands" unless needle && list
+        if variable?(list) && mapper.relation_of(list.name)&.type == :one
+          raise UnsupportedError,
+            "`in` over a to-one relation tests the related object's keys in CEL, and the adapter has no expression for a subdocument's field names"
+        end
+
+        {"$let" => {
+          "vars" => {"cerbos_needle" => build(needle, mapper), "cerbos_list" => build(list, mapper)},
+          "in" => {"$switch" => {
+            "branches" => [
+              {"case" => {"$not" => [{"$isArray" => "$$cerbos_list"}]}, "then" => nil},
+              {"case" => {"$in" => [{"$type" => "$$cerbos_needle"}, %w[object array]]}, "then" => nil},
+              {"case" => {"$eq" => ["$$cerbos_needle", Float::NAN]}, "then" => false}
+            ],
+            "default" => {"$in" => ["$$cerbos_needle", "$$cerbos_list"]}
+          }}
+        }}
       end
 
       # A CEL comparison inside $expr. MongoDB orders NaN below every number and equal to itself,
@@ -510,27 +582,17 @@ module Cerbos
 
       def build_size(operands, mapper)
         operand = operand_at(operands, 0, "size operator requires an operand")
-        inner = build(operand, mapper)
-        # $size for an array, $strLenCP for a string, and null — an error to CEL — otherwise.
-        size = {"$cond" => [
-          {"$isArray" => inner},
-          {"$size" => inner},
-          {"$cond" => [{"$eq" => [{"$type" => inner}, "string"]}, {"$strLenCP" => inner}, nil]}
-        ]}
-        parent = variable?(operand) ? mapper.relation_of(operand.name)&.requires_parent : nil
-        return size if parent.nil?
-
-        # Reached through the stored parent array, `$parent.children` is one array PER parent
-        # element, so $size of it counts parents, not children. The chain's list is every child
-        # of the (one) parent: flatten before counting.
-        children = {"$size" => {"$reduce" => {
-          "input" => {"$ifNull" => [inner, []]},
-          "initialValue" => [],
-          "in" => {"$concatArrays" => ["$$value", {"$cond" => [{"$isArray" => "$$this"}, "$$this", []]}]}
-        }}}
-        # An absent to-one parent counts as UNKNOWN, not 0. null loses against every number in
-        # BSON order, so both `== 0` and `>= 0` exclude the document (#309).
-        {"$cond" => [{"$gt" => [{"$size" => {"$ifNull" => ["$#{parent}", []]}}, 0]}, children, nil]}
+        # $size for an array, $strLenCP for a string, and null — an error to CEL — otherwise. A
+        # relation reached through a parent array (field_path) is already the one parent's list,
+        # or null where no parent is stored: an absent to-one parent is UNKNOWN, not 0 (#309).
+        {"$let" => {
+          "vars" => {"cerbos_sized" => build(operand, mapper)},
+          "in" => {"$cond" => [
+            {"$isArray" => "$$cerbos_sized"},
+            {"$size" => "$$cerbos_sized"},
+            {"$cond" => [{"$eq" => [{"$type" => "$$cerbos_sized"}, "string"]}, {"$strLenCP" => "$$cerbos_sized"}, nil]}
+          ]}
+        }}
       end
 
       def build_matches(operands, mapper)

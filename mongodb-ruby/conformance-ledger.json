@@ -5,17 +5,9 @@
       "status": "unsupported",
       "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare number and $toString over a double renders the exponent form (\"1e+06\"), so the adapter refuses string() over an untyped integral constant of 1e6 or more"
     },
-    "cast/string/negated-from-boolean-ternary": {
-      "status": "unsupported",
-      "reason": "The negation is a $nor whose missing-attribute guard sits outside it, and the ternary reads aBool only when aNumber > 3: a guard on aBool would deny rows CEL allows through the false arm, and no guard would let a missing aBool on the taken arm through, so the negation is refused."
-    },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
-    },
-    "collection/all/nested-exists-over-same-collection": {
-      "status": "unsupported",
-      "reason": "Same top-level-only $expr restriction as `collection/exists/nested-over-same-collection`, reached through all(): the inner $elemMatch cannot compare its element's id and name with the enclosing element's."
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
@@ -29,65 +21,13 @@
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
     },
-    "collection/exists/arithmetic-on-outer-attribute": {
-      "status": "unsupported",
-      "reason": "MongoDB rejects $expr below the top level of a query ('$expr can only be applied to the top-level document'), and field arithmetic exists only as an aggregation expression inside $expr; the per-element scope this needs comes from $elemMatch, so no find filter is both element-scoped and expression-valued. It would take an aggregation pipeline ($map/$filter plus $anyElementTrue), which a query filter is not."
-    },
-    "collection/exists/element-contains-outer-attribute": {
-      "status": "unsupported",
-      "reason": "Using an outer document field as the needle of a string search over an array element needs an aggregation expression over a $-anchored path, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot sit inside the $elemMatch that scopes the element."
-    },
-    "collection/exists/element-field-to-element-field": {
-      "status": "unsupported",
-      "reason": "Comparing two fields of the same array element is only expressible as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so it cannot be placed inside the $elemMatch that establishes the element scope."
-    },
-    "collection/exists/element-field-to-outer-field": {
-      "status": "unsupported",
-      "reason": "MongoDB $expr cannot be safely scoped inside the adapter's $elemMatch predicates."
-    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY; the adapter translates a macro only as an element match over a collection relation's subdocuments, and a MongoDB filter has no form that iterates a subdocument's field names"
     },
-    "collection/exists/negated": {
-      "status": "unsupported",
-      "reason": "negating a nullable collection macro would turn CEL errors into matches."
-    },
-    "collection/exists/negated-element-in-literal-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
-    },
-    "collection/exists/negated-empty-collection": {
-      "status": "unsupported",
-      "reason": "negated exists over nullable element members needs explicit three-valued logic."
-    },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
-      "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation, which the adapter also refuses as a negated collection macro"
-    },
-    "collection/exists/negated-nested-over-same-collection": {
-      "status": "unsupported",
-      "reason": "The negated macro reaches collection elements whose name may be NULL; the filter lowering refuses NOT over a collection macro because it cannot preserve their missing-attribute errors. Without the negation the shape is still refused, as `collection/exists/nested-over-same-collection`."
-    },
-    "collection/exists/negated-nested-three-levels": {
-      "status": "unsupported",
-      "reason": "same nullable macro-negation limitation across three collection levels."
-    },
-    "collection/exists/nested-collection-size": {
-      "status": "unsupported",
-      "reason": "nested collection size requires aggregation pipeline scoping."
-    },
-    "collection/exists/nested-over-same-collection": {
-      "status": "unsupported",
-      "reason": "The inner $elemMatch rebases every field path onto its own array element, so the enclosing element's name is reachable only as an aggregation expression inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')."
-    },
-    "collection/exists/nested-with-outer-attribute": {
-      "status": "unsupported",
-      "reason": "outer resource references inside nested element predicates require aggregation pipeline scoping."
-    },
-    "collection/exists/outer-collection-inside-lambda": {
-      "status": "unsupported",
-      "reason": "The categories.exists lambda reads the root document's tags collection from inside the element scope. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')."
+      "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation: neither the filter nor the three-valued evaluation has a form that iterates a subdocument's field names."
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -100,30 +40,6 @@
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
-    },
-    "conditional/ternary/as-whole-exists-body": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: if aggregation expressions inside collection predicates are unsupported."
-    },
-    "conditional/ternary/inside-all": {
-      "status": "unsupported",
-      "reason": "Same top-level-only $expr restriction as `conditional/ternary/inside-exists`, reached through all(): the negated $elemMatch that expresses all() still cannot contain the $cond aggregation expression the conditional needs."
-    },
-    "conditional/ternary/inside-exists": {
-      "status": "unsupported",
-      "reason": "$cond exists only as an aggregation expression, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document'), so a conditional cannot be evaluated inside the $elemMatch that establishes the element scope."
-    },
-    "conditional/ternary/negated": {
-      "status": "unsupported",
-      "reason": "A negated ternary over nullable fields: aNumber is read only on the branch aBool selects, so a missing aNumber is an error only where aBool is true. A `$ne: null` guard ANDed outside the `$nor` would also drop an aBool=false row with no aNumber, which the PDP allows; without it the `$nor` matches the missing field and returns the row the PDP denies (j2). The adapter refuses rather than pick a direction."
-    },
-    "conditional/ternary/negated-branch-on-relation": {
-      "status": "unsupported",
-      "reason": "The negated conditional reaches a nullable parent attribute; the filter lowering refuses NOT because it cannot preserve selected-branch missing-attribute errors."
-    },
-    "conditional/ternary/negated-missing-attribute-condition": {
-      "status": "unsupported",
-      "reason": "negating a ternary over a nullable field cannot preserve CEL error semantics."
     },
     "hierarchy/ancestor-of/empty-delimiter": {
       "status": "unsupported",
@@ -145,57 +61,17 @@
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: hierarchy path must be a field or string value."
     },
-    "logic/not/deep-mixed-nesting": {
-      "status": "unsupported",
-      "reason": "The tags.exists lambda compares an element's name with the root document's aString. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')."
-    },
-    "membership/in/field-in-resource-list": {
-      "status": "unsupported",
-      "reason": "variable-in-variable membership requires correlated aggregation scoping."
-    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a to-one relation, which CEL reads as a map and tests by KEY; the keys are the fields the embedded subdocument carries, and the adapter has no filter over a subdocument's field names, so it refuses"
-    },
-    "membership/in/negated-field-in-resource-list": {
-      "status": "unsupported",
-      "reason": "same variable-in-variable limitation under negation."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
     },
-    "null/all/negated-null-element": {
-      "status": "unsupported",
-      "reason": "negated all over nullable element members needs explicit three-valued logic."
-    },
-    "null/all/negated-null-element-with-false-sibling": {
-      "status": "unsupported",
-      "reason": "same nullable all-negation limitation with an absorbing false witness."
-    },
-    "null/exists/negated-explicit-null-in-principal-list": {
-      "status": "unsupported",
-      "reason": "The value-list fold produces a collection macro under a negation, which this adapter refuses before it ever reaches the comparison leaves: $nor over an exists would turn a CEL element error into a match. The explicit-null convention this case probes is expressible here (its four sibling cases pass) — the negated macro above it is not."
-    },
-    "null/in/missing-attribute-in-resource-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
-    },
-    "null/in/negated-missing-attribute-in-resource-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
-    },
-    "principal/all/negated-long-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
-    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
-    },
-    "principal/exists/negated-long-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
     },
     "principal/filter/size-of-filtered-long-list": {
       "status": "unsupported",
@@ -203,7 +79,7 @@
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: in supports only field-in-value-list or value-in-mapped-collection shapes."
+      "reason": "map() over a literal list whose projection reads a resource attribute: the plan's list is built per document, and the adapter has no aggregation form for map(), which a lambda over a constant list would need; membership in it is refused."
     },
     "regex/matches/bounded-repetition": {
       "status": "unsupported",
@@ -264,18 +140,6 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset, and PCRE2's \\s also matches a vertical tab that RE2's does not."
-    },
-    "relation/all/negated-to-one-chain": {
-      "status": "unsupported",
-      "reason": "Same refusal as `relation/exists/negated-to-one-chain`: negating a collection macro would turn CEL errors into matches, and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent"
-    },
-    "relation/exists/negated-to-one-chain": {
-      "status": "unsupported",
-      "reason": "Negating a collection macro over nullable element members would turn CEL errors into matches, the same three-valued limitation as `collection/exists/negated` — and the chain adds an absent to-one parent, which a Mongo filter has no UNKNOWN to represent."
-    },
-    "relation/ternary/to-one-chain-condition": {
-      "status": "unsupported",
-      "reason": "A bare ternary is planned as $expr/$cond, and an aggregation expression has no membership form here: MongoDB's $in aggregation operator raises a runtime error when its array operand is missing, which is exactly the absent-to-one-parent case this case probes, so lowering it would fail the whole query rather than deny the row."
     },
     "size/equals/filtered-collection": {
       "status": "unsupported",

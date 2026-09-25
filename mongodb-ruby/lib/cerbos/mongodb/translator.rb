@@ -4,6 +4,7 @@ require_relative "aggregation"
 require_relative "errors"
 require_relative "guards"
 require_relative "hierarchy"
+require_relative "logic"
 require_relative "mapper"
 require_relative "operands"
 require_relative "plan"
@@ -136,12 +137,14 @@ module Cerbos
         when "or" then {"$or" => operands.map { |op| build(op, mapper, scope) }}
         when "not" then translate_not(operands, mapper, scope)
         when *Aggregation::COMPARISONS.keys then translate_comparison(operator, operands, mapper, scope)
-        when "in" then translate_in(operands, mapper, scope)
+        when "in" then with_logic_fallback(expression, mapper, scope, true) { translate_in(operands, mapper, scope) }
         when "matches" then translate_matches(operands, mapper, scope)
         when "contains", "startsWith", "endsWith" then translate_string_predicate(expression, mapper, scope)
         when "hasIntersection" then translate_has_intersection(operands, mapper, scope)
-        when "exists", "all" then translate_quantifier(operator, operands, mapper, scope)
-        when "exists_one" then translate_exists_one(operands, mapper, scope, negated: false)
+        when "exists", "all"
+          with_logic_fallback(expression, mapper, scope, true) { translate_quantifier(operator, operands, mapper, scope) }
+        when "exists_one"
+          with_logic_fallback(expression, mapper, scope, true) { translate_exists_one(operands, mapper, scope, negated: false) }
         when "filter"
           # filter() yields a list. In boolean position there is no meaning to pick: `filter(...)`
           # is not `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
@@ -156,7 +159,9 @@ module Cerbos
         when "if"
           raise UnsupportedError, "if aggregation expressions inside collection predicates are unsupported" if scope.collection?
 
-          Guards.with_evaluation({"$expr" => Aggregation.build_expression(expression, mapper)}, operands, mapper)
+          # A ternary evaluates only the branch its condition selects, and CEL's three-valued
+          # logic (Logic) says exactly which document that leaves an error.
+          {"$expr" => {"$eq" => [Logic.truth(expression, mapper), true]}}
         when "ancestorOf", "descendentOf", "overlaps" then Hierarchy.build(operator, operands, mapper)
         else
           raise UnsupportedError, "Unsupported operator: #{operator}"
@@ -224,7 +229,9 @@ module Cerbos
 
         if (expression?(operand) && %w[exists exists_one all].include?(operand.operator)) ||
             !nullable_guard_exact?(operand, mapper, scope)
-          raise UnsupportedError, "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+          return with_logic_fallback(operand, mapper, scope, false) {
+            raise UnsupportedError, "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
+          }
         end
 
         # with_evaluation ANDs its conjuncts OUTSIDE this $nor, which is where the absent-parent
@@ -234,6 +241,21 @@ module Cerbos
         guarded = Guards.with_evaluation({"$nor" => [build(operand, mapper, scope)]}, [operand], mapper)
         list_shape = Guards.list_shape_guard(operand, mapper, !scope.collection?)
         list_shape ? {"$and" => [list_shape, guarded]} : guarded
+      end
+
+      # The block's filter; where it refuses at the top level, the condition evaluated in CEL's
+      # three-valued logic (Logic) instead, kept where it is +polarity+. The block's refusal
+      # stands where Logic has no form for the condition either.
+      def with_logic_fallback(condition, mapper, scope, polarity)
+        yield
+      rescue UnsupportedError => refusal
+        raise refusal if scope.collection?
+
+        begin
+          {"$expr" => {"$eq" => [Logic.truth(condition, mapper), polarity]}}
+        rescue UnsupportedError
+          raise refusal
+        end
       end
 
       # `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all.

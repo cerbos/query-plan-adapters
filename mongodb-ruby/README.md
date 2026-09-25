@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 55 / 80 |
-| adversarial | 251 / 308 |
+| extended | 65 / 80 |
+| adversarial | 275 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -212,30 +212,39 @@ erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is exact-one cardinality beyond an element field compared with a scalar constant (over a relation it is a `$size` of a `$filter`; over a literal list of up to 32 elements, and not under a negation, it expands to "this one and no other"), aggregation expressions or outer-document references
-inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), `string()` over a ternary
-of integral constants of 1e6 or more whose int or double type the plan does not carry, `+` between two fields (nothing tells `$add` from `$concat`), negations over
-collection macros or over a nullable field CEL may not evaluate (a filter has no UNKNOWN), macros
-and `in` over a to-one relation (CEL iterates a map's keys), an empty hierarchy separator, regular
-expressions outside the common subset, and a comparison with a map constant or with a list holding
-a list, a map or NaN (MongoDB compares embedded documents in stored field order and NaN equal to
-NaN). `int()` truncates a number toward
+The refused set is `filter()`, `map()` and `except()` anywhere but as a `hasIntersection` or
+whole-list operand, macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
+over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
+carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of two
+date fields (a stored date has lost the string CEL compares), an empty hierarchy separator or a
+constructed hierarchy path, regular expressions outside the common subset, and a comparison with
+a map constant or with a list holding a list, a map or NaN (MongoDB compares embedded documents in
+stored field order and NaN equal to NaN).
+
+What a query filter cannot say is evaluated in CEL's three-valued logic inside `$expr`: every
+condition is true, false, or null for a CEL error, `&&`, `||`, `exists()`, `all()` and
+`exists_one()` fold errors as CEL does, and a condition is kept where it is true (a negated one
+where it is false), so an error denies under both polarities. That covers a macro whose body
+reads the enclosing document, holds arithmetic or a ternary, or nests a macro over the same
+collection, and a negation over a macro or over a nullable field CEL may not read. A ternary
+evaluates, and guards, only the branch its condition selects. `int()` truncates a number toward
 zero inside (-2^63, 2^63) and reads a string only as a whole signed base-10 int64; `double()` reads
 a number, or a string that is a decimal floating-point literal (Go also reads `Inf`, `NaN` and
 hexadecimal forms, which are denied here rather than guessed at). Arithmetic over a CEL int
 (`int()`, `size()`, `%`) is int64 arithmetic: overflow, division and `%` by zero are errors, and
-division truncates toward zero; an attribute beside an int has no overload and is denied. A
-ternary's branch guards apply only where the condition selects that branch. Other arithmetic is
-CEL's double arithmetic: each operand is converted with `$toDouble`, a division by zero gives IEEE 754's NaN or
-signed infinity where `$divide` would abort the query, and every comparison inside `$expr` answers
-NaN as CEL does (false, but true for `!=`) where MongoDB orders NaN below every number and equal to
-itself. A list constant is compared whole inside `$expr` with a field, a to-many relation's
-projection or a `map()` over one, element by element and in order, as CEL does.
+division truncates toward zero; an attribute beside an int has no overload and is denied. Other
+arithmetic is CEL's double arithmetic: each operand is converted with `$toDouble`, a division by
+zero gives IEEE 754's NaN or signed infinity where `$divide` would abort the query, and every
+comparison inside `$expr` answers NaN as CEL does (false, but true for `!=`) where MongoDB orders
+NaN below every number and equal to itself; an ordering between two types CEL cannot order is an
+error. A list constant is compared whole inside `$expr` with a field, a to-many relation's
+projection or a `map()` over one, element by element and in order, as CEL does, and exists_one()
+over a literal list of up to 32 elements expands to "this one and no other".
 
-It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/), and its ledger is the
-same but for one case: the driver sends a filter to the server untouched, so a comparison between
-two conditionals (`conditional/ternary/on-both-sides`) translates here, where Mongoose's `$expr`
-caster fails to build it.
+It started from the [Mongoose adapter](../mongoose/)'s MongoDB semantics, and its ledger is now a
+strict subset of Mongoose's: the three-valued evaluation, IEEE 754 division, CEL int arithmetic,
+`int()`/`double()`, whole-list comparisons and `exists_one()` above have no Mongoose counterpart
+yet.
 
 The harness uses the `nullable: true` mapper flag for the attributes whose NULL the corpus sends
 as a *missing* attribute (`aString`, `aNumber` and `aBool` among them, which seeds j1, j2 and j3
