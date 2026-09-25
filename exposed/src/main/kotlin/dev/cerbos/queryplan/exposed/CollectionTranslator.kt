@@ -55,6 +55,16 @@ internal class CollectionTranslator(private val translation: Translation) {
                 foldKnownValues(operator, collectionOperand.value, lambdaOperand, scope)
             }
         }
+        // A list the planner assembles with list(...) from constants alone (principal structs,
+        // say) folds exactly like one it ships as a value.
+        PlanValues.literalListElements(collectionOperand)?.let { elements ->
+            val asValue = Value.newBuilder()
+                .setListValue(com.google.protobuf.ListValue.newBuilder().addAllValues(elements))
+                .build()
+            return translation.walker.enterMacro(operator) {
+                foldKnownValues(operator, asValue, lambdaOperand, scope)
+            }
+        }
         if (collectionOperand.nodeCase != Operand.NodeCase.VARIABLE) {
             throw RelationRefusals.computedCollection(operator)
         }
@@ -240,7 +250,7 @@ internal class CollectionTranslator(private val translation: Translation) {
      * collection operand — otherwise the inner macro's own elements would be replaced by the outer
      * fold's.
      */
-    private fun substitute(operand: Operand, variable: String, element: Value): Operand =
+    fun substitute(operand: Operand, variable: String, element: Value): Operand =
         when (operand.nodeCase) {
             Operand.NodeCase.VARIABLE -> {
                 val name = operand.variable

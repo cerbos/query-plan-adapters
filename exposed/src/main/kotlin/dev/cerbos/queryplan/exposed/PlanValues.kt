@@ -45,6 +45,46 @@ internal object PlanValues {
             throw Refusals.malformed("Protobuf Value has no kind set: the planner emitted a malformed operand")
     }
 
+    /**
+     * A value [builtConstant] produced, back as the protobuf `Value` a plan would carry, or `null`
+     * when it has no such spelling (a map with a non-string key).
+     */
+    fun toValue(value: Any?): Value? {
+        return when (value) {
+            null -> Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE).build()
+            is String -> Value.newBuilder().setStringValue(value).build()
+            is Boolean -> Value.newBuilder().setBoolValue(value).build()
+            is Long -> Value.newBuilder().setNumberValue(value.toDouble()).build()
+            is Double -> Value.newBuilder().setNumberValue(value).build()
+            is List<*> -> {
+                val list = com.google.protobuf.ListValue.newBuilder()
+                for (element in value) list.addValues(toValue(element) ?: return null)
+                Value.newBuilder().setListValue(list).build()
+            }
+            is Map<*, *> -> {
+                val struct = com.google.protobuf.Struct.newBuilder()
+                for ((key, element) in value) {
+                    if (key !is String) return null
+                    struct.putFields(key, toValue(element) ?: return null)
+                }
+                Value.newBuilder().setStructValue(struct).build()
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * The elements of a literal list operand — a list value, or a `list(...)` built from constants
+     * alone — as protobuf values, or `null` when the operand is neither.
+     */
+    fun literalListElements(operand: PlanResourcesFilter.Expression.Operand): List<Value>? {
+        if (operand.nodeCase == PlanResourcesFilter.Expression.Operand.NodeCase.VALUE) {
+            return if (operand.value.kindCase == Value.KindCase.LIST_VALUE) operand.value.listValue.valuesList else null
+        }
+        val built = builtConstant(operand) as? List<*> ?: return null
+        return built.map { toValue(it) ?: return null }
+    }
+
     /** The marker [builtConstant] answers for an operand that is not built from constants alone. */
     object NotConstant
 

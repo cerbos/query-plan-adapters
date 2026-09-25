@@ -40,6 +40,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         if (member.nodeCase == Operand.NodeCase.VARIABLE && container.nodeCase == Operand.NodeCase.VARIABLE) {
             return attributeInAttribute(member.variable, container.variable, scope)
         }
+        mappedLiteralMembership(member, container, scope)?.let { return it }
         val constant = PlanValues.builtConstant(container)
         if (member.nodeCase != Operand.NodeCase.VARIABLE || constant === PlanValues.NotConstant) {
             throw RelationRefusals.membershipOperands("in")
@@ -59,6 +60,49 @@ internal class MembershipTranslator(private val translation: Translation) {
         return when (val resolved = scope.resolve(member.variable)) {
             is Resolution.Collection -> collectionContainsAny(resolved, values)
             is Resolution.Scalar -> scalarIsAnyOf(resolved, values)
+        }
+    }
+
+    /**
+     * `attribute in [literal list].map(t, expr)`: the membership in the projected list, as the
+     * disjunction `OR_i attribute == expr[t := L_i]` walked like any written-out comparison. That
+     * is exact under three-valued logic: the projection raises only where `expr` does, and then
+     * every equality over it is UNKNOWN too, so no disjunct can be TRUE; a missing attribute makes
+     * every disjunct UNKNOWN. `map()` itself absorbs nothing, which an OR of UNKNOWNs preserves.
+     * The empty list projects to `[]`, where [scalarIsAnyOf] owns the answer. `null` when the
+     * container is not that shape.
+     */
+    private fun mappedLiteralMembership(member: Operand, container: Operand, scope: Scope): Op<Boolean>? {
+        if (member.nodeCase != Operand.NodeCase.VARIABLE ||
+            container.nodeCase != Operand.NodeCase.EXPRESSION ||
+            container.expression.operator != "map" ||
+            container.expression.operandsCount != 2
+        ) {
+            return null
+        }
+        val elements = PlanValues.literalListElements(container.expression.getOperands(0)) ?: return null
+        val lambda = ParsedLambda.parse(
+            container.expression.getOperands(1),
+            "map second operand must be a lambda",
+            "map supports single-variable lambdas only",
+            "map lambda variable must be a variable operand",
+        )
+        return translation.walker.enterMacro("map") {
+            if (elements.isEmpty()) {
+                return@enterMacro scalarIsAnyOf(scope.scalar(member.variable), emptyList())
+            }
+            val disjunction = PlanResourcesFilter.Expression.newBuilder().setOperator("or")
+            elements.forEach { element ->
+                disjunction.addOperands(
+                    Operand.newBuilder().setExpression(
+                        PlanResourcesFilter.Expression.newBuilder()
+                            .setOperator("eq")
+                            .addOperands(member)
+                            .addOperands(translation.collections.substitute(lambda.body, lambda.variable, element)),
+                    ),
+                )
+            }
+            translation.walker.traverse(Operand.newBuilder().setExpression(disjunction).build(), scope)
         }
     }
 

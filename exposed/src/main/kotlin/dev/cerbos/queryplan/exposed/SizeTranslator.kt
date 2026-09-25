@@ -60,6 +60,7 @@ internal class SizeTranslator(private val translation: Translation) {
         return when (val target = SizeTarget.of(argument[0])) {
             is SizeTarget.Whole -> whole(target.variable, comparison, scope)
             is SizeTarget.Filtered -> filtered(target, comparison, scope)
+            is SizeTarget.FilteredLiteral -> filteredLiteral(target, comparison, scope)
         }
     }
 
@@ -177,6 +178,36 @@ internal class SizeTranslator(private val translation: Translation) {
         }
     }
 
+    /**
+     * `size([literal list].filter(x, body))`: one body per element POSITION, substituted and walked
+     * like the `exists`/`all` fold. The count is `Σ CASE WHEN b THEN 1 ELSE 0 END` plus a poison
+     * term per element that is SQL NULL when its body is UNKNOWN — `filter` has no error absorption,
+     * so one erroring element errors the size, and NULL is absorbing under `+`.
+     */
+    private fun filteredLiteral(target: SizeTarget.FilteredLiteral, comparison: Threshold, scope: Scope): Op<Boolean> =
+        translation.walker.enterMacro("size(filter(...))") {
+            val bodies = target.elements.map { element ->
+                translation.walker.traverse(
+                    translation.collections.substitute(target.lambda.body, target.lambda.variable, element),
+                    scope,
+                )
+            }
+            if (bodies.isEmpty()) {
+                // size([]) is 0: decided, whatever the comparison.
+                return@enterMacro compare(intLiteral(0), comparison)
+            }
+            val poison: Expression<Int> = bodies
+                .map { nullIfUndetermined(ScoreCase(it, 0, 0, 1)) as Expression<Int> }
+                .reduce { a, b -> PlusOp<Int, Int>(a, b, IntegerColumnType()) }
+            if (comparison.vacuous != null) {
+                return@enterMacro if (comparison.vacuous) EqOp(poison, intLiteral(0)) else NeqOp(poison, intLiteral(0))
+            }
+            val matched = bodies
+                .map { ScoreCase(it, 1, 0, 0) as Expression<Int> }
+                .reduce { a, b -> PlusOp<Int, Int>(a, b, IntegerColumnType()) }
+            compare(PlusOp<Int, Int>(matched, poison, IntegerColumnType()), comparison)
+        }
+
     private fun body(
         collection: Resolution.Collection,
         target: SizeTarget.Filtered,
@@ -214,6 +245,7 @@ internal class SizeTranslator(private val translation: Translation) {
     private sealed interface SizeTarget {
         class Whole(val variable: String) : SizeTarget
         class Filtered(val variable: String, val lambda: ParsedLambda) : SizeTarget
+        class FilteredLiteral(val elements: List<Value>, val lambda: ParsedLambda) : SizeTarget
 
         companion object {
             fun of(argument: Operand): SizeTarget {
@@ -234,8 +266,19 @@ internal class SizeTranslator(private val translation: Translation) {
                     throw Refusals.malformed("filter requires exactly 2 operands, got ${operands.size}")
                 }
                 if (operands[0].nodeCase != Operand.NodeCase.VARIABLE) {
-                    // filter() over a computed collection: legal CEL, no table to count over.
-                    throw RelationRefusals.computedCollection("filter")
+                    // filter() over a literal list folds per element; over a computed collection
+                    // it is legal CEL with no table to count over.
+                    val elements = PlanValues.literalListElements(operands[0])
+                        ?: throw RelationRefusals.computedCollection("filter")
+                    return FilteredLiteral(
+                        elements,
+                        ParsedLambda.parse(
+                            operands[1],
+                            "filter second operand must be a lambda",
+                            "filter supports single-variable lambdas only",
+                            "filter lambda variable must be a variable operand",
+                        ),
+                    )
                 }
                 return Filtered(
                     operands[0].variable,
