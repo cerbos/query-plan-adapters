@@ -54,7 +54,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 235 / 308 |
+| adversarial | 238 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -75,6 +75,8 @@ UNKNOWN, which denies under both polarities exactly as the error does:
 - `size()`, `contains`, `startsWith` or `endsWith` over a number or a boolean (a numeric or
   boolean column, a computed number or boolean, or a constant). CEL has no such overload, so
   the declared type decides the error, whatever the row holds.
+- A collection where a boolean belongs: `filter()`, `map()` or a mapped association as a
+  condition, a conjunct or the operand of `!`. CEL's logical operators take only a boolean.
 
 The refusals fall into a few mechanisms:
 
@@ -88,7 +90,7 @@ The refusals fall into a few mechanisms:
 | `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a double column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. CEL truncates a double toward zero, and PostgreSQL and MySQL round a `CAST`. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
-| `filter()` or `map()` where a boolean belongs; a whole collection compared with `==` | Only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning, and a correlated subquery has no ordered list to compare element by element. |
+| A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |
 | A list or map as a list element, a struct built in the policy, a list difference, `filter`/`map` over a list of constants, a map's keys | None has a scalar SQL form. |
 | Two raw temporal columns, or two columns under mixed NULL conventions | CEL compares RFC-3339 spellings without `timestamp()`; a mixed pair needs both a definite and an UNKNOWN answer for NULL. |
 

@@ -727,15 +727,6 @@ RSpec.describe Cerbos::Sequel do
       }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /Unsupported operator: matches/)
     end
 
-    it "raises for a collection used as a condition" do
-      expect {
-        translate(conditional(expression("filter",
-          variable("request.resource.attr.tags"),
-          expression("lambda",
-            expression("eq", variable("t.name"), value("public")), variable("t")))))
-      }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /not to a boolean/)
-    end
-
     it "raises for a sub-microsecond timestamp literal" do
       # The planner makes nanoseconds for now(). Sequel would remove the last digits of
       # that value, and thus it would change the instant in the comparison.

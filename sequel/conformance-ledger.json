@@ -117,14 +117,6 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as collection/exists/map-keys, under negation."
     },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() yields a list, not a boolean; a filtered association cannot be used as a condition, even as one conjunct."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() yields a list, not a boolean; a filtered association cannot be used as a condition."
-    },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
       "reason": "Positional access into a list of booleans, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aBoolList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aBoolList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers"
@@ -168,10 +160,6 @@
     "collection/index/negative-position": {
       "status": "unsupported",
       "reason": "Relational associations do not expose CEL positional scalar-list indexing; the adapter refuses index before building a query."
-    },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() yields a list, not a boolean; a projected association cannot be used as a condition."
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
