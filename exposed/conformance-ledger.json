@@ -93,14 +93,6 @@
       "status": "unsupported",
       "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
     },
-    "cast/string/negated-from-boolean-expression": {
-      "status": "unsupported",
-      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
-    },
-    "cast/string/negated-from-boolean-ternary": {
-      "status": "unsupported",
-      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
-    },
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."

@@ -559,11 +559,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 72 / 80 |
-| adversarial | 261 / 308 |
+| adversarial | 263 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-48 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+46 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -577,9 +577,12 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   `hasIntersection()`, and whole-list equality against a relation;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
   where CEL requires the whole string, and rounds where CEL truncates;
-- `string()` over a computed value (a conversion, a ternary, a comparison) rather than a mapped
+- `string()` over a computed number (a conversion, a ternary of numbers) rather than a mapped
   column, and over a floating-point column compared with `"0"` or `"-0"`: SQL `CAST` prints numbers
-  and booleans differently from CEL, and cannot read the sign of a stored `-0.0`;
+  differently from CEL, and cannot read the sign of a stored `-0.0`. `string()` of a
+  boolean-valued expression (a comparison, a connective, a ternary of booleans) compared with a
+  literal translates: CEL prints exactly `true` or `false`, so it is the condition or its
+  negation;
 - a division whose divisor is a floating-point column or computed arithmetic: its zero may be
   `-0.0`, which CEL divides into the opposite infinity, and SQL compares `-0.0` equal to `0.0`;
 - a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has

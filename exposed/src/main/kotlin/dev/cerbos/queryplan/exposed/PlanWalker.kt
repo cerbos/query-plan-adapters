@@ -2,6 +2,8 @@ package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import org.jetbrains.exposed.v1.core.Op
 
 /**
@@ -60,6 +62,7 @@ internal class PlanWalker(private val translation: Translation) {
             "overlaps", "ancestorOf", "descendentOf" -> translation.hierarchy.translate(operator, operands, scope)
             "matches" -> matches(operands, scope)
             else -> matchesComparedWithBoolean(operator, operands, scope)
+                ?: textOfConditionCompared(operator, operands, scope)
                 ?: translation.comparisons.translate(operator, operands, scope)
         }
     }
@@ -99,6 +102,54 @@ internal class PlanWalker(private val translation: Translation) {
         return if (expected == (operator == "eq")) translated else TriLogic.not(translated)
     }
 
+    /**
+     * `string(condition) ==/!= "literal"`, where the argument is a boolean-VALUED expression — a
+     * comparison, a connective, a macro, or a ternary whose arms are all boolean — rather than a
+     * mapped column. CEL prints a boolean as exactly `true` or `false`, so the comparison is the
+     * condition itself, its negation, or (any other literal) FALSE; the condition's own UNKNOWN,
+     * CEL's error, carries through each: `"true"` is `c`, `"false"` is `NOT c`, and anything else
+     * is FALSE made UNKNOWN by `NOT (c OR NOT c)`. `null` when the node is not that shape.
+     */
+    private fun textOfConditionCompared(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
+        val cast = operands.firstOrNull {
+            it.nodeCase == Operand.NodeCase.EXPRESSION && it.expression.operator == "string" &&
+                it.expression.operandsCount == 1 && isBooleanValued(it.expression.getOperands(0), scope)
+        } ?: return null
+        val other = operands.first { it !== cast }
+        if (other.nodeCase != Operand.NodeCase.VALUE) return null
+        val text = PlanValues.toKotlin(other.value) as? String ?: return null
+        val condition = traverse(cast.expression.getOperands(0), scope)
+        val equal = when (text) {
+            "true" -> condition
+            "false" -> TriLogic.not(condition)
+            else -> TriLogic.baseUnlessUnknown(Op.FALSE, TriLogic.not(TriLogic.determined(condition)))
+        }
+        return if (operator == "eq") equal else TriLogic.not(equal)
+    }
+
+    /**
+     * Whether [operand] certainly evaluates to a CEL bool (or raises): an operator that only
+     * yields a bool, a boolean constant, a boolean column, or a ternary whose arms all are.
+     */
+    private fun isBooleanValued(operand: Operand, scope: Scope): Boolean = when (operand.nodeCase) {
+        Operand.NodeCase.VALUE -> operand.value.kindCase == com.google.protobuf.Value.KindCase.BOOL_VALUE
+        Operand.NodeCase.VARIABLE -> (scope.resolve(operand.variable) as? Resolution.Scalar)?.let {
+            ScalarColumnTypes.kindOf(it.column) == ScalarColumnKind.BOOLEAN
+        } == true
+        Operand.NodeCase.EXPRESSION -> {
+            val expression = operand.expression
+            when (expression.operator) {
+                in BOOLEAN_OPERATORS -> true
+                "if" -> expression.operandsCount == 3 &&
+                    isBooleanValued(expression.getOperands(1), scope) &&
+                    isBooleanValued(expression.getOperands(2), scope)
+                else -> false
+            }
+        }
+        else -> false
+    }
+
     private fun junction(operator: String, operands: List<Operand>, scope: Scope): List<Op<Boolean>> {
         if (operands.isEmpty()) throw Refusals.malformed("$operator requires at least 1 operand")
         return operands.map { traverse(it, scope) }
@@ -122,5 +173,14 @@ internal class PlanWalker(private val translation: Translation) {
         } finally {
             macroDepth--
         }
+    }
+
+    private companion object {
+        /** Operators whose CEL result is always a bool (or an error). */
+        val BOOLEAN_OPERATORS = setOf(
+            "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "in", "hasIntersection",
+            "has_intersection", "contains", "startsWith", "endsWith", "matches", "exists", "all",
+            "exists_one", "overlaps", "ancestorOf", "descendentOf",
+        )
     }
 }
