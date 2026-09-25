@@ -1,0 +1,73 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "b1",
+    "b6",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/map-keys",
+  "intent": "exists() over a map-valued attribute, which ranges over its keys (parent.exists(k, k == \"inner\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "k"
+                      },
+                      {
+                        "value": "inner"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "k"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/map-keys",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.exists(k, k == \"inner\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A CEL macro over a map iterates its keys, so every row whose parent has a parent of its own is allowed; reading a map as no collection under-grants them, and a row with no parent is a missing attribute that denies."
+}

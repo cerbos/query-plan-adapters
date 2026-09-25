@@ -1,0 +1,70 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b1",
+    "b4",
+    "b5",
+    "b6",
+    "c2",
+    "e1",
+    "h6",
+    "h7",
+    "i7",
+    "j2",
+    "j3"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/negated-astral-string-against-high-bmp",
+  "intent": "!(aString < \"héllo�\"): the code point ordering under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "héllo�"
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/negated-astral-string-against-high-bmp",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.aString < \"héllo�\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL allows a6, whose U+1F680 sorts after U+FFFD by code point; comparing UTF-16 code units makes the ordering true for a6 and the negation under-grants it, and a missing aString (j1) stays denied."
+}

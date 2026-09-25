@@ -115,6 +115,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / 2.0 >= 1.5'
+- id: 'arithmetic/divide/int-truncates'
+  tier: adversarial
+  intent: 'Int division of an int() conversion by an int literal (int(aNumber) / 2 == 1).'
+  trap: 'CEL int division truncates, so int(3) / 2 is 1 and a6 is allowed with a3 and a8; dividing as doubles gives 1.5 and drops a6.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) / 2 == 1'
+- id: 'arithmetic/divide/int-truncates-toward-zero'
+  tier: adversarial
+  intent: 'Int division of a negative int() conversion (int(aNumber) / 2 == -2).'
+  trap: 'CEL int division truncates toward zero, so int(-5) / 2 is -2 and a5 is allowed with b3; double division gives -2.5 and floor division -3, and both drop a5.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) / 2 == -2'
+- id: 'arithmetic/divide/negated-int-truncates'
+  tier: adversarial
+  intent: 'Negated int division (!(int(aNumber) / 2 == 1)).'
+  trap: 'Dividing as doubles makes int(3) / 2 equal 1.5, so the negation over-grants a6, which CEL denies; a missing aNumber (j2) stays denied.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) / 2 == 1)'
 - id: 'arithmetic/divide/negated-self-division-equals'
   tier: adversarial
   intent: 'Negated equality !(aNumber / aNumber == 1.0), where the zero row yields NaN.'

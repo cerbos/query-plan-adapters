@@ -1,0 +1,79 @@
+{
+  "allowed": [
+    "a3",
+    "a7",
+    "a9",
+    "b2",
+    "c1",
+    "d1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/negated-map-keys",
+  "intent": "Negated exists() over a map-valued attribute's keys (!parent.exists(k, k == \"inner\")).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "k"
+                            },
+                            {
+                              "value": "inner"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "variable": "k"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/negated-map-keys",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.parent.exists(k, k == \"inner\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL allows each row whose parent has no parent of its own; reading a map as no collection is an error that denies them under both polarities, and a row with no parent stays denied."
+}
