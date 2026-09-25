@@ -153,6 +153,10 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a comparison inside string() is itself a computed operand, which the Query DSL cannot compare against a literal"
     },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a ternary inside string() is itself a computed operand, which the Query DSL cannot compare against a literal"
+    },
     "cast/string/negated-from-boolean-through-relation": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double, reached through a field of the to-one parent"

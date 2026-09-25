@@ -33,6 +33,10 @@
       "status": "unsupported",
       "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A boolean-valued comparison is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the comparison renders 1/0 on SQLite and MySQL, where CEL says \"true\"."
     },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A ternary is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the CASE renders a boolean arm as 1/0 on SQLite and MySQL, where CEL says \"true\"."
+    },
     "cast/string/negated-from-boolean-through-relation": {
       "status": "unsupported",
       "reason": "The to-one parent is a relation, which this adapter reads only as a relation filter (an EXISTS over the related row), never as a scalar value expression, so string() over parent.aBool has no operand to convert."

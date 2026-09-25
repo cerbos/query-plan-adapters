@@ -57,6 +57,10 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a boolean-valued comparison has no column to solve for."
     },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a ternary has no column to solve for."
+    },
     "cast/string/negated-from-boolean-through-relation": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, and string(column) == literal is solved for the column only on a root field, not on a field reached through a relation filter such as the to-one parent."

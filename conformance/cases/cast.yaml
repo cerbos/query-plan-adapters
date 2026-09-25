@@ -87,6 +87,13 @@ cases:
   condition:
     match:
       expr: '!(string(R.attr.parent.aBool) == "true")'
+- id: 'cast/string/negated-from-boolean-ternary'
+  tier: adversarial
+  intent: '!(string(aNumber > 3 ? aBool : false) == "true"): string() over a ternary whose arms are both boolean, under negation.'
+  trap: 'The ternary is boolean-valued, so CEL renders "true"/"false"; a plain CAST of a SQL CASE yields "1"/"0" on SQLite and MySQL, which never equals "true" and over-grants every row with aNumber > 3 and aBool true. A missing aNumber (j2), or a missing aBool on the taken arm, must still deny.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aNumber > 3 ? R.attr.aBool : false) == "true")'
 - id: 'cast/string/from-double'
   tier: extended
   intent: 'string() over a double attribute compared with a literal (string(aDouble) == "-0.6").'

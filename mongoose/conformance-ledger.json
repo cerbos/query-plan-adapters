@@ -77,6 +77,10 @@
       "status": "unsupported",
       "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, so the adapter refuses the cast rather than lower it."
     },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "The negation is a $nor whose missing-attribute guard sits outside it, and the ternary reads aBool only when aNumber > 3: a guard on aBool would deny rows CEL allows through the false arm, and no guard would let a missing aBool on the taken arm through, so the negation is refused."
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Same top-level-only $expr restriction as `collection/exists/nested-over-same-collection`, reached through all(): the inner $elemMatch cannot compare its element's id and name with the enclosing element's"

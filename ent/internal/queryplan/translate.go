@@ -1194,7 +1194,11 @@ func castValue(v value) (value, error) {
 //   - a column declared ValueBool and read through a to-one hop, which is a scalar subquery
 //     projecting it (cast/string/negated-from-boolean-through-relation);
 //   - a predicate node, the lowering of a boolean-valued expression such as
-//     `string(R.attr.n > 3)` (cast/string/negated-from-boolean-expression).
+//     `string(R.attr.n > 3)` (cast/string/negated-from-boolean-expression);
+//   - a Case whose every arm is one of these or a boolean constant, the lowering of a ternary
+//     with boolean arms such as `string(R.attr.n > 3 ? R.attr.flag : false)`
+//     (cast/string/negated-from-boolean-ternary). A Case with no ELSE is still boolean: its
+//     missing ELSE is SQL NULL, which boolText keeps NULL (#538).
 //
 // Nothing in the plan names an attribute's type, so an undeclared column is not known to be
 // boolean, through a hop or not, and keeps the plain CAST: declaring ValueBool is what tells the
@@ -1209,10 +1213,27 @@ func boolOperand(e Expr) bool {
 		}
 		c, ok := t.Select.(Column)
 		return t.Kind == SubqueryScalar && ok && c.Type == ValueBool
+	case Case:
+		for _, w := range t.Whens {
+			if !boolArm(w.Then) {
+				return false
+			}
+		}
+		return t.Else == nil || boolArm(t.Else)
 	case Cmp, Logic, Not, IsNull, TruthTest, Like, NotDistinct, InList, BoolConst:
 		return true
 	}
 	return false
+}
+
+// boolArm reports whether one arm of a Case is boolean-valued: a boolOperand, or a boolean
+// constant such as the `false` of `n > 3 ? flag : false`, which reaches the Case as a literal.
+func boolArm(e Expr) bool {
+	if l, ok := e.(Lit); ok {
+		_, isBool := l.V.(bool)
+		return isBool
+	}
+	return boolOperand(e)
 }
 
 // boolText spells a boolean operand the way CEL's string() does:
