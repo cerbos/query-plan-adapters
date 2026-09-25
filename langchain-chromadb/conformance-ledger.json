@@ -23,11 +23,11 @@
     },
     "arithmetic/add/self-division-plus-constant-greater-than": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`, with addition composed on the division"
+      "reason": "Same missing computed operand as `arithmetic/divide/self-division-greater-than`, with addition composed on the division"
     },
     "arithmetic/add/self-division-plus-constant-not-equals": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/add/self-division-plus-constant-greater-than`, reached through an inequality"
+      "reason": "Same missing computed operand as `arithmetic/add/self-division-plus-constant-greater-than`, reached through an inequality"
     },
     "arithmetic/add/value-first": {
       "status": "unsupported",
@@ -35,7 +35,7 @@
     },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`, with a second metadata key as the denominator — Chroma has neither arithmetic nor a field-to-field operand"
+      "reason": "Same missing computed operand as `arithmetic/divide/self-division-greater-than`, with a second metadata key as the denominator — Chroma has neither arithmetic nor a field-to-field operand"
     },
     "arithmetic/divide/fractional-quotient": {
       "status": "unsupported",
@@ -47,11 +47,11 @@
     },
     "arithmetic/divide/negated-self-division-equals": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than` under a negated equality"
+      "reason": "Same missing computed operand as `arithmetic/divide/self-division-greater-than` under a negated equality"
     },
     "arithmetic/divide/negative-zero-divisor": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`: Chroma compares a stored field against a literal only, so a division operand cannot be translated whatever its denominator"
+      "reason": "Same missing computed operand as `arithmetic/divide/self-division-greater-than`: Chroma compares a stored field against a literal only, so a division operand cannot be translated whatever its denominator"
     },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
@@ -63,7 +63,7 @@
     },
     "arithmetic/divide/self-division-not-equals": {
       "status": "unsupported",
-      "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`: the arithmetic operand cannot be translated at all, whatever the enclosing comparison"
+      "reason": "Same missing computed operand as `arithmetic/divide/self-division-greater-than`: the arithmetic operand cannot be translated at all, whatever the enclosing comparison"
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -155,7 +155,7 @@
     },
     "collection/all/empty-collection": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
@@ -163,7 +163,7 @@
     },
     "collection/all/nested-three-levels-middle": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
@@ -179,23 +179,23 @@
     },
     "collection/exists-one/several-matches": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/arithmetic-on-outer-attribute": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/element-contains-outer-attribute": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/element-field-to-element-field": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/element-field-to-outer-field": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/element-in-literal-list": {
       "status": "unsupported",
@@ -203,11 +203,11 @@
     },
     "collection/exists/element-in-principal-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/empty-collection": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/negated": {
       "status": "unsupported",
@@ -215,7 +215,7 @@
     },
     "collection/exists/negated-element-in-literal-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no equivalent scalar metadata predicate."
+      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no `$not`, and the macro has no Where form to invert."
     },
     "collection/exists/negated-empty-collection": {
       "status": "unsupported",
@@ -231,31 +231,31 @@
     },
     "collection/exists/nested-collection-size": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "collection/exists/nested-over-same-collection": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so a collection macro — let alone one nested inside another — has no Where form"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so a collection macro — let alone one nested inside another — has no Where form"
     },
     "collection/exists/nested-three-levels": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/nested-with-outer-attribute": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/exists/outer-collection-inside-lambda": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "collection/exists/scalar-list-equals": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare scalar fields with literals; the projection collection lambda is a nested expression with no collection-query representation."
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475)."
     },
     "collection/exists/scalar-list-negated-body": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare scalar fields with literals; the projection collection lambda is a nested expression with no collection-query representation."
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475)."
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -271,11 +271,11 @@
     },
     "collection/has-intersection/mapped-names-with-metacharacters": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "collection/has-intersection/value-first": {
       "status": "unsupported",
-      "reason": "hasIntersection is not in the adapter's operator set: Chroma metadata values are scalars, so there is no list-valued field for a set intersection to test, and mirroring the operands does not change that"
+      "reason": "hasIntersection is not in the adapter's operator set: Chroma has no list-intersection operator, only per-element `$contains`, which the adapter does not translate (#475) because Chroma stores an empty list as an absent key and rejects null elements and mixed types. Mirroring the operands does not change that"
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -283,7 +283,7 @@
     },
     "collection/index/first-element-of-number-list": {
       "status": "unsupported",
-      "reason": "Chroma's Where grammar has no positional element access. The pinned server stores a homogeneous list as metadata but filters it only by position-blind membership ($contains matches [3, 2] as readily as [2]), and rejects the empty lists and null elements these seeds carry. The index() node is a computed operand where the comparison walk expects a bare metadata key, so it is refused as a nested expression before the element's JSON type could matter"
+      "reason": "Chroma's Where grammar has no positional element access. The pinned server stores a homogeneous list as metadata but filters it only by position-blind membership ($contains matches [3, 2] as readily as [2]), stores an empty list as an absent key, and rejects the null elements these seeds carry. The index() node is a computed operand where the comparison walk expects a bare metadata key, so it is refused as a nested expression before the element's JSON type could matter"
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
@@ -291,11 +291,11 @@
     },
     "collection/index/first-element-of-string-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+      "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a string list: `$eq` on a list key and a dotted `key.N` both match nothing, and the index() node is refused as a nested expression before its comparison is examined"
     },
     "collection/index/first-element-of-string-list-equals-null": {
       "status": "unsupported",
-      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+      "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a string list: `$eq` on a list key and a dotted `key.N` both match nothing, and the index() node is refused as a nested expression before its comparison is examined"
     },
     "collection/index/fractional-position": {
       "status": "unsupported",
@@ -311,7 +311,7 @@
     },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata values are scalars, so there is no list to index, and the index() node is a nested expression in an operand position either way"
+      "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a string list: `$eq` on a list key and a dotted `key.N` both match nothing, and the index() node is refused as a nested expression before its comparison is examined"
     },
     "collection/index/negated-out-of-bounds": {
       "status": "unsupported",
@@ -403,11 +403,11 @@
     },
     "conditional/ternary/inside-all": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "conditional/ternary/inside-exists": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "conditional/ternary/missing-attribute-condition": {
       "status": "unsupported",
@@ -527,7 +527,7 @@
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "logic/not/over-and": {
       "status": "unsupported",
@@ -543,7 +543,7 @@
     },
     "logic/or/comparison-or-in-resource-list": {
       "status": "unsupported",
-      "reason": "The membership spelling of `logic/or/comparison-or-exists`. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and Chroma metadata values are scalars anyway, so the right branch is refused before the disjunction is built"
+      "reason": "The membership spelling of `logic/or/comparison-or-exists`. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them. So the right branch is refused before the disjunction is built"
     },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
@@ -551,7 +551,7 @@
     },
     "membership/in/literal-in-resource-number-list": {
       "status": "unsupported",
-      "reason": "Value-first membership in a list-valued attribute. The adapter models metadata as scalars and refuses `literal in field` when mirroring it, because Chroma's $in tests a field against a literal list, not the reverse. The pinned stack's list metadata and its $contains cannot stand in for it here: it rejects an empty list and a null element outright, and these seeds carry both (a2 [], a6 [null, 2]), so the list cannot be stored as the PDP sees it"
+      "reason": "Value-first membership in a list-valued attribute. The adapter refuses `literal in field` when mirroring it, because Chroma's $in tests a field against a literal list, not the reverse. The pinned stack's list metadata and its $contains cannot stand in for it here: it stores an empty list as an absent key and rejects a null element outright, and these seeds carry both (a2 [], a6 [null, 2]), so the list cannot be stored as the PDP sees it"
     },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
@@ -567,7 +567,7 @@
     },
     "null/all/null-element-with-true-sibling": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "null/equals/field-to-field-both-explicit-null": {
       "status": "unsupported",
@@ -599,7 +599,7 @@
     },
     "null/has-intersection/literal-list-with-null-element": {
       "status": "unsupported",
-      "reason": "Chroma metadata values are scalars with no list-intersection operator, so hasIntersection has no Where equivalent"
+      "reason": "hasIntersection is not in the adapter's operator set: Chroma has no list-intersection operator, only per-element `$contains`, which the adapter does not translate (#475), and the null element in the literal list has no Chroma form: a null list element is rejected"
     },
     "null/has-intersection/literal-list-with-null-element-against-mapped-names": {
       "status": "unsupported",
@@ -619,7 +619,7 @@
     },
     "null/in/literal-list-with-null-element": {
       "status": "unsupported",
-      "reason": "Chroma metadata values are non-null scalars, so a membership list containing null cannot be represented and the adapter refuses to silently drop the null element"
+      "reason": "Chroma metadata has no null — a null value or list element is rejected — so a membership list containing null cannot be represented and the adapter refuses to silently drop the null element"
     },
     "null/in/missing-attribute-in-resource-list": {
       "status": "unsupported",
@@ -647,7 +647,7 @@
     },
     "null/in/negated-null-literal-in-resource-list": {
       "status": "unsupported",
-      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+      "reason": "Chroma's $in tests a metadata field against a literal list, not whether a literal is a member of a list-valued metadata field. `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them"
     },
     "null/in/null-literal-in-number-list": {
       "status": "unsupported",
@@ -655,7 +655,7 @@
     },
     "null/in/null-literal-in-resource-list": {
       "status": "unsupported",
-      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+      "reason": "Chroma's $in tests a metadata field against a literal list, not whether a literal is a member of a list-valued metadata field. `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them"
     },
     "null/not-equals/explicit-null-against-literal": {
       "status": "unsupported",
@@ -683,7 +683,7 @@
     },
     "principal/all/negated-long-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters cannot negate the retained all expression; there is no equivalent scalar metadata predicate."
+      "reason": "Chroma metadata filters cannot negate the retained all expression; there is no `$not`, and the macro has no Where form to invert."
     },
     "principal/all/short-list": {
       "status": "unsupported",
@@ -715,7 +715,7 @@
     },
     "principal/exists/negated-long-list": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no equivalent scalar metadata predicate."
+      "reason": "Chroma metadata filters cannot negate the retained exists expression; there is no `$not`, and the macro has no Where form to invert."
     },
     "principal/exists/shadowed-lambda-variable": {
       "status": "unsupported",
@@ -823,7 +823,7 @@
     },
     "relation/all/to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so the chained collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the chained collection lambda cannot be translated"
     },
     "relation/and/negated-conjunction-short-circuits-absent-parent": {
       "status": "unsupported",
@@ -843,7 +843,7 @@
     },
     "relation/contains/one-hop": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators — there is no substring operator — so contains has no faithful Where equivalent, through a chain key exactly as at the root"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so contains has no faithful Where equivalent, through a chain key exactly as at the root"
     },
     "relation/equals/negated-one-hop": {
       "status": "unsupported",
@@ -855,11 +855,11 @@
     },
     "relation/exists/to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated"
     },
     "relation/has-intersection/negated-empty-list-on-to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters cannot negate the retained hasIntersection expression; there is no equivalent scalar metadata predicate."
+      "reason": "Chroma metadata filters cannot negate the retained hasIntersection expression; there is no `$not`, and the macro has no Where form to invert."
     },
     "relation/has-intersection/negated-to-one-chain": {
       "status": "unsupported",
@@ -871,7 +871,7 @@
     },
     "relation/in/to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma's $in tests a metadata field against a literal list; it cannot test whether a literal is a member of a list-valued metadata field, and Chroma metadata values are scalars anyway"
+      "reason": "Chroma's $in tests a metadata field against a literal list, not whether a literal is a member of a list-valued metadata field. `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them"
     },
     "relation/not-equals/one-hop-null-literal": {
       "status": "unsupported",
@@ -891,7 +891,7 @@
     },
     "relation/size/non-empty-to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "relation/size/non-negative-to-one-chain": {
       "status": "unsupported",
@@ -899,7 +899,7 @@
     },
     "relation/size/zero-to-one-chain": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "relation/starts-with/two-hops": {
       "status": "unsupported",
@@ -911,11 +911,11 @@
     },
     "size/equals/filtered-collection": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "size/equals/negated-collection-zero": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "size/equals/negated-fractional-threshold-on-missing-attribute": {
       "status": "unsupported",
@@ -927,7 +927,7 @@
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "size/greater-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
@@ -935,7 +935,7 @@
     },
     "size/greater-than/collection-above-one": {
       "status": "unsupported",
-      "reason": "Chroma metadata is a flat scalar map with no relation model and no count function, so a size(...) collection-count operand cannot be translated"
+      "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated"
     },
     "size/greater-than/huge-threshold": {
       "status": "unsupported",
@@ -999,7 +999,7 @@
     },
     "string/contains/case-sensitive": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no substring operator — so the case-sensitivity this action probes is never reached: the operator is refused first, exactly as for `string/contains/underscore-in-needle`"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so the case-sensitivity this action probes is never reached: the operator is refused first, exactly as for `string/contains/underscore-in-needle`"
     },
     "string/contains/field-to-field": {
       "status": "unsupported",
@@ -1043,7 +1043,7 @@
     },
     "string/starts-with/bracket-in-needle": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so startsWith has no faithful Where equivalent and the adapter rejects it"
     },
     "string/starts-with/case-sensitive": {
       "status": "unsupported",
@@ -1051,7 +1051,7 @@
     },
     "string/starts-with/concatenated-literal-needle": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so startsWith has no faithful Where equivalent and the adapter rejects it"
     },
     "string/starts-with/field-to-field": {
       "status": "unsupported",
@@ -1063,15 +1063,15 @@
     },
     "string/starts-with/percent-in-needle": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so startsWith has no faithful Where equivalent and the adapter rejects it"
     },
     "string/starts-with/value-first": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so startsWith has no faithful Where equivalent and the adapter rejects it"
     },
     "string/starts-with/value-first-concatenated-literal": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters expose only scalar comparison and membership operators ($eq/$ne/$lt/$lte/$gt/$gte/$in/$nin) — there is no prefix, substring, or pattern operator — so startsWith has no faithful Where equivalent and the adapter rejects it"
+      "reason": "Chroma metadata filters have no prefix, substring or pattern operator on a string value (`$contains` tests list membership, not a substring), so startsWith has no faithful Where equivalent and the adapter rejects it"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
@@ -1159,7 +1159,7 @@
     },
     "type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list": {
       "status": "unsupported",
-      "reason": "hasIntersection is not in the adapter's operator set: metadata is modelled as scalars, and the pinned stack's list metadata rejects the empty lists and null elements these seeds carry, so there is no stored list for an intersection to test. The walk refuses the operator before the mixed literal list [\"2\", 3] is examined"
+      "reason": "hasIntersection is not in the adapter's operator set: the pinned stack stores an empty list as an absent key and rejects the null elements these seeds carry, so their lists cannot be stored as the PDP sees them. The walk refuses the operator before the mixed literal list [\"2\", 3] is examined"
     },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
@@ -1175,7 +1175,7 @@
     },
     "type-mismatch/in/string-literal-in-resource-boolean-list": {
       "status": "unsupported",
-      "reason": "The boolean mirror of `type-mismatch/in/string-literal-in-resource-number-list`: value-first membership refused when mirroring the operands, taking the aNumber == 5 disjunct with it. The pinned server's $contains does not match \"true\" against a stored [true], but rejects a4's [null, true] and the empty lists"
+      "reason": "The boolean mirror of `type-mismatch/in/string-literal-in-resource-number-list`: value-first membership refused when mirroring the operands, taking the aNumber == 5 disjunct with it. The pinned server's $contains does not match \"true\" against a stored [true], but rejects a4's [null, true] and stores the empty lists as absent keys"
     },
     "type-mismatch/in/string-literal-in-resource-number-list": {
       "status": "unsupported",
