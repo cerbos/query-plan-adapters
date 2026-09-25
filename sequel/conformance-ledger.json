@@ -29,10 +29,6 @@
       "status": "unsupported",
       "reason": "SQL floating-point casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe."
     },
-    "cast/int/double-truncation-bounds": {
-      "status": "unsupported",
-      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused."
-    },
     "cast/int/malformed-string": {
       "status": "unsupported",
       "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused."
@@ -40,10 +36,6 @@
     "cast/int/negated-malformed-string": {
       "status": "unsupported",
       "reason": "SQL numeric casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe."
-    },
-    "cast/int/negative-fraction": {
-      "status": "unsupported",
-      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused."
     },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
@@ -53,10 +45,6 @@
       "status": "unsupported",
       "reason": "string() wraps int() over a string column, which is refused: CEL reads the whole string or errors, but a SQL CAST reads the leading digits and gives a number."
     },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "string() wraps int() over a double column, which is refused: CEL truncates toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number."
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "string() over a ternary of whole-number constants is refused: the plan carries 1000000 and 1000000.0 as the same number, and CEL spells the int \"1000000\" and the double \"1e+06\", so SQL cannot know which text to produce."
@@ -64,14 +52,6 @@
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused"
-    },
-    "cast/string/from-ternary-with-int-branch": {
-      "status": "unsupported",
-      "reason": "The int() arm reads a double column, which is refused: CEL truncates toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number."
-    },
-    "cast/string/negated-from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refused int() over a double column as cast/string/from-int-past-exponent-threshold, under negation."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",

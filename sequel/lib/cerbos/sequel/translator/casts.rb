@@ -30,13 +30,14 @@ module Cerbos
           type = column_type(value)
           return record_cel_type(value, :int) if INTEGER_COLUMN_TYPES.include?(type)
 
+          return int_of_double(value) if type == :float
+
           if NUMERIC_COLUMN_TYPES.include?(type)
             raise UnsupportedOperatorError,
-              "int() applied to a double column is not portable: CEL removes the fraction " \
-              "toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number " \
-              "instead, so the two disagree for every value with a fraction of one half or " \
-              "more. Give an operator override that removes the fraction the way your database " \
-              "does it."
+              "int() applied to a #{type.inspect} column: the attribute CEL truncates is the " \
+              "double nearest the stored exact value, which can truncate to a different whole " \
+              "number than the exact value does. Map a double column, or give an operator " \
+              "override."
           end
 
           raise UnsupportedOperatorError,
@@ -44,6 +45,22 @@ module Cerbos
             "string or makes an error, and Cerbos then denies the row, but SQL reads the digits " \
             "at the front and gives a number, so the filter would keep the row. Compare the " \
             "column directly, or give an operator override."
+        end
+
+        # CEL's int() of a double truncates toward zero, and raises when the double is NaN, an
+        # Infinity, or outside (-2^63, 2^63) — cel-go's `doubleToInt64Checked` rejects both
+        # bounds themselves. The CASE keeps exactly that range and is NULL (the error, UNKNOWN)
+        # outside it; a NaN, which only PostgreSQL stores and orders above every number, fails
+        # the upper bound. The bounds are compared as doubles: 2^63 is exact in binary64.
+        # Only a double column: a decimal's attribute is the double nearest it, which can
+        # truncate to a different whole number than the exact decimal does.
+        def int_of_double(value)
+          bound = cast(2.0**63, dialect.double_type)
+          lower = cast(-(2.0**63), dialect.double_type)
+          in_range = SqlSupport.and_node([
+            SqlSupport.comparison("gt", value, lower), SqlSupport.comparison("lt", value, bound)
+          ])
+          record_cel_type(SqlSupport.case_node([[in_range, dialect.truncate_to_int(value)]]), :int)
         end
 
         # The same reason as `int()`: `double("abc")` is an error in CEL and Cerbos denies the

@@ -16,9 +16,10 @@ module EdgeCaseModels
     # NaN for 0/0, +Infinity for a positive numerator and -Infinity for a negative one, and each
     # of the three needs a row.
     Integer :n
-    # A double column, so a test can reach the int() cast that CEL and SQL disagree about: CEL
-    # removes the fraction toward zero, PostgreSQL and MySQL round to the nearest.
     Float :score
+    # An exact decimal, whose attribute is only the double nearest it, so int() over it stays
+    # refused where int() over `score` is translated.
+    BigDecimal :amount, size: [30, 20]
   end
 
   DB.create_table!(:edge_authors, **Database::TABLE_OPTIONS) do

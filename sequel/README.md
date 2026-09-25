@@ -54,7 +54,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 241 / 308 |
+| adversarial | 246 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -81,6 +81,10 @@ UNKNOWN, which denies under both polarities exactly as the error does:
   has no overload mixing an int with anything else and no `%` over doubles, and every number in
   a request attribute is a double.
 
+`int()` over a double column truncates toward zero on every dialect (SQLite's `CAST` to
+`INTEGER`, `TRUNC` on PostgreSQL, `TRUNCATE` on MySQL, then an exact `CAST`), inside a `CASE`
+that is NULL outside CEL's range `(-2^63, 2^63)` and for a NaN, where CEL raises.
+
 The refusals fall into a few mechanisms:
 
 | Shape | Why the adapter raises an error |
@@ -91,7 +95,7 @@ The refusals fall into a few mechanisms:
 | `int()` beside, or `%` over, an operand whose CEL type the plan does not settle (a ternary of whole constants) | The plan carries `2` and `2.0` as the same number, so whether CEL raises cannot be known. |
 | `matches()` | RE2 has no portable SQL form, and `LIKE` cannot show a regular expression. |
 | `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
-| `int()`, `double()` or `timestamp()` over a text column; `int()` over a double column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. CEL truncates a double toward zero, and PostgreSQL and MySQL round a `CAST`. |
+| `int()`, `double()` or `timestamp()` over a text column; `int()` over a decimal column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. A decimal's attribute is the double nearest it, which can truncate to a different whole number. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
 | A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |
 | A list or map as a list element, a struct built in the policy, a list difference, `filter`/`map` over a list of constants, a map's keys | None has a scalar SQL form. |

@@ -150,8 +150,8 @@ RSpec.describe Cerbos::Sequel do
 
     # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the usual source of
     # plans. Thus these tests use its output types directly and do not use a substitute. This
-    # test holds the contract with a name. Thus a change in the SDK makes this test fail, and it does not make
-    # an unclear failure in a harness.
+    # test holds the contract with a name, so a change in the SDK fails here and not as an
+    # unclear failure in a harness.
     def sdk_plan(kind, condition)
       Cerbos::Output::PlanResources.new(
         request_id: "test", kind: kind, condition: condition,
@@ -239,18 +239,18 @@ RSpec.describe Cerbos::Sequel do
         /int\(\) applied to a :string column/)
     end
 
-    # The two operands fail for two different reasons, so each message names only its own. A
-    # message that named both would not show which mechanism stopped the translation, which is
-    # what the corpus pins these messages for (cerbos/query-plan-adapters#326).
-    it "raises for int() over a double column, naming the rounding difference" do
+    # Kind 2: the column type is the caller's schema, and the corpus maps its numbers to
+    # integer and double columns only. int() over a double column is translated (the corpus
+    # proves it); over an exact decimal the attribute is a rounded double, so it stays refused.
+    it "raises for int() over a decimal column, naming the rounding to a double" do
       expect {
         described_class.query_plan_to_dataset(
           plan: conditional(expression("eq",
             expression("int", variable("d")), value(0))),
-          model: EdgeDocument, attributes: {"d" => field("score")}
+          model: EdgeDocument, attributes: {"d" => field("amount")}
         )
       }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError,
-        /int\(\) applied to a double column is not portable/)
+        /int\(\) applied to a :decimal column/)
     end
 
     it "raises for double() over a string column" do

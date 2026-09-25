@@ -39,6 +39,18 @@ module Cerbos
         SqlSupport.infix("/", left, right)
       end
 
+      # A double truncated toward zero, as a whole-number type: CEL's +int()+ of a double in
+      # its range. SQLite's CAST of a REAL to INTEGER already truncates; PostgreSQL's and
+      # MySQL's CAST round, so the fraction is dropped first with TRUNC and TRUNCATE, after
+      # which the CAST is exact.
+      def truncate_to_int(expression)
+        case database_type
+        when "sqlite" then ::Sequel.cast(expression, "INTEGER")
+        when "mysql" then ::Sequel.cast(::Sequel.function(:TRUNCATE, expression, 0), "SIGNED")
+        else ::Sequel.cast(::Sequel.function(:trunc, expression), "bigint")
+        end
+      end
+
       # CEL +size()+ counts the characters of a string.
       def char_length(expression)
         ::Sequel.char_length(expression)
