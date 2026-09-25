@@ -1,6 +1,14 @@
 {
   "adapter": "sqlalchemy",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "The sum adds int(aNumber) to a double, which CEL rejects as a no-such-overload error; int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the sum is reached."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A zero divisor makes CEL's quotient an infinity carrying the zero's sign, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read; a column divisor is refused unless zero can only give NaN (the numerator is the divisor itself or a constant zero)."
@@ -81,13 +89,25 @@
       "status": "unsupported",
       "reason": "string() wraps int(aDouble), and int() is refused: PostgreSQL and MySQL CAST round where CEL truncates toward zero, and SQL has no error for a double beyond int64."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an int in decimal and a double in Go's shortest %g form (\"1e+06\"), and the plan ships the ternary's int literals as bare numbers, so neither spelling can be chosen."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
     },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "The ternary's other branch is int(aDouble), and int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the string() over it is never reached."
+    },
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same refused int() cast as cast/string/from-int-past-exponent-threshold, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same string() refusal as `cast/string/from-integral-ternary`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -192,6 +212,14 @@
     "hierarchy/overlaps/path-built-from-list-value-first": {
       "status": "unsupported",
       "reason": "The path is constructed by list(), which has no SQL lowering, so the walk refuses it before the hierarchy operators are reached."
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "in over the to-one parent tests the keys of a map, and the parent is a related row: SQL cannot read which of its columns are non-NULL as the attribute's keys, so the harness's membership override refuses it."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same key-membership refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",

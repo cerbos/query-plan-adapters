@@ -511,6 +511,12 @@ def _relation_membership(relation: _Relation, value: Any):
 
 
 def _in_fn(column: Any, value: Any):
+    if isinstance(column, _ToOneRow) or isinstance(value, _ToOneRow):
+        raise UnsupportedPlanError(
+            "in over the to-one parent tests the keys of a map, and the parent is a "
+            "row: SQL has no way to read which of its columns are non-NULL as the "
+            "attribute's keys"
+        )
     if isinstance(column, _Relation):
         # Rows with an empty chain are excluded, matching CEL's missing-attribute deny.
         return _relation_membership(column, value)
