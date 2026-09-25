@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 52 / 80 |
-| adversarial | 214 / 308 |
+| extended | 53 / 80 |
+| adversarial | 215 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -212,7 +212,7 @@ erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is exact-one cardinality, aggregation expressions or outer-document references
+The refused set is exact-one cardinality over a relation or under a negation (over a literal list of up to 32 elements it expands to "this one and no other"), aggregation expressions or outer-document references
 inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), CEL's `int()`/`double()`
 (`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division by
 anything but a non-zero constant (`$divide` by zero aborts the query), `%` over anything but an

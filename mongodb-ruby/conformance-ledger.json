@@ -333,14 +333,6 @@
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
     },
-    "principal/exists-one/duplicate-elements": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection folds into a flat filter only for exists() and all(): an $or of per-element matches answers \"at least one\", and \"exactly one\" needs the count of matching elements, duplicates included, which the fold does not carry"
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
     "principal/exists/negated-long-list": {
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."

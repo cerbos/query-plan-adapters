@@ -652,10 +652,10 @@ module Cerbos
       # exists/all into an or/and chain itself. Apply the same fold here, so the filter does not
       # depend on which side of that threshold the collection lands.
       def fold_literal_collection(operator, collection, lambda)
-        unless %w[exists all].include?(operator)
+        unless %w[exists all exists_one].include?(operator)
           raise UnsupportedError,
             "#{operator} over a literal collection value is not supported. " \
-            "Only exists() and all() can be folded into a flat filter."
+            "Only exists(), all() and exists_one() can be folded into a flat filter."
         end
 
         elements = collection.value
@@ -671,8 +671,36 @@ module Cerbos
         # CEL identity over an empty collection; MongoDB rejects an empty $or/$and.
         return {"$expr" => operator == "all"} if elements.empty?
 
-        filters = elements.map { |element| yield(substitute(body, variable.name, element)) }
+        bodies = elements.map { |element| substitute(body, variable.name, element) }
+        return yield(exactly_one(bodies)) if operator == "exists_one"
+
+        filters = bodies.map { |condition| yield(condition) }
         (operator == "exists") ? {"$or" => filters} : {"$and" => filters}
+      end
+
+      # The largest literal collection exists_one() is expanded over: the expansion below grows
+      # with the square of its length.
+      EXACTLY_ONE_LIMIT = 32
+
+      # "Exactly one of +conditions+ holds", as the plan expression
+      # (c1 && !c2 && ... ) || (!c1 && c2 && ...) || ...
+      #
+      # CEL's exists_one() evaluates every element and raises if any condition raises, where an
+      # || of &&s could absorb the error. The expansion does not, because each leaf this
+      # translator emits is false where CEL raises, under either polarity: a term needs its own
+      # condition true and every other condition false, so a condition that raises falsifies every
+      # term. Only the positive expansion has that property, which is why a negated exists_one()
+      # is still refused (translate_not).
+      def exactly_one(conditions)
+        if conditions.length > EXACTLY_ONE_LIMIT
+          raise UnsupportedError, "exists_one over a literal collection of more than #{EXACTLY_ONE_LIMIT} elements is unsupported"
+        end
+
+        terms = conditions.each_with_index.map { |condition, index|
+          others = conditions.each_with_index.reject { |_, other| other == index }.map { |other, _| Plan::Expression.new("not", [other]) }
+          Plan::Expression.new("and", [condition] + others)
+        }
+        Plan::Expression.new("or", terms)
       end
 
       # Substitutes a lambda variable with a concrete element. A nested macro that rebinds the
