@@ -392,7 +392,7 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 38 seed rows on
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 41 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -401,15 +401,18 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 79 / 80 |
+| extended | 76 / 80 |
 | adversarial | 233 / 250 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 17 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
-is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
-[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)).
+when the fix is a mapping change) rather than emit a filter. Four extended cases are planner
+divergences the corpus skips: `null/has/missing-attribute`, where the planner folds `has()` to
+always-allowed (see [Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)), and
+three `composition/*` cases whose DENY condition reads a missing attribute, which `check()` treats as
+not firing while the plan negates it
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Other guarantees:
 
