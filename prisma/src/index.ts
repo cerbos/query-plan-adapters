@@ -168,16 +168,18 @@ export function queryPlanToPrisma({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
-      assertStructuralNulls(queryPlan.condition, context);
-      const condition = constantFoldExpression(
-        settleTypeMismatches(
-          hoistOuterScopeReferences(
-            expandLiteralCollections(queryPlan.condition),
-            []
-          ),
-          context
-        )
+      const settled = settleTypeMismatches(
+        hoistOuterScopeReferences(
+          expandLiteralCollections(queryPlan.condition),
+          []
+        ),
+        context
       );
+      // After settling: a struct literal compared with a column of another type is decided by
+      // the types alone (`aString == {"a": null}` is false, or an error on a missing column), so
+      // its null member never reaches a filter and must not refuse the plan.
+      assertStructuralNulls(settled, context);
+      const condition = constantFoldExpression(settled);
       if (isValueOperand(condition)) {
         // The planner folds a condition that is constant on its own, but not one the mapped
         // column types decide (`R.attr.aNumber == "5"` is false for every row): that surfaces

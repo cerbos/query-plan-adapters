@@ -299,21 +299,26 @@ export function hoistOuterScopeReferences(
   if (outerRef !== undefined) {
     const q: PlanExpressionOperand = { name: outerRef };
     const notQ: PlanExpressionOperand = { operator: "not", operands: [q] };
-    return {
-      operator: "or",
-      operands: [
-        {
-          operator: "and",
-          operands: [q, rebuild(substituteNamedOperand(body, outerRef, true))],
-        },
-        {
-          operator: "and",
-          operands: [notQ, rebuild(substituteNamedOperand(body, outerRef, false))],
-        },
-        // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE.
-        { operator: "and", operands: [q, notQ] },
-      ],
-    };
+    const arms: PlanExpressionOperand[] = [
+      {
+        operator: "and",
+        operands: [q, rebuild(substituteNamedOperand(body, outerRef, true))],
+      },
+      {
+        operator: "and",
+        operands: [notQ, rebuild(substituteNamedOperand(body, outerRef, false))],
+      },
+      // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE.
+      { operator: "and", operands: [q, notQ] },
+    ];
+    // all() over an empty collection never evaluates its body, so CEL holds it TRUE even when
+    // the reference is missing; the arms above are all UNKNOWN on that row. `all(c, false)` is
+    // TRUE exactly when the collection is empty, and definite, so it restores that row without
+    // touching any other (#488).
+    if (expr.operator === "all") {
+      arms.push(rebuild({ value: false }));
+    }
+    return { operator: "or", operands: arms };
   }
 
   return rebuild(body);
