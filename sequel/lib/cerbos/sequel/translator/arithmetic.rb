@@ -17,7 +17,7 @@ module Cerbos
           # comparison calculates it. More arithmetic on those branches has no SQL equivalent,
           # so the adapter raises instead of making an incorrect filter.
           require_scalars(operator, left, right)
-          reject_int_beside_non_int(operator, left, right)
+          return cel_type_error if int_beside_non_int?(operator, left, right)
 
           # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
           # `'a' + 'b'` is an addition of numbers, and it changes both sides into 0. Thus string
@@ -29,6 +29,10 @@ module Cerbos
           end
 
           if operator == "mod" && !(cel_int?(left) && cel_int?(right))
+            # `%` exists for ints only. An operand CEL certainly holds as something else — every
+            # attribute number is a double — makes it an error on every row.
+            return cel_type_error if certainly_non_int?(left) || certainly_non_int?(right)
+
             raise UnsupportedOperatorError,
               "% has no double overload in CEL, and every number in a request attribute is a " \
               "double, so % over an attribute that has not gone through int() is an error that " \
@@ -58,20 +62,37 @@ module Cerbos
           SqlSupport.sql_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
 
-        # CEL has no overload mixing an int with a double: `int(x) + R.attr.d` is an error that
-        # denies the row under either polarity, where SQL adds the two numbers and a negation
-        # turns the sum into a grant. An int() result beside an operand that is not certainly an
-        # int (a column, whose attribute is a double, or a fractional constant) is refused.
-        def reject_int_beside_non_int(operator, left, right)
+        # CEL has no overload mixing an int with anything else: `int(x) + R.attr.d` is an error
+        # that denies the row under either polarity, where SQL adds the two numbers and a
+        # negation turns the sum into a grant. Beside an operand CEL certainly holds as
+        # something other than an int (an attribute column, whose number is a double, or a
+        # fractional constant), the result is that error on every row: true, and the caller
+        # renders it UNKNOWN. Beside an operand whose CEL type the plan does not settle — a
+        # ternary of whole constants, say — it is refused.
+        def int_beside_non_int?(operator, left, right)
           mixed = (cel_type(left) == :int && !cel_int?(right)) ||
             (cel_type(right) == :int && !cel_int?(left))
-          return unless mixed
+          return false unless mixed
+          return true if certainly_non_int?(left) || certainly_non_int?(right)
 
           raise UnsupportedOperatorError,
             "#{operator} of an int() result and an operand that is not an int: CEL has no " \
             "overload mixing int and double, so the expression is an error that denies the row, " \
             "but SQL computes it. Every number in a request attribute is a double; wrap both " \
             "operands in int(), or neither."
+        end
+
+        # An operand CEL holds as something other than an int whatever the row: a mapped
+        # attribute column that has not gone through int() (a request attribute is never an
+        # int), a computed double or boolean, a fractional constant, a string or a boolean.
+        def certainly_non_int?(value)
+          return value != value.truncate || !value.finite? if value.is_a?(Float)
+          return true if value.is_a?(::String) || value == true || value == false
+          return false unless SqlSupport.sql_node?(value)
+          return false if cel_type(value) == :int
+          return true if %i[double bool].include?(cel_type(value))
+
+          !column_type(value).nil?
         end
 
         # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole
@@ -88,7 +109,7 @@ module Cerbos
         # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
-          reject_int_beside_non_int("div", numerator, denominator)
+          return cel_type_error if int_beside_non_int?("div", numerator, denominator)
           return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 
           if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)

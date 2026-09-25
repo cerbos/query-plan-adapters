@@ -54,7 +54,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 238 / 308 |
+| adversarial | 241 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -77,6 +77,9 @@ UNKNOWN, which denies under both polarities exactly as the error does:
   the declared type decides the error, whatever the row holds.
 - A collection where a boolean belongs: `filter()`, `map()` or a mapped association as a
   condition, a conjunct or the operand of `!`. CEL's logical operators take only a boolean.
+- An `int()` result beside an attribute, a double or a string, and `%` over an attribute. CEL
+  has no overload mixing an int with anything else and no `%` over doubles, and every number in
+  a request attribute is a double.
 
 The refusals fall into a few mechanisms:
 
@@ -85,7 +88,7 @@ The refusals fall into a few mechanisms:
 | `timestamp(...)` against `now() - duration(...)` | The planner folds `now()` into a literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds at best, so the query would compare with a different instant from the one in the policy. |
 | A division whose denominator is a second column | IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`. A division of a value by itself stays safe, and so does a constant denominator. |
 | More arithmetic on a division that can give NaN or Infinity | SQL has no NaN and no signed Infinity, so the adapter resolves such a division only where it is the comparison operand. |
-| `int()` beside a double, `%` over a bare attribute | CEL has no overload mixing int and double, and no `%` over doubles; every number in a request attribute is a double. SQL computes both. |
+| `int()` beside, or `%` over, an operand whose CEL type the plan does not settle (a ternary of whole constants) | The plan carries `2` and `2.0` as the same number, so whether CEL raises cannot be known. |
 | `matches()` | RE2 has no portable SQL form, and `LIKE` cannot show a regular expression. |
 | `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a double column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. CEL truncates a double toward zero, and PostgreSQL and MySQL round a `CAST`. |

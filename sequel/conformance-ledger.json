@@ -1,14 +1,6 @@
 {
   "adapter": "sequel",
   "cases": {
-    "arithmetic/add/int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "int() over the integer column beside the double column is refused: CEL has no overload mixing int and double, so the sum is an error that denies every row, where SQL adds the two numbers."
-    },
-    "arithmetic/add/negated-int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Same int-beside-double refusal as arithmetic/add/int-beside-double-field, under negation."
-    },
     "arithmetic/add/self-division-plus-constant-greater-than": {
       "status": "unsupported",
       "reason": "CEL carries a NaN or a signed Infinity out of the division and through the arithmetic composed on top of it; SQL has no value that does, because the NULLIF divide-by-zero guard turns the whole sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so a division nested under further arithmetic fails closed instead of emitting the under-granting filter"
@@ -24,10 +16,6 @@
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division."
-    },
-    "arithmetic/modulo/negated-double-operand": {
-      "status": "unsupported",
-      "reason": "CEL's % has no double overload, and every number in a request attribute is a double, so `aNumber % 2` errors on every row; SQL computes an integer remainder over the integer column instead, and the negation would return most rows. The adapter translates % only over int() results, size() and whole constants, and refuses it over a bare attribute"
     },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
