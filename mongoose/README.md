@@ -278,14 +278,15 @@ try {
 }
 ```
 
-A mapper misconfiguration — an unmapped reference, or a collection operator over a reference not
-mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
+A mapper misconfiguration — an unmapped reference, or a collection operator over a reference with
+no relation mapping — stays a plain `Error`. A macro over a `type: "one"` relation is a refusal: CEL
+reads that attribute as a map and ranges over its keys, which no filter can iterate. The messages:
 
 - `Invalid query plan.` — the plan kind is not a `PlanKind`.
 - `Invalid Cerbos expression structure` — a conditional plan lacks `operator`/`operands`.
 - `Unsupported operator: <name>` — anything not in the table above.
 - `No mapper entry for <reference>` — an unmapped attribute.
-- Collection operators without a `type: "many"` relation (e.g. `map operator requires a relation mapping`).
+- Collection operators over a reference with no relation mapping (e.g. `map operator requires a relation mapping`).
 - Malformed lambdas (`Lambda variable must have a name`) and mistyped operands (e.g. a non-array
   `hasIntersection` value).
 - Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
@@ -371,6 +372,11 @@ asserts that, since five of the rows below depend on it.
   denies. Declare `nullable: false` on an entry that is always stored and never null to keep its old
   translation. `"explicit"` output is unchanged
   ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+- A macro (`exists`, `all`, `filter`, `map`, …) over a `type: "one"` relation throws
+  `UnsupportedQueryPlanError` instead of a plain `Error` ("requires a collection relation"). CEL
+  ranges a macro over a map's keys, and a filter has no form that iterates a subdocument's field
+  names ([#545](https://github.com/cerbos/query-plan-adapters/issues/545)). It threw before too;
+  only the error type changes.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.

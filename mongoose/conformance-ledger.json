@@ -13,6 +13,18 @@
       "status": "unsupported",
       "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator"
     },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int the division would divide is never lowered"
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, reached through a negative dividend"
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, under negation"
+    },
     "arithmetic/divide/negated-self-division-equals": {
       "status": "unsupported",
       "reason": "Same zero-denominator abort as `arithmetic/divide/self-division-greater-than`, reached through a negated equality"
@@ -77,9 +89,21 @@
       "status": "unsupported",
       "reason": "int() over a string column: $convert parses a numeric prefix where CEL requires the whole string and raises otherwise, so the adapter refuses the cast rather than lower it."
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() over a string column as `cast/int/string-beyond-double-precision`: $convert parses a numeric prefix where CEL requires the whole string, so string() never sees the int"
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() over a numeric column as `cast/int/negative-fraction`: $convert rounds where CEL truncates toward zero, so string() never sees the int"
+    },
     "cast/string/negated-from-boolean-ternary": {
       "status": "unsupported",
       "reason": "The negation is a $nor whose missing-attribute guard sits outside it, and the ternary reads aBool only when aNumber > 3: a guard on aBool would deny rows CEL allows through the false arm, and no guard would let a missing aBool on the taken arm through, so the negation is refused."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal of int() as `cast/string/from-int-past-exponent-threshold`, under negation"
     },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
@@ -117,6 +141,10 @@
       "status": "unsupported",
       "reason": "MongoDB $expr cannot be safely scoped inside the adapter's $elemMatch predicates"
     },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY; the adapter translates a macro only as an element match over a collection relation's subdocuments, and a MongoDB filter has no form that iterates a subdocument's field names"
+    },
     "collection/exists/negated": {
       "status": "unsupported",
       "reason": "negating a nullable collection macro would turn CEL errors into matches"
@@ -128,6 +156,10 @@
     "collection/exists/negated-empty-collection": {
       "status": "unsupported",
       "reason": "negated exists over nullable element members needs explicit three-valued logic"
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation, which the adapter also refuses as a negated collection macro"
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
