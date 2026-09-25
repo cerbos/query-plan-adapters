@@ -288,6 +288,42 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aBool) == "true"
+    # cast/string/from-boolean-case-changed-literal
+    - actions:
+        - cast/string/from-boolean-case-changed-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aBool) == "TRUE" || R.attr.aNumber == 5
+    # cast/string/negated-from-boolean
+    - actions:
+        - cast/string/negated-from-boolean
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aBool) == "true")'
+    # cast/string/negated-from-boolean-expression
+    - actions:
+        - cast/string/negated-from-boolean-expression
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aNumber > 3) == "true")'
+    # cast/string/negated-from-boolean-through-relation
+    - actions:
+        - cast/string/negated-from-boolean-through-relation
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.parent.aBool) == "true")'
     # cast/string/from-double
     - actions:
         - cast/string/from-double

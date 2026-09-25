@@ -125,6 +125,10 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double"
     },
+    "cast/string/from-boolean-case-changed-literal": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double, reached through string() over a boolean"
+    },
     "cast/string/from-double": {
       "status": "unsupported",
       "reason": "The Query DSL has no computed operand: a term or range query compares a FIELD against a literal, and there is no place to apply a cast to the field first. Painless runtime scripts could express it, which is the enhancement #226 tracks"
@@ -140,6 +144,18 @@
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion."
+    },
+    "cast/string/negated-from-boolean": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double, reached through string() over a boolean under negation"
+    },
+    "cast/string/negated-from-boolean-expression": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a comparison inside string() is itself a computed operand, which the Query DSL cannot compare against a literal"
+    },
+    "cast/string/negated-from-boolean-through-relation": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double, reached through a field of the to-one parent"
     },
     "cast/string/negated-missing-attribute": {
       "status": "unsupported",

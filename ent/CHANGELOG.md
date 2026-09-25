@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** `string()` over a boolean-valued expression (`string(R.attr.n > 3)`), or over a
+  column declared `ValueBool` and read through a to-one `ScalarRelation`, now returns an error
+  wrapping `ErrUnsupported` on every dialect. It used to emit a plain `CAST`, which SQLite and MySQL
+  render as `"1"`/`"0"` where CEL says `"true"`/`"false"`, so a negated comparison with `"true"`
+  returned rows the PDP denies (#470).
 - **Breaking:** `%` over an attribute, a comparison decided by the sign of an infinity from a zero
   column denominator, and `string()` over a `ValueNumber` column outside `==`/`!=` against a
   string constant (or against `"0"`/`"-0"`) now return an error wrapping `ErrUnsupported` instead of

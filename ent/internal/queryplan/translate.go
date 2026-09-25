@@ -1192,10 +1192,9 @@ func castValue(v value) (value, error) {
 //
 // castValue still casts the result to text, so the renderer treats it exactly as it treats any
 // other string(). On MySQL that cast is what gives the two words a byte-exact collation. A bare
-// CASE compares in the connection's collation once the driver interpolates its parameters into the
-// statement, and that collation ignores case and trailing spaces by default: `string(x) == "TRUE"`
-// and `== "true "` would both match a true row CEL rejects. Server-side prepared parameters happen
-// to compare as bytes, so a harness that never interpolates cannot see the difference.
+// CASE compares in the connection's collation, which ignores case and trailing spaces by default:
+// `string(x) == "TRUE"` and `== "true "` would both match a true row CEL rejects. The corpus case
+// cast/string/from-boolean-case-changed-literal fails on MySQL without it.
 func boolText(c Column) Expr {
 	return Case{
 		Whens: []When{

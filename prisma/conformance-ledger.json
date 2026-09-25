@@ -53,6 +53,14 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: int() over a string column cannot be expressed, and CEL's exact int64 parse (2^53 + 1 stays distinct from 2^53) has no filter form"
     },
+    "cast/string/negated-from-boolean-expression": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a boolean-valued comparison has no column to solve for."
+    },
+    "cast/string/negated-from-boolean-through-relation": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator, and string(column) == literal is solved for the column only on a root field, not on a field reached through a relation filter such as the to-one parent."
+    },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
       "reason": "timestamp() over createdBy, a String column: a Prisma DateTime filter needs a column mapped with valueType \"dateTime\", and comparing the ISO string lexically would not reproduce CEL's parse-or-error semantics."

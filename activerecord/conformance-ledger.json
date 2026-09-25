@@ -57,6 +57,11 @@
       "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused",
       "status": "unsupported"
     },
+    "cast/string/negated-from-boolean-expression": {
+      "issue": "https://github.com/cerbos/query-plan-adapters/issues/471",
+      "reason": "string() over a boolean-valued comparison goes through a plain SQL CAST rather than the CASE a boolean column takes, and SQLite renders the comparison as 1/0, so !(string(aNumber > 3) == \"true\") returns every row, including those with aNumber > 3 that CEL denies.",
+      "status": "divergent"
+    },
     "cast/timestamp/malformed-string": {
       "reason": "timestamp() over a column holding a formatted string would compare text in SQL, not instants; the attribute must map to a datetime column.",
       "status": "unsupported"
