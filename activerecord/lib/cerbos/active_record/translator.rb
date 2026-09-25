@@ -73,6 +73,10 @@ module Cerbos
       INTEGER_COLUMN_TYPES = %i[integer bigint].freeze
       # The ActiveRecord column types that hold a CEL number.
       NUMERIC_COLUMN_TYPES = %i[integer bigint float decimal].freeze
+      # The ActiveRecord column types that hold a CEL number exactly, not as a double.
+      EXACT_NUMERIC_COLUMN_TYPES = %i[integer bigint decimal].freeze
+      # CEL's int range. A wider whole number in a plan can only be a double.
+      INT64_RANGE = (-(2**63))..(2**63 - 1)
       # The ActiveRecord column types that hold an instant.
       TEMPORAL_COLUMN_TYPES = %i[datetime timestamp timestamptz time date].freeze
 
@@ -251,7 +255,7 @@ module Cerbos
       # @private
       def evaluate(node, environment)
         case node
-        when Plan::Value then node.value
+        when Plan::Value then constant(node.value)
         when Plan::Variable then environment.resolve(node.name)
         when Plan::Expression then evaluate_expression(node, environment)
         else raise InvalidPlanError, "Unrecognised query plan node: #{node.inspect}"
@@ -259,6 +263,17 @@ module Cerbos
       end
 
       private
+
+      # A plan number reaches Ruby through JSON, which decodes a whole double such as -1e19 as
+      # an Integer. Beyond int64 it can only be a double, and ActiveRecord refuses to bind such
+      # an Integer on PostgreSQL (IntegerOutOf64BitRange), so hold it as the Float it is.
+      def constant(value)
+        case value
+        when Integer then INT64_RANGE.cover?(value) ? value : value.to_f
+        when Array then value.map { |element| constant(element) }
+        else value
+        end
+      end
 
       def evaluate_expression(node, environment)
         operator = node.operator

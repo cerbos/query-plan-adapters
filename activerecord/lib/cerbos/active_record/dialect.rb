@@ -51,9 +51,10 @@ module Cerbos
         end
       end
 
-      # The CAST type for a string. MySQL cannot CAST to `TEXT`.
+      # The CAST type for a string. MySQL casts only to `CHAR`: `TEXT` and `VARCHAR` are
+      # syntax errors there.
       def text_type
-        mysql? ? "VARCHAR" : "TEXT"
+        mysql? ? "CHAR" : "TEXT"
       end
     end
   end

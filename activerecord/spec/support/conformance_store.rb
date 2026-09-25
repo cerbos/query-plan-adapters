@@ -2,9 +2,10 @@
 
 require "time"
 
-# The conformance dataset in SQLite: one table per attribute shape, able to hold every hostile
-# corpus row (NULL elements, duplicate or mirrored names, LIKE metacharacters, empty strings
-# and empty collections). conformance/README.md, "The dataset", says what each row must hold.
+# The conformance dataset in the store under test (spec/support/database.rb): one table per
+# attribute shape, able to hold every hostile corpus row (NULL elements, duplicate or mirrored
+# names, LIKE metacharacters, empty strings and empty collections). conformance/README.md,
+# "The dataset", says what each row must hold.
 module ConformanceStore
   module_function
 
@@ -14,7 +15,22 @@ module ConformanceStore
 
     Database.establish!
     define_schema!
+    verify_mysql_collation! if Database::STORE == "mysql"
     seed!
+  end
+
+  # A column or a session left on MySQL's default collation would pass the case-sensitivity
+  # cases only where no seed happens to discriminate, so check both before any case runs.
+  def verify_mysql_collation!
+    connection = ActiveRecord::Base.connection
+    columns = connection.select_values(<<~SQL)
+      SELECT DISTINCT collation_name FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND collation_name IS NOT NULL
+    SQL
+    session = connection.select_value("SELECT @@collation_connection")
+    return if columns == [Database::MYSQL_COLLATION] && session == Database::MYSQL_COLLATION
+
+    raise "MySQL must run on #{Database::MYSQL_COLLATION}: columns #{columns}, session #{session}"
   end
 
   def define_schema!
@@ -26,7 +42,8 @@ module ConformanceStore
         t.boolean :a_bool
         t.string :a_string
         t.integer :a_number
-        t.float :a_double
+        # limit 53: a double. MySQL makes a bare `float` a 4-byte single.
+        t.float :a_double, limit: 53
         t.string :a_optional_string
         t.string :created_by, null: false
         t.string :scope
@@ -68,7 +85,7 @@ module ConformanceStore
       # lists (e.g. `aNumberList[0]`) is refused at `index`.
       create_table :adversarial_number_list_elements, force: true do |t|
         t.integer :position, null: false
-        t.float :value
+        t.float :value, limit: 53
         t.string :resource_id, null: false
       end
 
