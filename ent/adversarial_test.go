@@ -90,9 +90,9 @@ const sqliteDSN = "file:adversarial?mode=memory&cache=shared" +
 const sqliteDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_double           real,
 	a_optional_string  text,
 	created_by         text    NOT NULL,
@@ -123,17 +123,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_optional_string  text,
 	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -155,9 +155,9 @@ CREATE TABLE adversarial_bool_elem (
 const postgresDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
-	a_bool             boolean          NOT NULL,
-	a_string           text             NOT NULL,
-	a_number           bigint           NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_double           double precision,
 	a_optional_string  text,
 	created_by         text             NOT NULL,
@@ -188,17 +188,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 text   PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 text   PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -240,9 +240,9 @@ func openSQLite(t *testing.T) *sql.DB {
 const mysqlDDL = `
 CREATE TABLE adversarial_resource (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean          NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint           NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_double           double,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	created_by         varchar(64) COLLATE utf8mb4_0900_bin NOT NULL,
@@ -273,17 +273,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	resource_id        varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	parent_id          varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -440,12 +440,15 @@ func buildMapper() cerbosent.Mapper {
 		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
 		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
 		// and PostgreSQL render "true", and nothing in the plan names a column's type.
-		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool},
+		//
+		// aBool, aString and aNumber are NULL on one seed each (j3, j1, j2), and the corpus omits
+		// the attribute there, so each is declared NullConventionOmitted like aOptionalString.
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
 		// undeclared pair fails closed rather than emitting a numeric `+`.
-		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString},
-		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber},
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
@@ -460,7 +463,7 @@ func buildMapper() cerbosent.Mapper {
 		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
-		"request.resource.attr.obj.inner": {Column: "a_string"},
+		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
 
 		"request.resource.attr.tags":       {Relation: tags},
 		"request.resource.attr.tagNames":   {Relation: &tagNames},

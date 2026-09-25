@@ -631,8 +631,10 @@ func TestNumericCastsAreRejected(t *testing.T) {
 //
 // Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus case reaches
 // either, so this test is a bridge tracked by #469 rather than their home. The first is the IS NULL
-// arm ahead of the column's own test: the corpus's aBool is never null, and without the arm a NULL
-// column falls through to 'false', so `string(x) != "true"` returns a row the PDP denies. The
+// arm ahead of the column's own test: without it a NULL column falls through to 'false', so
+// `string(x) != "true"` returns a row the PDP denies. The corpus now carries a NULL aBool (seed j3,
+// #488), but its one string()-over-boolean case is the positive `== "true"`, which excludes j3
+// with or without the arm; only a negated case (#469) would tell them apart. The
 // second is the text cast around the whole CASE on MySQL, which gives the two words a byte-exact
 // collation. Without it a driver that interpolates its parameters compares them in the connection's
 // collation, where "TRUE" and "true " both equal "true", and no leg of the harness interpolates.

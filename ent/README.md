@@ -224,12 +224,12 @@ Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are 
 recorded `check()` decisions. The previous PDP's goldens (0.54.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
-and counts toward the total but not toward passed — on 0.55.0 that is one extended case.
+and counts toward the total but not toward passed — on 0.55.0 that is four extended cases.
 
 | Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
+| extended | 56 / 80 |
 | adversarial | 188 / 250 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;

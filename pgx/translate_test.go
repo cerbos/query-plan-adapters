@@ -535,9 +535,11 @@ func TestNumericCastsAreRejected(t *testing.T) {
 // the two words against the recorded check() decisions.
 //
 // Corpus gap. The IS NULL arm ahead of the column's own test is policy-reachable, and no corpus
-// case reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
-// #469 rather than its home. Without the arm a NULL column falls through to 'false', and
-// `string(x) != "true"` returns a row the PDP denies.
+// case reaches it, so this test is a bridge tracked by #469 rather than its home. Without the arm a
+// NULL column falls through to 'false', and `string(x) != "true"` returns a row the PDP denies.
+// The corpus now carries a NULL aBool (seed j3, #488), but its one string()-over-boolean case is
+// the positive `== "true"`, which excludes j3 with or without the arm; only a negated case (#469)
+// would tell them apart.
 func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
 	t.Parallel()
 

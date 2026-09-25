@@ -47,13 +47,13 @@ type Seed struct {
 	// row with no parent. See conformance/README.md, "The dataset".
 	ParentSeedID     *string    `json:"parentSeedId"` //nolint:tagliatelle // The corpus spells it parentSeedId; Go's ID suffix is not the JSON name.
 	ID               string     `json:"id"`
-	AString          string     `json:"aString"`
+	AString          *string    `json:"aString"`
 	Tags             []Tag      `json:"tags"`
 	SubCategoryNames []string   `json:"subCategoryNames"`
 	ANumberList      []*float64 `json:"aNumberList"`
 	ABoolList        []*bool    `json:"aBoolList"`
-	ANumber          int        `json:"aNumber"`
-	ABool            bool       `json:"aBool"`
+	ANumber          *int       `json:"aNumber"`
+	ABool            *bool      `json:"aBool"`
 }
 
 // Derived is one seed's entry in conformance/derived-fields.json. A nil value is a NULL column; a nil
