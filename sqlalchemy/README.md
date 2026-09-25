@@ -140,15 +140,21 @@ the attributes it sends to `check()`, so you have to tell the adapter which conv
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The default, `"explicit"`, translates `== null` to `IS NULL`. If you omit attributes for NULL
-columns, pass `"omitted"` and the adapter raises on every null comparison operand instead:
+columns, pass `"omitted"`:
 
 ```python
 get_query(plan, Resource, attr_map, null_attribute_representation="omitted")
 ```
 
-The rejection is wider than strictly needed (`x != null` and `!(x == null)` are aligned under both
-conventions), because a leaf cannot see whether an enclosing `not` will flip it. It also fires
-before `operator_override_fns`. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+Under `"omitted"`, `x == null` and `x != null` answer exactly what CEL does: a NULL column is a
+missing-attribute error, and a present one is never null. The adapter renders them as
+`CASE WHEN x IS NOT NULL THEN FALSE END` (`TRUE` for `!=`), which is UNKNOWN for a NULL column and
+stays UNKNOWN under any enclosing `not`, so the row is denied under both polarities. This needs `x`
+mapped to a SQL expression (a column, or a correlated scalar subquery for a to-one relation) and no
+override for that operator; otherwise the comparison raises. Every other null operand raises (a null
+element of an `in` list, a null inside `hasIntersection`, ordering against null), and the refusal
+fires before `operator_override_fns`. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302)
+and [#551](https://github.com/cerbos/query-plan-adapters/issues/551).
 
 #### Declare the convention per attribute
 
@@ -395,9 +401,9 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 205 / 270 |
+| adversarial | 208 / 270 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (84 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
 harness does not compare. Under 0.55.0 those are four extended cases: `null/has/missing-attribute`
 (`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the planner), and three
