@@ -584,15 +584,28 @@ def reads_declared_collection(case: dict[str, Any]) -> bool:
 
 
 # `owner` and `coOwner` reuse columns under the other null convention: the corpus
-# sends an explicit null instead of omitting the attribute (#308). The root scalars
-# are omitted when NULL, so `== null` against one is a CEL error, not a match (#302,
-# #488); `obj.inner` aliases `aString`.
+# sends an explicit null instead of omitting the attribute (#308). Every attribute
+# resources.json omits when its column is NULL is declared omitted, so `== null`
+# against one is a CEL error, not a match (#302, #488, #528); `obj.inner` aliases
+# `aString`, and a `parent` hop's NULL column is omitted like an absent level.
 ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.aBool": "omitted",
     "request.resource.attr.aString": "omitted",
     "request.resource.attr.aNumber": "omitted",
     "request.resource.attr.obj.inner": "omitted",
     "request.resource.attr.aOptionalString": "omitted",
+    "request.resource.attr.aDouble": "omitted",
+    "request.resource.attr.scope": "omitted",
+    "request.resource.attr.createdAt": "omitted",
+    "request.resource.attr.updatedAt": "omitted",
+    "request.resource.attr.parent.aBool": "omitted",
+    "request.resource.attr.parent.aString": "omitted",
+    "request.resource.attr.parent.aNumber": "omitted",
+    "request.resource.attr.parent.aOptionalString": "omitted",
+    "request.resource.attr.parent.inner.aBool": "omitted",
+    "request.resource.attr.parent.inner.aString": "omitted",
+    "request.resource.attr.parent.inner.aNumber": "omitted",
+    "request.resource.attr.parent.inner.aOptionalString": "omitted",
     "tagName": "explicit",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",

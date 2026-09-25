@@ -1697,6 +1697,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aOptionalString == null
+    # null/equals/null-literal-on-missing-attribute-under-or
+    - actions:
+        - null/equals/null-literal-on-missing-attribute-under-or
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.scope == null || R.attr.aBool
     # null/exists-one/negated-null-element
     - actions:
         - null/exists-one/negated-null-element

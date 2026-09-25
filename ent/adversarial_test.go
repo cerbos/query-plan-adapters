@@ -441,15 +441,18 @@ func buildMapper() cerbosent.Mapper {
 		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
 		// and PostgreSQL render "true", and nothing in the plan names a column's type.
 		//
-		// aBool, aString and aNumber are NULL on one seed each (j3, j1, j2), and the corpus omits
-		// the attribute there, so each is declared NullConventionOmitted like aOptionalString.
+		// Every attribute resources.json omits when its column is NULL is declared
+		// NullConventionOmitted: aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString,
+		// aDouble, scope, createdAt, updatedAt, obj.inner and every parent.* hop. A null literal
+		// against one is then a missing-attribute error CEL denies, so it is refused rather than
+		// rendered as IS NULL (#528).
 		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
 		// undeclared pair fails closed rather than emitting a numeric `+`.
 		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
-		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber},
+		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
@@ -458,9 +461,9 @@ func buildMapper() cerbosent.Mapper {
 		// two attributes and leaves it untouched for every other mapping.
 		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbosent.NullConventionExplicit},
 		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
-		"request.resource.attr.scope":     {Column: "scope"},
-		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
-		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp},
+		"request.resource.attr.scope":     {Column: "scope", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
 		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
@@ -485,16 +488,18 @@ func buildMapper() cerbosent.Mapper {
 		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
 		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
 		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
+		// A hop's NULL column, like an absent level, is omitted from the resource, so every hop
+		// is declared NullConventionOmitted.
 		// The two aBool hops are declared boolean, like the root aBool, because that is what they
 		// hold, and an undeclared one keeps the plain CAST that SQLite and MySQL render as 1/0.
-		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool},
-		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
-		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},
-		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string"},
-		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool},
-		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string"},
-		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number"},
-		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string"},
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
 	}
 }
 
