@@ -273,8 +273,9 @@ def get_query(
         null_attribute_representation: How a NULL column is sent to ``check()``.
             The plan is the same either way, so the caller must say. ``"explicit"``
             (default) sends a ``null`` attribute, so ``IS NULL`` matches.
-            ``"omitted"`` sends no attribute, which CEL denies, so null comparison
-            operands are rejected rather than translated.
+            ``"omitted"`` sends no attribute, which CEL denies, so ``eq``/``ne``
+            against null is UNKNOWN for a NULL column, and every other null
+            operand is rejected rather than translated. See #551.
         attribute_null_representation: The same, per attribute, overriding the
             call-level value. Use it when a policy mixes conventions. An
             ``"explicit"`` attribute renders ``eq``, ``ne`` and ``in`` so they are
@@ -329,7 +330,11 @@ def get_query(
     )
 
     translator = Translator(
-        attr_map, overrides or {}, null_conventions, declared_collections
+        attr_map,
+        overrides or {},
+        null_conventions,
+        declared_collections,
+        null_fallback=null_attribute_representation,
     )
     where = require_boolean(translator.predicate(condition), "condition")
     query = select(table).where(where)

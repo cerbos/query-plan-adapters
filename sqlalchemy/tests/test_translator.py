@@ -107,15 +107,6 @@ class TestNullAttributeRepresentation:
         )
         assert "adversarial_resource.a_optional_string IS NULL" in statement
 
-    def test_omitted_refuses_the_same_plan(self):
-        # Here a NULL column means no attribute, which check() denies (#302).
-        with pytest.raises(UnsupportedPlanError, match="null operand"):
-            translate(
-                self.ACTION,
-                null_attribute_representation="omitted",
-                attribute_null_representation=None,
-            )
-
     def test_a_per_attribute_declaration_overrides_the_call_level_option(self):
         # `owner` is declared "explicit", so its null probe still translates (#308)...
         assert render(
@@ -125,13 +116,15 @@ class TestNullAttributeRepresentation:
             "sqlite",
         ) == render(translate("null/equals/null-literal"), "sqlite")
 
-        # ...and without the declaration it is refused.
-        with pytest.raises(UnsupportedPlanError, match="null operand"):
+        # ...and without the declaration it takes the omitted rendering instead (#551).
+        assert render(
             translate(
                 "null/equals/null-literal",
                 null_attribute_representation="omitted",
                 attribute_null_representation=None,
-            )
+            ),
+            "sqlite",
+        ) != render(translate("null/equals/null-literal"), "sqlite")
 
 
 class TestOperatorOverrides:
@@ -521,14 +514,31 @@ class TestDeclarativeBaseModels:
         assert differing == []
 
 
-def test_every_null_carrying_plan_is_refused_under_omitted():
+def _null_only_in_equality_with_an_attribute(node):
+    """Whether every null literal is the bare operand of ``eq``/``ne`` with a variable."""
+    if not isinstance(node, dict) or "value" in node or "variable" in node:
+        return not _plan_carries_null_literal(node)
+    expression = node.get("expression", node)
+    operands = expression.get("operands", [])
+    if expression.get("operator") in ("eq", "ne") and len(operands) == 2:
+        values = [operand for operand in operands if "value" in operand]
+        variables = [operand for operand in operands if "variable" in operand]
+        if len(values) == 1 and len(variables) == 1 and values[0]["value"] is None:
+            return True
+    return all(_null_only_in_equality_with_an_attribute(o) for o in operands)
+
+
+def test_every_other_null_carrying_plan_is_refused_under_omitted():
     # #302. The refusal keys off the null operand, not an operator list, which would
-    # miss the null inside `hasIntersection(tagNames, ["public", null])`.
+    # miss the null inside `hasIntersection(tagNames, ["public", null])`. The one
+    # exception is `eq`/`ne` between an attribute and a bare null, rendered as UNKNOWN
+    # for a NULL column (#551).
     null_carrying = [
         case["id"]
         for case in CURRENT
         if case["plan"]["kind"] == "KIND_CONDITIONAL"
         and _plan_carries_null_literal(case["plan"]["condition"])
+        and not _null_only_in_equality_with_an_attribute(case["plan"]["condition"])
     ]
     assert "null/has-intersection/literal-list-with-null-element" in null_carrying
 
