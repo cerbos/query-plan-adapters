@@ -717,3 +717,16 @@ describe("plans the planner cannot produce", () => {
     ).toThrow("exists over a literal collection requires a list value");
   });
 });
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). No seed stores a list as null or omits it,
+// so no case can witness a negated membership over one: whether the corpus should carry such a
+// row is #548. CEL denies `!(2 in null)`, where a bare `$nor` over the membership matches a null
+// or absent array (#534). Delete this when a case carrying a null-list row lands.
+describe("a negated membership over a native array field", () => {
+  test("Corpus gap. requires the list to be stored as an array, outside the $nor", () => {
+    const { filters } = translate("null/in/negated-null-literal-in-number-list");
+    expect(filters).toMatchObject({
+      $and: expect.arrayContaining([{ aNumberList: { $type: "array" } }]),
+    });
+  });
+});

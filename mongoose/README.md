@@ -293,7 +293,8 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
   variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
   non-zero integer constant, negated collection
   macros, a negation over a nullable field that some path through it can leave unread (one side of
-  `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation,
+  `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation, a negated
+  membership whose list CEL may not evaluate, or that sits inside a collection predicate,
   whole-list equality (including over a `map()` projection), list-valued membership needles, and
   `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
   refused corpus case with its reason).
@@ -379,6 +380,13 @@ asserts that, since five of the rows below depend on it.
   a `$nor`, which matched a stored null or a value of another type
   ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)). Nothing that translated now
   throws.
+- A negated membership or `hasIntersection` over a list (a native array field, or a to-many
+  relation's array) requires `{ <list>: { $type: "array" } }` outside the `$nor`. CEL raises on a
+  null or absent list (`2 in null` has no overload) and denies the document, where the bare `$nor`
+  matched it (over-grant fix,
+  [#534](https://github.com/cerbos/query-plan-adapters/issues/534)). **Breaking:** the same
+  negation throws when its list sits under `&&`, `||` or a ternary that CEL may short-circuit, or
+  inside a collection predicate, where the guard has no faithful position.
 - **Breaking:** value-first membership and `hasIntersection` over a native array field (a mapper
   entry with no `relation`) emit an `$expr` instead of `{ list: x }` / `{ list: { $in: [...] } }`.
   The old filter over-granted whenever the literal's type differed from the schema's element type,

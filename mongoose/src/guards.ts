@@ -7,7 +7,9 @@ import {
   relationOfReference,
   resolveFieldReference,
 } from "./mapper";
-import { collectVariableNames } from "./operands";
+import { UnsupportedQueryPlanError } from "./errors";
+import { LAMBDA_BINDING_OPERATORS } from "./lambda";
+import { collectVariableNames, isExpression, isVariable } from "./operands";
 
 /** `["a", "b"]`, `v` → `{ a: { b: v } }`; an empty path is `v` itself. */
 export const buildFieldFilter = (path: string[], value: unknown): any =>
@@ -118,6 +120,92 @@ const buildRequiredParentsFilter = (
     })),
     ...[...toOnePaths].map((path) => ({ [path]: { $ne: null } })),
   ];
+  if (clauses.length === 0) {
+    return undefined;
+  }
+  return clauses.length === 1 ? clauses[0]! : { $and: clauses };
+};
+
+/**
+ * The collection variables `operand` reads as a list: the collection of a `needle in list`, a
+ * `hasIntersection` operand, and the collection a `map` or other macro ranges over. Stops at a
+ * lambda body, whose references are element-scoped. With `strictOnly`, also stops at `&&`, `||`
+ * and a ternary, which CEL may evaluate without reading every operand.
+ */
+const collectListReads = (
+  operand: PlanExpressionOperand,
+  strictOnly: boolean,
+): string[] => {
+  if (!isExpression(operand)) {
+    return [];
+  }
+  const [first, second] = operand.operands;
+  switch (operand.operator) {
+    case "in":
+      return second && isVariable(second) ? [second.name] : [];
+    case "hasIntersection":
+      return operand.operands.flatMap((child) =>
+        isVariable(child) ? [child.name] : collectListReads(child, strictOnly),
+      );
+    case "and":
+    case "or":
+    case "if":
+      if (strictOnly) {
+        return [];
+      }
+      break;
+    default:
+      if (LAMBDA_BINDING_OPERATORS.has(operand.operator)) {
+        return first && isVariable(first) ? [first.name] : [];
+      }
+  }
+  return operand.operands.flatMap((child) => collectListReads(child, strictOnly));
+};
+
+/**
+ * "Every list the negated `operand` reads is stored as an array", as a Mongoose filter, or
+ * undefined when it reads none (cerbos/query-plan-adapters#534).
+ *
+ * A list that is null or absent is a CEL error — `2 in null` has no overload, and an absent
+ * attribute is a missing-path error — so `check()` denies the document under BOTH polarities.
+ * MongoDB answers the membership `false` there instead (the uncast membership reads a non-array
+ * as `[]`, and an `$elemMatch` over a missing array fails), which the `$nor` a negation wraps it
+ * in turns into a match. `{ list: { $type: "array" } }` holds for every stored array, the empty
+ * one included, and for nothing else, so requiring it OUTSIDE the `$nor` denies exactly the
+ * documents CEL cannot evaluate.
+ *
+ * Only a membership CEL is certain to evaluate can be guarded: a list read under `&&`, `||` or a
+ * ternary may be skipped by CEL, where the guard would deny a document the PDP allows. Those, and
+ * a list read inside a collection predicate (whose path is element-relative), are refused.
+ */
+export const buildListShapeGuard = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+  rootScope: boolean,
+): MongooseFilter | undefined => {
+  const names = [...new Set(collectListReads(operand, false))];
+  if (names.length === 0) {
+    return undefined;
+  }
+  const alwaysRead = new Set(collectListReads(operand, true));
+  if (!rootScope || names.some((name) => !alwaysRead.has(name))) {
+    throw new UnsupportedQueryPlanError(
+      "a negated membership whose list may go unevaluated, or is element-scoped, cannot be guarded " +
+        "against a null or absent list, which CEL denies and a $nor would match",
+    );
+  }
+  const paths = new Set<string>();
+  for (const name of names) {
+    const { path, relation } = resolveFieldReference(name, mapper);
+    if (!relation) {
+      paths.add(path.join("."));
+    } else if (relation.type === "many" && relation.requiresParent === undefined) {
+      // A to-many relation's elements live in one array on the document; a relation that
+      // declares its parent is already guarded by `buildRequiredParentsFilter`.
+      paths.add(relation.name);
+    }
+  }
+  const clauses = [...paths].map((path) => ({ [path]: { $type: "array" } }));
   if (clauses.length === 0) {
     return undefined;
   }
