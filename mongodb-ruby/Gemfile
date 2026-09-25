@@ -1,0 +1,18 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+group :development, :test do
+  # The official MongoDB Ruby driver, which executes every emitted filter in the conformance
+  # harness and serialises it in the unit suites. The adapter itself does not depend on
+  # it: it returns plain Hashes.
+  gem "mongo", "~> 2.21"
+  # Optional for consumers — `require "cerbos/mongodb/mongoid"` is the only file that loads
+  # it — and exercised here by spec/mongoid_spec.rb and the Mongoid leg of the conformance harness.
+  gem "mongoid", "~> 9.0"
+  gem "rake", "~> 13.2"
+  gem "rspec", "~> 3.13"
+  gem "standard", "~> 1.50"
+end

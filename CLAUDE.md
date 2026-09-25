@@ -13,6 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
+| mongodb-ruby | Ruby | `cerbos-mongodb` | MongoDB Ruby driver, Mongoid 9 |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -80,6 +81,19 @@ under ActiveRecord 8.0 and 7.1; every other suite runs on SQLite.
 `spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
+
+### Ruby (MongoDB driver)
+```bash
+cd mongodb-ruby                                        # Ruby and Bundler from the host; MongoDB in Docker
+./scripts/test.sh                                      # all the specs
+./scripts/test.sh spec/adapter_contract_spec.rb spec/mongoid_spec.rb   # offline: no MongoDB
+ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE ./scripts/test.sh spec/conformance_spec.rb
+./scripts/lint.sh                                      # standardrb
+```
+
+`spec/conformance_spec.rb` replays every case twice, through the driver and through Mongoid via
+`Cerbos::MongoDB::Mongoid.criteria`, on the server `scripts/test.sh` starts from `MONGO_IMAGE` (or
+`MONGO_NEXT_IMAGE`).
 
 ### Go (Ent, pgx)
 ```bash
@@ -243,7 +257,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose and mongodb-ruby equivalent, and it exists only on the baseline Node or Ruby leg.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
@@ -319,7 +333,7 @@ state. Three kinds of material live only there, and they are not equal:
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and a new case runs in every adapter's harness
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no ledger to opt out with
 - Never edit `policies/conformance.yaml`, `resources.json` or anything under `golden/` by hand: the generator writes them, and CI fails if they are stale
-- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `mongodb-ruby/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A harness passes corpus data through verbatim: one mapping for every case, no per-case options, no hand-projected subset of the dataset
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. The roster is the set of directories holding a `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something else (cases, seed rows) go in digits
 - Changing what an adapter can translate means updating its `conformance-ledger.json` and its README contract table in the same commit
