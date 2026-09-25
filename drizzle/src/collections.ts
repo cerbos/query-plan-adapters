@@ -72,13 +72,23 @@ const resolveMacroScope = (
     lambdaOperand,
     context,
   );
+  const scope = createCollectionScope(
+    collectionOperand.name,
+    variable.name,
+    mapper,
+    options.openTables,
+  );
+  if (scope.primaryRelation.type === "one") {
+    // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
+    // attribute names — which a subquery over the related row cannot enumerate.
+    throw new UnsupportedQueryPlanError(
+      `Cannot translate a macro over '${collectionOperand.name}': it is a to-one relation, which ` +
+        "CEL reads as a map whose keys (the attribute names present on the related row) the " +
+        "macro ranges over, and SQL has no row of attribute names to iterate",
+    );
+  }
   return {
-    ...createCollectionScope(
-      collectionOperand.name,
-      variable.name,
-      mapper,
-      options.openTables,
-    ),
+    ...scope,
     collectionName: collectionOperand.name,
     conditionOperand: expression,
   };

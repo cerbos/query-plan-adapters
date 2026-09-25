@@ -506,6 +506,14 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   an instant throws `UnsupportedQueryPlanError` instead of binding a text constant. That covers a
   SQLite `integer` in `timestamp` or `timestamp_ms` mode, which SQLite ranked below every text
   constant so `<` matched every row, and a PostgreSQL or MySQL text column.
+- **Breaking:** `/` over a CEL int (`int()`, `size()`, or int arithmetic over them) is CEL's
+  truncating int division. `int(<integer column>) / <non-zero whole constant>` now translates to
+  the store's integer division (`/` on SQLite and PostgreSQL, `DIV` on MySQL), so `int(3) / 2` is
+  1; it used to be a double division giving 1.5, whose negation returned rows the PDP denies. Any
+  other division with an int operand now throws.
+- **Breaking:** a macro (`exists`, `all`, `exists_one`, `filter`, `map`) over a to-one relation
+  now throws `UnsupportedQueryPlanError`. CEL ranges it over the related row's attribute names;
+  it used to fail with a plain `Error` about the relation mapping.
 - A null operand under the `"omitted"` convention now translates instead of throwing: `== null` is
   false for a present value and UNKNOWN for a NULL column, `!= null` true and UNKNOWN, and a null
   `in` element is dropped. A field-to-field equality mixing the two conventions translates too,
