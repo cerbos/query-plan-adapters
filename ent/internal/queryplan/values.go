@@ -948,6 +948,22 @@ func asFloatExpr(v value) (Expr, error) {
 	return Cast{X: e, To: CastFloat}, nil
 }
 
+// omittedNullComparison lowers `x == null` / `x != null` for an attribute declaring
+// NullConventionOmitted.
+//
+// A NULL column sends no attribute, so CEL raises a missing-attribute error for it, and a present
+// column is never null: `==` is false and `!=` is true. The CASE yields exactly that, with SQL
+// NULL standing for the error. UNKNOWN stays UNKNOWN under NOT, so the rendering is right under
+// any nesting without tracking negation parity, and an enclosing OR still absorbs it when a
+// sibling is true, as CEL's `||` absorbs the error. A column read through a to-ONE hop is NULL
+// for an absent parent too, which is the same missing-path error.
+func omittedNullComparison(op CmpOp, x Expr) Expr {
+	return Case{
+		Whens: []When{{Cond: IsNull{X: x}, Then: Lit{V: nil}}},
+		Else:  BoolConst{V: op == OpNe},
+	}
+}
+
 // nullComparison lowers `x == null` / `x != null` into a NULL test.
 //
 // `x = NULL` is UNKNOWN for every row in SQL, whereas CEL's `x == null` is true exactly for the

@@ -169,14 +169,6 @@
       "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
       "status": "unsupported"
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "reason": "aOptionalString is mapped with NullConventionOmitted (a NULL column is a missing attribute), so a null operand against it is refused: the plan cannot say whether IS NULL would match rows check() denies.",
-      "status": "unsupported"
-    },
-    "null/equals/null-literal-on-missing-attribute-under-or": {
-      "reason": "scope is mapped with NullConventionOmitted (a NULL column sends no attribute), so the null operand is refused: CEL answers == null over a missing scope with an error that only a true sibling in the OR absorbs, while IS NULL would return the NULL-scope rows check() denies.",
-      "status": "unsupported"
-    },
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "reason": "A field-to-field comparison between columns declared under different null conventions has no single SQL NULL reading, so it is refused.",
       "status": "unsupported"
@@ -295,10 +287,6 @@
     },
     "regex/matches/whitespace-class": {
       "reason": "matches() has no lowering: SQLite has no built-in regex operator, and PostgreSQL's and MySQL's regex dialects are not CEL's RE2.",
-      "status": "unsupported"
-    },
-    "relation/not-equals/one-hop-null-literal": {
-      "reason": "parent.aOptionalString is mapped with NullConventionOmitted (a NULL column, like an absent parent, sends no attribute), so every null operand against it is refused, != null included: a NOT above the IS NOT NULL would flip it to IS NULL and return rows check() denies.",
       "status": "unsupported"
     },
     "timestamp/equals/field-to-field-without-conversion": {

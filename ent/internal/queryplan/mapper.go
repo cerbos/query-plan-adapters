@@ -160,9 +160,10 @@ const (
 	NullConventionExplicit
 	// NullConventionOmitted means a NULL column sends no attribute, so CEL raises a
 	// missing-attribute error and check() denies. UNKNOWN already excludes the row under both
-	// polarities, so the rendering is unchanged; what the declaration adds is the same
-	// null-operand rejection Options.NullRepresentation = NullOmitted performs, scoped to this
-	// attribute.
+	// polarities, so the rendering is unchanged. A null operand compared with `==` or `!=`
+	// renders as UNKNOWN for a NULL column and a definite answer otherwise (see
+	// omittedNullComparison); every other null operand is rejected, as
+	// Options.NullRepresentation = NullOmitted rejects them, scoped to this attribute.
 	NullConventionOmitted
 )
 

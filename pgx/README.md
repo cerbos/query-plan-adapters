@@ -216,6 +216,11 @@ mapper := cerbospgx.MapperMap{
   `null`. The equality family (`eq`, `ne`, `in`) then never renders SQL UNKNOWN, so
   `null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
   receiver is a CEL error, which denies like UNKNOWN).
+- `NullConventionOmitted` renders `== null` as `CASE WHEN col IS NULL THEN NULL ELSE FALSE END`
+  and `!= null` with `ELSE TRUE`: a NULL column is CEL's missing-attribute error, so it stays
+  UNKNOWN under any `NOT`, and a true sibling in an `||` still absorbs it. A column read through
+  a to-one hop is NULL for an absent parent too, and renders the same way. Every other null
+  operand against it (a null in an `in` list, say) is rejected.
 - Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
   the NULL rows.
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
@@ -239,7 +244,7 @@ PDP's goldens (0.54.0) are replayed too.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 206 / 270 |
+| adversarial | 209 / 270 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
