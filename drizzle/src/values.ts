@@ -2,10 +2,12 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { is, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { PgColumn } from "drizzle-orm/pg-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
-import { ARITHMETIC_OPERATORS } from "./arithmetic";
-import { buildFilteredCount } from "./collections";
+import { ARITHMETIC_OPERATORS, resolveConstantNumber } from "./arithmetic";
+import { buildExceptCount, buildFilteredCount } from "./collections";
 import { buildFilterFromExpression } from "./filter";
 import { resolveIndexedColumn } from "./indexed";
 import {
@@ -27,42 +29,42 @@ import {
   requireLeadingHops,
   resolveTableName,
 } from "./relations";
-import { normalizeRfc3339Milliseconds } from "./timestamp";
+import { normalizeRfc3339Milliseconds, timestampColumnForm } from "./timestamp";
 import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
 
 /**
  * Operands in VALUE position — the sides of a comparison: constants, columns, arithmetic,
- * ternaries, `size()`, `timestamp()` and the one conversion the adapter can lower.
+ * ternaries, `size()`, `timestamp()` and the `string()` shapes that need no cast.
  */
 
 /**
- * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. Only one is lowered — `string()`
- * over a boolean column, which needs no cast at all (see `buildBooleanString`). The adapter renders
- * through whichever Drizzle dialect the CALLER hands its query to, which is what lets one
- * translation serve SQLite, PostgreSQL and MySQL — and a cast is exactly the place where those
- * three disagree.
+ * Every CEL conversion, and why SQL `CAST` cannot reproduce it here. No conversion is lowered to a
+ * CAST: the adapter renders through whichever Drizzle dialect the CALLER hands its query to, which
+ * is what lets one translation serve SQLite, PostgreSQL and MySQL — and a cast is exactly the place
+ * where those three disagree. The `string()` shapes that translate need none (see below).
  *
  * `int()` / `double()` (cerbos/query-plan-adapters#311): CEL reads a WHOLE string or raises an
  * error, and an error denies the row. SQL reads whatever prefix parses — `CAST('100%_done' AS
  * INTEGER)` is `100` on SQLite, `0` on MySQL and a hard error on PostgreSQL — so a direct lowering
  * returns rows the PDP denies. The numeric direction is no safer: CEL's `int()` truncates toward
  * zero, SQLite's CAST truncates, but PostgreSQL and MySQL round to nearest, so `int(-0.6)` is `0`
- * to CEL and `-1` to those engines. Nothing in the plan says what type the column holds, so the
- * adapter cannot pick a faithful lowering per row.
+ * to CEL and `-1` to those engines. So `int()` is lowered only where the column says what it
+ * holds: over a whole-number column it is the column (`buildIntegerConversion`); over a double or
+ * string column it validates and truncates the way cel-go does, per dialect, and only as a direct
+ * comparison with a small constant (`buildCheckedIntComparison`). Every other conversion is refused.
  *
  * `string()` (cerbos/query-plan-adapters#340): there is no cast TARGET the three stores share.
- * This one used to be lowered to `CAST(... AS TEXT)` for numeric and text columns, on the stated
- * grounds that the rendering was "measured against the pinned images" — it was measured against
- * two of them. `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on
- * MySQL 8.4, which spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR`
- * is `character(1)` on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'` — a filter that silently
- * matches nothing rather than failing. A BOOLEAN column is the exception, and it is not a cast:
- * SQLite and MySQL hold a boolean as 1/0, so any CAST renders `"1"` where CEL renders `"true"`,
- * but a CASE spells CEL's two words on every store (cerbos/query-plan-adapters#418).
+ * `TEXT` is not a MySQL cast target at all: `CAST(-0.6 AS TEXT)` is `ERROR 1064` on MySQL 8.4, which
+ * spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR` is `character(1)`
+ * on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'`. Even a per-dialect target would render a
+ * number in the store's format, not CEL's: SQLite's `CAST(2.0 AS TEXT)` is `'2.0'`, CEL's is `"2"`.
+ * So three shapes are lowered WITHOUT a cast, and every other `string()` is refused:
  *
- * `ent` translates `string()` and is not a counter-example: its `render.go` branches on a dialect
- * the caller declares through `WithDialect`, so it emits `CHAR` on MySQL and `TEXT` elsewhere. The
- * limitation here is the absent dialect, not the absent cast.
+ * - over a string column it is the identity;
+ * - over a boolean column it is a CASE spelling CEL's two words (`buildBooleanString`, #418);
+ * - over a number column compared for (in)equality with a string constant, the comparison is
+ *   inverted into a numeric one against the one double CEL spells that way
+ *   (`buildNumberStringComparison` in `comparison.ts`).
  */
 const NUMERIC_CONVERSION_REFUSAL =
   "SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL " +
@@ -73,10 +75,11 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
   int: NUMERIC_CONVERSION_REFUSAL,
   double: NUMERIC_CONVERSION_REFUSAL,
   string:
-    "no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are " +
-    "syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where " +
-    "the cast would silently match nothing. The adapter does not know its dialect by design, so " +
-    "it rejects the shape instead of emitting a filter that is correct on one store only",
+    "only string() over a string or boolean column, or string() over a number column compared " +
+    "for equality with a string constant, is lowered — each without a CAST. A CAST would render " +
+    "the number in the store's own format rather than CEL's (SQLite spells 2.0 as '2.0' where " +
+    "CEL spells it '2'), and no cast target is shared by every store: TEXT is a syntax error on " +
+    "MySQL, whose CHAR is character(1) on PostgreSQL",
 };
 
 /**
@@ -138,10 +141,320 @@ const booleanStringColumn = (
 };
 
 /**
+ * The Drizzle column types that can only hold whole numbers inside int64's range, keyed by
+ * `columnType`. A `bigint` column in `bigint` mode is not among them: its values are not numbers.
+ */
+const INTEGER_COLUMN_TYPES = new Set([
+  "SQLiteInteger",
+  "PgInteger",
+  "PgSmallInt",
+  "PgBigInt53",
+  "PgSerial",
+  "PgSmallSerial",
+  "PgBigSerial53",
+  "MySqlInt",
+  "MySqlTinyInt",
+  "MySqlSmallInt",
+  "MySqlMediumInt",
+  "MySqlBigInt53",
+  "MySqlSerial",
+]);
+
+/**
+ * Whether `operand` is a bare reference to an integer column. Such a column cannot hold -0.0, so a
+ * zero read from it is CEL's positive zero; a double column's zero may be either, and SQLite does
+ * not even store the sign.
+ */
+export const isIntegerColumnReference = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): boolean => {
+  if (!isNameOperand(operand)) return false;
+  const column = columnForOperand(operand, mapper);
+  return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType);
+};
+
+/**
+ * The integer column an `int()` operand converts, if it converts one. CEL's `int()` over a whole
+ * number is that number, so no CAST is needed and the rounding every other `int()` would inherit
+ * from PostgreSQL and MySQL never arises.
+ */
+const integerConversionColumn = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): AnyColumn | undefined => {
+  if (!isOperatorCall(operand, "int") || !isExpressionOperand(operand)) return undefined;
+  const [inner] = operand.operands;
+  if (operand.operands.length !== 1 || inner === undefined) return undefined;
+  const column = columnForOperand(inner, mapper);
+  return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType)
+    ? column
+    : undefined;
+};
+
+/**
+ * `int()` over an integer column. On PostgreSQL and MySQL the column's type guarantees a whole
+ * number, so it is the column itself. SQLite's INTEGER affinity does not: a value with a fraction
+ * is kept as a REAL, so the conversion is spelled `CAST(… AS INTEGER)`, which on SQLite (and only
+ * there) truncates toward zero exactly as CEL's `int()` does.
+ */
+const buildIntegerConversion = (column: AnyColumn, expr: SQL): SQL =>
+  is(column, SQLiteColumn) ? sql`cast(${expr} as integer)` : expr;
+
+/** The store a column belongs to, read off its Drizzle class. */
+const columnDialect = (column: AnyColumn): "sqlite" | "postgresql" | "mysql" | undefined =>
+  is(column, SQLiteColumn)
+    ? "sqlite"
+    : is(column, PgColumn)
+      ? "postgresql"
+      : is(column, MySqlColumn)
+        ? "mysql"
+        : undefined;
+
+/** 2^63, the first double cel-go's `int()` refuses in either direction (`doubleToInt64Checked`). */
+const INT64_BOUND = 9223372036854775808;
+
+/**
+ * `int()` over a double column: cel-go refuses a value at or beyond ±2^63 (and NaN or an
+ * infinity) and otherwise truncates toward zero. Each store has an exact truncation — PostgreSQL's
+ * `trunc`, MySQL's `TRUNCATE(x, 0)`, and SQLite's `CAST(… AS INTEGER)`, which truncates there (and
+ * only there) — and the CASE leaves the refused values NULL, CEL's error.
+ */
+const buildDoubleToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
+  const dialect = columnDialect(column);
+  const truncated =
+    dialect === "postgresql"
+      ? sql`trunc(${expr})`
+      : dialect === "mysql"
+        ? sql`truncate(${expr}, 0)`
+        : dialect === "sqlite"
+          ? sql`cast(${expr} as integer)`
+          : undefined;
+  if (truncated === undefined) return undefined;
+  return sql`(case when ${expr} > ${bindConstant(-INT64_BOUND)} and ${expr} < ${bindConstant(INT64_BOUND)} then ${truncated} end)`;
+};
+
+/**
+ * `int()` over a string column: cel-go's `strconv.ParseInt(s, 10, 64)` — an optional sign, then one
+ * or more ASCII digits and nothing else, within int64 — or an error. SQL's own CAST reads a
+ * numeric prefix instead (`'100%_done'` is 100 on SQLite, 0 on MySQL, an error on PostgreSQL), so
+ * the string is validated first and cast only when valid; anything else is NULL, CEL's error.
+ *
+ * Validation needs no regex: removing every digit from the unsigned part must leave nothing, and
+ * once leading zeros are trimmed the digits must be fewer than 19, or exactly 19 and no greater
+ * than int64's bound — for equal-length digit strings, string order is numeric order.
+ */
+const buildStringToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
+  const dialect = columnDialect(column);
+  if (dialect === undefined) return undefined;
+  const sign = sql`substr(${expr}, 1, 1)`;
+  const unsigned = sql`(case when ${sign} in ('+', '-') then substr(${expr}, 2) else ${expr} end)`;
+  const nonDigits = [..."0123456789"].reduce<SQL>(
+    (rest, digit) => sql`replace(${rest}, ${digit}, '')`,
+    unsigned,
+  );
+  const significant =
+    dialect === "mysql" ? sql`trim(leading '0' from ${unsigned})` : sql`ltrim(${unsigned}, '0')`;
+  const bound = sql`(case when ${sign} = '-' then '9223372036854775808' else '9223372036854775807' end)`;
+  const valid = sql`length(${unsigned}) > 0 and length(${nonDigits}) = 0 and (length(${significant}) < 19 or (length(${significant}) = 19 and ${significant} <= ${bound}))`;
+  const cast =
+    dialect === "postgresql"
+      ? sql`cast(${expr} as bigint)`
+      : dialect === "mysql"
+        ? sql`cast(${expr} as signed)`
+        : sql`cast(${expr} as integer)`;
+  return sql`(case when ${valid} then ${cast} end)`;
+};
+
+/** 2^53: below it a double holds every integer exactly, so a store's bigint-to-double is exact. */
+const EXACT_DOUBLE_INTEGER_BOUND = 9007199254740992;
+
+/**
+ * `int(x) <op> constant` over a double or string column, where `x` is read through
+ * `buildDoubleToInt` / `buildStringToInt`. Their result can reach ±2^63, so it is lowered ONLY as a
+ * comparison with a number constant below 2^53 in magnitude: PostgreSQL and MySQL compare a bigint
+ * with a double by converting the bigint, which is exact against such a constant — measured,
+ * `int("9223372036854775807") == 9223372036854775808.0` is true on both where CEL says false — and
+ * arithmetic on the result could overflow a bigint and fail the whole query. `undefined` when the
+ * shape is anything else.
+ */
+export const buildCheckedIntComparison = (
+  operator: "eq" | "ne" | "lt" | "le" | "gt" | "ge",
+  conversion: PlanExpressionOperand,
+  constant: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL | undefined => {
+  if (
+    !isOperatorCall(conversion, "int") || !isExpressionOperand(conversion) ||
+    conversion.operands.length !== 1 ||
+    !isValueOperand(constant) || typeof constant.value !== "number" ||
+    !(Math.abs(constant.value) < EXACT_DOUBLE_INTEGER_BOUND)
+  ) {
+    return undefined;
+  }
+  const inner = conversion.operands[0]!;
+  const column = columnForOperand(inner, mapper);
+  if (column === undefined || INTEGER_COLUMN_TYPES.has(column.columnType)) return undefined;
+  const expr = () => buildValueExpression(inner, mapper, options);
+  const converted =
+    column.dataType === "number"
+      ? buildDoubleToInt(column, expr())
+      : column.dataType === "string"
+        ? buildStringToInt(column, expr())
+        : undefined;
+  if (converted === undefined) return undefined;
+  const symbol = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }[operator];
+  return sql`(${converted} ${sql.raw(symbol)} ${bindConstant(constant.value)})`;
+};
+
+/**
+ * A divisor `%` can take from a column: `int()` of an integer column, alone or plus or minus a
+ * whole constant. Its value is an integer on every dialect, so the remainder stays integral.
+ */
+const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+  if (integerConversionColumn(operand, mapper) !== undefined) return true;
+  if (
+    !(isOperatorCall(operand, "add") || isOperatorCall(operand, "sub")) ||
+    !isExpressionOperand(operand) ||
+    operand.operands.length !== 2
+  ) {
+    return false;
+  }
+  const [left, right] = operand.operands;
+  const isWholeConstant = (side: PlanExpressionOperand | undefined): boolean => {
+    const value = side === undefined ? undefined : resolveConstantNumber(side);
+    return value !== undefined && Number.isSafeInteger(value);
+  };
+  return (
+    (integerConversionColumn(left!, mapper) !== undefined && isWholeConstant(right)) ||
+    (isWholeConstant(left) && integerConversionColumn(right!, mapper) !== undefined)
+  );
+};
+
+/**
+ * Whether the operand is certainly a CEL int: `int()`, `size()`, or `+ - * / %` over ints of which
+ * at least one is such an expression (an integral constant beside one can only be an int).
+ */
+const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
+  if (isOperatorCall(operand, "int") || isOperatorCall(operand, "size")) return true;
+  if (!isExpressionOperand(operand) || !(operand.operator in ARITHMETIC_OPERATORS)) return false;
+  const isIntOrWhole = (side: PlanExpressionOperand): boolean =>
+    isCelIntExpression(side) ||
+    (isValueOperand(side) && typeof side.value === "number" && Number.isInteger(side.value));
+  return operand.operands.every(isIntOrWhole) && operand.operands.some(isCelIntExpression);
+};
+
+/**
+ * Whether one operand is certainly a CEL int and the other certainly a double: an attribute read
+ * (CEL reads every attribute number as a double), a fractional constant, or `double()`. CEL has no
+ * overload mixing the two, so `int(x) + R.attr.d` is an error that denies the row under both
+ * polarities; it is lowered to a NULL, which SQL's three-valued logic carries the same way.
+ */
+const mixesIntWithDouble = (
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+): boolean => {
+  const isDouble = (operand: PlanExpressionOperand): boolean =>
+    isNameOperand(operand) ||
+    isOperatorCall(operand, "double") ||
+    (isValueOperand(operand) &&
+      typeof operand.value === "number" &&
+      !Number.isInteger(operand.value));
+  return (
+    (isCelIntExpression(left) && isDouble(right)) ||
+    (isDouble(left) && isCelIntExpression(right))
+  );
+};
+
+/**
+ * CEL's `/` over ints truncates toward zero, where a double division makes `int(3) / 2` 1.5; a
+ * zero divisor is an error, and an int beside a double is a no-overload error. It is lowered only
+ * for `int()` of an integer column divided by a non-zero whole constant, with each store's
+ * truncating integer division: SQLite's and PostgreSQL's `/` over two integers, MySQL's `DIV`
+ * (whose `/` returns a decimal). The constant is inlined as an integer literal, since a bound
+ * JavaScript number may reach SQLite as a REAL and turn the division back into a double one.
+ */
+const buildIntDivision = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const dividend = integerConversionColumn(leftOperand, mapper);
+  const divisor = resolveConstantNumber(rightOperand);
+  const dialect = dividend === undefined ? undefined : columnDialect(dividend);
+  if (
+    dialect === undefined ||
+    divisor === undefined ||
+    !Number.isSafeInteger(divisor) ||
+    divisor === 0 ||
+    !isValueOperand(rightOperand)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate '/' over a CEL int: CEL's int division truncates toward zero and errors " +
+        "on a zero divisor, so the adapter lowers it only for int() of an integer column divided " +
+        "by a non-zero whole constant, where each store has an exact truncating integer division",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  const right = sql.raw(String(divisor));
+  return dialect === "mysql" ? sql`(${left} div ${right})` : sql`(${left} / ${right})`;
+};
+
+/**
+ * CEL's `%` is integer-only, and no attribute is an integer: CEL reads every attribute number as a
+ * double. So `%` straight over an attribute is a no-overload error, which denies the row whatever
+ * surrounds it; it is lowered to a NULL, which SQL's three-valued logic carries the same way.
+ * Only an `int()` over an integer column is a dividend `%` can take. The divisor is a non-zero
+ * whole constant or an integer column divisor; CEL's `x % 0` is an error, which SQLite and MySQL
+ * answer NULL but PostgreSQL raises, so a column divisor's zero is turned into a NULL first.
+ * SQLite, PostgreSQL and MySQL all give the remainder the dividend's sign — truncated division, as
+ * CEL does — so `-5 % 2` is `-1` on each.
+ */
+const buildModulo = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (isNameOperand(leftOperand) || isNameOperand(rightOperand)) {
+    return sql`cast(null as float(53))`;
+  }
+  const dividend = integerConversionColumn(leftOperand, mapper);
+  const divisor = resolveConstantNumber(rightOperand);
+  if (
+    dividend !== undefined &&
+    divisor === undefined &&
+    isIntegerColumnDivisor(rightOperand, mapper)
+  ) {
+    const left = buildValueExpression(leftOperand, mapper, options);
+    const right = buildValueExpression(rightOperand, mapper, options);
+    return sql`(${left} % nullif(${right}, 0))`;
+  }
+  if (
+    dividend === undefined ||
+    divisor === undefined ||
+    !Number.isInteger(divisor) ||
+    divisor === 0
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate '%': CEL's modulo is defined only over integers, so the adapter lowers " +
+        "it only for int() of an integer column by a non-zero whole constant or by int() of an " +
+        "integer column plus or minus a whole constant. A double constant is a no-overload error in CEL, and " +
+        "a zero constant divisor raises on PostgreSQL",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  return sql`(${left} % ${bindConstant(divisor)})`;
+};
+
+/**
  * Whether an `add` is CEL's string overload rather than its numeric one.
  *
  * One string operand settles it: CEL has no mixed-type `+`, so a string on either side means the
- * whole expression is a concatenation.
+ * whole expression is a concatenation. A nested `+` is read the same way, so
+ * `(a + b) + (c + d)` over string columns is never lowered to numeric `+`.
  */
 const isStringConcatenation = (
   operands: PlanExpressionOperand[],
@@ -156,8 +469,77 @@ const isStringConcatenation = (
     if (isStringConversion(operand)) {
       return true;
     }
+    if (isOperatorCall(operand, "add")) {
+      return isStringConcatenation(operand.operands, mapper);
+    }
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
+
+type ConcatenationDialect = "pipes" | "concat";
+
+/**
+ * How the store spells string `+`, read off the Drizzle class of every column the concatenation
+ * reaches — as `indexed.ts` and `characterLength` do, so the caller still declares no dialect.
+ * `||` concatenates on SQLite and PostgreSQL but is LOGICAL OR on MySQL unless PIPES_AS_CONCAT is
+ * set, and MySQL's own spelling is CONCAT(). With no column of a known dialect in the tree — a
+ * callback mapping, or columns of two dialects — there is nothing to decide by, so `undefined`.
+ */
+const concatenationDialect = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): ConcatenationDialect | undefined => {
+  const dialects = new Set<ConcatenationDialect>();
+  const visit = (operand: PlanExpressionOperand): void => {
+    if (isExpressionOperand(operand)) {
+      operand.operands.forEach(visit);
+      return;
+    }
+    const column = columnForOperand(operand, mapper);
+    if (column === undefined) return;
+    if (is(column, MySqlColumn)) dialects.add("concat");
+    else if (is(column, PgColumn) || is(column, SQLiteColumn)) dialects.add("pipes");
+  };
+  operands.forEach(visit);
+  return dialects.size === 1 ? [...dialects][0] : undefined;
+};
+
+/**
+ * CEL's string `+`. Both spellings propagate NULL — `NULL || 'x'` and `CONCAT(NULL, 'x')` are
+ * both NULL — so a missing operand leaves the enclosing comparison UNKNOWN and the row out under
+ * either polarity, as CEL's missing-attribute error denies it. Two constants fold in JavaScript
+ * and need no dialect at all.
+ */
+const buildConcatenation = (
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (
+    isValueOperand(leftOperand) &&
+    typeof leftOperand.value === "string" &&
+    isValueOperand(rightOperand) &&
+    typeof rightOperand.value === "string"
+  ) {
+    return bindConstant(leftOperand.value + rightOperand.value);
+  }
+  const dialect = concatenationDialect([leftOperand, rightOperand], mapper);
+  if (dialect === undefined) {
+    // The numeric `+` the adapter would otherwise emit is silently wrong rather than a syntax
+    // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches nothing
+    // (cerbos/query-plan-adapters#376).
+    throw new UnsupportedQueryPlanError(
+      "Cannot translate string concatenation: no Drizzle column of a single known dialect " +
+        "among its operands says how to spell it — || concatenates on SQLite and PostgreSQL " +
+        "but is logical OR on MySQL, which spells it CONCAT()",
+    );
+  }
+  const left = buildValueExpression(leftOperand, mapper, options);
+  const right = buildValueExpression(rightOperand, mapper, options);
+  return dialect === "concat"
+    ? sql`concat(${left}, ${right})`
+    : sql`(${left} || ${right})`;
+};
 
 const buildArithmeticExpression = (
   operator: string,
@@ -185,6 +567,18 @@ const buildArithmeticExpression = (
     // semantics; SQLite represents bound NaN as NULL, whose comparisons are never true.
     return sql`${leftOperand.value / rightOperand.value}`;
   }
+  if (operator === "add" && isStringConcatenation(operands, mapper)) {
+    return buildConcatenation(leftOperand, rightOperand, mapper, options);
+  }
+  if (operator === "mod") {
+    return buildModulo(leftOperand, rightOperand, mapper, options);
+  }
+  if (mixesIntWithDouble(leftOperand, rightOperand)) {
+    return sql`cast(null as float(53))`;
+  }
+  if (operator === "div" && (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand))) {
+    return buildIntDivision(leftOperand, rightOperand, mapper, options);
+  }
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);
   if (operator === "div") {
@@ -193,21 +587,6 @@ const buildArithmeticExpression = (
     // The comparison builder handles non-finite results in separate IEEE arms;
     // this expression supplies its finite branch.
     return sql`(cast(${left} as float(53)) / ${right})`;
-  }
-  if (operator === "add" && isStringConcatenation(operands, mapper)) {
-    // CEL overloads `+` on strings; SQL does not agree on how to spell that. `||` concatenates
-    // on SQLite and PostgreSQL but is LOGICAL OR on MySQL unless PIPES_AS_CONCAT is set, and
-    // MySQL's own spelling is CONCAT(). This adapter deliberately does not know its dialect
-    // (see `definiteEquality`), so there is no rendering it can prove correct everywhere —
-    // and the numeric `+` it would otherwise emit is silently wrong rather than a syntax
-    // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches
-    // nothing (cerbos/query-plan-adapters#376).
-    throw new UnsupportedQueryPlanError(
-      "Cannot translate string concatenation: CEL's + over strings has no dialect-independent " +
-        "SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, " +
-        "which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would " +
-        "coerce the operands to 0 rather than fail",
-    );
   }
   return sql`(${left} ${sql.raw(ARITHMETIC_OPERATORS[operator]!)} ${right})`;
 };
@@ -220,6 +599,9 @@ const buildSizeExpression = (
 ): SQL => {
   if (isOperatorCall(operand, "filter")) {
     return buildFilteredCount(operand, mapper, options);
+  }
+  if (isOperatorCall(operand, "except") && isExpressionOperand(operand)) {
+    return buildExceptCount(operand, mapper, options);
   }
   if (!isNameOperand(operand)) {
     throw new UnsupportedQueryPlanError(
@@ -272,6 +654,16 @@ const buildTimestampExpression = (
     ) {
       throw new UnsupportedQueryPlanError(
         `'timestamp' field '${inner.name}' requires a mapping with valueType: "timestamp"`,
+      );
+    }
+    const { column } = resolved.mapping;
+    // A direct comparison owns every column it can compare (`comparison.ts`); reaching here means
+    // the timestamp sits somewhere else, where only a native temporal column orders instants.
+    if (column !== undefined && timestampColumnForm(column, inner.name) === "sqlite-text") {
+      throw new UnsupportedQueryPlanError(
+        `Cannot use the SQLite text timestamp '${inner.name}' outside a direct comparison with a ` +
+          "timestamp() constant or another SQLite text timestamp: elsewhere its stored string " +
+          "would be compared as a string, not as an instant",
       );
     }
     return buildValueExpression(inner, mapper, options);
@@ -327,6 +719,25 @@ export const buildValueExpression = (
         buildValueExpression(operands[0]!, mapper, options),
       );
     }
+    // `string()` of a string is the string itself: no cast, so no cast target to disagree on. A
+    // NULL column stays NULL, leaving the comparison UNKNOWN under both polarities, as CEL's
+    // error over a missing attribute or a null value denies it.
+    const [inner] = operands;
+    if (
+      operands.length === 1 &&
+      inner !== undefined &&
+      columnForOperand(inner, mapper)?.dataType === "string"
+    ) {
+      return buildValueExpression(inner, mapper, options);
+    }
+  }
+
+  const integerColumn = integerConversionColumn(operand, mapper);
+  if (integerColumn !== undefined) {
+    return buildIntegerConversion(
+      integerColumn,
+      buildValueExpression(operands[0]!, mapper, options),
+    );
   }
 
   const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];

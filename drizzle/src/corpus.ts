@@ -198,9 +198,9 @@ export function sqliteSchema() {
   return {
     resources: sqliteTable("adversarial_resources", {
       id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-      aString: text("a_string").notNull(),
-      aNumber: integer("a_number").notNull(),
+      aBool: integer("a_bool", { mode: "boolean" }),
+      aString: text("a_string"),
+      aNumber: integer("a_number"),
       aDouble: real("a_double"),
       aOptionalString: text("a_optional_string"),
       createdBy: text("created_by").notNull(),
@@ -215,18 +215,18 @@ export function sqliteSchema() {
     // The corpus's one real to-one chain, one owned row per level and per resource.
     parents: sqliteTable("adversarial_parents", {
       id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-      aString: text("a_string").notNull(),
-      aNumber: integer("a_number").notNull(),
+      aBool: integer("a_bool", { mode: "boolean" }),
+      aString: text("a_string"),
+      aNumber: integer("a_number"),
       aOptionalString: text("a_optional_string"),
       resourceId: text("resource_id").notNull().unique(),
     }),
 
     inners: sqliteTable("adversarial_inners", {
       id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }).notNull(),
-      aString: text("a_string").notNull(),
-      aNumber: integer("a_number").notNull(),
+      aBool: integer("a_bool", { mode: "boolean" }),
+      aString: text("a_string"),
+      aNumber: integer("a_number"),
       aOptionalString: text("a_optional_string"),
       parentId: text("parent_id").notNull().unique(),
     }),
@@ -263,17 +263,17 @@ export function sqliteSchema() {
  * The PostgreSQL tables the `postgres` store seeds.
  *
  * The column types are the point: `boolean` and `timestamptz` exercise the typed paths SQLite
- * cannot reach — on SQLite a boolean is an integer and a timestamp is text compared
- * lexicographically, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
- * layout only string comparison tolerates, passes there and fails here.
+ * cannot reach — on SQLite a boolean is an integer and a timestamp is text the adapter rewrites into
+ * its own string form, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
+ * layout PostgreSQL cannot parse, passes there and fails here.
  */
 export function postgresSchema() {
   return {
     resources: pgTable("adversarial_resources", {
       id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool").notNull(),
-      aString: pgText("a_string").notNull(),
-      aNumber: pgInteger("a_number").notNull(),
+      aBool: boolean("a_bool"),
+      aString: pgText("a_string"),
+      aNumber: pgInteger("a_number"),
       aDouble: doublePrecision("a_double"),
       aOptionalString: pgText("a_optional_string"),
       createdBy: pgText("created_by").notNull(),
@@ -300,18 +300,18 @@ export function postgresSchema() {
     // The corpus's one real to-one chain, one owned row per level and per resource.
     parents: pgTable("adversarial_parents", {
       id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool").notNull(),
-      aString: pgText("a_string").notNull(),
-      aNumber: pgInteger("a_number").notNull(),
+      aBool: boolean("a_bool"),
+      aString: pgText("a_string"),
+      aNumber: pgInteger("a_number"),
       aOptionalString: pgText("a_optional_string"),
       resourceId: pgText("resource_id").notNull().unique(),
     }),
 
     inners: pgTable("adversarial_inners", {
       id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool").notNull(),
-      aString: pgText("a_string").notNull(),
-      aNumber: pgInteger("a_number").notNull(),
+      aBool: boolean("a_bool"),
+      aString: pgText("a_string"),
+      aNumber: pgInteger("a_number"),
       aOptionalString: pgText("a_optional_string"),
       parentId: pgText("parent_id").notNull().unique(),
     }),
@@ -371,9 +371,9 @@ export function mysqlSchema() {
   return {
     resources: mysqlTable("adversarial_resources", {
       id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool").notNull(),
-      aString: varchar("a_string", { length: 255 }).notNull(),
-      aNumber: mysqlInt("a_number").notNull(),
+      aBool: mysqlBoolean("a_bool"),
+      aString: varchar("a_string", { length: 255 }),
+      aNumber: mysqlInt("a_number"),
       aDouble: double("a_double"),
       aOptionalString: varchar("a_optional_string", { length: 255 }),
       createdBy: varchar("created_by", { length: 64 }).notNull(),
@@ -388,18 +388,18 @@ export function mysqlSchema() {
     // The corpus's one real to-one chain, one owned row per level and per resource.
     parents: mysqlTable("adversarial_parents", {
       id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool").notNull(),
-      aString: varchar("a_string", { length: 255 }).notNull(),
-      aNumber: mysqlInt("a_number").notNull(),
+      aBool: mysqlBoolean("a_bool"),
+      aString: varchar("a_string", { length: 255 }),
+      aNumber: mysqlInt("a_number"),
       aOptionalString: varchar("a_optional_string", { length: 255 }),
       resourceId: varchar("resource_id", { length: 64 }).notNull().unique(),
     }),
 
     inners: mysqlTable("adversarial_inners", {
       id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool").notNull(),
-      aString: varchar("a_string", { length: 255 }).notNull(),
-      aNumber: mysqlInt("a_number").notNull(),
+      aBool: mysqlBoolean("a_bool"),
+      aString: varchar("a_string", { length: 255 }),
+      aNumber: mysqlInt("a_number"),
       aOptionalString: varchar("a_optional_string", { length: 255 }),
       parentId: varchar("parent_id", { length: 64 }).notNull().unique(),
     }),
@@ -463,26 +463,47 @@ export function buildMapper(
     // cases). It is a mapping like any other here, which is the point: an adapter that resolves
     // references by stripping a `request.resource.attr.` prefix never sees this name.
     "request.resource.id": schema.resources.id,
-    "request.resource.attr.aBool": schema.resources.aBool,
-    "request.resource.attr.aString": schema.resources.aString,
-    "request.resource.attr.aNumber": schema.resources.aNumber,
-    "request.resource.attr.aDouble": schema.resources.aDouble,
+    // Every attribute resources.json omits when its column is NULL is declared on the omitted
+    // convention: aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope,
+    // createdAt, updatedAt, obj.inner and every `parent` field. A null literal against one is then a
+    // missing-attribute error CEL denies, so it is refused rather than rendered as IS NULL (#528).
+    "request.resource.attr.aBool": {
+      column: schema.resources.aBool,
+      nullAttributeRepresentation: "omitted",
+    },
+    "request.resource.attr.aString": {
+      column: schema.resources.aString,
+      nullAttributeRepresentation: "omitted",
+    },
+    "request.resource.attr.aNumber": {
+      column: schema.resources.aNumber,
+      nullAttributeRepresentation: "omitted",
+    },
+    "request.resource.attr.aDouble": {
+      column: schema.resources.aDouble,
+      nullAttributeRepresentation: "omitted",
+    },
     // The corpus's default NULL convention: a NULL column sends no attribute (resources.json omits
     // it), so `== null` is a missing-attribute error in CEL, never true. Declaring it is what makes
-    // the adapter refuse a null operand here instead of emitting an over-granting IS NULL.
+    // the adapter read a NULL column here as UNKNOWN instead of emitting an over-granting IS NULL.
     "request.resource.attr.aOptionalString": {
       column: schema.resources.aOptionalString,
       nullAttributeRepresentation: "omitted",
     },
     "request.resource.attr.createdBy": schema.resources.createdBy,
-    "request.resource.attr.scope": schema.resources.scope,
+    "request.resource.attr.scope": {
+      column: schema.resources.scope,
+      nullAttributeRepresentation: "omitted",
+    },
     "request.resource.attr.createdAt": {
       column: schema.resources.createdAt,
       valueType: "timestamp",
+      nullAttributeRepresentation: "omitted",
     },
     "request.resource.attr.updatedAt": {
       column: schema.resources.updatedAt,
       valueType: "timestamp",
+      nullAttributeRepresentation: "omitted",
     },
     // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
     // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
@@ -499,7 +520,10 @@ export function buildMapper(
     // obj.inner is not a real nested column — mirrors aString, same trick the spring-data
     // and prisma reference harnesses use for the `comparison/equals/nested-map-member` probe. `parent.inner` below is the
     // opposite: a real two-level join. The two are kept side by side on purpose.
-    "request.resource.attr.obj.inner": schema.resources.aString,
+    "request.resource.attr.obj.inner": {
+      column: schema.resources.aString,
+      nullAttributeRepresentation: "omitted",
+    },
     // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"` is what tells the
     // adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
     // parent sends no attribute, so CEL raises a missing-path error and the PDP denies, while an
@@ -512,10 +536,10 @@ export function buildMapper(
         sourceColumn: schema.resources.id,
         targetColumn: schema.parents.resourceId,
         fields: {
-          aBool: schema.parents.aBool,
-          aString: schema.parents.aString,
-          aNumber: schema.parents.aNumber,
-          aOptionalString: schema.parents.aOptionalString,
+          aBool: { column: schema.parents.aBool, nullAttributeRepresentation: "omitted" },
+          aString: { column: schema.parents.aString, nullAttributeRepresentation: "omitted" },
+          aNumber: { column: schema.parents.aNumber, nullAttributeRepresentation: "omitted" },
+          aOptionalString: { column: schema.parents.aOptionalString, nullAttributeRepresentation: "omitted" },
           inner: {
             relation: {
               type: "one",
@@ -523,10 +547,10 @@ export function buildMapper(
               sourceColumn: schema.parents.id,
               targetColumn: schema.inners.parentId,
               fields: {
-                aBool: schema.inners.aBool,
-                aString: schema.inners.aString,
-                aNumber: schema.inners.aNumber,
-                aOptionalString: schema.inners.aOptionalString,
+                aBool: { column: schema.inners.aBool, nullAttributeRepresentation: "omitted" },
+                aString: { column: schema.inners.aString, nullAttributeRepresentation: "omitted" },
+                aNumber: { column: schema.inners.aNumber, nullAttributeRepresentation: "omitted" },
+                aOptionalString: { column: schema.inners.aOptionalString, nullAttributeRepresentation: "omitted" },
               },
             },
           },

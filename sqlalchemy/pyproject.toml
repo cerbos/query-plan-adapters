@@ -42,6 +42,9 @@ test = [
     "psycopg2-binary>=2.9.10",
     # Async driver for the harness's AsyncSession leg.
     "aiosqlite>=0.17",
+    # MySQL driver for the harness. Pure Python, and the driver testcontainers' MySqlContainer
+    # names in its connection URL.
+    "pymysql>=1.1",
 ]
 lint = [
     "ruff>=0.11.13",

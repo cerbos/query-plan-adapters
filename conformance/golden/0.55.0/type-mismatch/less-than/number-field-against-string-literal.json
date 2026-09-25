@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a3",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/less-than/number-field-against-string-literal",
+  "intent": "aNumber < \"5\" OR aNumber == 2: a number attribute ordered against a numeric string.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": "5"
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/less-than/number-field-against-string-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber < \"5\" || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ordering is a CEL error, so only a3/a8 are allowed; a coercing store adds each aNumber < 5, and one that orders numbers below every string returns every row."
+}

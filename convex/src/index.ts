@@ -7,7 +7,7 @@ import {
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { evaluate } from "./evaluate";
-import { isExpression } from "./operands";
+import { isExpression, withOmittedNullDefault } from "./operands";
 import { canPushToDb, translateExpression } from "./pushdown";
 import type { FilterQ } from "./pushdown";
 import {
@@ -23,6 +23,11 @@ export type ConvexFilter<Q, R = unknown> = (q: Q) => R;
 
 export type MapperConfig = {
   field?: string;
+  /**
+   * The mapped path may be absent from a document (CEL's missing-attribute case), so comparisons
+   * over it stay with the post-filter. Left undeclared, it follows the call's
+   * `nullAttributeRepresentation`: `false` under `"explicit"`, `true` under `"omitted"`.
+   */
   nullable?: boolean;
 };
 
@@ -40,9 +45,12 @@ export type Mapper =
  *   `null == null`, so matching null selects exactly the documents `check()` allows.
  * - `"omitted"` — a NULL field sends no attribute at all. CEL then raises a missing-attribute
  *   error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
- *   documents the PDP denies. Null comparison operands are rejected instead of translated.
+ *   documents the PDP denies. Null comparison operands are rejected instead of translated, every
+ *   mapper entry that does not declare `nullable` is treated as `nullable: true`, and the
+ *   post-filter reads a stored `null` as a missing attribute.
  *
- * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ * See https://github.com/cerbos/query-plan-adapters/issues/302 and
+ * cerbos/query-plan-adapters#493.
  */
 export type NullAttributeRepresentation = "explicit" | "omitted";
 
@@ -96,6 +104,7 @@ export type QueryPlanToConvexResult<Q = unknown, R = unknown> =
 const buildFilters = <Q, R>(
   expression: PlanExpressionOperand,
   mapper: Mapper,
+  nullIsMissing: boolean,
 ): ConditionalResult<Q, R> => {
   if (canPushToDb(expression, mapper)) {
     return {
@@ -121,7 +130,11 @@ const buildFilters = <Q, R>(
         kind: PlanKind.CONDITIONAL,
         path: "split",
         filter: convexFilter(conjunction(pushable), mapper),
-        postFilter: postFilterFor(conjunction(nonPushable), mapper),
+        postFilter: postFilterFor(
+          conjunction(nonPushable),
+          mapper,
+          nullIsMissing,
+        ),
       };
     }
   }
@@ -129,7 +142,7 @@ const buildFilters = <Q, R>(
   return {
     kind: PlanKind.CONDITIONAL,
     path: "post",
-    postFilter: postFilterFor(expression, mapper),
+    postFilter: postFilterFor(expression, mapper, nullIsMissing),
   };
 };
 
@@ -150,9 +163,13 @@ const convexFilter =
     translateExpression(expression, q as unknown as FilterQ, mapper) as R;
 
 const postFilterFor =
-  (expression: PlanExpressionOperand, mapper: Mapper): PostFilter =>
+  (
+    expression: PlanExpressionOperand,
+    mapper: Mapper,
+    nullIsMissing: boolean,
+  ): PostFilter =>
   (doc) =>
-    evaluate(expression, { doc, mapper, bindings: {} }) === true;
+    evaluate(expression, { doc, mapper, bindings: {}, nullIsMissing }) === true;
 
 export function queryPlanToConvex<Q = unknown, R = unknown>({
   queryPlan,
@@ -167,14 +184,19 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
       const { condition } = queryPlan;
+      const omitted = nullAttributeRepresentation === "omitted";
       assertNoListValuedCondition(condition);
-      if (nullAttributeRepresentation === "omitted") {
+      if (omitted) {
         assertNoNullComparisonOperands(condition);
       }
       validateStructure(condition);
       assertEveryReferenceMapped(condition, mapper);
 
-      const result = buildFilters<Q, R>(condition, mapper);
+      const result = buildFilters<Q, R>(
+        condition,
+        omitted ? withOmittedNullDefault(mapper) : mapper,
+        omitted,
+      );
       if (result.postFilter && !allowPostFilter) {
         throw new Error(
           "The query plan contains conditions that cannot be evaluated by Convex's " +

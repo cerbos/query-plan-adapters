@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "aOptionalString is omitted when NULL, so an inner leaf is either set (== null is false) or missing (an error), and a missing level is an error too: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/two-hops-null-literal-or-root-attribute carries the discriminating oracle.",
+  "id": "relation/equals/two-hops-null-literal",
+  "intent": "parent.inner.aOptionalString == null, two levels out.",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.inner.aOptionalString"
+          },
+          {
+            "value": null
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/two-hops-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.inner.aOptionalString == null"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A two-valued IS NULL returns b1 (inner with a NULL leaf), the rows with a parent but no inner, and the parentless rows, all of which CEL denies."
+}

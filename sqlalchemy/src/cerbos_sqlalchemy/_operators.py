@@ -34,9 +34,12 @@ from sqlalchemy import (
     not_,
     null,
     or_,
+    true,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
+from sqlalchemy.sql.functions import FunctionElement
 
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
@@ -72,6 +75,80 @@ class ConditionalValue:
 
 #: Possibly non-finite numbers, folded by the enclosing comparison instead of bound into SQL.
 SYMBOLIC_NUMBERS = (IEEEConstant, ConditionalValue)
+
+
+class _CharLength(FunctionElement):
+    """A string's length in characters, as CEL's ``size()`` counts it.
+
+    SQLite's and PostgreSQL's ``length()`` count characters; MySQL's counts bytes.
+    """
+
+    name = "cerbos_char_length"
+    type = Integer()
+    inherit_cache = True
+
+
+@compiles(_CharLength)
+def _char_length(element, compiler, **kw):
+    return f"length({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(_CharLength, "mysql")
+@compiles(_CharLength, "mariadb")
+def _mysql_char_length(element, compiler, **kw):
+    return f"char_length({compiler.process(element.clauses, **kw)})"
+
+
+class _AsDouble(FunctionElement):
+    """An exact numeric column read as a double, as CEL reads every attribute number.
+
+    PostgreSQL multiplies an integer by the literal ``0.1`` in exact ``numeric``, so
+    ``3 * 0.1 == 0.3`` is true there and false in CEL. ``cast(x, Float)`` is no help:
+    SQLAlchemy skips a ``FLOAT`` cast on MySQL.
+    """
+
+    name = "cerbos_as_double"
+    type = Float(precision=53)
+    inherit_cache = True
+
+
+@compiles(_AsDouble)
+def _as_double_standard(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS DOUBLE PRECISION)"
+
+
+@compiles(_AsDouble, "sqlite")
+def _as_double_sqlite(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS REAL)"
+
+
+@compiles(_AsDouble, "mysql")
+@compiles(_AsDouble, "mariadb")
+def _as_double_mysql(element, compiler, **kw):
+    return f"CAST({compiler.process(element.clauses, **kw)} AS DOUBLE)"
+
+
+def _as_double(value: Any) -> Any:
+    """Read an exact numeric column as a double; leave anything else alone."""
+    type_ = _base_type(getattr(value, "type", None))
+    if isinstance(type_, Integer) or (
+        isinstance(type_, Numeric) and not isinstance(type_, Float)
+    ):
+        return _AsDouble(value)
+    return value
+
+
+def _arithmetic(op_fn: Callable[[Any, Any], Any]) -> Callable[[Any, Any], Any]:
+    return lambda c, v: op_fn(_as_double(c), _as_double(v))
+
+
+def _unknown() -> Any:
+    """SQL UNKNOWN typed as a boolean.
+
+    A bare ``NULL`` is untyped, and PostgreSQL resolves a ``CASE`` whose every arm is
+    one as ``text``, which it then refuses to mix with a boolean arm.
+    """
+    return func.nullif(true(), true())
 
 
 @dataclass(frozen=True)
@@ -165,7 +242,7 @@ def _string_size(value: Any, _: Any) -> Any:
             'attribute in collection_columns with storage "json" or "pgArray"'
         )
     kind = scalar_kind(value)
-    return null() if kind and kind != "string" else func.length(value)
+    return null() if kind and kind != "string" else _CharLength(value)
 
 
 # -- casts -------------------------------------------------------------------------------------
@@ -187,13 +264,21 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
 def _string_cast(c: Any) -> Any:
     """CEL's ``string()``.
 
-    Numbers use CAST, which formats the shortest round-trip decimal on SQLite,
-    PostgreSQL 12+ and MySQL. Booleans use a CASE because SQLite and MySQL cast
-    them to ``'1'``/``'0'`` (#376, #418). A NULL boolean must stay NULL, since CEL
-    denies it. On MySQL the literals use the connection collation, which must be
-    case-sensitive.
+    Numbers are refused: attribute numbers are doubles, which CEL prints in Go's
+    shortest ``%g`` form (``1e+06``, ``2``, ``-0``), where CAST prints ``1000000``
+    or ``2.0`` and SQL cannot keep the sign of a zero. Booleans use a CASE because
+    SQLite and MySQL cast them to ``'1'``/``'0'`` (#376, #418). A NULL boolean must
+    stay NULL, since CEL denies it. On MySQL the literals use the connection
+    collation, which must be case-sensitive.
     """
-    if isinstance(_base_type(getattr(c, "type", None)), Boolean):
+    type_ = _base_type(getattr(c, "type", None))
+    if isinstance(type_, (Integer, Numeric)) or _is_number(c):
+        raise UnsupportedPlanError(
+            "'string()' over a number cannot be lowered to SQL CAST: CEL formats a "
+            "double in Go's shortest %g form (1e+06, 2, -0), where CAST prints "
+            "1000000 or 2.0, and SQL does not keep the sign of a zero"
+        )
+    if isinstance(type_, Boolean):
         return case(
             (c.is_(None), null()),
             (c, literal_column("'true'", String)),
@@ -224,6 +309,16 @@ def _require_signed_zero(denominator: Any) -> None:
     )
 
 
+def _zero_divisor_is_nan(numerator: Any, denominator: Any) -> bool:
+    """True when a zero column divisor can only give NaN, which has no sign.
+
+    That holds when the numerator is the divisor itself or a constant zero.
+    """
+    if _is_number(numerator):
+        return numerator == 0.0
+    return isinstance(numerator, ColumnElement) and numerator.compare(denominator)
+
+
 def _float_div(c: Any, v: Any) -> Any:
     """Divide as doubles, as CEL does. SQLite and PostgreSQL would truncate integer ``/``."""
     if _is_number(c) and _is_number(v):
@@ -245,12 +340,18 @@ def _float_div(c: Any, v: Any) -> Any:
     # wrong (`NaN != 1.0` is TRUE), so keep these arms symbolic for the enclosing
     # comparison to fold. A NULL operand still makes the whole CASE NULL.
     # NULLIF stops dialects that evaluate CASE arms eagerly from failing on /0.
-    # A constant denominator's sign is applied. SQL cannot read a column's
-    # zero sign, so a column is assumed +0.0. See #312.
+    # A constant denominator's sign is applied. SQL cannot read a column's zero
+    # sign, so a column divisor is accepted only where zero gives NaN. See #312.
     denominator_sign = 1.0
     if _is_number(v):
         _require_signed_zero(v)
         denominator_sign = math.copysign(1.0, float(v))
+    elif not _zero_divisor_is_nan(numerator, denominator):
+        raise UnsupportedPlanError(
+            "division by a column cannot be lowered: a zero divisor makes CEL's "
+            "quotient an infinity whose sign is the zero's, and SQL compares -0.0 "
+            "equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read"
+        )
 
     return ConditionalValue(
         condition=denominator == 0.0,
@@ -301,6 +402,20 @@ def arith_over_conditional(op_fn: Callable[[Any, Any], Any], left: Any, right: A
     return op_fn(left, right)
 
 
+def _modulo(*_: Any) -> NoReturn:
+    """Fail closed on CEL's ``%``, which is defined only over integers.
+
+    Attribute numbers are doubles, where ``%`` is a no-such-overload error that
+    must stay denied under negation, and ``int()`` is refused, so no operand the
+    planner leaves unfolded has a faithful lowering.
+    """
+    raise UnsupportedPlanError(
+        "'%' cannot be lowered: CEL defines it only over integers, attribute numbers "
+        "are doubles (a no-such-overload error that must stay denied under negation), "
+        "and int() has no faithful SQL CAST"
+    )
+
+
 # -- comparisons -------------------------------------------------------------------------------
 
 
@@ -321,9 +436,15 @@ def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
 
 
 def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
+    if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
+        raise UnsupportedPlanError(
+            "comparison with a list or map literal cannot be lowered: a SQL column "
+            "holds one scalar, and binding the literal as a parameter would compare "
+            "it by the driver's coercion rather than CEL's typed equality"
+        )
     left_kind, right_kind = scalar_kind(left), scalar_kind(right)
     if left_kind and right_kind and left_kind != right_kind:
-        result = literal(operator == "ne") if operator in ("eq", "ne") else null()
+        result = literal(operator == "ne") if operator in ("eq", "ne") else _unknown()
         for value in (left, right):
             if hasattr(value, "is_"):
                 result = case((value.isnot(None), result))
@@ -359,6 +480,14 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
             )
         return _apply_comparison(operator, left_value, right_value)
 
+    if operator not in ("eq", "ne"):
+        # CEL orders bools, false before true, and so does SQL's boolean (SQLite and
+        # MySQL store 0/1). SQLAlchemy refuses to order against a bare Python bool, so
+        # bind it as a typed parameter instead.
+        if isinstance(left, bool):
+            left = literal(left, Boolean)
+        if isinstance(right, bool):
+            right = literal(right, Boolean)
     return _apply_comparison(operator, left, right)
 
 
@@ -532,11 +661,11 @@ OPERATOR_FNS = MappingProxyType(
         "ge": _comparison("ge"),
         "in": _in,
         # Arithmetic returns values, composed inside comparisons.
-        "add": lambda c, v: c + v,
-        "sub": lambda c, v: c - v,
-        "mult": lambda c, v: c * v,
+        "add": _arithmetic(lambda c, v: c + v),
+        "sub": _arithmetic(lambda c, v: c - v),
+        "mult": _arithmetic(lambda c, v: c * v),
         "div": _float_div,
-        "mod": lambda c, v: c % v,
+        "mod": _modulo,
         # Receiver-style string matches. Operands arrive receiver first.
         "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
         "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),

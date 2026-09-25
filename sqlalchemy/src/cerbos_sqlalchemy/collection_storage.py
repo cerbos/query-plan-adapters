@@ -38,13 +38,13 @@ class CollectionColumn:
 
     The adapter never infers storage, since the SQL differs for JSON, arrays and
     relations. Other operators still resolve the attribute through ``attr_map``.
-    Supported on SQLite and PostgreSQL only.
+    Supported on SQLite, PostgreSQL and MySQL 8.0.17+ (``"json"`` only).
 
     Args:
         column: The column holding exactly the list sent to Cerbos, nulls included.
-        storage: ``"json"`` for a JSON array (PostgreSQL ``JSON``/``JSONB`` or a
-            SQLite JSON text column), or ``"pgArray"`` for a PostgreSQL array of
-            text, varchar, boolean, integer or smallint.
+        storage: ``"json"`` for a JSON array (PostgreSQL ``JSON``/``JSONB``, a
+            MySQL ``JSON`` column, or a SQLite JSON text column), or ``"pgArray"`` for
+            a PostgreSQL array of text, varchar, boolean, integer or smallint.
 
     Raises:
         ValueError: If ``storage`` is not ``"json"`` or ``"pgArray"``.
@@ -267,7 +267,7 @@ def _unsupported(element, compiler, **kw):
     if compiler.dialect.name == "default":
         return f"{element.name}({', '.join(_args(element, compiler, **kw))})"
     raise CompileError(
-        "collection_columns storage renders only on SQLite and PostgreSQL, not "
+        "collection_columns storage renders only on SQLite, PostgreSQL and MySQL, not "
         f"{compiler.dialect.name}"
     )
 
@@ -533,3 +533,149 @@ def _postgresql_member_equals_number(element, compiler, **kw):
 def _postgresql_member_equals_string(element, compiler, **kw):
     (value,) = _args(element, compiler, **kw)
     return f"{_ELEMENT}.value = to_jsonb(CAST({value} AS TEXT))"
+
+
+# -- MySQL -----------------------------------------------------------------------------------
+# MySQL 8.0.17+, for CAST(... AS DOUBLE) and the utf8mb4_0900_bin collation. JSON_TYPE() names
+# the type of a JSON value, so `true` is never `1` and `"2"` is never `2`.
+#
+# Every string this SQL compares carries its own character set and collation, so it runs under
+# any connection collation. A bare literal would take the connection's, which MySQL refuses to
+# mix with the `utf8mb4_bin` of JSON_TYPE() and JSON_UNQUOTE().
+
+# JSON_UNQUOTE() returns utf8mb4_bin, which is PAD SPACE (`'a' = 'a '`), so element text is
+# compared in the byte-exact, NO PAD collation instead.
+_MYSQL_EXACT_COLLATION = "utf8mb4_0900_bin"
+
+
+def _mysql_text(text: str) -> str:
+    return f"_utf8mb4'{text}' COLLATE {_MYSQL_EXACT_COLLATION}"
+
+
+def _mysql_is(item: str, *json_types: str) -> str:
+    names = ", ".join(_mysql_text(json_type) for json_type in json_types)
+    return f"JSON_TYPE({item}) COLLATE {_MYSQL_EXACT_COLLATION} IN ({names})"
+
+
+@compiles(_JsonDocument, "mysql")
+def _mysql_json_document(element, compiler, **kw):
+    column, stored = _declared_column(element, compiler)
+    if not isinstance(stored, sqltypes.JSON):
+        raise CompileError(
+            'collection_columns storage "json" requires a MySQL JSON column'
+        )
+    return compiler.process(column, **kw)
+
+
+@compiles(_PgArrayDocument, "mysql")
+def _mysql_pg_array_document(element, compiler, **kw):
+    raise CompileError(
+        'collection_columns storage "pgArray" requires a PostgreSQL array column'
+    )
+
+
+@compiles(_CollectionSize, "mysql")
+def _mysql_size(element, compiler, **kw):
+    (document,) = _args(element, compiler, **kw)
+    return f"CASE WHEN {_mysql_is(document, 'ARRAY')} THEN JSON_LENGTH({document}) END"
+
+
+def _mysql_is_null(item: str) -> str:
+    return _mysql_is(item, "NULL")
+
+
+def _mysql_equals_bool(item: str, value: str) -> str:
+    # A bound boolean arrives as 1 or 0, so spell the JSON literal out.
+    return (
+        f"({_mysql_is(item, 'BOOLEAN')} AND "
+        f"JSON_UNQUOTE({item}) COLLATE {_MYSQL_EXACT_COLLATION} = "
+        f"CASE WHEN {value} THEN {_mysql_text('true')} ELSE {_mysql_text('false')} END)"
+    )
+
+
+def _mysql_equals_number(item: str, value: str) -> str:
+    # CEL numbers are doubles, so compare as DOUBLE.
+    number = _mysql_is(item, "INTEGER", "UNSIGNED INTEGER", "DOUBLE", "DECIMAL")
+    return (
+        f"CASE WHEN {number} "
+        f"THEN CAST(JSON_UNQUOTE({item}) AS DOUBLE) = CAST({value} AS DOUBLE) "
+        "ELSE false END"
+    )
+
+
+def _mysql_equals_string(item: str, value: str) -> str:
+    return (
+        f"({_mysql_is(item, 'STRING')} AND "
+        f"JSON_UNQUOTE({item}) COLLATE {_MYSQL_EXACT_COLLATION} = "
+        f"CONVERT({value} USING utf8mb4) COLLATE {_MYSQL_EXACT_COLLATION})"
+    )
+
+
+def _mysql_element(element, compiler, equality, **kw):
+    document, index, *value = _args(element, compiler, **kw)
+    item = f"JSON_EXTRACT({document}, '$[{index}]')"
+    # JSON_EXTRACT() is SQL NULL past the end and the JSON null for a null element.
+    return (
+        f"CASE WHEN {_mysql_is(document, 'ARRAY')} AND {item} IS NOT NULL "
+        f"THEN {equality(item, *value)} END"
+    )
+
+
+@compiles(_ElementIsNull, "mysql")
+def _mysql_element_is_null(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_is_null, **kw)
+
+
+@compiles(_ElementEqualsBool, "mysql")
+def _mysql_element_equals_bool(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_bool, **kw)
+
+
+@compiles(_ElementEqualsNumber, "mysql")
+def _mysql_element_equals_number(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_number, **kw)
+
+
+@compiles(_ElementEqualsString, "mysql")
+def _mysql_element_equals_string(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_string, **kw)
+
+
+@compiles(_CollectionContains, "mysql")
+def _mysql_contains(element, compiler, **kw):
+    document, *matches = _args(element, compiler, **kw)
+    condition = " OR ".join(f"({match})" for match in matches) or "false"
+    # A JSON column keeps a null element as the JSON null, not SQL NULL.
+    return (
+        f"CASE WHEN {_mysql_is(document, 'ARRAY')} THEN EXISTS "
+        f"(SELECT 1 FROM JSON_TABLE({document}, '$[*]' COLUMNS "
+        f"(value JSON PATH '$')) AS {_ELEMENT} WHERE {condition}) END"
+    )
+
+
+_MYSQL_MEMBER = f"{_ELEMENT}.value"
+
+
+@compiles(_MemberIsNull, "mysql")
+def _mysql_member_is_null(element, compiler, **kw):
+    # JSON_TABLE() turns a JSON null element into SQL NULL. Every element exists, so that
+    # NULL can only be a null element.
+    return f"({_MYSQL_MEMBER} IS NULL OR {_mysql_is_null(_MYSQL_MEMBER)})"
+
+
+@compiles(_MemberEqualsBool, "mysql")
+def _mysql_member_equals_bool(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_bool(_MYSQL_MEMBER, value)
+
+
+@compiles(_MemberEqualsNumber, "mysql")
+def _mysql_member_equals_number(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_number(_MYSQL_MEMBER, value)
+
+
+@compiles(_MemberEqualsString, "mysql")
+def _mysql_member_equals_string(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_string(_MYSQL_MEMBER, value)

@@ -17,6 +17,7 @@ import type { ExpressionOperand } from "./operands";
 import {
   FALSE_CONDITION,
   TRUE_CONDITION,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import {
@@ -71,13 +72,23 @@ const resolveMacroScope = (
     lambdaOperand,
     context,
   );
+  const scope = createCollectionScope(
+    collectionOperand.name,
+    variable.name,
+    mapper,
+    options.openTables,
+  );
+  if (scope.primaryRelation.type === "one") {
+    // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
+    // attribute names — which a subquery over the related row cannot enumerate.
+    throw new UnsupportedQueryPlanError(
+      `Cannot translate a macro over '${collectionOperand.name}': it is a to-one relation, which ` +
+        "CEL reads as a map whose keys (the attribute names present on the related row) the " +
+        "macro ranges over, and SQL has no row of attribute names to iterate",
+    );
+  }
   return {
-    ...createCollectionScope(
-      collectionOperand.name,
-      variable.name,
-      mapper,
-      options.openTables,
-    ),
+    ...scope,
     collectionName: collectionOperand.name,
     conditionOperand: expression,
   };
@@ -114,6 +125,116 @@ const primaryAlias = (
  * where filter() surfaces the missing-attribute error instead of skipping the element — so the
  * enclosing comparison is UNKNOWN and the row is excluded under both polarities.
  */
+/**
+ * `size(filter(list, lambda))` over a literal list: the number of elements whose condition is TRUE.
+ * CEL's filter() absorbs no error — an erroring element condition makes the whole list an error —
+ * so a single UNKNOWN makes the count NULL.
+ */
+const buildKnownValueFilteredCount = (
+  elements: Value[],
+  lambdaOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const { variable, expression } = extractLambdaComponents(lambdaOperand, "'filter' lambda operand");
+  if (elements.length === 0) return sql`0`;
+  const conditions = elements.map((element) =>
+    buildFilterFromExpression(
+      substituteLambdaVariable(expression, variable.name, element),
+      mapper,
+      options,
+    ),
+  );
+  const anyUnknown = sql.join(
+    conditions.map((condition) => sql`(${condition}) is null`),
+    sql` or `,
+  );
+  const count = sql.join(
+    conditions.map((condition) => sql`(case when ${condition} then 1 else 0 end)`),
+    sql` + `,
+  );
+  return sql`(case when ${anyUnknown} then null else ${count} end)`;
+};
+
+/**
+ * `map(list, lambda)` over a literal list, unrolled into the `list(...)` of its substituted
+ * bodies before translation — `["a", "b"].map(t, t + R.attr.s)` is `[("a" + s), ("b" + s)]` — so
+ * what the planner could not evaluate reaches the translators as an ordinary list constructor.
+ */
+export const unrollKnownValueMaps = (
+  operand: PlanExpressionOperand,
+): PlanExpressionOperand => {
+  if (!isExpressionOperand(operand)) return operand;
+  const operands = operand.operands.map(unrollKnownValueMaps);
+  const [collection, lambda] = operands;
+  if (
+    operand.operator === "map" &&
+    operands.length === 2 &&
+    collection !== undefined && isValueOperand(collection) && Array.isArray(collection.value) &&
+    lambda !== undefined && isOperatorCall(lambda, "lambda")
+  ) {
+    const { variable, expression } = extractLambdaComponents(lambda, "'map' lambda operand");
+    return {
+      operator: "list",
+      operands: collection.value.map((element) =>
+        substituteLambdaVariable(expression, variable.name, element),
+      ),
+    };
+  }
+  return { operator: operand.operator, operands };
+};
+
+/** The iteration variable `size(except(...))` is rewritten with; not a name CEL lets a policy bind. */
+const EXCEPT_ELEMENT = "__cerbos_except_element";
+
+/**
+ * `size(a.except(b))`, as `size(a.filter(t, !(t in b)))`: Cerbos's except keeps an element of `a`
+ * exactly when `b` does not contain it, duplicates included. The two differ only when `b` is an
+ * error and `a` is empty — except() still raises, filter() never evaluates its body — so `b` must
+ * be constant unless `a` is a non-empty literal list.
+ */
+export const buildExceptCount = (
+  exceptOperand: ExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const [collection, removed] = exceptOperand.operands;
+  if (
+    exceptOperand.operands.length !== 2 || collection === undefined || removed === undefined ||
+    isOperatorCall(removed, "lambda")
+  ) {
+    throw new UnsupportedQueryPlanError("'size' of except() requires two list operands");
+  }
+  const nonEmptyLiteral =
+    isValueOperand(collection) && Array.isArray(collection.value) && collection.value.length > 0;
+  if (!isValueOperand(removed) && !nonEmptyLiteral) {
+    throw new UnsupportedQueryPlanError(
+      "'size' of except() over a collection that may be empty requires a constant list to " +
+        "remove: an erroring list still makes except() raise when there is nothing to remove from",
+    );
+  }
+  return buildFilteredCount(
+    {
+      operator: "filter",
+      operands: [
+        collection,
+        {
+          operator: "lambda",
+          operands: [
+            {
+              operator: "not",
+              operands: [{ operator: "in", operands: [{ name: EXCEPT_ELEMENT }, removed] }],
+            },
+            { name: EXCEPT_ELEMENT },
+          ],
+        },
+      ],
+    },
+    mapper,
+    options,
+  );
+};
+
 export const buildFilteredCount = (
   filterOperand: ExpressionOperand,
   mapper: Mapper,
@@ -125,6 +246,9 @@ export const buildFilteredCount = (
   const [collectionOperand, lambdaOperand] = filterOperand.operands;
   if (!collectionOperand || !lambdaOperand) {
     throw new UnsupportedQueryPlanError("'filter' operator requires collection and lambda operands");
+  }
+  if (isValueOperand(collectionOperand) && Array.isArray(collectionOperand.value)) {
+    return buildKnownValueFilteredCount(collectionOperand.value, lambdaOperand, mapper, options);
   }
   const scope = resolveMacroScope(
     collectionOperand,
@@ -264,10 +388,10 @@ const buildKnownValueCollectionFilter = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
-  if (operator !== "exists" && operator !== "all") {
+  if (operator !== "exists" && operator !== "all" && operator !== "exists_one") {
     throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection value is not supported. ` +
-        "Only exists() and all() can be folded into a flat filter.",
+        "Only exists(), all() and exists_one() can be folded into a flat filter.",
     );
   }
   if (!Array.isArray(collectionValue)) {
@@ -279,6 +403,13 @@ const buildKnownValueCollectionFilter = (
     lambdaOperand,
     `'${operator}' lambda operand`,
   );
+
+  if (operator === "exists_one") {
+    return withPolarity(
+      buildKnownValueExistsOne(collectionValue, variable.name, bodyOperand, mapper, options),
+      negated,
+    );
+  }
 
   // Push negation through the macro rather than applying a SQL NOT around it:
   // !exists(body) == all(!body), and !all(body) == exists(!body). This keeps
@@ -303,6 +434,40 @@ const buildKnownValueCollectionFilter = (
     );
   }
   return combined;
+};
+
+/**
+ * `exists_one` over a literal list: exactly one element's condition is TRUE. Unlike `exists` and
+ * `all`, CEL's `exists_one` evaluates every element and absorbs no error — any erroring element
+ * makes the whole macro an error — so a single UNKNOWN element condition makes the result NULL,
+ * excluded under both polarities, before the matches are counted.
+ */
+const buildKnownValueExistsOne = (
+  elements: Value[],
+  variableName: string,
+  bodyOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (elements.length === 0) {
+    return FALSE_CONDITION;
+  }
+  const conditions = elements.map((element) =>
+    buildFilterFromExpression(
+      substituteLambdaVariable(bodyOperand, variableName, element),
+      mapper,
+      options,
+    ),
+  );
+  const anyUnknown = sql.join(
+    conditions.map((condition) => sql`(${condition}) is null`),
+    sql` or `,
+  );
+  const matches = sql.join(
+    conditions.map((condition) => sql`(case when ${condition} then 1 else 0 end)`),
+    sql` + `,
+  );
+  return sql`(case when ${anyUnknown} then null when (${matches}) = 1 then true else false end)`;
 };
 
 /**
@@ -374,14 +539,11 @@ export const buildCollectionOperatorFilter = (
 
   switch (operator) {
     // filter() yields a list, not a boolean. Reaching it here means the plan used it as a
-    // predicate, and there is no meaning to pick: `filter(...)` is not
-    // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
-    // use — `size(filter(coll, lambda))` — is handled by buildFilteredCount before this.
+    // predicate, which CEL evaluates to a no-overload error: denied under both polarities, and
+    // absorbed by `||` / `&&` exactly as SQL absorbs UNKNOWN. It is NOT `size(filter(...)) > 0`
+    // (cerbos/query-plan-adapters#313); that use is handled by buildFilteredCount before this.
     case "filter":
-      throw new UnsupportedQueryPlanError(
-        "Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. " +
-          "Only size(filter(...)) has a boolean meaning",
-      );
+      return UNKNOWN_CONDITION;
     case "exists": {
       const trueWitness = wrapAll(sql`(${rowCondition}) is true`);
       const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);

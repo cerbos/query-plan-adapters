@@ -95,8 +95,9 @@ const (
 	// NullConventionExplicit — this column's NULL is sent as an explicit null attribute, so the
 	// equality family renders definitely and a negation includes the NULL rows CEL allows.
 	NullConventionExplicit = queryplan.NullConventionExplicit
-	// NullConventionOmitted — this column's NULL sends no attribute, so null operands against it
-	// are rejected whatever NullRepresentation says.
+	// NullConventionOmitted — this column's NULL sends no attribute. `x == null` and `x != null`
+	// render as UNKNOWN for a NULL column, as CEL's missing-attribute error; every other null
+	// operand against it is rejected, whatever NullRepresentation says.
 	NullConventionOmitted = queryplan.NullConventionOmitted
 )
 

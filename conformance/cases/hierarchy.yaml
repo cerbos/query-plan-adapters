@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy("dept.eng").ancestorOf(hierarchy(R.attr.scope))'
+- id: 'hierarchy/ancestor-of/empty-delimiter'
+  tier: adversarial
+  intent: 'ancestorOf over a hierarchy split on the empty delimiter, one segment per character.'
+  trap: 'The ancestors are the strict character prefixes of "dept.eng", the empty string included (zero segments): a8 "" and a1 "dept". A segment-wise or dot-split reading drops a8 or keeps a2.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, "").ancestorOf(hierarchy("dept.eng", ""))'
 - id: 'hierarchy/ancestor-of/like-metacharacters-in-path'
   tier: adversarial
   intent: 'ancestorOf against a constant path containing % and _ (''50%.a_b.x'').'
@@ -73,6 +80,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy("dept.eng").overlaps(hierarchy(R.attr.scope))'
+- id: 'hierarchy/overlaps/empty-delimiter'
+  tier: adversarial
+  intent: 'overlaps over a hierarchy split on the empty delimiter, one segment per character.'
+  trap: 'Any character prefix of "dept.eng" or any extension of it overlaps, so a5 "dept.engineering" does (it would not under the dot delimiter) and a8 "" does too.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, "").overlaps(hierarchy("dept.eng", ""))'
 - id: 'hierarchy/overlaps/like-metacharacters-in-path'
   tier: adversarial
   intent: 'overlaps with a '':'' delimiter against ''50%:a_b'', emitting the IN list, the equality and the escaped LIKE at once.'

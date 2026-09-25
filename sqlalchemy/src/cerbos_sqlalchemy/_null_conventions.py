@@ -90,12 +90,13 @@ def assert_no_null_comparison_operands(
     declarations: dict[str, NullAttributeRepresentation],
     fallback: str,
 ) -> None:
-    """Reject every null literal operand under the ``omitted`` representation.
+    """Reject null literal operands under the ``omitted`` representation.
 
     An omitted NULL makes CEL error and deny, while ``IS NULL`` would return the row.
     The scan matches any operand, not a list of operators, so shapes like
-    ``hasIntersection`` and future operators are covered. It also rejects
-    ``ne(x, null)``: a leaf cannot see whether an enclosing ``not`` will flip it.
+    ``hasIntersection`` and future operators are covered. The one exception is
+    ``eq``/``ne`` between an attribute and a bare null, which the translator renders
+    as UNKNOWN for a NULL column (``omitted_null_comparison``). See #551.
     """
     if not isinstance(node, Expr):
         return
@@ -107,16 +108,35 @@ def assert_no_null_comparison_operands(
     compared = _compared_attribute_and_literal(node)
     if compared is not None:
         variable, value = compared
-        declared = declarations.get(variable)
-        if declared is not None:
-            if declared == "omitted" and _carries_null_operand(value):
-                raise _null_operand_error(operator)
-            return
+        convention = declarations.get(variable, fallback)
+        if (
+            convention == "omitted"
+            and _carries_null_operand(value)
+            and not (operator in ("eq", "ne") and value.value is None)
+        ):
+            raise _null_operand_error(operator)
+        return
 
     if fallback == "omitted" and any(_carries_null_operand(o) for o in operands):
         raise _null_operand_error(operator)
     for operand in operands:
         assert_no_null_comparison_operands(operand, declarations, fallback)
+
+
+def omitted_null_comparison(operator: str, column: Any, overridden: bool) -> Any:
+    """Render ``eq``/``ne`` against null for an attribute on the omitted convention.
+
+    A NULL column sends no attribute, so CEL answers with a missing-attribute error,
+    and a present column is never equal to null. The ``CASE`` has no ``ELSE``, so a
+    NULL column is UNKNOWN, which stays UNKNOWN under any enclosing ``NOT``; a
+    present one is FALSE for ``eq`` and TRUE for ``ne``. See #551.
+
+    An overridden operator, or an attribute mapped to something that is not a SQL
+    expression (e.g. a relation marker), cannot be rendered this way, so it is refused.
+    """
+    if overridden or not hasattr(column, "isnot"):
+        raise _null_operand_error(operator)
+    return case((column.isnot(None), literal(operator == "ne")))
 
 
 def definite_equality(

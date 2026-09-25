@@ -1,9 +1,14 @@
 {
-  "allowed": [],
-  "degenerateReason": "No seed's aString converts to a number, so double(R.attr.aString) is a conversion error for every seed and denies.",
+  "allowed": [
+    "i1",
+    "i3",
+    "i4",
+    "i6"
+  ],
+  "degenerateReason": null,
   "id": "cast/double/malformed-string",
   "intent": "double() over a string attribute compared with a threshold.",
-  "oracle": "empty",
+  "oracle": "discriminating",
   "pdp": "0.54.0",
   "plan": {
     "condition": {
@@ -48,5 +53,5 @@
     }
   ],
   "tier": "adversarial",
-  "trap": "CEL requires the whole string to be a number; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2."
+  "trap": "CEL requires the whole string to be a number (i1 \"+051\", i3 \"1e3\", i4 and i6 are; i2 \"51 \" is not); SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3, b2 and i2."
 }

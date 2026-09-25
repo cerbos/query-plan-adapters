@@ -121,8 +121,8 @@ describe("nullAttributeRepresentation", () => {
   // be told, and the whole behaviour is a translator property with no store in it.
   //
   // Mongoose expresses it twice over: per attribute with the `nullable` mapper flag (which the
-  // conformance mapping declares, so the harness replays that case under it), and globally with this switch, which is the fail-closed backstop for a caller
-  // who omits attributes without declaring `nullable` on every affected entry.
+  // conformance mapping declares, so the harness replays that case under it), and globally with
+  // this switch, which is the default for every entry that declares no `nullable` (#493).
   test("explicit: the null operand is translated", () => {
     expect(
       translate("null/equals/null-literal-on-missing-attribute", {
@@ -184,7 +184,9 @@ describe("nullAttributeRepresentation", () => {
 
   // The same claim over every recorded plan, so a new case carrying a null constant is covered
   // without anyone naming it here. An INDEXED null element is the one exception: the option
-  // describes absent fields, not null list elements, which keep their explicit null value.
+  // describes absent fields, not null list elements, which keep their explicit null value. A
+  // negated shape may be refused for the negation over a field the option makes nullable before
+  // its null operand is reached, so the refusal type is what counts.
   test("omitted: every golden plan carrying a null literal is refused", () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
@@ -212,13 +214,23 @@ describe("nullAttributeRepresentation", () => {
     );
     expect(nullCarrying).toContain(indexedNull);
 
+    // A plan the adapter refuses under "explicit" too is refused for its shape, not its null
+    // (a whole-list comparison with `[null]` in the list), so the option has nothing to add.
+    const refusedRegardless = (id: string): boolean => {
+      try {
+        translate(id);
+        return false;
+      } catch (error) {
+        return error instanceof UnsupportedQueryPlanError;
+      }
+    };
     const notRejected = nullCarrying.filter((id) => {
-      if (id === indexedNull) return false;
+      if (id === indexedNull || refusedRegardless(id)) return false;
       try {
         translate(id, { nullAttributeRepresentation: "omitted" });
         return true;
       } catch (error) {
-        return !String(error).includes("missing-attribute error");
+        return !(error instanceof UnsupportedQueryPlanError);
       }
     });
     expect(notRejected).toEqual([]);
@@ -229,13 +241,161 @@ describe("nullAttributeRepresentation", () => {
 
   // The negative control, and the reason the two assertions above are not vacuous: a guard that
   // rejected EVERY plan under `omitted` would satisfy both while breaking every caller who set
-  // the option. The switch narrows what translates; it does not turn the adapter off.
-  test("omitted: a null-free comparison is untouched", () => {
-    expect(
-      translate("string/equals/case-sensitive", {
-        nullAttributeRepresentation: "omitted",
-      }),
-    ).toStrictEqual(translate("string/equals/case-sensitive"));
+  // the option. The switch narrows what translates; it does not turn the adapter off. With every
+  // entry declaring its own `nullable`, nothing is left for the default to decide, so every
+  // null-free plan translates exactly as it does under "explicit".
+  test("omitted: with every entry declared, a null-free plan is untouched", () => {
+    const outcome = (build: () => QueryPlanToMongooseResult): unknown => {
+      try {
+        return build();
+      } catch (error) {
+        return error instanceof UnsupportedQueryPlanError
+          ? "refused"
+          : String(error);
+      }
+    };
+    const nullFree = readGoldens(CURRENT).filter(
+      (g) => !/\bnull\b/.test(JSON.stringify(g.plan)),
+    );
+    // Guard the guard: the loop below must cover real plans.
+    expect(nullFree.map((g) => g.id)).toContain("string/equals/case-sensitive");
+    const differing = nullFree
+      .filter(
+        (g) =>
+          JSON.stringify(outcome(() => translate(g.id))) !==
+          JSON.stringify(
+            outcome(() =>
+              translate(g.id, {
+                mapper: declaringNullable(MAPPER, false),
+                nullAttributeRepresentation: "omitted",
+              }),
+            ),
+          ),
+      )
+      .map((g) => g.id);
+    expect(differing).toEqual([]);
+  });
+});
+
+/** `mapper` with `nullable` set to `value` on every entry and relation field that declares none. */
+function declaringNullable(mapper: Mapper, value: boolean): Mapper {
+  const declare = (config: MapperConfig): MapperConfig => ({
+    ...config,
+    nullable: config.nullable ?? value,
+    ...(config.relation
+      ? {
+          relation: {
+            ...config.relation,
+            ...(config.relation.fields
+              ? {
+                  fields: Object.fromEntries(
+                    Object.entries(config.relation.fields).map(([key, field]) => [
+                      key,
+                      declare(field),
+                    ]),
+                  ),
+                }
+              : {}),
+          },
+        }
+      : {}),
+  });
+  if (typeof mapper === "function") return (key) => declare(mapper(key));
+  return Object.fromEntries(
+    Object.entries(mapper).map(([key, config]) => [key, declare(config)]),
+  );
+}
+
+// Under "omitted" a NULL field sends no attribute, so CEL denies every comparison against it, while
+// MongoDB's `$ne` and `$nor` match a document the path is absent from or null in. An entry that
+// declares no `nullable` therefore takes the call-level convention as its default, exactly as if it
+// declared `nullable: true` (#493). A caller-supplied argument no corpus case can vary: the harness
+// runs one mapping, under "explicit".
+describe("omitted: an undeclared entry is nullable", () => {
+  const omitted = (id: string, mapper: Mapper = MAPPER) =>
+    translate(id, { mapper, nullAttributeRepresentation: "omitted" });
+  const topLevelConjuncts = (filter: unknown): unknown[] => {
+    const record = filter as Record<string, unknown>;
+    return Array.isArray(record["$and"])
+      ? record["$and"].flatMap(topLevelConjuncts)
+      : [filter];
+  };
+
+  // The corpus mapping declares the scalars it seeds as missing (`aString`, `aNumber`, `aBool`)
+  // nullable, so each test strips the declaration from the field it reads, leaving the entry for
+  // the call-level default to decide. `owner` maps the nullable `aOptionalString` column without
+  // declaring it, as a caller on the explicit convention would.
+  const undeclared = (field: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER as Record<string, MapperConfig>).map(
+        ([key, config]) => {
+          if (config.field !== field) return [key, config];
+          const { nullable: _nullable, ...rest } = config;
+          return [key, rest];
+        },
+      ),
+    );
+  const guard = (field: string) => JSON.stringify({ [field]: { $ne: null } });
+
+  test.each([
+    ["string/equals/case-sensitive", "aString"],
+    ["comparison/not-equals/value-first", "aString"],
+    ["null/not-equals/explicit-null-against-literal", "aOptionalString"],
+  ])(
+    "%s requires the field to be present and non-null, outside any negation",
+    (id, field) => {
+      const mapper = undeclared(field);
+      expect(topLevelConjuncts(translate(id, { mapper }).filters)).not.toContainEqual({
+        [field]: { $ne: null },
+      });
+      expect(topLevelConjuncts(omitted(id, mapper).filters)).toContainEqual({
+        [field]: { $ne: null },
+      });
+    },
+  );
+
+  // A `not` over an undeclared entry is translated as one over a declared-nullable entry: the
+  // guard sits outside the `$nor`, which would otherwise readmit the missing documents. A negated
+  // `&&` is pushed down to its leaves first, so each leaf carries its own guard.
+  test.each([
+    ["null/equals/negated-explicit-null-against-literal", "aOptionalString"],
+    ["null/in/negated-explicit-null-in-literal-list", "aOptionalString"],
+    ["logic/not/over-and", "aString"],
+  ])("%s guards %s outside the negation", (id, field) => {
+    const mapper = undeclared(field);
+    expect(JSON.stringify(translate(id, { mapper }).filters)).not.toContain(
+      guard(field),
+    );
+    expect(JSON.stringify(omitted(id, mapper).filters)).toContain(guard(field));
+  });
+
+  test("a function mapper takes the default too", () => {
+    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const asFunction: Mapper = (key) => mapper[key]!;
+    for (const id of ["string/equals/case-sensitive", "logic/not/over-and"]) {
+      expect(omitted(id, asFunction)).toStrictEqual(omitted(id, mapper));
+    }
+  });
+
+  // `tagNames` projects the `name` field of each `tags` element, which declares no `nullable`.
+  test("a relation's element field takes the default too", () => {
+    const id = "collection/exists/scalar-list-equals";
+    const guard = JSON.stringify({ name: { $ne: null } });
+    expect(JSON.stringify(translate(id).filters)).not.toContain(guard);
+    expect(JSON.stringify(omitted(id).filters)).toContain(guard);
+  });
+
+  // `nullable: false` is the per-entry opt-out: it asserts the field is always stored.
+  test("declaring nullable: false keeps the explicit translation", () => {
+    for (const id of [
+      "string/equals/case-sensitive",
+      "comparison/not-equals/value-first",
+      "logic/not/over-and",
+    ]) {
+      expect(omitted(id, declaringNullable(MAPPER, false))).toStrictEqual(
+        translate(id),
+      );
+    }
   });
 });
 
@@ -555,5 +715,18 @@ describe("plans the planner cannot produce", () => {
         mapper: MAPPER,
       }),
     ).toThrow("exists over a literal collection requires a list value");
+  });
+});
+
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). No seed stores a list as null or omits it,
+// so no case can witness a negated membership over one: whether the corpus should carry such a
+// row is #548. CEL denies `!(2 in null)`, where a bare `$nor` over the membership matches a null
+// or absent array (#534). Delete this when a case carrying a null-list row lands.
+describe("a negated membership over a native array field", () => {
+  test("Corpus gap. requires the list to be stored as an array, outside the $nor", () => {
+    const { filters } = translate("null/in/negated-null-literal-in-number-list");
+    expect(filters).toMatchObject({
+      $and: expect.arrayContaining([{ aNumberList: { $type: "array" } }]),
+    });
   });
 });

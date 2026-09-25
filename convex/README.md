@@ -114,7 +114,7 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | Option | Meaning |
 | --- | --- |
 | `field` | The document field the Cerbos path maps to. Dot notation reaches nested fields (`metadata.value`), including chained paths such as `mainCategory.subCategories`. Omit it (`{}`) if the document field really is named like the plan path. |
-| `nullable` | The field may be **absent** from a document. Predicates on it are evaluated by `postFilter`, where an absent path is a CEL missing-attribute error (deny), instead of in Convex's filter engine, which cannot tell absent from null or false. Required for every field that can be absent. |
+| `nullable` | The field may be **absent** from a document. Predicates on it are evaluated by `postFilter`, where an absent path is a CEL missing-attribute error (deny), instead of in Convex's filter engine, which cannot tell absent from null or false. Required for every field that can be absent. Left undeclared, it follows the call's [`nullAttributeRepresentation`](#null-attribute-representation): off under `"explicit"`, on under `"omitted"`. |
 
 ```ts
 const mapper: Mapper = {
@@ -167,18 +167,38 @@ field in the attributes you send to `check()`, so tell the adapter which convent
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects a stored null — **over-grants** |
 
 `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for NULL fields, set
-`"omitted"`: the adapter then rejects every null comparison operand, in both `filter` and
-`postFilter`, rather than return documents the PDP denies.
+`"omitted"`:
 
 ```ts
-queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted", allowPostFilter: true });
 ```
 
-The rejection is wider than the shapes that actually over-grant (`x != null` is aligned under both
-conventions), because a leaf cannot see whether an enclosing `not` will flip it. Storing the field
-as absent (with `nullable: true`) also aligns the two via `postFilter`, but that depends on your
-document shape; the option is the reliable guard. See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+The call-level option is the default for every mapper entry that does not declare `nullable`, so
+under `"omitted"` the adapter:
+
+- rejects every null comparison operand, in both `filter` and `postFilter`. The rejection is wider
+  than the shapes that actually over-grant (`x != null` is aligned under both conventions), because
+  a leaf cannot see whether an enclosing `not` will flip it
+  ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
+- treats every entry that does not declare `nullable` as `nullable: true`, so its comparisons are
+  answered by `postFilter` and need `allowPostFilter: true`. Convex's engine cannot guard them:
+  `q.neq(...)` and a negated comparison match a document the field is absent from, which `check()`
+  denies ([#493](https://github.com/cerbos/query-plan-adapters/issues/493));
+- has `postFilter` read a stored `null` as a missing attribute, which denies under both polarities,
+  since under this convention the application sends no attribute for it.
+
+`nullable: false` opts an entry out: it asserts the field is always stored and never null, and its
+comparisons go to Convex's filter engine as they do under `"explicit"`.
+
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
+> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
+> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
+> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
+> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Supported operators
 
@@ -187,7 +207,8 @@ Pushed to Convex's filter engine (`filter`):
 | Category | Operators | Emits |
 | --- | --- | --- |
 | Logical | `and`, `or`, `not` | `q.and`, `q.or`, `q.not` |
-| Comparison | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | `q.eq`, `q.neq`, `q.lt`, `q.lte`, `q.gt`, `q.gte` |
+| Comparison | `eq`, `ne` | `q.eq`, `q.neq` |
+| Ordering | `lt`, `le`, `gt`, `ge` | `q.lt`, `q.lte`, `q.gt`, `q.gte`, each inside a guard confining the field to the literal's type ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)) |
 | Membership | `in` | `q.or(q.eq(field, v1), q.eq(field, v2), …)` — can be slow for long lists |
 | Null checks | `eq`/`ne` against `null` | The planner has no existence operator |
 
@@ -244,21 +265,25 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 29 seed documents. Passed cases on the current PDP, 0.55.0, where the
+function over the corpus's 41 seed documents. Passed cases on the current PDP, 0.55.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 70 / 80 |
-| adversarial | 206 / 227 |
+| extended | 67 / 80 |
+| adversarial | 275 / 308 |
 
-Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there is one, `null/has/missing-attribute`
-(extended), which is why that tier's passed and refused cases add up to one fewer than its total:
-the planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies
-the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead
-of `has(R.attr.x)`.
+Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
+them, because the plan and `check()` disagree. On 0.55.0 there are seven, four extended and three
+adversarial, which is why those tiers' passed and refused cases fall short of their totals.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
+receives the omission as absent and denies the document; use `R.attr.x != null` instead of
+`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
+`not(...)` of it denies j2, which lacks `aNumber`, while `check()` receives `aNumber` as absent and
+treats the erroring DENY as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
 documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -271,19 +296,22 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 302 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 349 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
-| Convex's filter engine, alone | 53 |
-| the engine narrowing and the `postFilter` deciding (a root `and` mixing both) | 2 |
-| the adapter's `postFilter`, alone | 241 |
+| Convex's filter engine, alone | 18 |
+| the adapter's `postFilter`, alone | 325 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
-Convex's own comparison semantics only decide the 53, which include the null comparisons against
-the explicit-null `owner` field (`q.eq(field, null)` against a stored null).
+Convex's own comparison semantics only decide the 18, which include the null comparisons against
+the explicit-null `owner` field (`q.eq(field, null)` against a stored null) and its orderings
+against a string, where a stored null must not sort below `"m"`.
+The corpus's three most-read scalars, `aBool`, `aString` and `aNumber`, can each be absent (one
+seed apiece), so the harness declares them `nullable` and their predicates are post-filtered too:
+Convex's filter engine cannot tell an absent field from a present one the way CEL does.
 
 The harness runs against a self-hosted `convex-backend` container pinned in `docker-compose.yml`.
 Convex Cloud is not exercised: any difference in its filter engine, value ordering or
@@ -309,6 +337,13 @@ document — so most do not apply.
 
 See also [CHANGELOG.md](CHANGELOG.md).
 
+- **Breaking:** under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
+  declare `nullable` is treated as `nullable: true`, and `postFilter` reads a stored `null` as a
+  missing attribute. Comparisons over such an entry move to `postFilter` and need
+  `allowPostFilter: true`; the old pushed-down `q.neq(...)` and negations matched documents the
+  field was missing from, which `check()` denies. Declare `nullable: false` on an entry that is
+  always stored and never null to keep it on Convex's engine. `"explicit"` output is unchanged
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; an unmapped
   reference and a missing `allowPostFilter` opt-in stay a plain `Error`.
@@ -332,6 +367,20 @@ See also [CHANGELOG.md](CHANGELOG.md).
   readmitted every document missing the path. Correct rows, but one more shape scanned, and such
   plans now need `allowPostFilter: true`
   ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)).
+- An ordering against a literal is pushed to Convex only inside a guard confining the field to the
+  literal's type, and a `not` above it is pushed inward so the guard is never negated. Convex
+  orders values across types (null < number < boolean < string), so `q.lt(field, "5")` held for
+  every number, where CEL's `5 < "5"` is an error that denies; under `!`, `!(x >= "5")`
+  returned every number. An ordering against a null, a list or a map is now a constant false.
+  Filters change shape; nothing that translated now throws
+  ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)).
+- **Breaking:** `string()` over an integral constant whose int or double type no other operand
+  fixes, such as `string(R.attr.flag ? 1000000 : 0)`, now throws at translation. CEL renders the
+  int as `"1000000"` and the double as `"1e+06"`, and the plan ships both as the same number; it
+  used to render the double and deny what the PDP allowed. A constant whose two renderings agree
+  (`0`, `42`) and a ternary whose other branch is `int()` still translate. `int()` added to a
+  document field is now the no-such-overload error CEL raises, and `in` over a map-valued attribute
+  tests its keys ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - **Breaking (Cerbos 0.55 compatibility):** ordered comparisons involving NaN evaluate to false, so
   their negation can allow a row; Cerbos 0.54 denied it. The adapter follows 0.55 — use it with
   Cerbos 0.55 when policies can produce NaN in a negated comparison. Missing attributes and nulls

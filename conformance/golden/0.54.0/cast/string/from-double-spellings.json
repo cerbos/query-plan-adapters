@@ -1,0 +1,110 @@
+{
+  "allowed": [
+    "g1",
+    "i1",
+    "i2"
+  ],
+  "degenerateReason": null,
+  "id": "cast/string/from-double-spellings",
+  "intent": "string() over a double attribute compared with CEL's spellings of 1e6, 2 and -9.5e18.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aDouble"
+                            }
+                          ],
+                          "operator": "string"
+                        }
+                      },
+                      {
+                        "value": "1e+06"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aDouble"
+                            }
+                          ],
+                          "operator": "string"
+                        }
+                      },
+                      {
+                        "value": "2"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      }
+                    ],
+                    "operator": "string"
+                  }
+                },
+                {
+                  "value": "-9.5e+18"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/string/from-double-spellings",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "string(R.attr.aDouble) == \"1e+06\" || string(R.attr.aDouble) == \"2\" || string(R.attr.aDouble) == \"-9.5e+18\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL prints a double with Go's %g-style shortest form: \"1e+06\" (i1), \"2\" (i2) and \"-9.5e+18\" (g1). A store CAST prints \"1000000\", \"2.0\" or \"-9.5E18\" and under-grants them."
+}

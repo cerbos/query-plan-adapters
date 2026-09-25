@@ -1,0 +1,84 @@
+{
+  "allowed": [
+    "a4",
+    "a6",
+    "b1",
+    "b5"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/modulo/column-divisor-negative-and-zero",
+  "intent": "Integer modulo by a column expression that is negative on most rows and zero on a1 (int(aNumber) % (int(aNumber) - 5) == 1).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "sub"
+                  }
+                }
+              ],
+              "operator": "mod"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/modulo/column-divisor-negative-and-zero",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL truncates toward zero, so 1 % -4 is 1 and 3 % -2 is 1 (a4, a6 allowed); a floored modulo gives -3 and -1 and under-grants them. a1's divisor is zero, an error that must deny, not fail the query."
+}

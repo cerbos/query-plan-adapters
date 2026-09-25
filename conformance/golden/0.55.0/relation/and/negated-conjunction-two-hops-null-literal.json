@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "b6",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/and/negated-conjunction-two-hops-null-literal",
+  "intent": "The negated conjunction two levels out (!(!parent.inner.aBool && parent.inner.aOptionalString == null)).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.inner.aBool"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.inner.aOptionalString"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/and/negated-conjunction-two-hops-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(!R.attr.parent.inner.aBool && R.attr.parent.inner.aOptionalString == null)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b1's inner has aBool false and a NULL leaf, so the conjunction is an error that denies; the 6 rows with a parent but no inner are errors too. A plain NOT over the relation filter admits them."
+}

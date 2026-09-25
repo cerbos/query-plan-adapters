@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/brace-without-count-is-literal",
+  "intent": "matches(\"^a{,2}$\"), where {,2} opens no count and is therefore literal text.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^a{,2}$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/brace-without-count-is-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^a{,2}$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 reads a brace that does not start a valid {n}, {n,} or {n,m} as a literal, so only i9 \"a{,2}\" matches; reading it as {0,2} (PCRE-style) matches \"\", \"a\" or \"aa\" and under-grants i9."
+}

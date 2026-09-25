@@ -40,11 +40,18 @@ export interface FilterQ {
 
 interface PushdownRule {
   accepts: (operands: PlanExpressionOperand[], mapper: Mapper) => boolean;
+  /**
+   * `negated` is whether an odd number of `not`s encloses the node. The emitted filter matches
+   * exactly the documents on which the node, under that polarity, is CEL `true`. A CEL error is
+   * false under BOTH polarities, so a rule whose operator can error cannot leave its negation to an
+   * enclosing `q.not`, which would turn the error's `false` into `true`.
+   */
   emit: (
     operands: PlanExpressionOperand[],
     q: FilterQ,
     mapper: Mapper,
     operator: string,
+    negated: boolean,
   ) => unknown;
 }
 
@@ -107,64 +114,126 @@ const fieldInList = (
 const allPushable = (operands: PlanExpressionOperand[], mapper: Mapper) =>
   operands.every((operand) => canPushToDb(operand, mapper));
 
-const comparisonRule: PushdownRule = {
+/** The largest int64. Convex orders every int64 below every float64. */
+const INT64_MAX = 2n ** 63n - 1n;
+
+/**
+ * A filter holding for exactly the documents whose `field` has the Convex type a JSON `literal` is
+ * stored as, or undefined for a literal CEL has no ordering for at all (null, a list, a map).
+ *
+ * Convex orders values ACROSS types — undefined < null < int64 < float64 < boolean < string <
+ * bytes < array < object — so `q.lt(field, "5")` is true for every number, and `q.gt(field, 0)`
+ * for every boolean and every string. CEL has no ordering between types: the same comparison is an
+ * error, which denies the document under either polarity. Each guard is bounded by the values
+ * just outside the literal's own type in that order.
+ */
+const sameTypeAs = (literal: unknown, q: FilterQ, field: unknown): unknown => {
+  switch (typeof literal) {
+    case "number":
+      return q.and(q.gt(field, INT64_MAX), q.lt(field, false));
+    case "boolean":
+      return q.and(q.gte(field, false), q.lte(field, true));
+    case "string":
+      return q.and(q.gte(field, ""), q.lt(field, new ArrayBuffer(0)));
+    default:
+      return undefined;
+  }
+};
+
+/** The field and the Convex method that compares it with the literal, operand order resolved. */
+const comparisonParts = (
+  operands: PlanExpressionOperand[],
+  q: FilterQ,
+  mapper: Mapper,
+  operator: string,
+) => {
+  const pair = fieldAndLiteral(operands);
+  if (!pair) {
+    throw new UnsupportedQueryPlanError(
+      `${operator} operator requires one field and one value operand`,
+    );
+  }
+  const cel = operator as ComparisonOperator;
+  const method =
+    CONVEX_COMPARISON[pair.swapped ? MIRRORED_COMPARISON[cel] : cel];
+  const field = q.field(resolveField(pair.field.name, mapper));
+  return { field, literal: pair.literal.value, method };
+};
+
+/** `==` and `!=`: CEL equality across types is false, never an error, exactly as in Convex. */
+const equalityRule: PushdownRule = {
   accepts: (operands, mapper) => {
     const pair = fieldAndLiteral(operands);
     return pair !== undefined && !isNullableField(pair.field.name, mapper);
   },
-  emit: (operands, q, mapper, operator) => {
-    const pair = fieldAndLiteral(operands);
-    if (!pair) {
-      throw new UnsupportedQueryPlanError(
-        `${operator} operator requires one field and one value operand`,
-      );
-    }
-    const cel = operator as ComparisonOperator;
-    const method =
-      CONVEX_COMPARISON[pair.swapped ? MIRRORED_COMPARISON[cel] : cel];
-    return q[method](
-      q.field(resolveField(pair.field.name, mapper)),
-      pair.literal.value,
+  emit: (operands, q, mapper, operator, negated) => {
+    const { field, literal, method } = comparisonParts(
+      operands,
+      q,
+      mapper,
+      operator,
     );
+    const compared = q[method](field, literal);
+    return negated ? q.not(compared) : compared;
+  },
+};
+
+/**
+ * `<`, `<=`, `>`, `>=`: pushed only behind a guard confining the field to the literal's type, and
+ * the guard stays OUTSIDE any negation. `!(x < "5")` over a number is still a CEL error, so it
+ * must not become Convex's `!(true)` for the same document — or, for `!(x >= "5")`, `!(false)`,
+ * which returns every number (cerbos/query-plan-adapters#516).
+ */
+const orderingRule: PushdownRule = {
+  accepts: (operands, mapper) => {
+    const pair = fieldAndLiteral(operands);
+    return pair !== undefined && !isNullableField(pair.field.name, mapper);
+  },
+  emit: (operands, q, mapper, operator, negated) => {
+    const { field, literal, method } = comparisonParts(
+      operands,
+      q,
+      mapper,
+      operator,
+    );
+    const guard = sameTypeAs(literal, q, field);
+    // Ordering against null, a list or a map is an error for every document: false either way.
+    if (guard === undefined) return q.eq(true, false);
+    const compared = q[method](field, literal);
+    return q.and(guard, negated ? q.not(compared) : compared);
   },
 };
 
 const PUSHDOWN_RULES: Record<string, PushdownRule> = {
+  // Negation is pushed inward (De Morgan) rather than wrapped around the built predicate, so each
+  // leaf sees its own polarity. That is sound under CEL's three-valued logic: `!(a && b)` is true
+  // exactly when `!a` or `!b` is true, with an error in either counting as not true.
   and: {
     accepts: allPushable,
-    emit: (operands, q, mapper) => {
-      if (operands.length === 0) return q.eq(true, true);
-      if (operands.length === 1)
-        return translateExpression(operands[0]!, q, mapper);
-      return q.and(...operands.map((op) => translateExpression(op, q, mapper)));
-    },
+    emit: (operands, q, mapper, _operator, negated) =>
+      junction(operands, q, mapper, negated, negated ? "or" : "and"),
   },
   or: {
     accepts: allPushable,
-    emit: (operands, q, mapper) => {
-      if (operands.length === 0) return q.eq(true, false);
-      if (operands.length === 1)
-        return translateExpression(operands[0]!, q, mapper);
-      return q.or(...operands.map((op) => translateExpression(op, q, mapper)));
-    },
+    emit: (operands, q, mapper, _operator, negated) =>
+      junction(operands, q, mapper, negated, negated ? "and" : "or"),
   },
   not: {
     accepts: allPushable,
-    emit: (operands, q, mapper) =>
-      q.not(
-        translateExpression(
-          operandAt(operands, 0, "not operator requires at least one operand"),
-          q,
-          mapper,
-        ),
+    emit: (operands, q, mapper, _operator, negated) =>
+      emitExpression(
+        operandAt(operands, 0, "not operator requires at least one operand"),
+        q,
+        mapper,
+        !negated,
       ),
   },
-  eq: comparisonRule,
-  ne: comparisonRule,
-  lt: comparisonRule,
-  le: comparisonRule,
-  gt: comparisonRule,
-  ge: comparisonRule,
+  eq: equalityRule,
+  ne: equalityRule,
+  lt: orderingRule,
+  le: orderingRule,
+  gt: orderingRule,
+  ge: orderingRule,
   in: {
     accepts: (operands, mapper) => {
       const membership = fieldInList(operands);
@@ -173,7 +242,7 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
         !isNullableField(membership.field.name, mapper)
       );
     },
-    emit: (operands, q, mapper) => {
+    emit: (operands, q, mapper, _operator, negated) => {
       const membership = fieldInList(operands);
       if (!membership) {
         throw new UnsupportedQueryPlanError(
@@ -182,9 +251,13 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
       }
       const field = resolveField(membership.field.name, mapper);
       const { values } = membership;
-      if (values.length === 0) return q.eq(true, false);
-      if (values.length === 1) return q.eq(q.field(field), values[0]);
-      return q.or(...values.map((v: unknown) => q.eq(q.field(field), v)));
+      const built =
+        values.length === 0
+          ? q.eq(true, false)
+          : values.length === 1
+            ? q.eq(q.field(field), values[0])
+            : q.or(...values.map((v: unknown) => q.eq(q.field(field), v)));
+      return negated ? q.not(built) : built;
     },
   },
 };
@@ -217,15 +290,25 @@ export const translateExpression = (
   expression: PlanExpressionOperand,
   q: FilterQ,
   mapper: Mapper,
+): unknown => emitExpression(expression, q, mapper, false);
+
+const emitExpression = (
+  expression: PlanExpressionOperand,
+  q: FilterQ,
+  mapper: Mapper,
+  negated: boolean,
 ): unknown => {
+  const polarised = (built: unknown) => (negated ? q.not(built) : built);
   if (isValue(expression)) {
     if (typeof expression.value === "boolean") {
-      return q.eq(true, expression.value);
+      return polarised(q.eq(true, expression.value));
     }
     throw new UnsupportedQueryPlanError("Unexpected bare value in expression");
   }
   if (isVariable(expression)) {
-    return q.eq(q.field(resolveField(expression.name, mapper)), true);
+    return polarised(
+      q.eq(q.field(resolveField(expression.name, mapper)), true),
+    );
   }
   if (!isExpression(expression)) {
     throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
@@ -236,5 +319,25 @@ export const translateExpression = (
       `Unsupported operator: ${expression.operator}`,
     );
   }
-  return rule.emit(expression.operands, q, mapper, expression.operator);
+  return rule.emit(
+    expression.operands,
+    q,
+    mapper,
+    expression.operator,
+    negated,
+  );
+};
+
+/** `and`/`or` over operands that each carry the enclosing polarity. */
+const junction = (
+  operands: PlanExpressionOperand[],
+  q: FilterQ,
+  mapper: Mapper,
+  negated: boolean,
+  combine: "and" | "or",
+): unknown => {
+  if (operands.length === 0) return q.eq(true, combine === "and");
+  const emitted = operands.map((op) => emitExpression(op, q, mapper, negated));
+  if (emitted.length === 1) return emitted[0];
+  return q[combine](...emitted);
 };

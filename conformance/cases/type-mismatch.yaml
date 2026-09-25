@@ -67,6 +67,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/negated-on-missing-attribute'
+  tier: adversarial
+  intent: '!(aDouble == "x") || !(string(aDouble) == "zzz"): two comparisons settled by type or spelling, negated, over an attribute missing on a3.'
+  trap: 'Both are false for every present double, so their negations are true, but a missing aDouble is an error under both; folding either comparison to a constant false turns its negation true and over-grants a3.'
+  condition:
+    match:
+      expr: '!(R.attr.aDouble == "x") || !(string(R.attr.aDouble) == "zzz")'
 - id: 'type-mismatch/equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber == "5" OR aNumber == 2: a number attribute compared with a numeric string.'
@@ -91,6 +98,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumberList[0] == true || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/string-field-against-list-literal'
+  tier: adversarial
+  intent: 'A string attribute compared with a one-element list literal, OR''d with aNumber == 5.'
+  trap: 'A string never equals a list, so only a1 is allowed; unwrapping the one-element list compares aString with "same" and over-grants a9.'
+  condition:
+    match:
+      expr: 'R.attr.aString == ["same"] || R.attr.aNumber == 5'
 - id: 'type-mismatch/equals/string-field-against-map-literal'
   tier: adversarial
   intent: 'Equality between a string attribute and a map literal (aString == {"a": 1}).'
@@ -145,6 +159,55 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.exists(t, t.name == 0) || R.attr.aNumber == 5'
+- id: 'type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal'
+  tier: adversarial
+  intent: '!(owner >= "m"): a negated ordering over an attribute that is an explicit null on some rows.'
+  trap: 'Ordering a null is a CEL error under either polarity, so the null-owner rows are denied; a store that orders null below every string answers false and the negation returns them.'
+  condition:
+    match:
+      expr: '!(R.attr.owner >= "m")'
+- id: 'type-mismatch/greater-or-equal/negated-number-field-against-string-literal'
+  tier: adversarial
+  intent: '!(aNumber >= "5") OR aNumber == 2: a negated ordering between a number attribute and a numeric string.'
+  trap: 'The ordering is a CEL error, and so is its negation, so only a3/a8 are allowed; a store that orders a number below every string answers false and the negation returns every row, and a coercing store adds each aNumber < 5.'
+  condition:
+    match:
+      expr: '!(R.attr.aNumber >= "5") || R.attr.aNumber == 2'
+- id: 'type-mismatch/greater-or-equal/string-field-against-number-literal-value-first'
+  tier: adversarial
+  intent: '0 >= aString OR aNumber == 2: a number literal ordered against a string attribute, value first.'
+  trap: 'The ordering is a CEL error, so only a3/a8 are allowed; MySQL reads every non-numeric string as 0 and returns most rows, and a store that coerces 0 to text orders it against each string.'
+  condition:
+    match:
+      expr: '0 >= R.attr.aString || R.attr.aNumber == 2'
+- id: 'type-mismatch/greater-than/boolean-field-against-number-literal'
+  tier: adversarial
+  intent: 'aBool > 0 OR aNumber == 2: a boolean attribute ordered against a number.'
+  trap: 'CEL has no bool-vs-int ordering, so only a3/a8 are allowed; a store holding true as 1 returns every aBool-true row, and one that orders booleans above numbers returns every row.'
+  condition:
+    match:
+      expr: 'R.attr.aBool > 0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/greater-than/number-field-against-string-literal-value-first'
+  tier: adversarial
+  intent: '"5" > aNumber OR aNumber == 2: a numeric string ordered against a number attribute, value first.'
+  trap: 'The ordering is a CEL error, so only a3/a8 are allowed; a coercing store adds each aNumber < 5, and one that orders strings above numbers returns every row.'
+  condition:
+    match:
+      expr: '"5" > R.attr.aNumber || R.attr.aNumber == 2'
+- id: 'type-mismatch/greater-than/string-field-against-number-literal'
+  tier: adversarial
+  intent: 'aString > 0 OR aNumber == 2: a string attribute ordered against a number.'
+  trap: 'The ordering is a CEL error, so only a3/a8 are allowed; a store that orders strings above numbers returns every row, and a coercing store adds the numeric-looking strings.'
+  condition:
+    match:
+      expr: 'R.attr.aString > 0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first'
+  tier: adversarial
+  intent: '"m" > owner: a string literal ordered against an attribute that is an explicit null on some rows, value first.'
+  trap: 'Ordering a null is a CEL error, so the null-owner rows are denied; a store that orders null below every string returns them.'
+  condition:
+    match:
+      expr: '"m" > R.attr.owner'
 - id: 'type-mismatch/has-intersection/mapped-names-against-mixed-literal-list'
   tier: adversarial
   intent: 'hasIntersection(tags.map(t, t.name), ["public", 0]): projected tag names against a literal list mixing a string and a number.'
@@ -217,6 +280,27 @@ cases:
   condition:
     match:
       expr: '"2" in R.attr.aNumberList || R.attr.aNumber == 5'
+- id: 'type-mismatch/less-or-equal/negated-boolean-field-against-number-literal'
+  tier: adversarial
+  intent: '!(aBool <= 0) OR aNumber == 2: a negated ordering between a boolean attribute and a number.'
+  trap: 'The ordering is a CEL error, and so is its negation, so only a3/a8 are allowed; a store holding true as 1 returns every aBool-true row, and one that orders booleans above numbers answers false and the negation returns every row.'
+  condition:
+    match:
+      expr: '!(R.attr.aBool <= 0) || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first'
+  tier: adversarial
+  intent: '!("5" <= aNumber) OR aNumber == 2: a negated ordering between a numeric string and a number attribute, value first.'
+  trap: 'The ordering is a CEL error, and so is its negation, so only a3/a8 are allowed; a store that orders strings above numbers answers false and the negation returns every row, and a coercing store adds each aNumber < 5.'
+  condition:
+    match:
+      expr: '!("5" <= R.attr.aNumber) || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/explicit-null-field-against-string-literal'
+  tier: adversarial
+  intent: 'owner < "m": an attribute that is an explicit null on some rows, ordered against a string.'
+  trap: 'Ordering a null is a CEL error, so the null-owner rows are denied; a store that orders null below every string returns them.'
+  condition:
+    match:
+      expr: 'R.attr.owner < "m"'
 - id: 'type-mismatch/less-than/negated-nan-against-string-field'
   tier: adversarial
   intent: 'Negated < between a ternary number and a string attribute, where one arm yields NaN (!((aBool ? 1.0 : 0.0/0.0) < aString)).'
@@ -229,7 +313,27 @@ cases:
     pdp:
     - 0.54.0
     reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
-
+- id: 'type-mismatch/less-than/negated-string-field-against-number-literal'
+  tier: adversarial
+  intent: '!(aString < 0) OR aNumber == 2: a negated ordering between a string attribute and a number.'
+  trap: 'The ordering is a CEL error, and so is its negation, so only a3/a8 are allowed; a store that orders strings above numbers answers false and the negation returns every row.'
+  condition:
+    match:
+      expr: '!(R.attr.aString < 0) || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/number-field-against-string-literal'
+  tier: adversarial
+  intent: 'aNumber < "5" OR aNumber == 2: a number attribute ordered against a numeric string.'
+  trap: 'The ordering is a CEL error, so only a3/a8 are allowed; a coercing store adds each aNumber < 5, and one that orders numbers below every string returns every row.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber < "5" || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/number-literal-against-boolean-field-value-first'
+  tier: adversarial
+  intent: '0 < aBool OR aNumber == 2: a number literal ordered against a boolean attribute, value first.'
+  trap: 'CEL has no int-vs-bool ordering, so only a3/a8 are allowed; a store holding true as 1 returns every aBool-true row, and one that orders numbers below booleans returns every row.'
+  condition:
+    match:
+      expr: '0 < R.attr.aBool || R.attr.aNumber == 2'
 - id: 'type-mismatch/not-equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber != "5" AND aNumber > 3: a number attribute compared not-equal with a numeric string.'
@@ -240,13 +344,10 @@ cases:
 - id: 'type-mismatch/not-equals/string-field-against-map-literal'
   tier: adversarial
   intent: 'Inequality between a string attribute and a map literal (aString != {"a": 1}).'
-  trap: 'A string is never equal to a map, so != holds for every row; a store that errors or compares by coercion drops rows.'
+  trap: 'A string is never equal to a map, so != holds for every row with a present aString; a store that errors or compares by coercion drops rows, and folding it to TRUE readmits the missing-aString row (j1), which CEL denies.'
   condition:
     match:
       expr: 'R.attr.aString != {"a": 1}'
-  degenerate:
-    oracle: total
-    reason: 'A string is never equal to a map literal, so != holds for every seed. A store that errors or compares by coercion would drop rows.'
 - id: 'type-mismatch/size/boolean-field'
   tier: adversarial
   intent: 'size() of a boolean attribute (size(R.attr.aBool) > 0).'

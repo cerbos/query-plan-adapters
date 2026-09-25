@@ -1,6 +1,6 @@
-import type { PlanExpressionOperand } from "@cerbos/core";
+import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, not, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
@@ -26,6 +26,7 @@ import {
 import {
   isExpressionOperand,
   isNameOperand,
+  isOperatorCall,
   isValueOperand,
 } from "./operands";
 import {
@@ -33,13 +34,18 @@ import {
   assertNullOperandTranslatable,
   buildStringMatchCondition,
   characterLength,
+  columnExpression,
   constantCondition,
+  constantExpression,
+  FALSE_CONDITION,
   operandExpression,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import type { StringMatchOperator } from "./predicates";
+import { compileRegex } from "./regex";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BaseMapperEntry, BuildFilterOptions, Mapper } from "./types";
 import { resolveScalarOperand } from "./values";
 
 /**
@@ -218,11 +224,80 @@ const buildVariableMembershipFilter = (
  * the planner emits both `R.attr.x in [..]` (name, values) and `"v" in R.attr.list`
  * (value, name), and both mean membership against the column.
  */
+const SCALAR_ELEMENT_TYPES = new Set(["string", "number", "boolean"]);
+
+/** A list or map constant, as opposed to a scalar or null. */
+const isCompositeValue = (value: Value): value is Value[] | { [key: string]: Value } =>
+  value !== null && typeof value === "object";
+
+/** The column a mapping entry reads, if it reads one. */
+const columnOfMapping = (mapping: BaseMapperEntry): AnyColumn | undefined =>
+  isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+
+/**
+ * `x in [e1, e2, …]` where the list is built at evaluation — a constructor whose elements are not
+ * all constants. CEL builds the whole list first, so any element that is a missing attribute (a
+ * NULL column on the omitted convention, or an expression NULL on it) makes the membership an
+ * error, even where another element equals `x`; otherwise it is CEL's equality against each.
+ */
+const buildListConstructorMembership = (
+  element: PlanExpressionOperand,
+  members: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  if (members.length === 0) return FALSE_CONDITION;
+  const errors = members.flatMap((member): SQL[] => {
+    if (isValueOperand(member)) return [];
+    if (
+      isNameOperand(member) &&
+      mappingNullRepresentation(resolveFieldReference(member.name, mapper).mapping) === "explicit"
+    ) {
+      return [];
+    }
+    return [sql`${resolveScalarOperand(member, mapper, options).expr} is null`];
+  });
+  const equalities = members.map((member) =>
+    buildComparisonFilter("eq", element, member, mapper, options, false),
+  );
+  const membership = or(...equalities)!;
+  return errors.length === 0
+    ? membership
+    : sql`(case when ${sql.join(errors, sql` or `)} then null else ${membership} end)`;
+};
+
 const buildMembershipFilter = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
   options: BuildFilterOptions,
 ): SQL => {
+  const [elementOperand, collectionOperand] = operands;
+  if (
+    operands.length === 2 && elementOperand !== undefined &&
+    collectionOperand !== undefined && isOperatorCall(collectionOperand, "list")
+  ) {
+    return buildListConstructorMembership(
+      elementOperand,
+      collectionOperand.operands,
+      mapper,
+      options,
+    );
+  }
+  if (collectionOperand !== undefined && isNameOperand(collectionOperand)) {
+    const haystack = getMappingEntry(collectionOperand.name, mapper);
+    if (
+      haystack !== undefined && isMappingConfig(haystack) &&
+      haystack.relation?.type === "one"
+    ) {
+      // CEL reads a to-one relation as a map, and `in` over a map tests its KEYS: the attribute
+      // names present on the related row, which a comparison against its columns cannot test.
+      throw new UnsupportedQueryPlanError(
+        `Cannot translate 'in' over '${collectionOperand.name}': it is a to-one relation, which ` +
+          "CEL reads as a map whose keys (the attribute names present on the related row) 'in' " +
+          "tests, and SQL has no row of attribute names to search",
+      );
+    }
+  }
   if (operands.every(isNameOperand)) {
     return buildVariableMembershipFilter(operands, mapper, options);
   }
@@ -234,17 +309,39 @@ const buildMembershipFilter = (
   if (!valueOperand) {
     throw new UnsupportedQueryPlanError("Comparison operator missing value operand");
   }
-  if (isValueOperand(operands[0]!) && Array.isArray(operands[0]!.value)) {
-    throw new UnsupportedQueryPlanError(
-      "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
-    );
+  const [element] = operands;
+  if (isValueOperand(element!) && isCompositeValue(element.value)) {
+    // A list or map element equals no string, number or boolean, so over a collection of those it
+    // is never a member. Anything else — a JSON column that may hold lists — has no such answer.
+    const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+    const elementColumn = isScalarCollection(getMappingEntry(fieldOperand.name, mapper))
+      ? columnOfMapping(resolveRelationDefaultField(unresolved, fieldOperand.name).mapping)
+      : undefined;
+    if (
+      elementColumn === undefined ||
+      !SCALAR_ELEMENT_TYPES.has(elementColumn.dataType) ||
+      unresolved.relations.length > 1
+    ) {
+      throw new UnsupportedQueryPlanError(
+        "List-element membership is supported only over a collection of strings, numbers or " +
+          "booleans, which a list or map element can never equal",
+      );
+    }
+    return FALSE_CONDITION;
   }
+  // `x in {"a": 1}` tests the map's KEYS, as CEL's `in` over a map does.
+  const collection =
+    operands[1] === valueOperand && isCompositeValue(valueOperand.value) &&
+    !Array.isArray(valueOperand.value)
+      ? Object.keys(valueOperand.value)
+      : valueOperand.value;
   // `"2" in R.attr.list` over a list held in one declared JSON or array column: the column is the
   // collection, not an element, so it is searched element by element rather than compared whole.
   const indexed = resolveIndexedMembership(fieldOperand.name, mapper, options);
   if (indexed) {
     return indexedMembership({ ...indexed, values: [valueOperand.value] });
   }
+
   const unresolved = resolveFieldReference(fieldOperand.name, mapper);
   const resolved = isScalarCollection(
     getMappingEntry(fieldOperand.name, mapper),
@@ -253,10 +350,99 @@ const buildMembershipFilter = (
     : unresolved;
   return wrapRelationChain(
     resolved.relations,
-    applyComparison(resolved.mapping, "in", valueOperand.value, options),
+    applyComparison(resolved.mapping, "in", collection, options),
     fieldOperand.name,
     options,
   );
+};
+
+/**
+ * `field.matches("pattern")`, lowered through `compileRegex` into the adapter's exact string
+ * predicates — never into the store's own regex dialect, none of which is RE2.
+ *
+ * A NULL receiver is a missing attribute (or a null value, which has no `matches()`): CEL raises,
+ * so the whole predicate is NULL for it, even where a pattern matches every string.
+ */
+const buildMatchesFilter = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
+  const [receiverOperand, patternOperand] = operands;
+  if (
+    operands.length !== 2 ||
+    receiverOperand === undefined || !isNameOperand(receiverOperand) ||
+    patternOperand === undefined || !isValueOperand(patternOperand) ||
+    typeof patternOperand.value !== "string"
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "'matches' is supported only with a field receiver and a constant pattern",
+    );
+  }
+  const resolved = resolveFieldReference(receiverOperand.name, mapper);
+  const { mapping } = resolved;
+  if (
+    typeof mapping === "function" ||
+    isRelationValue(mapping) ||
+    (isMappingConfig(mapping) && mapping.transform !== undefined)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "'matches' cannot be delegated to a transform or function mapping",
+    );
+  }
+  const column = columnForOperand(receiverOperand, mapper);
+  // A non-string receiver is a CEL no-overload error: UNKNOWN.
+  if (column && column.dataType !== "string") return sql`null`;
+  const plans = compileRegex(patternOperand.value);
+  if (plans === "error") return UNKNOWN_CONDITION;
+
+  const expr = buildColumnExpression(mapping, receiverOperand.name);
+  const receiver = columnExpression(expr);
+  const length = characterLength([column]);
+  const match = (operator: StringMatchOperator, literal: string): SQL =>
+    buildStringMatchCondition(operator, receiver, constantExpression(sql`${literal}`), length);
+  const anyOf = (conditions: SQL[]): SQL =>
+    conditions.length === 0 ? FALSE_CONDITION : or(...conditions)!;
+  const atLeast = (characters: number): SQL | undefined =>
+    characters > 0 ? sql`${length(expr)} >= ${characters}` : undefined;
+  const noNewline = (): SQL => not(match("contains", "\n"));
+
+  const conditions = plans.map((plan): SQL => {
+    switch (plan.kind) {
+      case "equals":
+        return sql`${expr} in ${plan.literals.map((literal) => sql`${literal}`)}`;
+      case "startsWith":
+      case "endsWith":
+      case "contains":
+        return anyOf(plan.literals.map((literal) => match(plan.kind, literal)));
+      case "allCharactersIn": {
+        // Remove every allowed character; nothing may be left. REPLACE is case-sensitive and
+        // literal on all three stores, as `contains` already relies on.
+        const rest = plan.characters.reduce<SQL>(
+          (current, character) => sql`replace(${current}, ${character}, '')`,
+          expr,
+        );
+        return and(sql`length(${rest}) = 0`, atLeast(plan.min))!;
+      }
+      case "noNewline":
+        return and(noNewline(), atLeast(plan.min))!;
+      case "prefixSuffix":
+        return and(
+          anyOf(
+            plan.pairs.map(([prefix, suffix]) =>
+              and(
+                match("startsWith", prefix),
+                match("endsWith", suffix),
+                atLeast([...prefix].length + plan.min + [...suffix].length),
+              )!,
+            ),
+          ),
+          noNewline(),
+        )!;
+    }
+  });
+  const filter = sql`(case when ${expr} is null then null else ${anyOf(conditions)} end)`;
+  return wrapRelationChain(resolved.relations, filter, receiverOperand.name, options);
 };
 
 /** A ternary in boolean position: each branch guarded by the (un)satisfied condition. */
@@ -393,10 +579,18 @@ export const buildFilterFromExpression = (
         buildMembershipFilter(operands, mapper, options),
         negated,
       );
+    case "map":
+      // map() returns a list, and a list where CEL needs a boolean is a no-overload error at
+      // evaluation, denied under both polarities — which UNKNOWN spells exactly. The same
+      // holds for filter() (see `collections.ts`) and the list-valued except().
+      return UNKNOWN_CONDITION;
+    case "except":
+      if (operands.length === 2 && !isOperatorCall(operands[1]!, "lambda")) {
+        return UNKNOWN_CONDITION;
+      }
+      return buildCollectionOperatorFilter(operator, operands, mapper, negated, options);
     case "matches":
-      throw new UnsupportedQueryPlanError(
-        "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics",
-      );
+      return withPolarity(buildMatchesFilter(operands, mapper, options), negated);
     case "hasIntersection":
       // Only the call-level option is passed on: an enclosing lambda's `skipRelations` is not.
       return withPolarity(

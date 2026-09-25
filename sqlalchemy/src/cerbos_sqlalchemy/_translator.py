@@ -16,6 +16,7 @@ from sqlalchemy.sql.expression import ColumnElement
 from cerbos_sqlalchemy._null_conventions import (
     EQUALITY_FAMILY,
     NullAttributeRepresentation,
+    omitted_null_comparison,
     with_null_conventions,
 )
 from cerbos_sqlalchemy._operators import (
@@ -80,11 +81,14 @@ class Translator:
         overrides: dict[str, Callable[[Any, Any], Any]],
         null_conventions: dict[str, NullAttributeRepresentation],
         declared_collections: dict[str, CollectionColumn],
+        null_fallback: NullAttributeRepresentation = "explicit",
     ) -> None:
         self._attr_map = attr_map
         # No None values: an operator is overridden exactly when it is a key here.
         self._overrides = overrides
         self._null_conventions = null_conventions
+        # The call-level convention, for an attribute with no declaration.
+        self._null_fallback = null_fallback
         self._declared_collections = declared_collections
         self._declared_names = frozenset(declared_collections)
 
@@ -100,6 +104,29 @@ class Translator:
 
     def _is_explicit_null(self, variable: str) -> bool:
         return self._null_conventions.get(variable) == "explicit"
+
+    def _is_omitted_null(self, variable: str) -> bool:
+        return self._null_conventions.get(variable, self._null_fallback) == "omitted"
+
+    def _leaf_comparison(
+        self, operator: str, column: Any, variable: Variable, value: Value
+    ) -> Any:
+        """Compare a mapped attribute with a literal, in either source order."""
+        if (
+            operator in ("eq", "ne")
+            and value.value is None
+            and self._is_omitted_null(variable.name)
+        ):
+            return omitted_null_comparison(
+                operator, column, overridden=operator in self._overrides
+            )
+        return self._with_null_conventions(
+            operator,
+            column,
+            value.value,
+            self._is_explicit_null(variable.name),
+            False,
+        )
 
     def _apply(self, operator: str, left: Any, right: Any) -> Any:
         """Lower one operator with the caller's override, else the default."""
@@ -382,6 +409,14 @@ class Translator:
         operands = operand.operands
 
         if operator in _BOOLEAN_OPERATORS:
+            if operator != "not" and not operands:
+                # and_() / or_() with no arguments render an empty clause that
+                # .where() drops, returning every row. See #498.
+                raise UnsupportedPlanError(
+                    f"{operator!r} with no operands has no SQL rendering: SQLAlchemy "
+                    "emits an empty clause that .where() drops, which would return "
+                    "every row"
+                )
             branches = [
                 require_boolean(self.predicate(o), f"{operator!r} operand")
                 for o in operands
@@ -486,25 +521,13 @@ class Translator:
         if operator in MIRRORED_OPERATORS:
             return self._apply(MIRRORED_OPERATORS[operator], column, value.value)
         if operator in ORDER_INSENSITIVE_OPERATORS:
-            return self._with_null_conventions(
-                operator,
-                column,
-                value.value,
-                self._is_explicit_null(variable.name),
-                False,
-            )
+            return self._leaf_comparison(operator, column, variable, value)
         # Receiver-style: the value is the receiver, e.g. `"abc".contains(x)`.
         return self._apply(operator, value.value, column)
 
     def _column_first(self, operator: str, variable: Variable, value: Value) -> Any:
         column = self._resolve_variable(variable.name)
-        return self._with_null_conventions(
-            operator,
-            column,
-            value.value,
-            self._is_explicit_null(variable.name),
-            False,
-        )
+        return self._leaf_comparison(operator, column, variable, value)
 
 
 def _all_leaves(operands: tuple[Operand, ...]) -> bool:

@@ -30,7 +30,8 @@ module Cerbos
     #   `:explicit` (default): the attribute is sent with a null value, so `R.attr.x == null`
     #   matches and `IS NULL` agrees with the PDP.
     #   `:omitted`: the attribute is not sent. CEL errors and the PDP denies, but `IS NULL` would
-    #   match, so the adapter refuses any null constant in the plan.
+    #   match, so `==` and `!=` against null are UNKNOWN for a NULL column, and the adapter
+    #   refuses any other null constant in the plan (cerbos/query-plan-adapters#551).
     #
     #   Set it per attribute with `null_representation:` on {Cerbos::ActiveRecord.field}; this
     #   value is the fallback. Per-attribute lets one column be mapped twice under different

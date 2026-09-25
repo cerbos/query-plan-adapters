@@ -125,7 +125,13 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
-- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`.
+- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`),
+  a boolean-valued expression (`string(R.attr.n > 3)`) and a ternary whose arms are all boolean
+  (`string(R.attr.n > 3 ? R.attr.flag : false)`). An undeclared column, through a hop or
+  not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
+  tells the adapter the column holds a boolean. Declare every boolean column you pass to `string()`,
+  since SQLite and MySQL render a stored boolean as `"1"`/`"0"` under a `CAST`.
 
 ### Timestamps on SQLite
 
@@ -172,10 +178,24 @@ mapper := cerbosent.MapperMap{
   `null`. The equality family (`eq`, `ne`, `in`) then never renders SQL UNKNOWN, so
   `null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
   receiver is a CEL error, which denies like UNKNOWN).
+- `NullConventionOmitted` renders `== null` as `CASE WHEN col IS NULL THEN NULL ELSE FALSE END`
+  and `!= null` with `ELSE TRUE`: a NULL column is CEL's missing-attribute error, so it stays
+  UNKNOWN under any `NOT`, and a true sibling in an `||` still absorbs it. A column read through
+  a to-one hop is NULL for an absent parent too, and renders the same way. Every other null
+  operand against it (a null in an `in` list, say) is rejected.
 - Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
   the NULL rows.
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
   of the same or undeclared scalar type is rejected.
+
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Dialects
 
@@ -196,16 +216,26 @@ connection collation cannot make `string(x) == "set"` match `"Set"`.
 
 ## Collation
 
-CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow the database's
-collation. A looser collation is an **over-grant the adapter cannot detect**, so treat collation as
-part of your policy contract:
+CEL string comparison is case-sensitive and byte-exact, and CEL orders strings by code point; `=`,
+`LIKE` and `<`/`<=`/`>`/`>=` follow the database's collation. A looser collation is an
+**over-grant the adapter cannot detect**, so treat collation as part of your policy contract:
 
-- **SQLite:** set `PRAGMA case_sensitive_like = ON`.
-- **PostgreSQL:** use a deterministic collation (the default).
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
+  point.
+- **PostgreSQL:** use a deterministic collation (the default) for equality, and a byte-order
+  collation, `"C"`, on every column a policy orders. A linguistic collation such as glibc's
+  `en_US.UTF-8` (the usual default on Debian images and managed services) or ICU's `en-US` sorts
+  `"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). The conformance leg
+  initialises its database with `--lc-collate=C` rather than trusting the Alpine image, whose musl
+  libc orders by byte only by accident;
+  `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
+  TestAdversarialConformance ./...` reproduces the over-grant.
 - **MySQL:** use `utf8mb4_0900_bin` (8.0.17+) on every string column policies read. The default
   `utf8mb4_0900_ai_ci` is case- and accent-insensitive. Even `utf8mb4_0900_as_cs` is not
   byte-exact: it ignores a soft hyphen (U+00AD), so `"o­ne"` equals `"one"` — an over-grant on
   `==`/`in` and an under-grant on `!=` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  `utf8mb4_0900_bin` orders by code point.
 - A `_CI_` SQL Server collation has the same problem.
 
 ## Identifier quoting
@@ -224,19 +254,24 @@ Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are 
 recorded `check()` decisions. The previous PDP's goldens (0.54.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
-and counts toward the total but not toward passed — on 0.55.0 that is one extended case.
+and counts toward the total but not toward passed — on 0.55.0 that is four extended cases and three
+adversarial cases.
 
 | Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
-| adversarial | 183 / 227 |
+| extended | 56 / 80 |
+| adversarial | 229 / 308 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
-holds for every dialect. The one case no adapter can pass is `null/has/missing-attribute`: the
-Cerbos planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those
-rows, so use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
+holds for every dialect. Two of the skipped cases, `null/has/missing-attribute` and
+`null/has/composed-with-comparison`, are the two calls answering different questions: the plan
+request leaves an omitted attribute unknown, so the planner folds `has()` to true by design, while
+`check()` receives the omission as absent and denies the row. Use `R.attr.x != null` instead of
+`has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
+while `check()` has no double + int overload and denies every row, so write `1.0`.
 
 ### Known gaps
 
@@ -245,7 +280,6 @@ Real but unfixed; each needs a corpus case first. Treat them as constraints on y
 | Gap | Effect |
 | --- | --- |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering, not CEL's IEEE semantics. Only NaNs the adapter folds itself are exact. |
-| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`, so the sign of the resulting infinity is unknowable when the denominator is a column. A constant denominator is exact (`arithmetic/divide/negative-zero-divisor`). |
 | `!=` / `not in` against an explicit null, on an attribute not declared `NullConventionExplicit` | CEL says `null != "x"` is true; SQL leaves it UNKNOWN and excludes the row. Under-grants (fails closed). See cerbos/query-plan-adapters#308. |
 
 ## Mapping hazards
@@ -324,6 +358,32 @@ tags := &cerbosent.Relation{
   `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text, giving CEL's
   words on every dialect; a NULL column stays NULL and the row is excluded. On MySQL the cast
   carries `COLLATE utf8mb4_0900_bin`.
+- [#470](https://github.com/cerbos/query-plan-adapters/issues/470): `string()` over a boolean-valued
+  expression (`string(R.attr.n > 3)`), or over a `ValueBool` column read through a to-one
+  `ScalarRelation`, is spelled through the same `CASE` as a plain `ValueBool` column, instead of a
+  plain `CAST`. On SQLite and MySQL that `CAST` said `"1"`/`"0"`, so `!(string(x) == "true")`
+  returned rows whose `x` is true (`cast/string/negated-from-boolean-expression`,
+  `cast/string/negated-from-boolean-through-relation`).
+- [#538](https://github.com/cerbos/query-plan-adapters/issues/538): `string()` over a ternary whose
+  arms are all boolean (`string(R.attr.n > 3 ? R.attr.flag : false)`) is spelled through the same
+  `CASE`. It used to get a plain `CAST` of the ternary's `CASE`, which SQLite and MySQL render as
+  `"1"`/`"0"`, so `!(string(...) == "true")` returned rows the PDP denies
+  (`cast/string/negated-from-boolean-ternary`).
+- **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
+  disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
+  attribute number is a double — so the PDP denies every row
+  (`arithmetic/modulo/negated-double-operand`). A comparison decided by the sign of an infinity
+  from a zero column denominator (`R.attr.a / R.attr.b > 0.0`) is refused, since CEL's `x / -0.0` is
+  the opposite infinity from `x / 0.0` and the sign of a stored zero cannot be read
+  (`arithmetic/divide/field-by-field`); a self-division, and a comparison both signs answer alike,
+  still translate. `string()` over a `ValueNumber` column translates only as `==`/`!=` against a
+  string constant, lowered to a numeric comparison with the double CEL spells that way (Go's `%g`:
+  `"1e+06"`, `"2"`), and a zero spelling is refused (`cast/string/from-double-spellings`,
+  `cast/string/from-negative-zero-double`).
+- A list literal compared with a column declared `ValueString`, `ValueNumber` or `ValueBool` is
+  unequal wherever the column is present (`type-mismatch/equals/string-field-against-list-literal`);
+  against an undeclared column it fails closed. It used to bind the list as a parameter, which the
+  driver rejected at execution.
 - Cerbos 0.55: folded NaN ordered comparisons return false (so their negation returns true),
   matching the updated CEL evaluator; this differs from Cerbos 0.54. Missing attributes still
   propagate errors.

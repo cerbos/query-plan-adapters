@@ -140,15 +140,21 @@ the attributes it sends to `check()`, so you have to tell the adapter which conv
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 The default, `"explicit"`, translates `== null` to `IS NULL`. If you omit attributes for NULL
-columns, pass `"omitted"` and the adapter raises on every null comparison operand instead:
+columns, pass `"omitted"`:
 
 ```python
 get_query(plan, Resource, attr_map, null_attribute_representation="omitted")
 ```
 
-The rejection is wider than strictly needed (`x != null` and `!(x == null)` are aligned under both
-conventions), because a leaf cannot see whether an enclosing `not` will flip it. It also fires
-before `operator_override_fns`. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+Under `"omitted"`, `x == null` and `x != null` answer exactly what CEL does: a NULL column is a
+missing-attribute error, and a present one is never null. The adapter renders them as
+`CASE WHEN x IS NOT NULL THEN FALSE END` (`TRUE` for `!=`), which is UNKNOWN for a NULL column and
+stays UNKNOWN under any enclosing `not`, so the row is denied under both polarities. This needs `x`
+mapped to a SQL expression (a column, or a correlated scalar subquery for a to-one relation) and no
+override for that operator; otherwise the comparison raises. Every other null operand raises (a null
+element of an `in` list, a null inside `hasIntersection`, ordering against null), and the refusal
+fires before `operator_override_fns`. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302)
+and [#551](https://github.com/cerbos/query-plan-adapters/issues/551).
 
 #### Declare the convention per attribute
 
@@ -177,6 +183,15 @@ undeclared attribute keeps the old rendering, where `!=` against a constant unde
 comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
+
 ### Collection storage
 
 `size(R.attr.tags)` and `R.attr.tags[0]` need to know how the collection is stored. Declare it per
@@ -190,7 +205,7 @@ get_query(
     Resource,
     attr_map,
     collection_columns={
-        # PostgreSQL JSON/JSONB, or a SQLite JSON text column
+        # PostgreSQL JSON/JSONB, a MySQL JSON column, or a SQLite JSON text column
         "request.resource.attr.tags": CollectionColumn(Resource.tags, "json"),
         # PostgreSQL array of text, varchar, boolean, integer or smallint
         "request.resource.attr.labels": CollectionColumn(Resource.labels, "pgArray"),
@@ -223,8 +238,8 @@ projection like `x[0].name`, and comparison with a list or map literal. Elsewher
 still resolves through `attr_map`. The column must hold exactly the list you send to Cerbos, null
 elements included.
 
-The SQL is picked per dialect at compile time. SQLite (JSON1) and PostgreSQL are supported; any
-other dialect raises `CompileError`.
+The SQL is picked per dialect at compile time. SQLite (JSON1), PostgreSQL and MySQL 8.0.17+
+(`"json"` only) are supported; any other dialect raises `CompileError`.
 
 ### Operator overrides
 
@@ -313,8 +328,50 @@ Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­n
 TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
 ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
 
-`string()` over a boolean column compares the literals `'true'`/`'false'` in the connection's
-collation on MySQL — make it case-sensitive, or `string(flag) == "TRUE"` selects rows CEL does not.
+String ordering (`<`, `<=`, `>`, `>=`) follows the collation too, and CEL orders strings by code
+point. SQLite's default `BINARY` and MySQL's `utf8mb4_0900_bin` do. On PostgreSQL every collation
+is deterministic, so equality is exact, but a linguistic one such as glibc's `en_US.UTF-8` (the
+usual default on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`,
+so `R.attr.name > "a"` over-grants it
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use `"C"` on every column a
+policy orders: create the database with `LC_COLLATE 'C'`, or declare `COLLATE "C"` on the column.
+The conformance harness's PostgreSQL container initialises with `--lc-collate=C`, overridable
+through `ADAPTER_TEST_POSTGRES_INITDB_ARGS`.
+
+On MySQL a string literal, and `string()` of a column (`CAST(... AS CHAR)`, or the `'true'`/`'false'`
+of a boolean), take the **connection's** collation, not the column's, and a utf8mb4 session starts
+at `utf8mb4_0900_ai_ci` whatever the server default is. Set `utf8mb4_0900_bin` on every connection,
+or `!(string(R.attr.owner) == "set")` drops the `Set` row CEL keeps. The conformance harness does it
+from a `connect` listener, which runs after the driver's own character-set setup:
+
+```python
+@event.listens_for(engine, "connect")
+def _byte_exact_collation(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("SET NAMES utf8mb4 COLLATE utf8mb4_0900_bin")
+    cursor.close()
+```
+
+On SQLite a column collation does not help: SQLite's `LIKE` ignores it and folds ASCII case unless
+the connection sets `PRAGMA case_sensitive_like = ON`. Without the pragma, `contains`, `startsWith`,
+`endsWith` and hierarchy-prefix predicates **over-grant** (`R.attr.name.startsWith("o")` matches
+`One`). The adapter does not own the connection, so set the pragma on every one it opens, as the
+conformance harness does:
+
+```python
+from sqlalchemy import create_engine, event
+
+engine = create_engine("sqlite:///app.db")
+
+
+@event.listens_for(engine, "connect")
+def _case_sensitive_like(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA case_sensitive_like = ON")
+    cursor.close()
+```
+
+For an async engine, listen on `async_engine.sync_engine`.
 
 ### Timestamps
 
@@ -329,9 +386,13 @@ instants with `timestamp()` on both operands.
 | --- | --- | --- |
 | Comparisons, logical operators, value-first and field-to-field forms, ternaries | translated | — |
 | `contains`, `startsWith`, `endsWith` | escaped `LIKE` | — |
-| Arithmetic; `string()` over a numeric, text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
+| `+`, `-`, `*`, `/` by a constant | translated | — |
+| `/` by a column | refused, unless the numerator is that column or a constant zero (a zero divisor then gives NaN, which has no sign) | an override |
+| `%` | refused: CEL defines it only over integers, and attribute numbers are doubles | an override |
+| `string()` over a text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
+| `string()` over a numeric column | refused: CEL prints Go's shortest `%g` form (`1e+06`, `-0`) | an override matching your database |
 | `int()`, `double()` | refused | an override matching your database |
-| `size()` over a string column | `LENGTH` | — |
+| `size()` over a string column | `LENGTH` (`CHAR_LENGTH` on MySQL, whose `LENGTH` counts bytes) | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `x[i] == literal`, `x[i] != literal` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `literal in x`, `hasIntersection(x, [literals])` over a JSON or PostgreSQL array column | refused until declared | `collection_columns`, for an attribute `attr_map` does not map |
@@ -349,21 +410,30 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
 recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is translated with one mapping, executed on SQLite
-(through a `Connection` and through an `AsyncSession`), and the returned ids are compared with the
-decisions the PDP recorded. The cases that read a collection declared in `collection_columns` also
-run on PostgreSQL under both storage shapes, `json` and `pgArray`. Results for the current PDP,
-0.55.0, where the total is every golden case recorded in that tier:
+(through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL (`utf8mb4_0900_bin`),
+and the returned ids are compared with the decisions the PDP recorded. The collections are stored as
+JSON on every store; the cases that read a collection declared in `collection_columns` run once more
+on PostgreSQL with them stored as arrays (`pgArray`). The results are the same on every store. For
+the current PDP, 0.55.0, where the total is every golden case recorded in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
-| adversarial | 185 / 227 |
+| extended | 57 / 80 |
+| adversarial | 228 / 308 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (60 cases) or is
-skipped because its golden file records a planner divergence: under 0.55.0 that is the one case
-`null/has/missing-attribute` (`has()` on a missing attribute, folded to `ALWAYS_ALLOWED` by the
-planner), which no adapter can pass and the harness does not compare.
+Every case that does not pass is either refused with `UnsupportedPlanError` (96 cases) or is
+skipped because its golden file records a planner divergence, which no adapter can pass and the
+harness does not compare. Under 0.55.0 those are four extended cases and three adversarial cases:
+`null/has/missing-attribute` and `null/has/composed-with-comparison` (the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
+the omission as absent and denies the row; use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
+`R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
+and three
+`composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of
+it denies j2, while `check()` receives `aNumber` as absent and treats the erroring DENY as not
+matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 
@@ -449,6 +519,31 @@ chain.
 
 ## Behaviour changes
 
+- [#500](https://github.com/cerbos/query-plan-adapters/issues/500), found by running the corpus on
+  PostgreSQL and MySQL:
+  - `+`, `-` and `*` read an integer or `Numeric` column as a double, as CEL reads every attribute
+    number. PostgreSQL used to multiply in exact `numeric`, so `R.attr.aNumber * 0.1 == 0.3` was true
+    for `3` (CEL: `0.30000000000000004`) — an over-grant.
+  - `size()` of a string counts characters on MySQL (`CHAR_LENGTH`), where `LENGTH` counted bytes.
+  - An ordering comparison between mismatched types inside a ternary no longer fails on PostgreSQL
+    with `CASE types text and boolean cannot be matched`.
+  - **Widening:** `collection_columns` storage `"json"` renders on MySQL 8.0.17+, where it used to
+    raise `CompileError`.
+- [#545](https://github.com/cerbos/query-plan-adapters/issues/545): an ordering between a boolean
+  column and a boolean literal (`R.attr.aBool < true`) now translates, binding the literal as a
+  typed parameter, where SQLAlchemy used to raise `ArgumentError` at translation. CEL orders bools
+  `false < true`, as SQL's boolean does. A widening.
+- **Breaking:** shapes that used to return a wrong filter now raise `UnsupportedPlanError`:
+  - `string()` over a numeric column. CEL prints an attribute double in Go's shortest `%g` form
+    (`1e+06`, `2`, `-0`), where `CAST` prints `1000000` or `2.0`, and SQL cannot keep the sign of a
+    zero, so `string(R.attr.aDouble) == "1e+06"` under-granted.
+  - `/` by a column, unless the numerator is that column or a constant zero. A zero divisor makes
+    CEL's quotient an infinity carrying the zero's sign, which SQL cannot read (`-0.0 = 0.0`, and
+    SQLite stores `-0.0` as `0.0`); the column used to be assumed `+0.0`, which over-granted.
+  - `%` over a column. CEL defines `%` only over integers and attribute numbers are doubles, so it is
+    a no-such-overload error; SQL's remainder made `!(R.attr.aNumber % 2 == 1)` true for most rows.
+  - A scalar column compared with a list or map literal (`R.attr.aString == ["same"]`), which used to
+    bind the list as a parameter and fail, or be coerced, at execution.
 - Translation refusals now raise `cerbos_sqlalchemy.UnsupportedPlanError`, a `ValueError` subclass
   (also a `TypeError` where the refusal raised one before), so existing handlers keep catching them.
   Not breaking.
@@ -505,7 +600,7 @@ demo/scripts/run-example.sh sqlalchemy
 | --- | --- | --- |
 | `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) (declared collection storage) |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
 
 ```bash
 pdm install -G :all

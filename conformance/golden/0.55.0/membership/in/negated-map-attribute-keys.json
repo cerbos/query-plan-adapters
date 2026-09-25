@@ -1,0 +1,59 @@
+{
+  "allowed": [
+    "a3",
+    "a7",
+    "a9",
+    "b2",
+    "c1",
+    "d1"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/negated-map-attribute-keys",
+  "intent": "!(\"inner\" in parent): key membership in a map-valued attribute under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "inner"
+                },
+                {
+                  "variable": "request.resource.attr.parent"
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/negated-map-attribute-keys",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(\"inner\" in R.attr.parent)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL allows each row whose parent has no parent of its own; answering a map haystack false over-grants the rows that have one, an error under-grants the rest, and a row with no parent stays denied."
+}

@@ -40,7 +40,10 @@ PostgreSQL and MySQL via testcontainers: `npm run test:adversarial:postgres` / `
 `:v6` / `:v7` on Prisma), selected by `ADAPTER_TEST_DB`; an unknown value fails. The MySQL legs pin
 the byte-exact collation `utf8mb4_0900_bin`: MySQL's default makes `=` case-insensitive, and
 `utf8mb4_0900_as_cs` still ignores a soft hyphen
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Every PostgreSQL leg initialises
+with `--lc-collate=C`, because CEL orders strings by code point and a linguistic collation does not
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)); `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
+overrides it to reproduce the over-grant.
 
 ### Python (SQLAlchemy)
 ```bash
@@ -53,9 +56,11 @@ pdm run lint           # ruff check --fix; CI fails on any diff format or lint l
 Every `pdm` command also runs through the pyprojectx wrapper, `./pw` (`pw.bat` on Windows), as in
 cerbos-sdk-python: `./pw test`, `./pw format`, `./pw lint`, `./pw pdm build`.
 
-`tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite, and the
-cases that read a `collection_columns` declaration again on PostgreSQL (`sqlalchemy/POSTGRES_IMAGE`,
-Docker) under both storage shapes. The other suites start nothing. CI runs SQLAlchemy 1.4 and 2.x.
+`tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite (sync and
+async), PostgreSQL and MySQL (`sqlalchemy/POSTGRES_IMAGE`, `sqlalchemy/MYSQL_IMAGE`, testcontainers,
+Docker), and the cases that read a `collection_columns` declaration once more on PostgreSQL with the
+collections stored as native arrays. The other suites start nothing. CI runs the whole harness
+under both SQLAlchemy 1.4 and 2.x.
 
 ### Ruby (ActiveRecord)
 ```bash
@@ -63,11 +68,16 @@ Docker) under both storage shapes. The other suites start nothing. CI runs SQLAl
 cd activerecord
 ./scripts/test.sh                                      # all the specs
 ./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql; default sqlite
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                      # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                      # YARD, failing on a warning or an undocumented object
 ```
 
+`ADAPTER_TEST_DB` selects the conformance store; an unknown value fails. `scripts/test.sh` starts
+PostgreSQL or MySQL (`utf8mb4_0900_bin`) from `docker-compose.yaml`, with the images pinned in
+`activerecord/POSTGRES_IMAGE` and `activerecord/MYSQL_IMAGE`. CI runs the corpus on all three stores
+under ActiveRecord 8.0 and 7.1; every other suite runs on SQLite.
 `spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
@@ -101,7 +111,8 @@ scoped to `^example/go\.mod$`) and run it with `demo/scripts/run-example.sh <ada
 ```
 
 Spring-data runs every suite on H2; CI adds an `ADAPTER_TEST_ORM=next` leg (Hibernate 7 / Spring
-Data JPA 4). On elasticsearch-java, `ElasticsearchAdversarialConformanceTest` and
+Data JPA 4), and runs the conformance suite on PostgreSQL and MySQL (`ADAPTER_TEST_DB`,
+testcontainers; MySQL with client- and server-side prepared statements) under both ORM sets. On elasticsearch-java, `ElasticsearchAdversarialConformanceTest` and
 `ElasticsearchSurfaceTest` need Docker. The surface test measures the store facts most of that
 adapter's ledger reasons cite (an empty array or a JSON null is not indexed; an analyzed field is
 compared per token), since a harness only ever sees the refusal, never the mechanism.
@@ -167,8 +178,9 @@ conformance/scripts/validate-corpus.sh      # offline: ledgers, pins, vendored G
 conformance/scripts/bump-pdp.sh [tag]       # run locally: current -> previous, re-record (default: latest release)
 ```
 
-A planner bug — the plan and `check()` disagree, so no adapter can pass — is declared **once**, as
-`plannerDivergence` on the case, optionally scoped to PDP tags, and every harness skips it for that
+A disagreement between the plan and `check()`, which no adapter can pass, is declared **once**, as
+`plannerDivergence` on the case, whether it is a planner bug or the two calls answering different
+questions (an omitted attribute is unknown to the planner and absent to `check()`), optionally scoped to PDP tags, and every harness skips it for that
 tag. An empty or total oracle is only legal when the case declares `degenerate` with its reason; the
 generator fails on an undeclared one, which usually means a discriminating seed is missing.
 
@@ -247,8 +259,8 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle and Prisma run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22.
+- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
 
@@ -281,8 +293,8 @@ looking at leaves the identical bug live in every other adapter.
 3. **Run every adapter's harness and triage each failure** into exactly one of: a translation bug
    (fix it), a shape that store genuinely cannot express (make it throw the adapter's refusal type
    and add an `unsupported` ledger entry whose `reason` names the real mechanism), or a known wrong
-   result tracked by an issue (`divergent`). A planner bug is `plannerDivergence` on the case, not a
-   ledger entry.
+   result tracked by an issue (`divergent`). A plan/`check()` disagreement is `plannerDivergence` on
+   the case, not a ledger entry.
 4. **The ledger is an output of the run, not an input.** Declaring a case unsupported before
    watching it fail is how a translatable shape gets permanently skipped.
 5. **Update the affected READMEs' `Conformance contract` tables** in the same commit.

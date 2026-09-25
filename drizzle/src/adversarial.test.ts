@@ -52,9 +52,9 @@ interface Tag {
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
@@ -106,9 +106,9 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 
 interface ResourceRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aDouble: number | null;
   aOptionalString: string | null;
   createdBy: string;
@@ -147,18 +147,18 @@ interface LabelRow {
 /** One level of the to-one chain. `resourceId`/`parentId` is unique: this is a to-ONE relation. */
 interface ParentRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   resourceId: string;
 }
 
 interface InnerRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   parentId: string;
 }
@@ -227,14 +227,17 @@ function seedRows(): SeedRows {
     for (const tag of seed.tags) {
       rows.tags.push({ tagId: tag.id, name: tag.name, resourceId: seed.id });
     }
-    seed.subCategoryNames.forEach((subName, index) => {
-      const categoryId = `${seed.id}-cat-${index}`;
-      const subCategoryId = `${categoryId}-sub`;
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
+    const categoryId = `${seed.id}-cat`;
+    if (seed.subCategoryNames.length > 0) {
       rows.categories.push({
         id: categoryId,
         name: "business",
         resourceId: seed.id,
       });
+    }
+    seed.subCategoryNames.forEach((subName, index) => {
+      const subCategoryId = `${categoryId}-sub-${index}`;
       rows.subCategories.push({
         id: subCategoryId,
         name: subName,
@@ -242,7 +245,7 @@ function seedRows(): SeedRows {
       });
       derivedFor(seed).labels.forEach((labelName, labelIndex) => {
         rows.labels.push({
-          id: `${categoryId}-label-${labelIndex}`,
+          id: `${subCategoryId}-label-${labelIndex}`,
           name: labelName,
           subCategoryId,
         });
@@ -318,9 +321,9 @@ function sqliteStore(): AdversarialStore {
       sqlite.exec(`
         CREATE TABLE adversarial_resources (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_double REAL,
           a_optional_string TEXT,
           created_by TEXT NOT NULL,
@@ -333,17 +336,17 @@ function sqliteStore(): AdversarialStore {
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_optional_string TEXT,
           resource_id TEXT NOT NULL UNIQUE
         );
         CREATE TABLE adversarial_inners (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_optional_string TEXT,
           parent_id TEXT NOT NULL UNIQUE
         );
@@ -411,18 +414,38 @@ const POSTGRES_IMAGE =
   "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
 
 /**
+ * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
+ *
+ * **This is a correctness requirement, not a preference.** CEL orders strings by code point, and
+ * `<`, `<=`, `>` and `>=` on a text column follow the column's collation. PostgreSQL collations are
+ * deterministic, so `=` is byte-exact under any of them, but a linguistic one orders case,
+ * accents and punctuation below the letter: under glibc's `en_US.utf8` `'One' > 'a'` is TRUE,
+ * which over-grants `comparison/greater-than/string-code-point-order`
+ * (cerbos/query-plan-adapters#489). `"C"` orders by byte, which for UTF-8 is code point order.
+ *
+ * Stated rather than inherited: the Alpine image reports `en_US.utf8` without it, and orders by
+ * byte only because musl's `strcoll` does. The same database on a glibc image, or on a managed
+ * service, orders linguistically.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust —
+ * `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" npm run
+ * test:adversarial:postgres` gives the pinned image ICU's linguistic order, which musl cannot, and
+ * fails both `string-code-point-order` cases. A measurement escape hatch, not a CI leg.
+ */
+const POSTGRES_INITDB_ARGS =
+  process.env["ADAPTER_TEST_POSTGRES_INITDB_ARGS"] ?? "--lc-collate=C";
+
+/**
  * The PostgreSQL leg (cerbos/query-plan-adapters#320).
  *
  * The column types are the point: `boolean` and `timestamptz` exercise the typed paths SQLite
- * cannot reach — on SQLite a boolean is an integer and a timestamp is text compared
- * lexicographically, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
- * layout only string comparison tolerates, passes there and fails here. PostgreSQL also raises on
+ * cannot reach — on SQLite a boolean is an integer and a timestamp is text the adapter rewrites into
+ * its own string form, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
+ * layout PostgreSQL cannot parse, passes there and fails here. PostgreSQL also raises on
  * division by zero where SQLite returns NULL, which is what proves the adapter's IEEE CASE arms
  * guard the division rather than merely reshaping its NULL.
  *
- * The default collation the image initialises with is left alone: PostgreSQL collations are
- * deterministic, so `=` stays byte-exact and matches CEL string equality. (MySQL's default is
- * case-insensitive, which is why the ent harness has to pin a binary collation there.)
+ * The database is initialised under `POSTGRES_INITDB_ARGS`, below: a byte-order collation.
  */
 function postgresStore(): AdversarialStore {
   const schema = postgresSchema();
@@ -467,16 +490,18 @@ function postgresStore(): AdversarialStore {
     ],
 
     async start(): Promise<void> {
-      container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+      container = await new PostgreSqlContainer(POSTGRES_IMAGE)
+        .withEnvironment({ POSTGRES_INITDB_ARGS })
+        .start();
       pool = new Pool({ connectionString: container.getConnectionUri() });
       db = drizzlePostgres(pool);
 
       await db.execute(sql`
         CREATE TABLE adversarial_resources (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_double           double precision,
           a_optional_string  text,
           created_by         text NOT NULL,
@@ -495,17 +520,17 @@ function postgresStore(): AdversarialStore {
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_optional_string  text,
           resource_id        text NOT NULL UNIQUE REFERENCES adversarial_resources(id)
         );
         CREATE TABLE adversarial_inners (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_optional_string  text,
           parent_id          text NOT NULL UNIQUE REFERENCES adversarial_parents(id)
         );
@@ -688,9 +713,9 @@ function mysqlStore(): AdversarialStore {
   const DDL = [
     `CREATE TABLE adversarial_resources (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_double           double,
        a_optional_string  varchar(255),
        created_by         varchar(64) NOT NULL,
@@ -703,17 +728,17 @@ function mysqlStore(): AdversarialStore {
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_optional_string  varchar(255),
        resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resources(id)
      )`,
     `CREATE TABLE adversarial_inners (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_optional_string  varchar(255),
        parent_id          varchar(64) NOT NULL UNIQUE REFERENCES adversarial_parents(id)
      )`,

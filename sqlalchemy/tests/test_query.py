@@ -8,6 +8,7 @@ so they are tested here. Policy-reachable shapes belong in the corpus. No PDP ne
 """
 
 import math
+import warnings
 
 import pytest
 from cerbos.sdk.model import (
@@ -18,7 +19,7 @@ from cerbos.sdk.model import (
 from sqlalchemy import Boolean, DateTime, String, column, create_engine, literal, table
 from sqlalchemy.dialects import postgresql
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import UnsupportedPlanError, get_query
 
 
 def _default_resp_params():
@@ -75,32 +76,53 @@ class TestNullAttributeRepresentation:
         assert " IS NULL" in compiled
         assert compiled == str(explicit.compile(compile_kwargs={"literal_binds": True}))
 
-    def test_omitted_rejects_eq_against_null(self, resource_table):
+    @pytest.mark.parametrize(
+        "operator, negated, expected",
+        [
+            ("eq", False, []),
+            ("eq", True, [1]),
+            ("ne", False, [1]),
+            ("ne", True, []),
+        ],
+    )
+    def test_omitted_answers_eq_and_ne_against_null_as_unknown_for_a_null_column(
+        self, resource_table, operator, negated, expected
+    ):
+        # #551. A NULL column is a missing attribute, a CEL error that denies the
+        # row under any number of enclosing NOTs; a present one is never null.
+        comparison = {
+            "operator": operator,
+            "operands": [
+                {"variable": "request.resource.attr.name"},
+                {"value": None},
+            ],
+        }
+        if negated:
+            comparison = {"operator": "not", "operands": [{"expression": comparison}]}
+        engine = create_engine("sqlite://")
+        resource_table.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                resource_table.__table__.insert(),
+                [{"id": 1, "name": "present"}, {"id": 2, "name": None}],
+            )
+            query = get_query(
+                _conditional_plan(comparison),
+                resource_table,
+                {"request.resource.attr.name": resource_table.name},
+                null_attribute_representation="omitted",
+            )
+            assert [row.id for row in connection.execute(query)] == expected
+        engine.dispose()
+
+    def test_omitted_rejects_an_overridden_eq_against_null(self, resource_table):
+        # The override owns `eq`, so the UNKNOWN-when-NULL rendering cannot be applied.
         with pytest.raises(ValueError, match="missing-attribute"):
             get_query(
                 self._null_eq_plan(),
                 resource_table,
                 {"request.resource.attr.name": resource_table.name},
-                null_attribute_representation="omitted",
-            )
-
-    def test_omitted_rejects_ne_against_null(self, resource_table):
-        # `ne` alone would be safe, but a leaf cannot see whether an enclosing
-        # `not` will flip IS NOT NULL back into IS NULL.
-        plan = _conditional_plan(
-            {
-                "operator": "ne",
-                "operands": [
-                    {"variable": "request.resource.attr.name"},
-                    {"value": None},
-                ],
-            }
-        )
-        with pytest.raises(ValueError, match="missing-attribute"):
-            get_query(
-                plan,
-                resource_table,
-                {"request.resource.attr.name": resource_table.name},
+                operator_override_fns={"eq": lambda left, right: left == right},
                 null_attribute_representation="omitted",
             )
 
@@ -133,10 +155,10 @@ class TestNullAttributeRepresentation:
                             "operands": [
                                 {
                                     "expression": {
-                                        "operator": "eq",
+                                        "operator": "in",
                                         "operands": [
                                             {"variable": "request.resource.attr.name"},
-                                            {"value": None},
+                                            {"value": ["resource1", None]},
                                         ],
                                     }
                                 }
@@ -310,7 +332,7 @@ class TestAttributeNullRepresentation:
         with pytest.raises(ValueError, match="null operand"):
             get_query(
                 _conditional_plan(
-                    self._comparison("eq", "request.resource.attr.owner", None)
+                    self._comparison("in", "request.resource.attr.owner", ["x", None])
                 ),
                 resource_table,
                 self._attr_map(resource_table),
@@ -1219,3 +1241,51 @@ class TestPlanOperandBoundary:
 
         with pytest.raises(ValueError, match="Unrecognised operand shape"):
             parse_operand(operand)
+
+
+_A_BOOL = {"variable": "request.resource.attr.aBool"}
+
+
+class TestEmptyBooleanOperators:
+    """A zero-operand ``and``/``or`` is refused, never rendered as an empty clause.
+
+    The planner never sends this shape. ``and_()``/``or_()`` with no arguments
+    render nothing, ``.where()`` drops it and every row comes back, even for an
+    empty ``or``, which CEL evaluates as false. See #498.
+    """
+
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            pytest.param({"operator": "or", "operands": []}, id="or"),
+            pytest.param({"operator": "and", "operands": []}, id="and"),
+            pytest.param(
+                {
+                    "operator": "and",
+                    "operands": [_A_BOOL, {"operator": "or", "operands": []}],
+                },
+                id="or-under-and",
+            ),
+            pytest.param(
+                {
+                    "operator": "or",
+                    "operands": [_A_BOOL, {"operator": "and", "operands": []}],
+                },
+                id="and-under-or",
+            ),
+            pytest.param(
+                {"operator": "not", "operands": [{"operator": "or", "operands": []}]},
+                id="or-under-not",
+            ),
+        ],
+    )
+    def test_zero_operand_boolean_is_refused(self, resource_table, expression):
+        with warnings.catch_warnings():
+            # Nor may it warn about an argument-less and_()/or_() on the way.
+            warnings.simplefilter("error")
+            with pytest.raises(UnsupportedPlanError):
+                get_query(
+                    _conditional_plan(expression),
+                    resource_table,
+                    {"request.resource.attr.aBool": resource_table.aBool},
+                )

@@ -197,21 +197,12 @@ export function negateRequiringHops(
 }
 
 /**
- * Whether `expr` dots through at least one intermediate to-one hop, so negating it needs the
- * hop requirement of buildExpressionHopsExistFilter.
+ * Whether negating `expr` needs a hop requirement (see buildExpressionHopsExistFilter): it dots
+ * through at least one to-one hop, which is absent on a parentless row.
  */
-export function referencesChainedRelation(
+export function referencesRequiredHop(
   expr: PlanExpressionOperand,
   context: TranslationContext
 ): boolean {
-  if (isNamedOperand(expr)) {
-    const { relations } = resolveFieldReference(expr.name, context);
-    return relations !== undefined && relations.length > 1;
-  }
-  if (!isOperatorOperand(expr) || expr.operator === "lambda") {
-    return false;
-  }
-  return expr.operands.some((operand) =>
-    referencesChainedRelation(operand, context)
-  );
+  return buildExpressionHopsExistFilter(expr, context) !== undefined;
 }

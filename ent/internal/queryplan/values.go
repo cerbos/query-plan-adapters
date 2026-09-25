@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,8 +34,37 @@ func (deferredCollection) isSymbolicValue() {}
 // ieeeConst is a non-finite CEL double. It is deliberately NOT lowered into SQL: no portable SQL
 // literal denotes NaN or an infinity, and PostgreSQL's NaN ordering is not IEEE's. Comparisons
 // fold it away instead (see compareLeaf).
+//
+// signUnknown marks an infinity whose sign rests on the sign of a zero column: the value is v or
+// -v, and only a result both signs agree on may be folded.
 type ieeeConst struct {
-	v float64
+	v           float64
+	signUnknown bool
+}
+
+// errUnknownZeroSign refuses a result that the sign of a stored zero decides. CEL divides by -0.0
+// into the opposite infinity from 0.0, and SQL cannot read that sign: no portable function exposes
+// the sign bit, and SQLite does not even keep it, storing -0.0 as 0.
+var errUnknownZeroSign = errors.New(
+	"the sign of a zero column denominator decides this result: CEL's x / -0.0 is the opposite " +
+		"infinity from x / 0.0, and SQL cannot read the sign of a stored zero",
+)
+
+// foldIEEE applies f to a non-finite constant. An unknown sign survives only as a pair of opposite
+// infinities; any other result the sign decides is refused.
+func foldIEEE(c ieeeConst, f func(float64) float64) (value, error) {
+	out := f(c.v)
+	if !c.signUnknown {
+		return ieeeConst{v: out}, nil
+	}
+	alt := f(-c.v)
+	switch {
+	case math.IsNaN(out) && math.IsNaN(alt), math.Float64bits(out) == math.Float64bits(alt):
+		return ieeeConst{v: out}, nil
+	case math.IsInf(out, 0) && alt == -out:
+		return ieeeConst{v: out, signUnknown: true}, nil
+	}
+	return nil, errUnknownZeroSign
 }
 
 // condValue is a ternary held back from lowering so that a non-finite arm can be folded by the
@@ -209,11 +240,16 @@ func floatDiv(l, r value) (value, error) {
 		R:  Call{Name: FuncNullIf, Args: []Expr{denominator, zero}},
 	}
 
+	// A self-division has no infinite arm: a zero denominator is a zero numerator, so it is NaN.
+	if reflect.DeepEqual(numerator, denominator) {
+		return condValue{cond: Cmp{Op: OpEq, L: denominator, R: zero}, then: ieeeConst{v: math.NaN()}, els: finite}, nil
+	}
+
 	// IEEE-754 keeps the sign of a zero, so `n / -0.0` is the OPPOSITE infinity from `n / 0.0`.
 	// A CONSTANT denominator carries its sign on the wire (the planner ships `-0` verbatim and
 	// protobuf doubles preserve the sign bit), so it must be applied. A COLUMN denominator does
 	// not: SQL cannot tell -0.0 from 0.0 and no portable function reads the sign bit, so the
-	// positive-zero reading is assumed — see the README's IEEE section.
+	// infinity's sign is left unknown and a comparison it decides is refused (errUnknownZeroSign).
 	denominatorSign := 1.0
 	if rIsNum && math.Signbit(rn) {
 		denominatorSign = -1.0
@@ -226,8 +262,8 @@ func floatDiv(l, r value) (value, error) {
 			then: ieeeConst{v: math.NaN()},
 			els: condValue{
 				cond: Cmp{Op: OpGt, L: numerator, R: zero},
-				then: ieeeConst{v: math.Inf(int(denominatorSign))},
-				els:  ieeeConst{v: math.Inf(-int(denominatorSign))},
+				then: ieeeConst{v: math.Inf(int(denominatorSign)), signUnknown: !rIsNum},
+				els:  ieeeConst{v: math.Inf(-int(denominatorSign)), signUnknown: !rIsNum},
 			},
 		},
 		els: finite,
@@ -280,14 +316,14 @@ func arithOverConditional(op ArithOp, l, r value) (value, bool, error) {
 			if !ok {
 				return nil, errNonFiniteWithColumn
 			}
-			return ieeeConst{v: applyIEEE(op, lc.v, rf)}, nil
+			return foldIEEE(lc, func(v float64) float64 { return applyIEEE(op, v, rf) })
 		}
 		if rc, ok := right.(ieeeConst); ok {
 			lf, ok := asFloat(left)
 			if !ok {
 				return nil, errNonFiniteWithColumn
 			}
-			return ieeeConst{v: applyIEEE(op, lf, rc.v)}, nil
+			return foldIEEE(rc, func(v float64) float64 { return applyIEEE(op, lf, v) })
 		}
 		lExpr, err := asExpr(left)
 		if err != nil {
@@ -416,7 +452,15 @@ func compareLeaf(op CmpOp, l, r value) (Expr, error) {
 		return nil, fmt.Errorf("non-finite numeric constants can only be compared with numeric constants")
 	}
 
-	return BoolConst{V: compareOrdered(op, lv, rv)}, nil
+	result := compareOrdered(op, lv, rv)
+	lUnknown := lIsIEEE && lIEEE.signUnknown
+	rUnknown := rIsIEEE && rIEEE.signUnknown
+	if (lUnknown && compareOrdered(op, -lv, rv) != result) ||
+		(rUnknown && compareOrdered(op, lv, -rv) != result) ||
+		(lUnknown && rUnknown && compareOrdered(op, -lv, -rv) != result) {
+		return nil, errUnknownZeroSign
+	}
+	return BoolConst{V: result}, nil
 }
 
 // compareOrdered folds a comparison between two constants of the same ordered type.
@@ -439,8 +483,17 @@ func compareOrdered[T cmp.Ordered](op CmpOp, l, r T) bool {
 
 // applyComparison lowers a comparison whose operands are ordinary constants or expressions.
 func applyComparison(op CmpOp, l, r value) (Expr, error) {
+	if text, ok, err := compareNumberText(op, l, r); err != nil || ok {
+		return text, err
+	}
 	if mixed, ok := compareMixedTypes(op, l, r); ok {
 		return mixed, nil
+	}
+	if _, list := l.([]any); list {
+		return nil, errListOperand
+	}
+	if _, list := r.([]any); list {
+		return nil, errListOperand
 	}
 	if nullTest, ok, err := nullComparison(op, l, r); err != nil || ok {
 		return nullTest, err
@@ -488,6 +541,70 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	}
 	return Cmp{Op: op, L: lExpr, R: rExpr}, nil
 }
+
+// errListOperand refuses a list literal compared with an operand whose type is not declared. CEL
+// compares a list with a list element by element and answers any other type unequal, and SQL has
+// neither a list operand nor a way to tell an undeclared column's type.
+var errListOperand = errors.New(
+	"a list literal compares only against an operand with a declared scalar ValueType, which it " +
+		"never equals; SQL has no list operand to compare an undeclared column with",
+)
+
+// numberText is string() over a column declared ValueNumber, held back from lowering.
+//
+// CEL spells a double with Go's %g — `1e+06`, `2`, `-9.5e+18`, `-0` — and no engine's CAST prints
+// that: PostgreSQL and MySQL write `1000000`, SQLite writes `2.0`. Equality against a string
+// constant does not need the spelling, though: it becomes a numeric comparison with the one double
+// that prints as the constant, or false when none does.
+type numberText struct {
+	x Expr
+}
+
+func (numberText) isSymbolicValue() {}
+
+// compareNumberText lowers `string(number) == "…"` and `!=`. Any other use of numberText is refused.
+func compareNumberText(op CmpOp, l, r value) (Expr, bool, error) {
+	text, ok := l.(numberText)
+	other := r
+	if !ok {
+		if text, ok = r.(numberText); !ok {
+			return nil, false, nil
+		}
+		other = l
+	}
+	s, isString := other.(string)
+	if !isString || (op != OpEq && op != OpNe) {
+		return nil, true, errNumberText
+	}
+	f, spelled := celDoubleSpelling(s)
+	if !spelled {
+		// No double prints as s, so the comparison is decided wherever the column is present. A
+		// NULL is a CEL error (string() has no null overload) and stays UNKNOWN.
+		return Case{Whens: []When{{Cond: IsNull{X: text.x, Negate: true}, Then: BoolConst{V: op == OpNe}}}}, true, nil
+	}
+	if f == 0 {
+		// "0" and "-0" are told apart by the sign bit alone, which SQL cannot read.
+		return nil, true, fmt.Errorf(
+			"string() over a number compared with %q: CEL spells 0.0 \"0\" and -0.0 \"-0\", and SQL "+
+				"cannot read the sign of a stored zero", s,
+		)
+	}
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return nil, true, fmt.Errorf("string() over a number compared with %q: a non-finite value has no SQL literal", s)
+	}
+	return Cmp{Op: op, L: text.x, R: Lit{V: f}}, true, nil
+}
+
+// celDoubleSpelling returns the double CEL's string() spells as s, if there is one.
+func celDoubleSpelling(s string) (float64, bool) {
+	f, err := strconv.ParseFloat(s, 64)
+	return f, err == nil && fmt.Sprintf("%g", f) == s
+}
+
+var errNumberText = errors.New(
+	"string() over a ValueNumber column translates only as == or != against a string constant: " +
+		"CEL spells a double with Go's %g (\"1e+06\", \"-0\") and no SQL CAST prints that spelling",
+)
 
 // definiteEquality rewrites an equality involving an explicit-null column so it is never UNKNOWN.
 //
@@ -794,6 +911,8 @@ func asExpr(v value) (Expr, error) {
 		return nil, fmt.Errorf("conditional value used where a plain expression is required")
 	case hierarchyValue:
 		return nil, fmt.Errorf("hierarchy() value used outside a hierarchy operator")
+	case numberText:
+		return nil, errNumberText
 	case deferredCollection:
 		// A filter()/map() reaching a plain VALUE position: `map(tags, t.id) == [...]` compares
 		// the projection itself rather than feeding it to size() or hasIntersection(). Without
@@ -827,6 +946,22 @@ func asFloatExpr(v value) (Expr, error) {
 		return nil, err
 	}
 	return Cast{X: e, To: CastFloat}, nil
+}
+
+// omittedNullComparison lowers `x == null` / `x != null` for an attribute declaring
+// NullConventionOmitted.
+//
+// A NULL column sends no attribute, so CEL raises a missing-attribute error for it, and a present
+// column is never null: `==` is false and `!=` is true. The CASE yields exactly that, with SQL
+// NULL standing for the error. UNKNOWN stays UNKNOWN under NOT, so the rendering is right under
+// any nesting without tracking negation parity, and an enclosing OR still absorbs it when a
+// sibling is true, as CEL's `||` absorbs the error. A column read through a to-ONE hop is NULL
+// for an absent parent too, which is the same missing-path error.
+func omittedNullComparison(op CmpOp, x Expr) Expr {
+	return Case{
+		Whens: []When{{Cond: IsNull{X: x}, Then: Lit{V: nil}}},
+		Else:  BoolConst{V: op == OpNe},
+	}
 }
 
 // nullComparison lowers `x == null` / `x != null` into a NULL test.

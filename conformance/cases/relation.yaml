@@ -3,6 +3,13 @@
 area: relation
 description: 'The real to-one relation (parent, parent.inner) and the mainCategory join chain.'
 cases:
+- id: 'relation/all/negated-to-one-chain'
+  tier: adversarial
+  intent: '!all() over the flattened mainCategory chain.'
+  trap: 'i9''s one category holds finance and legal, so all() is false and its negation true; negating the some-wrapped chain (some { NOT some P }) denies it, and a category with no elements would be admitted.'
+  condition:
+    match:
+      expr: '!R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
 - id: 'relation/all/to-one-chain'
   tier: adversarial
   intent: all() over mainCategory.subCategories where most rows have no mainCategory.
@@ -10,6 +17,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
+- id: 'relation/and/negated-conjunction-one-hop-null-literal'
+  tier: adversarial
+  intent: 'A negated && of a negated parent boolean and a parent null comparison (!(!parent.aBool && parent.aOptionalString == null)).'
+  trap: 'Where parent.aBool is true the conjunction is false before the null leaf is read, so a7 is allowed although its leaf is NULL; a4 and c1 (parent.aBool false, leaf NULL) are errors that deny. De Morgan into a two-valued IS NOT NULL denies a7 or admits a4/c1.'
+  condition:
+    match:
+      expr: '!(!R.attr.parent.aBool && R.attr.parent.aOptionalString == null)'
+- id: 'relation/and/negated-conjunction-short-circuits-absent-parent'
+  tier: adversarial
+  intent: 'A negated && whose root operand decides the row before the to-one hop is read.'
+  trap: 'Where aBool is true, !aBool && ... is false without reading parent, so the negation is true even with no parent (a6, a8, b3, b5, h1-h7); requiring the parent hop around the whole negation denies them.'
+  condition:
+    match:
+      expr: '!(!R.attr.aBool && R.attr.parent.aString == "one")'
+- id: 'relation/and/negated-conjunction-two-hops-null-literal'
+  tier: adversarial
+  intent: 'The negated conjunction two levels out (!(!parent.inner.aBool && parent.inner.aOptionalString == null)).'
+  trap: 'b1''s inner has aBool false and a NULL leaf, so the conjunction is an error that denies; the 6 rows with a parent but no inner are errors too. A plain NOT over the relation filter admits them.'
+  condition:
+    match:
+      expr: '!(!R.attr.parent.inner.aBool && R.attr.parent.inner.aOptionalString == null)'
 - id: 'relation/and/one-hop-and-root-attribute'
   tier: extended
   intent: 'A root predicate AND a parent predicate (aBool == true && parent.aString.contains("re")).'
@@ -59,6 +87,30 @@ cases:
   condition:
     match:
       expr: '!(R.attr.parent.aString == "One")'
+- id: 'relation/equals/negated-one-hop-null-literal'
+  tier: adversarial
+  intent: '!(parent.aOptionalString == null) through the to-one parent.'
+  trap: 'Only rows whose parent holds a set aOptionalString are allowed; a plain NOT over the relation filter also admits a4/a7/c1, whose parent has a NULL leaf, and the parentless rows.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aOptionalString == null)'
+- id: 'relation/equals/negated-two-hops-null-literal'
+  tier: adversarial
+  intent: '!(parent.inner.aOptionalString == null), two levels out.'
+  trap: 'b1''s inner has a NULL leaf and 6 rows have a parent but no inner; each is an error that denies, which a plain NOT over the relation filter admits.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.inner.aOptionalString == null)'
+- id: 'relation/equals/one-hop-null-literal'
+  tier: adversarial
+  intent: 'parent.aOptionalString == null through the to-one parent.'
+  trap: 'A two-valued IS NULL over a LEFT JOIN returns a4/a7/c1 (NULL leaf) and every parentless row, all of which CEL denies as a missing attribute.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aOptionalString == null'
+  degenerate:
+    oracle: empty
+    reason: 'aOptionalString is omitted when NULL, so a parent leaf is either a set string (== null is false) or missing (an error), and a missing parent is an error too: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/one-hop-null-literal-or-root-attribute carries the discriminating oracle.'
 - id: 'relation/equals/one-hop-number'
   tier: core
   intent: 'Numeric equality on a field of the to-one parent (parent.aNumber == 2).'
@@ -80,6 +132,16 @@ cases:
   condition:
     match:
       expr: R.attr.parent.inner.aBool == true
+- id: 'relation/equals/two-hops-null-literal'
+  tier: adversarial
+  intent: 'parent.inner.aOptionalString == null, two levels out.'
+  trap: 'A two-valued IS NULL returns b1 (inner with a NULL leaf), the rows with a parent but no inner, and the parentless rows, all of which CEL denies.'
+  condition:
+    match:
+      expr: 'R.attr.parent.inner.aOptionalString == null'
+  degenerate:
+    oracle: empty
+    reason: 'aOptionalString is omitted when NULL, so an inner leaf is either set (== null is false) or missing (an error), and a missing level is an error too: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/two-hops-null-literal-or-root-attribute carries the discriminating oracle.'
 - id: 'relation/exists/negated-to-one-chain'
   tier: adversarial
   intent: Negated exists() over mainCategory.subCategories where most rows have no mainCategory.
@@ -150,6 +212,26 @@ cases:
   condition:
     match:
       expr: R.attr.parent.aNumber < 2
+- id: 'relation/not-equals/negated-one-hop-null-literal'
+  tier: adversarial
+  intent: '!(parent.aOptionalString != null) through the to-one parent.'
+  trap: 'Rewriting the negation to a two-valued IS NULL returns a4/a7/c1 and the parentless rows, all of which CEL denies.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aOptionalString != null)'
+  degenerate:
+    oracle: empty
+    reason: 'aOptionalString is omitted when NULL, so != null is true for every set parent leaf (its negation false) and an error for a missing leaf or parent: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/negated-one-hop-not-null-or-negated-root-attribute carries the discriminating oracle.'
+- id: 'relation/not-equals/negated-two-hops-null-literal'
+  tier: adversarial
+  intent: '!(parent.inner.aOptionalString != null), two levels out.'
+  trap: 'Rewriting the negation to a two-valued IS NULL returns b1, the rows with a parent but no inner, and the parentless rows, all of which CEL denies.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.inner.aOptionalString != null)'
+  degenerate:
+    oracle: empty
+    reason: 'aOptionalString is omitted when NULL, so != null is true for every set inner leaf (its negation false) and an error for a missing leaf or level: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/negated-two-hops-not-null-or-negated-root-attribute carries the discriminating oracle.'
 - id: 'relation/not-equals/one-hop-null-literal'
   tier: adversarial
   intent: 'parent.aOptionalString != null through the to-one parent.'
@@ -157,6 +239,41 @@ cases:
   condition:
     match:
       expr: 'R.attr.parent.aOptionalString != null'
+- id: 'relation/not-equals/two-hops-null-literal'
+  tier: adversarial
+  intent: 'parent.inner.aOptionalString != null, two levels out.'
+  trap: 'b1''s inner has a NULL leaf and most rows have no inner; each is an error that denies, which an unguarded join or a two-valued IS NOT NULL under a NOT mishandles.'
+  condition:
+    match:
+      expr: 'R.attr.parent.inner.aOptionalString != null'
+- id: 'relation/or/negated-one-hop-not-null-or-negated-root-attribute'
+  tier: adversarial
+  intent: '!(parent.aOptionalString != null) || !aBool, the always-erroring negation beside a discriminating root predicate.'
+  trap: 'Only the aBool-false rows are allowed; a4/a7/c1 (NULL parent leaf) and the parentless aBool-true rows are errors the || cannot absorb, and a two-valued IS NULL admits them.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aOptionalString != null) || !R.attr.aBool'
+- id: 'relation/or/negated-two-hops-not-null-or-negated-root-attribute'
+  tier: adversarial
+  intent: '!(parent.inner.aOptionalString != null) || !aBool, two levels out.'
+  trap: 'Only the aBool-false rows are allowed; b1 (NULL inner leaf), the aBool-true rows with no inner and the parentless ones are errors, and a two-valued IS NULL admits them.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.inner.aOptionalString != null) || !R.attr.aBool'
+- id: 'relation/or/one-hop-null-literal-or-root-attribute'
+  tier: adversarial
+  intent: 'parent.aOptionalString == null || aBool, a relation-reached null comparison under a disjunction.'
+  trap: 'The null comparison is false or an error on every row, so only the aBool-true rows are allowed; the error must not absorb the ||, and a two-valued IS NULL over a LEFT JOIN adds the parentless aBool-false rows (a5, b4, c2, d2, g1).'
+  condition:
+    match:
+      expr: 'R.attr.parent.aOptionalString == null || R.attr.aBool'
+- id: 'relation/or/two-hops-null-literal-or-root-attribute'
+  tier: adversarial
+  intent: 'parent.inner.aOptionalString == null || aBool, two levels out.'
+  trap: 'Only the aBool-true rows are allowed; a two-valued IS NULL adds b2 (a parent but no inner) and the parentless aBool-false rows.'
+  condition:
+    match:
+      expr: 'R.attr.parent.inner.aOptionalString == null || R.attr.aBool'
 - id: 'relation/or/two-hops-or-collection-exists'
   tier: adversarial
   intent: 'A two-level parent predicate OR an exists() over categories.'

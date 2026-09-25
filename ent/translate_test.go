@@ -79,7 +79,6 @@ func testMapper() cerbosent.Mapper {
 		"request.resource.attr.count":     {Column: "count"},
 		"request.resource.attr.owner":     {Column: "owner"},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
-		"request.resource.attr.flag":      {Column: "flag", ValueType: cerbosent.ValueBool},
 		"request.resource.attr.tags":      {Relation: tagRelation()},
 	}
 }
@@ -313,14 +312,22 @@ func TestOperatorSymbols(t *testing.T) {
 	t.Run("arithmetic", func(t *testing.T) {
 		t.Parallel()
 
-		// A column dividend keeps `div` and `mod` from folding to a constant, and the division
+		// A non-constant dividend keeps `div` and `mod` from folding to a constant, and the division
 		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
-		// assert the operator appears rather than pinning the whole surrounding CASE.
+		// assert the operator appears rather than pinning the whole surrounding CASE. `mod` takes
+		// size(), CEL's one integer an attribute yields: `%` over the double attribute itself is a
+		// no-overload error and refused.
+		dividend := func(operator string) *operand {
+			if operator == "mod" {
+				return expr("size", variable("request.resource.attr.name"))
+			}
+			return variable("request.resource.attr.count")
+		}
 		for operator, symbol := range map[string]string{
 			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
 		} {
 			query, _ := translateWith(t, testMapper(), expr("gt",
-				expr(operator, variable("request.resource.attr.count"), val(t, 2)), val(t, 1)))
+				expr(operator, dividend(operator), val(t, 2)), val(t, 1)))
 			require.Contains(t, query, " "+symbol+" ", operator+": "+query)
 		}
 	})
@@ -611,38 +618,6 @@ func TestNumericCastsAreRejected(t *testing.T) {
 			_, err := translate(t, expr("eq", expr(operator, variable("request.resource.attr.count")), val(t, 2)))
 			require.ErrorIs(t, err, cerbosent.ErrUnsupported)
 			require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
-		})
-	}
-}
-
-// TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
-// (cerbos/query-plan-adapters#418). A CAST alone renders the stored 1/0 as "1" on SQLite and MySQL
-// where CEL says "true", so the column is spelled through a CASE first, on every dialect. The
-// corpus case cast/string/from-boolean proves the two words against the recorded check() decisions
-// on all three engines.
-//
-// Corpus gap. Two more properties of that CASE are policy-reachable, and no corpus case reaches
-// either, so this test is a bridge tracked by #469 rather than their home. The first is the IS NULL
-// arm ahead of the column's own test: the corpus's aBool is never null, and without the arm a NULL
-// column falls through to 'false', so `string(x) != "true"` returns a row the PDP denies. The
-// second is the text cast around the whole CASE on MySQL, which gives the two words a byte-exact
-// collation. Without it a driver that interpolates its parameters compares them in the connection's
-// collation, where "TRUE" and "true " both equal "true", and no leg of the harness interpolates.
-func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
-	t.Parallel()
-
-	cond := expr("eq", expr("string", variable("request.resource.attr.flag")), val(t, "true"))
-	for d, want := range map[string]string{
-		dialect.SQLite:   "CAST((CASE WHEN (`resource`.`flag` IS NULL) THEN NULL WHEN `resource`.`flag` THEN ? ELSE ? END) AS text) = ?",
-		dialect.Postgres: `CAST((CASE WHEN ("resource"."flag" IS NULL) THEN NULL WHEN "resource"."flag" THEN $1::text ELSE $2::text END) AS text) = $3::text`,
-		dialect.MySQL:    "CAST((CASE WHEN (`resource`.`flag` IS NULL) THEN NULL WHEN `resource`.`flag` THEN ? ELSE ? END) AS char character set utf8mb4) COLLATE utf8mb4_0900_bin = ?",
-	} {
-		t.Run(d, func(t *testing.T) {
-			t.Parallel()
-
-			query, args := whereFor(t, d, testMapper(), cond)
-			require.Contains(t, query, want)
-			require.Equal(t, []any{"true", "false", "true"}, args)
 		})
 	}
 }
@@ -1072,10 +1047,19 @@ func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
 	require.NoError(t, err,
 		"an attribute declaring NullConventionExplicit is not the call-level option's business")
 
+	// Under the call-level default, an omitted entry still does not render the explicit
+	// convention's IS NULL: its `== null` is UNKNOWN for a NULL column, and a null operand it
+	// cannot render that way is refused.
 	omitted := cerbosent.MapperMap{
 		"request.resource.attr.owner": {Column: "owner", NullConvention: cerbosent.NullConventionOmitted},
 	}
-	_, err = cerbosent.Translate(conditional(nullEq), "resource", omitted)
+	unset := cerbosent.MapperMap{"request.resource.attr.owner": {Column: "owner"}}
+	unsetWhere, _ := translateWith(t, unset, nullEq)
+	omittedWhere, _ := translateWith(t, omitted, nullEq)
+	require.NotEqual(t, unsetWhere, omittedWhere)
+
+	nullIn := expr("in", variable("request.resource.attr.owner"), val(t, []any{"a", nil}))
+	_, err = cerbosent.Translate(conditional(nullIn), "resource", omitted)
 	require.ErrorIs(t, err, cerbosent.ErrUnsupported)
 	require.Contains(t, err.Error(), "null operand")
 }

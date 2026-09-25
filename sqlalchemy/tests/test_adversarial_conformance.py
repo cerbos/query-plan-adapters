@@ -5,8 +5,9 @@
 
 Each golden plan, for both recorded PDPs, is translated with ``corpus.py``'s mapping and
 executed; the ids must equal the recorded ``allowed``. ``conformance-ledger.json`` lists the
-exceptions. SQLite runs every case, sync and async; PostgreSQL runs only the cases that read
-a declared collection, once per storage shape.
+exceptions. SQLite (sync and async), PostgreSQL and MySQL run every case. PostgreSQL runs
+the cases that read a declared collection once more, with the collections stored as native
+arrays instead of JSON.
 """
 
 import asyncio
@@ -38,6 +39,7 @@ from corpus import (
     reads_declared_collection,
 )
 from sqlalchemy import create_engine, event, insert, text
+from sqlalchemy.engine import make_url
 
 from cerbos_sqlalchemy import UnsupportedPlanError, get_query
 
@@ -52,7 +54,7 @@ with open(
 
 GOLDEN = {tag: golden_cases(tag) for tag in PDP_TAGS}
 
-STORES = ("sqlite", "sqlite-async", "postgresql-json", "postgresql-pgArray")
+STORES = ("sqlite", "sqlite-async", "postgresql-json", "postgresql-pgArray", "mysql")
 
 #: ``(tier, outcome)`` per store and tag, printed by ``conftest.py`` after the run.
 RESULTS: dict[str, Counter] = {}
@@ -62,7 +64,9 @@ def _params():
     for store in STORES:
         for tag in PDP_TAGS:
             for case in GOLDEN[tag]:
-                if store.startswith("postgresql") and not reads_declared_collection(
+                # Only a declared collection's storage tells the two PostgreSQL shapes
+                # apart, so the array shape runs just the cases that read one.
+                if store == "postgresql-pgArray" and not reads_declared_collection(
                     case
                 ):
                     continue
@@ -156,12 +160,14 @@ def _seed(engine) -> None:
             rows[AdvTag].append(
                 {"tag_id": tag["id"], "name": tag["name"], "resource_id": seed["id"]}
             )
-        # One category per sub-name, per seed, so no two rows share a relation.
-        for i, sub_name in enumerate(sub_names):
-            category_id, sub_id = f"{seed['id']}-cat{i}", f"{seed['id']}-sub{i}"
+        # One category per seed, holding every sub-name, so no two rows share a relation.
+        category_id = f"{seed['id']}-cat"
+        if sub_names:
             rows[AdvCategory].append(
                 {"id": category_id, "name": "business", "resource_id": seed["id"]}
             )
+        for i, sub_name in enumerate(sub_names):
+            sub_id = f"{seed['id']}-sub{i}"
             rows[AdvSubCategory].append(
                 {"id": sub_id, "name": sub_name, "category_id": category_id}
             )
@@ -225,7 +231,16 @@ def pg_engine():
         encoding="utf-8",
     ) as f:
         image = f.read().strip()
-    with PostgresContainer(image) as container:
+    # A byte-order collation, stated rather than inherited. CEL orders strings by code
+    # point, and <, <=, > and >= on a text column follow the column's collation: under
+    # glibc's en_US.utf8 'One' > 'a' is TRUE (cerbos/query-plan-adapters#489). The Alpine
+    # image reports en_US.utf8 and orders by byte only because musl's strcoll does.
+    # Override with ADAPTER_TEST_POSTGRES_INITDB_ARGS to reproduce the over-grant, for
+    # example "--locale-provider=icu --icu-locale=en-US"; a measurement, not a CI leg.
+    initdb_args = os.environ.get("ADAPTER_TEST_POSTGRES_INITDB_ARGS", "--lc-collate=C")
+    with PostgresContainer(image).with_env(
+        "POSTGRES_INITDB_ARGS", initdb_args
+    ) as container:
         engine = create_engine(container.get_connection_url())
         _seed(engine)
         with engine.begin() as conn:
@@ -249,13 +264,64 @@ def pg_engine():
         engine.dispose()
 
 
+#: MySQL's default collation makes ``=`` case-insensitive, and ``utf8mb4_0900_as_cs`` still
+#: ignores a soft hyphen (#474). Only ``utf8mb4_0900_bin`` compares bytes, as CEL does.
+MYSQL_COLLATION = "utf8mb4_0900_bin"
+
+
+def _mysql_connection_collation(dbapi_conn, _):
+    # The connection's collation too: a string literal and `CAST(... AS CHAR)` take it, not
+    # the column's (README.md, "Database collation requirements"). The session otherwise
+    # starts at utf8mb4's default, `utf8mb4_0900_ai_ci`, whatever the server's is.
+    cursor = dbapi_conn.cursor()
+    cursor.execute(f"SET NAMES utf8mb4 COLLATE {MYSQL_COLLATION}")
+    cursor.close()
+
+
+@pytest.fixture(scope="module")
+def mysql_engine():
+    from testcontainers.mysql import MySqlContainer
+
+    with open(
+        os.path.join(os.path.dirname(__file__), "..", "MYSQL_IMAGE"),
+        encoding="utf-8",
+    ) as f:
+        image = f.read().strip()
+    # The server default, so the database and every column the schema creates inherit it.
+    container = MySqlContainer(image).with_command(
+        f"--character-set-server=utf8mb4 --collation-server={MYSQL_COLLATION}"
+    )
+    with container:
+        # Name the driver: testcontainers 4 leaves it out, which picks MySQLdb.
+        url = make_url(container.get_connection_url()).set(drivername="mysql+pymysql")
+        engine = create_engine(url)
+        event.listen(engine, "connect", _mysql_connection_collation)
+        _seed(engine)
+        with engine.connect() as conn:
+            collations = conn.execute(
+                text(
+                    "SELECT DISTINCT collation_name FROM information_schema.columns "
+                    "WHERE table_schema = DATABASE() AND collation_name IS NOT NULL"
+                )
+            ).scalars()
+            assert set(collations) == {MYSQL_COLLATION}
+        yield engine
+        engine.dispose()
+
+
+_ENGINES = {
+    "sqlite": "sqlite_engine",
+    "postgresql-json": "pg_engine",
+    "postgresql-pgArray": "pg_engine",
+    "mysql": "mysql_engine",
+}
+
+
 # A list, not a set, so a filter that duplicates a row (a fanning-out join) is caught.
 def _execute(store: str, query, request) -> list[str]:
     if store == "sqlite-async":
         return _execute_async(request.getfixturevalue("sqlite_url"), query)
-    engine = request.getfixturevalue(
-        "pg_engine" if store.startswith("postgresql") else "sqlite_engine"
-    )
+    engine = request.getfixturevalue(_ENGINES[store])
     with engine.connect() as conn:
         return [row.id for row in conn.execute(query)]
 

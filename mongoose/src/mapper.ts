@@ -27,6 +27,53 @@ export const resolveMapperConfig = (
 ): MapperConfig | undefined =>
   lookupConfig(mapper, reference) || relationFieldConfig(reference, mapper);
 
+/** `config` with `nullable: true` wherever it, or a relation field beneath it, declares nothing. */
+const nullableByDefault = (config: MapperConfig): MapperConfig => {
+  const fields = config.relation?.fields;
+  return {
+    ...config,
+    nullable: config.nullable ?? true,
+    ...(config.relation && fields
+      ? {
+          relation: {
+            ...config.relation,
+            fields: Object.fromEntries(
+              Object.entries(fields).map(([key, field]) => [
+                key,
+                nullableByDefault(field),
+              ]),
+            ),
+          },
+        }
+      : {}),
+  };
+};
+
+/**
+ * The mapper as the `"omitted"` convention reads it: every entry that does not declare `nullable`
+ * is `nullable: true`, and `nullable: false` still opts an entry out.
+ *
+ * The call-level convention is the default for an attribute that declares nothing (ADR 0004).
+ * Under `"omitted"`, a NULL field sends no attribute and CEL denies the document on a
+ * missing-attribute error, while MongoDB's `$ne` and `$nor` match a document the path is absent
+ * from or null in. Refusing null operands alone left `R.attr.x != "a"` returning those documents
+ * on every field that did not declare `nullable` (cerbos/query-plan-adapters#493).
+ */
+export const withOmittedNullDefault = (mapper: Mapper): Mapper => {
+  if (typeof mapper === "function") {
+    return (key) => {
+      const config = mapper(key);
+      return config && nullableByDefault(config);
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(mapper).map(([key, config]) => [
+      key,
+      nullableByDefault(config),
+    ]),
+  );
+};
+
 export const isNullableReference = (
   reference: string,
   mapper: Mapper,

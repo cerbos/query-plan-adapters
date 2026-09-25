@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    "i5"
+  ],
+  "degenerateReason": null,
+  "id": "cast/string/from-negative-zero-double",
+  "intent": "string(aDouble) == \"-0\", where i5 holds the double -0.0.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                }
+              ],
+              "operator": "string"
+            }
+          },
+          {
+            "value": "-0"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/string/from-negative-zero-double",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "string(R.attr.aDouble) == \"-0\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL keeps the sign of -0.0 and prints \"-0\"; a store that normalises it to 0 (or prints \"0\") under-grants i5 and must refuse instead."
+}

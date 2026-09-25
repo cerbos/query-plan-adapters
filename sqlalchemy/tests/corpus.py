@@ -141,6 +141,9 @@ def grpc_plan_from_golden(
 
 AdvBase = declarative_base()
 
+# MySQL's VARCHAR needs a length. Every corpus string fits, and the other stores ignore it.
+_STRING = String(255)
+
 # Ordered copies of the collections for `collection_columns` (#227). `none_as_null` makes an
 # absent collection SQL NULL, not the JSON document `null`.
 _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
@@ -156,14 +159,15 @@ _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
 class AdvResource(AdvBase):
     __tablename__ = "adversarial_resource"
 
-    id = Column(String, primary_key=True)
-    a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
-    a_number = Column(Integer, nullable=False)
+    id = Column(_STRING, primary_key=True)
+    # Nullable: seeds j1, j2 and j3 each leave one of them NULL, a missing attribute (#488).
+    a_bool = Column(Boolean, nullable=True)
+    a_string = Column(_STRING, nullable=True)
+    a_number = Column(Integer, nullable=True)
     a_double = Column(Float(precision=53), nullable=True)
-    a_optional_string = Column(String, nullable=True)
-    created_by = Column(String, nullable=False)
-    scope = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
+    created_by = Column(_STRING, nullable=False)
+    scope = Column(_STRING, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=True)
     tags_json = Column(_COLLECTION_JSON, nullable=True)
@@ -184,34 +188,34 @@ class AdvTag(AdvBase):
     __tablename__ = "adversarial_tag"
 
     pk = Column(Integer, primary_key=True, autoincrement=True)
-    tag_id = Column(String, nullable=False)
-    name = Column(String, nullable=True)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
+    tag_id = Column(_STRING, nullable=False)
+    name = Column(_STRING, nullable=True)
+    resource_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=False)
 
 
 class AdvCategory(AdvBase):
     __tablename__ = "adversarial_category"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=False)
+    resource_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=False)
 
 
 class AdvSubCategory(AdvBase):
     __tablename__ = "adversarial_sub_category"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    category_id = Column(String, ForeignKey("adversarial_category.id"), nullable=False)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=False)
+    category_id = Column(_STRING, ForeignKey("adversarial_category.id"), nullable=False)
 
 
 class AdvLabel(AdvBase):
     __tablename__ = "adversarial_label"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=True)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=True)
     sub_category_id = Column(
-        String, ForeignKey("adversarial_sub_category.id"), nullable=False
+        _STRING, ForeignKey("adversarial_sub_category.id"), nullable=False
     )
 
 
@@ -220,26 +224,26 @@ class AdvLabel(AdvBase):
 class AdvParent(AdvBase):
     __tablename__ = "adversarial_parent"
 
-    id = Column(String, primary_key=True)
+    id = Column(_STRING, primary_key=True)
     a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
+    a_string = Column(_STRING, nullable=False)
     a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
     resource_id = Column(
-        String, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
+        _STRING, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
     )
 
 
 class AdvInner(AdvBase):
     __tablename__ = "adversarial_inner"
 
-    id = Column(String, primary_key=True)
+    id = Column(_STRING, primary_key=True)
     a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
+    a_string = Column(_STRING, nullable=False)
     a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
     parent_id = Column(
-        String, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
+        _STRING, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
     )
 
 
@@ -356,7 +360,23 @@ def _require_hops(rel: _Relation, expr: Any):
     return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
 
+class _ToOneRow:
+    """The to-one `parent` read whole: a map-valued attribute, stored as a row."""
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return "_ToOneRow(parent)"
+
+
+PARENT = _ToOneRow()
+
+
 def _require_relation(op: str, coll: Any) -> _Relation:
+    if isinstance(coll, _ToOneRow):
+        raise UnsupportedPlanError(
+            f"{op} over the to-one parent ranges over the keys of a map, and the "
+            "parent is a row: SQL has no way to enumerate which of its columns are "
+            "non-NULL as the attribute's keys"
+        )
     if not isinstance(coll, _Relation):
         raise UnsupportedPlanError(
             f"{op} over unsupported collection operand: {coll!r}"
@@ -491,6 +511,12 @@ def _relation_membership(relation: _Relation, value: Any):
 
 
 def _in_fn(column: Any, value: Any):
+    if isinstance(column, _ToOneRow) or isinstance(value, _ToOneRow):
+        raise UnsupportedPlanError(
+            "in over the to-one parent tests the keys of a map, and the parent is a "
+            "row: SQL has no way to read which of its columns are non-NULL as the "
+            "attribute's keys"
+        )
     if isinstance(column, _Relation):
         # Rows with an empty chain are excluded, matching CEL's missing-attribute deny.
         return _relation_membership(column, value)
@@ -580,10 +606,28 @@ def reads_declared_collection(case: dict[str, Any]) -> bool:
 
 
 # `owner` and `coOwner` reuse columns under the other null convention: the corpus
-# sends an explicit null instead of omitting the attribute (#308). `aOptionalString`
-# is omitted when NULL, so `== null` against it is a CEL error, not a match (#302).
+# sends an explicit null instead of omitting the attribute (#308). Every attribute
+# resources.json omits when its column is NULL is declared omitted, so `== null`
+# against one is a CEL error, not a match (#302, #488, #528); `obj.inner` aliases
+# `aString`, and a `parent` hop's NULL column is omitted like an absent level.
 ATTRIBUTE_NULL_REPRESENTATION = {
+    "request.resource.attr.aBool": "omitted",
+    "request.resource.attr.aString": "omitted",
+    "request.resource.attr.aNumber": "omitted",
+    "request.resource.attr.obj.inner": "omitted",
     "request.resource.attr.aOptionalString": "omitted",
+    "request.resource.attr.aDouble": "omitted",
+    "request.resource.attr.scope": "omitted",
+    "request.resource.attr.createdAt": "omitted",
+    "request.resource.attr.updatedAt": "omitted",
+    "request.resource.attr.parent.aBool": "omitted",
+    "request.resource.attr.parent.aString": "omitted",
+    "request.resource.attr.parent.aNumber": "omitted",
+    "request.resource.attr.parent.aOptionalString": "omitted",
+    "request.resource.attr.parent.inner.aBool": "omitted",
+    "request.resource.attr.parent.inner.aString": "omitted",
+    "request.resource.attr.parent.inner.aNumber": "omitted",
+    "request.resource.attr.parent.inner.aOptionalString": "omitted",
     "tagName": "explicit",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
@@ -635,6 +679,8 @@ ATTR_MAP = {
     # Not a real nested column; aliases aString for comparison/equals/nested-map-member.
     "request.resource.attr.obj.inner": AdvResource.a_string,
     # The real to-one chain (`relation/*` cases), as correlated scalar subqueries.
+    # Read whole, the parent is a map; a macro over its keys is refused.
+    "request.resource.attr.parent": PARENT,
     "request.resource.attr.parent.aBool": _parent_scalar(AdvParent.a_bool),
     "request.resource.attr.parent.aString": _parent_scalar(AdvParent.a_string),
     "request.resource.attr.parent.aNumber": _parent_scalar(AdvParent.a_number),
@@ -663,6 +709,9 @@ ATTR_MAP = {
     "s.labels": LABELS_OF_SUB,
     "l": LABELS_OF_SUB,
     "l.name": AdvLabel.name,
+    # A key of the parent map (collection/exists/map-keys). It has no column: the
+    # body translates, and the `exists` override then refuses the map it ranges over.
+    "k": literal(None, String),
     "request.resource.attr.mainCategory.subCategories": MAIN_SUB,
     "request.resource.attr.mainCategory.subNames": MAIN_SUBNAMES,
 }

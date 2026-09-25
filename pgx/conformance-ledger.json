@@ -1,12 +1,48 @@
 {
   "adapter": "pgx",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "reason": "Same int() refusal as arithmetic/add/int-beside-double-field, under negation.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/field-by-field": {
+      "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign; PostgreSQL compares -0.0 equal to 0.0 and the shared translator reads no sign bit, so a comparison that sign decides is refused.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/int-truncates": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a PostgreSQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates, under negation.",
+      "status": "unsupported"
+    },
     "arithmetic/divide/nested-division-divisor": {
       "reason": "The divisor resolves to a conditional IEEE value; division requires a plain SQL expression and cannot bind the symbolic branches.",
       "status": "unsupported"
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "reason": "The int() cast that gives % an integer operand has no SQL lowering: PostgreSQL CAST rounds where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "reason": "% over an attribute is a CEL no-overload error (every attribute number is a double and % is integer-only), which the PDP denies on every row; a SQL modulus would answer it, so the translator refuses instead.",
+      "status": "unsupported"
+    },
     "arithmetic/modulo/negative-dividend": {
       "reason": "The int() cast that gives % an integer operand has no SQL lowering: PostgreSQL CAST rounds where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "reason": "The self-division's NaN arm must be added to a column, and SQL has no literal for NaN to carry through the arithmetic.",
       "status": "unsupported"
     },
     "cast/double/malformed-string": {
@@ -15,6 +51,10 @@
     },
     "cast/double/negated-malformed-string": {
       "reason": "Negated double() remains unsupported: SQL CAST accepts numeric prefixes where CEL requires the whole string and errors otherwise; negation must not turn those errors into matches.",
+      "status": "unsupported"
+    },
+    "cast/int/double-truncation-bounds": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero and errors outside the bigint range.",
       "status": "unsupported"
     },
     "cast/int/malformed-string": {
@@ -27,6 +67,38 @@
     },
     "cast/int/negative-fraction": {
       "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "cast/int/string-beyond-double-precision": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed and rounds where CEL truncates.",
+      "status": "unsupported"
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
+    "cast/string/from-integral-ternary": {
+      "reason": "string() over a numeric constant is refused: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\"), and a SQL CAST of the bound parameter spells neither reliably (SQLite says \"1000000.0\").",
+      "status": "unsupported"
+    },
+    "cast/string/from-negative-zero-double": {
+      "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; PostgreSQL compares the two zeros equal and the shared translator reads no sign bit, so a string() comparison against a zero spelling is refused.",
+      "status": "unsupported"
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "reason": "string() over a ternary with a numeric constant branch is refused as in cast/string/from-integral-ternary, and its int() branch cannot be lowered to a SQL CAST either.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "reason": "Same int() refusal as cast/string/from-int-past-exponent-threshold, under negation.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "reason": "Same string() refusal of a numeric constant as cast/string/from-integral-ternary, under negation.",
       "status": "unsupported"
     },
     "cast/timestamp/malformed-string": {
@@ -47,6 +119,14 @@
     },
     "collection/except/size-of-difference": {
       "reason": "The two-list except function has no list-difference lowering in this translator.",
+      "status": "unsupported"
+    },
+    "collection/exists/map-keys": {
+      "reason": "A macro over a map-valued attribute ranges over its keys, and `parent` is a to-one relation: one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so a macro over the hop is refused.",
+      "status": "unsupported"
+    },
+    "collection/exists/negated-map-keys": {
+      "reason": "Same refusal as collection/exists/map-keys, under negation.",
       "status": "unsupported"
     },
     "collection/filter/as-conjunct": {
@@ -113,11 +193,23 @@
       "reason": "The mapped relation stores individual members, and cannot be resolved as one scalar comparison operand for whole-list equality.",
       "status": "unsupported"
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "reason": "The mapped relation stores individual members, and cannot be resolved as one scalar comparison operand for whole-list equality.",
+      "status": "unsupported"
+    },
     "comparison/not-equals/whole-list-literal": {
       "reason": "The mapped relation stores individual members, and cannot be resolved as one scalar comparison operand for whole-list equality.",
       "status": "unsupported"
     },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "reason": "An empty hierarchy delimiter is refused before the prefix membership is built.",
+      "status": "unsupported"
+    },
     "hierarchy/descendent-of/empty-delimiter": {
+      "reason": "An empty hierarchy delimiter is refused before the prefix LIKE is built.",
+      "status": "unsupported"
+    },
+    "hierarchy/overlaps/empty-delimiter": {
       "reason": "An empty hierarchy delimiter is refused before the prefix LIKE is built.",
       "status": "unsupported"
     },
@@ -129,8 +221,12 @@
       "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
       "status": "unsupported"
     },
-    "null/equals/null-literal-on-missing-attribute": {
-      "reason": "aOptionalString is mapped with NullConventionOmitted (a NULL column is a missing attribute), so a null operand against it is refused: the plan cannot say whether IS NULL would match rows check() denies.",
+    "membership/in/map-attribute-keys": {
+      "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
+      "status": "unsupported"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
     },
     "null/not-equals/field-to-field-mixed-null-conventions": {
@@ -139,6 +235,10 @@
     },
     "principal/except/size-after-removing-resource-value": {
       "reason": "The two-list except function has no list-difference lowering in this translator.",
+      "status": "unsupported"
+    },
+    "principal/exists-one/duplicate-elements": {
+      "reason": "This macro has no value-list lowering; only exists/all can use the translator’s literal-list fold.",
       "status": "unsupported"
     },
     "principal/exists-one/long-list": {
@@ -169,6 +269,14 @@
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
       "status": "unsupported"
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
+      "status": "unsupported"
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
+      "status": "unsupported"
+    },
     "regex/matches/case-insensitive-flag": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
       "status": "unsupported"
@@ -183,6 +291,10 @@
     },
     "regex/matches/dot-excludes-newline": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
+      "status": "unsupported"
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
     },
     "regex/matches/end-anchor-before-final-newline": {
@@ -205,8 +317,16 @@
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
       "status": "unsupported"
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
+      "status": "unsupported"
+    },
     "regex/matches/posix-character-class": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
+      "status": "unsupported"
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
@@ -219,6 +339,14 @@
     },
     "regex/matches/unanchored": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
+      "status": "unsupported"
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
+      "status": "unsupported"
+    },
+    "regex/matches/whitespace-class": {
+      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
     },
     "timestamp/equals/field-to-field-without-conversion": {

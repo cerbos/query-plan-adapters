@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a3",
+    "b2",
+    "c1",
+    "d1",
+    "d2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i8",
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "string/concatenate/ordering",
+  "intent": "A concatenation of two attributes ordered against a literal (aString + aOptionalString < \"b\").",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": "b"
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/concatenate/ordering",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString + R.attr.aOptionalString < \"b\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL orders strings by code point, so c1 \"OneSet\" sorts before \"b\"; a case-insensitive collation sorts it after and under-grants, and a missing aOptionalString is an error that must deny."
+}

@@ -86,7 +86,7 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | Option | What it does |
 | --- | --- |
 | `field` | Document path for this attribute. |
-| `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. |
+| `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. Left undeclared, it follows the call's [`nullAttributeRepresentation`](#null-attribute-representation): off under `"explicit"`, on under `"omitted"`. |
 | `valueParser` | Converts plan literals before they reach the filter (for example string → `ObjectId`). Applied to `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `in` values, and inside relation `fields`. |
 | `valueType` | The stored scalar type. Declare number, string and boolean fields — top-level, and inside relation `fields` — so Mongoose does not cast a mismatched CEL literal into the field's type: without it, `R.attr.flag == "true"` is sent as `true` and matches. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
 | `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). |
@@ -196,16 +196,41 @@ const mapper: Mapper = {
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects it — **over-grants** |
 
 `nullAttributeRepresentation` defaults to `"explicit"`. If you omit NULL attributes, set
-`"omitted"`: the adapter then rejects every null comparison operand instead of emitting a filter
-that returns documents the PDP denies.
+`"omitted"`:
 
 ```ts
 queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-The rejection is wider than the shapes that actually over-grant, because a leaf cannot tell whether
-an enclosing `not` will flip it. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
-For a single field, `nullable: true` on its mapper entry is the per-attribute alternative.
+The call-level option is the default for every mapper entry that does not declare `nullable`, so
+under `"omitted"` the adapter:
+
+- rejects every null comparison operand. The rejection is wider than the shapes that actually
+  over-grant, because a leaf cannot tell whether an enclosing `not` will flip it
+  ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
+- treats every entry that does not declare `nullable` as `nullable: true`, relation `fields`
+  included. A comparison ANDs `{ field: { $ne: null } }` in front of it, so `R.attr.x != "a"` no
+  longer returns the documents `x` is missing or null in, which `check()` denies. A `not` over such a
+  field is handled as it is for a declared-nullable field: the guard is ANDed outside the `$nor`,
+  and where some path through the negation can leave the field unread (one side of `&&`/`||`, a
+  ternary branch) the adapter throws `UnsupportedQueryPlanError` instead
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+
+`nullable: false` opts an entry out: it asserts the field is always stored and never null, and the
+entry translates as it does under `"explicit"`. Declare it where you know that, because a nullable
+guard is a `$ne: null`, which MongoDB applies per element to an array field: an array that holds a
+`null` element is excluded too. Under `"explicit"`, `nullable: true` on one entry is the
+per-attribute way to declare the omitted convention.
+
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
+> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
+> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
+> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
+> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Timestamps and conversions
 
@@ -256,20 +281,24 @@ try {
 }
 ```
 
-A mapper misconfiguration — an unmapped reference, or a collection operator over a reference not
-mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
+A mapper misconfiguration — an unmapped reference, or a collection operator over a reference with
+no relation mapping — stays a plain `Error`. A macro over a `type: "one"` relation is a refusal: CEL
+reads that attribute as a map and ranges over its keys, which no filter can iterate. The messages:
 
 - `Invalid query plan.` — the plan kind is not a `PlanKind`.
 - `Invalid Cerbos expression structure` — a conditional plan lacks `operator`/`operands`.
 - `Unsupported operator: <name>` — anything not in the table above.
 - `No mapper entry for <reference>` — an unmapped attribute.
-- Collection operators without a `type: "many"` relation (e.g. `map operator requires a relation mapping`).
+- Collection operators over a reference with no relation mapping (e.g. `map operator requires a relation mapping`).
 - Malformed lambdas (`Lambda variable must have a name`) and mistyped operands (e.g. a non-array
   `hasIntersection` value).
 - Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
   outer-document references inside a collection predicate, nested collection counts, correlated
-  variable-in-variable membership, unsafe division or non-finite arithmetic, negated collection
-  macros over nullable fields (including a negated string match against a nullable field needle),
+  variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
+  non-zero integer constant, negated collection
+  macros, a negation over a nullable field that some path through it can leave unread (one side of
+  `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation, a negated
+  membership whose list CEL may not evaluate, or that sits inside a collection predicate,
   whole-list equality (including over a `map()` projection), list-valued membership needles, and
   `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
   refused corpus case with its reason).
@@ -278,20 +307,24 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 29 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
 0.55.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 52 / 80 |
-| adversarial | 148 / 227 |
+| extended | 49 / 80 |
+| adversarial | 202 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute` — the planner folds
-`has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
-missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`. Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
+pass them. On 0.55.0 that is four extended cases and three adversarial cases.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
+receives the omission as absent and denies the document; use `R.attr.x != null` instead of
+`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
+lacks: the plan's `not(...)` of it denies j2, while `checkResource` receives `aNumber` as absent,
+treats the erroring deny rule as not matching and allows the document
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
@@ -300,13 +333,19 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
 - **Declared `valueType`.** Mongoose casts a query literal to the schema type (`"5"` is sent as
   `5`), so `R.attr.aNumber == "5"` would match `5`. Declaring the field's `valueType` lets the
   adapter answer a literal of another type as CEL does — `==` and membership false, `!=` true where
-  the field is present — including over a typed subdocument field. Membership in a native array
+  the field is present, and an ordering (`<`, `<=`, `>`, `>=`) false under either polarity —
+  including over a typed subdocument field. Membership in a native array
   field is answered inside `$expr` with `$literal` needles for the same reason.
 - **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
   from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
-  demands. A field without it compares a stored null as a null *value*. The global
-  `nullAttributeRepresentation: "omitted"` option is the fail-closed backstop for mappings that do
-  not declare it: it refuses every null operand.
+  demands. Under a negation its non-null guard is ANDed outside the `$nor`, so `!(x > 3)` denies
+  a document with no `x` as CEL does, where a bare `$nor` would match it. A negated ordering
+  against a constant is translated as its complement (`!(x > 3)` as `x <= 3`), whose MongoDB
+  comparison only matches values of the constant's own type, so a stored null or a value of
+  another type is denied under both polarities. A field that does not declare it takes the call's
+  `nullAttributeRepresentation`: under `"explicit"` it compares a stored null as a null *value*;
+  under `"omitted"` it is nullable, and every null operand is refused
+  ([NULL attribute representation](#null-attribute-representation)).
 
 ## Mapping hazards
 
@@ -329,9 +368,42 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- **Breaking** — under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
+  declare `nullable` is treated as `nullable: true`. Comparisons on it gain a
+  `{ field: { $ne: null } }` guard, and a `not` over it carries that guard outside the `$nor`, or
+  throws `UnsupportedQueryPlanError` where some path through it can leave the field unread. The old
+  filter's `$ne` and `$nor` returned documents the field was missing or null in, which `check()`
+  denies. Declare `nullable: false` on an entry that is always stored and never null to keep its old
+  translation. `"explicit"` output is unchanged
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+- **Breaking:** `string()` over an integral constant of 1e6 or more, bare or as a ternary branch
+  (`string(R.attr.flag ? 1000000 : 0)`), throws `UnsupportedQueryPlanError`. CEL renders the int
+  as `"1000000"` and the double as `"1e+06"`, and the plan ships both as the same number; the old
+  filter rendered the double and denied what the PDP allowed, or allowed it under negation. A
+  literal `in` over a `type: "one"` relation (`"k" in R.attr.parent`), which CEL answers from the
+  subdocument's keys, throws `UnsupportedQueryPlanError` instead of reaching Mongoose, which failed
+  the query with a `CastError` ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
+- A macro (`exists`, `all`, `filter`, `map`, …) over a `type: "one"` relation throws
+  `UnsupportedQueryPlanError` instead of a plain `Error` ("requires a collection relation"). CEL
+  ranges a macro over a map's keys, and a filter has no form that iterates a subdocument's field
+  names ([#545](https://github.com/cerbos/query-plan-adapters/issues/545)). It threw before too;
+  only the error type changes.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.
+- An ordering against a constant of another type than the field's declared `valueType`, or
+  against null, is `false` under either polarity instead of being cast by Mongoose (`aNumber < "5"`
+  compared `5`). A negated ordering against a constant is translated as its complement rather than
+  a `$nor`, which matched a stored null or a value of another type
+  ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)). Nothing that translated now
+  throws.
+- A negated membership or `hasIntersection` over a list (a native array field, or a to-many
+  relation's array) requires `{ <list>: { $type: "array" } }` outside the `$nor`. CEL raises on a
+  null or absent list (`2 in null` has no overload) and denies the document, where the bare `$nor`
+  matched it (over-grant fix,
+  [#534](https://github.com/cerbos/query-plan-adapters/issues/534)). **Breaking:** the same
+  negation throws when its list sits under `&&`, `||` or a ternary that CEL may short-circuit, or
+  inside a collection predicate, where the guard has no faithful position.
 - **Breaking:** value-first membership and `hasIntersection` over a native array field (a mapper
   entry with no `relation`) emit an `$expr` instead of `{ list: x }` / `{ list: { $in: [...] } }`.
   The old filter over-granted whenever the literal's type differed from the schema's element type,
@@ -348,6 +420,18 @@ asserts that, since five of the rows below depend on it.
 - **Breaking** — `+` between two field paths throws instead of reaching the server as `$add`
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - **Breaking** — a bare comparison of two `dateTime` fields throws.
+- **Breaking** — `%` throws unless its dividend is `size()` and its divisor a non-zero integer
+  constant. CEL's `%` has no double overload and every attribute number reaches CEL as a double, so
+  `R.attr.n % 2` is an error that denies every row; the old `$mod` computed a floating remainder,
+  which a negation turned into an over-grant.
+- `string()` of a number follows CEL's (Go's shortest `%g`) spelling: `1e+06`, `1.234567e+06`,
+  `+Inf` and `-Inf` where `$convert` wrote `1000000`, `1234567` and `Infinity` (under-grant fix).
+- `size()` of a `requiresParent` chain counts the children of the parent, not the parent elements:
+  `$parent.children` is one array per stored parent element, so a parent holding two children
+  counted 1.
+- A negated `&&`/`||` is pushed down to its operands (De Morgan), so each carries its own
+  absent-parent and evaluation guards: `!(!aBool && parent.x == "one")` now allows a parentless
+  document whose `aBool` is true, as CEL does (under-grant fix).
 - A `type: "one"` relation ANDs a non-null guard outside any negation, so a negation over it no
   longer matches documents where the subdocument is absent (over-grant fix); a bare boolean read
   through a to-one hop now translates instead of throwing "Bare collection variables are

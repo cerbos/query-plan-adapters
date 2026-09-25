@@ -6,13 +6,10 @@ cases:
 - id: 'cast/double/malformed-string'
   tier: adversarial
   intent: double() over a string attribute compared with a threshold.
-  trap: 'CEL requires the whole string to be a number; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  trap: 'CEL requires the whole string to be a number (i1 "+051", i3 "1e3", i4 and i6 are; i2 "51 " is not); SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3, b2 and i2.'
   condition:
     match:
       expr: 'double(R.attr.aString) > 50.0'
-  degenerate:
-    oracle: empty
-    reason: 'No seed''s aString converts to a number, so double(R.attr.aString) is a conversion error for every seed and denies.'
 - id: 'cast/double/negated-malformed-string'
   tier: adversarial
   intent: '!(double(aString) > 50.0): a string-to-double conversion under negation.'
@@ -20,20 +17,24 @@ cases:
   condition:
     match:
       expr: '!(double(R.attr.aString) > 50.0)'
+- id: 'cast/int/double-truncation-bounds'
+  tier: adversarial
+  intent: 'int() over a double attribute under > and < (int(aDouble) > 0 || int(aDouble) < -4).'
+  trap: 'int() truncates toward zero, so 0.25/0.3 give 0 and -4.7 gives -4, all denied; solving to aDouble > 0 or aDouble < -4 over-grants a2, a5, a7 and h4. g1''s -9.5e18 is out of int64 range, an error.'
+  condition:
+    match:
+      expr: 'int(R.attr.aDouble) > 0 || int(R.attr.aDouble) < -4'
 - id: 'cast/int/malformed-string'
   tier: adversarial
   intent: 'int() over a string attribute compared with a threshold (int(aString) > 50).'
-  trap: 'CEL requires the whole string to be an integer; SQL CAST reads leading digits, so a direct cast wrongly returns a2, a3 and b2.'
+  trap: 'CEL requires the whole string to parse as Go''s strconv.ParseInt does: i1 "+051" and i6 are integers, while i2 "51 ", i3 "1e3" and i4 (past int64) are errors. SQL CAST reads leading digits, trims, or goes through a double, so it wrongly returns a2, a3, b2 and i2-i4.'
   condition:
     match:
       expr: 'int(R.attr.aString) > 50'
-  degenerate:
-    oracle: empty
-    reason: 'No seed''s aString converts to an integer, so int(R.attr.aString) is a conversion error for every seed and denies.'
 - id: 'cast/int/negated-malformed-string'
   tier: adversarial
   intent: '!(int(aString) > 50): a string-to-int conversion under negation.'
-  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix or yields 0, so the negation turns those errors into matches.'
+  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix, yields 0 or wraps past int64 (i4), so the negation turns those errors into matches. h4 "0" and i5 "-0" are the integers it must keep.'
   condition:
     match:
       expr: '!(int(R.attr.aString) > 50)'
@@ -44,6 +45,13 @@ cases:
   condition:
     match:
       expr: int(R.attr.aDouble) == 0
+- id: 'cast/int/string-beyond-double-precision'
+  tier: adversarial
+  intent: 'int(aString) compared for equality with 2^53, OR''d with aNumber == 5.'
+  trap: 'i6 holds 2^53 + 1, which a double cannot represent; comparing the cast through a double (a JS number, or SQL comparing bigint with double) finds it equal to 2^53 and over-grants i6.'
+  condition:
+    match:
+      expr: 'int(R.attr.aString) == 9007199254740992 || R.attr.aNumber == 5'
 - id: 'cast/string/from-boolean'
   tier: adversarial
   intent: 'string() over a boolean attribute compared with "true".'
@@ -51,6 +59,41 @@ cases:
   condition:
     match:
       expr: 'string(R.attr.aBool) == "true"'
+- id: 'cast/string/from-boolean-case-changed-literal'
+  tier: adversarial
+  intent: 'string() over a boolean attribute compared with "TRUE", OR''d with aNumber == 5.'
+  trap: 'CEL renders the word "true", which never equals "TRUE", so only a1 (through aNumber) is allowed; comparing the rendered word in a case-insensitive collation (MySQL''s default, or a driver''s connection collation) matches every true row.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool) == "TRUE" || R.attr.aNumber == 5'
+- id: 'cast/string/negated-from-boolean'
+  tier: adversarial
+  intent: '!(string(aBool) == "true"): string() over a boolean attribute that is missing on one row, under negation.'
+  trap: 'string() of a missing aBool (j3) errors and denies under negation; a rendering whose NULL falls through to "false", or a NULL cast negated to true, over-grants j3.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aBool) == "true")'
+- id: 'cast/string/negated-from-boolean-expression'
+  tier: adversarial
+  intent: '!(string(aNumber > 3) == "true"): string() over a boolean-valued comparison rather than a column, under negation.'
+  trap: 'The operand is a boolean expression, so CEL renders "true"/"false"; a plain CAST of a SQL comparison yields "1"/"0" on SQLite and MySQL, which never equals "true" and over-grants every row with aNumber > 3. A missing aNumber (j2) must still deny.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aNumber > 3) == "true")'
+- id: 'cast/string/negated-from-boolean-through-relation'
+  tier: adversarial
+  intent: '!(string(parent.aBool) == "true"): string() over a boolean read through the to-one parent, under negation.'
+  trap: 'A row with no parent is a missing attribute and denies under negation; the parent''s boolean must still render "true"/"false". A plain CAST over the hop yields "1"/"0" on SQLite and MySQL and over-grants every row whose parent''s aBool is true.'
+  condition:
+    match:
+      expr: '!(string(R.attr.parent.aBool) == "true")'
+- id: 'cast/string/negated-from-boolean-ternary'
+  tier: adversarial
+  intent: '!(string(aNumber > 3 ? aBool : false) == "true"): string() over a ternary whose arms are both boolean, under negation.'
+  trap: 'The ternary is boolean-valued, so CEL renders "true"/"false"; a plain CAST of a SQL CASE yields "1"/"0" on SQLite and MySQL, which never equals "true" and over-grants every row with aNumber > 3 and aBool true. A missing aNumber (j2), or a missing aBool on the taken arm, must still deny.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aNumber > 3 ? R.attr.aBool : false) == "true")'
 - id: 'cast/string/from-double'
   tier: extended
   intent: 'string() over a double attribute compared with a literal (string(aDouble) == "-0.6").'
@@ -58,6 +101,62 @@ cases:
   condition:
     match:
       expr: 'string(R.attr.aDouble) == "-0.6"'
+- id: 'cast/string/from-double-spellings'
+  tier: adversarial
+  intent: 'string() over a double attribute compared with CEL''s spellings of 1e6, 2 and -9.5e18.'
+  trap: 'CEL prints a double with Go''s %g-style shortest form: "1e+06" (i1), "2" (i2) and "-9.5e+18" (g1). A store CAST prints "1000000", "2.0" or "-9.5E18" and under-grants them.'
+  condition:
+    match:
+      expr: 'string(R.attr.aDouble) == "1e+06" || string(R.attr.aDouble) == "2" || string(R.attr.aDouble) == "-9.5e+18"'
+- id: 'cast/string/from-int-beyond-double-precision'
+  tier: adversarial
+  intent: 'string(int(aString)) == "9007199254740993": an int past 2^53 rendered back to a string.'
+  trap: 'i6 holds 2^53 + 1, which CEL converts exactly and renders in full; an evaluator that carries the int as a double renders 2^53 instead, and one that cannot render a big int errors and under-grants i6.'
+  condition:
+    match:
+      expr: 'string(int(R.attr.aString)) == "9007199254740993"'
+- id: 'cast/string/from-int-past-exponent-threshold'
+  tier: adversarial
+  intent: 'string(int(aDouble)) == "1000000": an int of 1e6 rendered as a string.'
+  trap: 'CEL renders an int in plain decimal, "1000000" (i1), where a double of the same value renders "1e+06"; rendering the int with the double formatting under-grants i1.'
+  condition:
+    match:
+      expr: 'string(int(R.attr.aDouble)) == "1000000"'
+- id: 'cast/string/from-integral-ternary'
+  tier: adversarial
+  intent: 'string() of a ternary over int literals (string(aBool ? 1000000 : 0) == "1000000").'
+  trap: 'Both arms are ints, so CEL renders "1000000" and every aBool true row is allowed; the plan carries 1000000 as a bare number, and rendering it as a double gives "1e+06" and under-grants them. A missing aBool (j3) is denied.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool ? 1000000 : 0) == "1000000"'
+- id: 'cast/string/from-ternary-with-int-branch'
+  tier: adversarial
+  intent: 'string() of a ternary whose one branch is int() and the other an int literal (string(aBool ? int(aDouble) : 1000000) == "1000000").'
+  trap: 'CEL gives both branches one type, so the literal is an int as well: i1 and every aBool false row render "1000000". Rendering either branch as a double gives "1e+06" and under-grants them; refusing the literal as untyped refuses a shape whose type the other branch fixes.'
+  condition:
+    match:
+      expr: 'string(R.attr.aBool ? int(R.attr.aDouble) : 1000000) == "1000000"'
+- id: 'cast/string/negated-from-int-past-exponent-threshold'
+  tier: adversarial
+  intent: '!(string(int(aDouble)) == "1000000"): the int rendering under negation.'
+  trap: 'Rendering the int 1000000 as the double "1e+06" makes the equality false for i1, so the negation over-grants i1, which CEL denies; a missing aDouble and an int() beyond int64 (g1) stay denied.'
+  condition:
+    match:
+      expr: '!(string(int(R.attr.aDouble)) == "1000000")'
+- id: 'cast/string/negated-from-integral-ternary'
+  tier: adversarial
+  intent: '!(string(aBool ? 1000000 : 0) == "1000000"): the int rendering of a ternary under negation.'
+  trap: 'CEL allows only the aBool false rows; rendering the int 1000000 as the double "1e+06" makes the equality false for every aBool true row, so the negation over-grants them. A missing aBool (j3) stays denied.'
+  condition:
+    match:
+      expr: '!(string(R.attr.aBool ? 1000000 : 0) == "1000000")'
+- id: 'cast/string/from-negative-zero-double'
+  tier: adversarial
+  intent: 'string(aDouble) == "-0", where i5 holds the double -0.0.'
+  trap: 'CEL keeps the sign of -0.0 and prints "-0"; a store that normalises it to 0 (or prints "0") under-grants i5 and must refuse instead.'
+  condition:
+    match:
+      expr: 'string(R.attr.aDouble) == "-0"'
 - id: 'cast/string/negated-explicit-null'
   tier: adversarial
   intent: '!(string(owner) == "set"): string() over an explicit-null attribute, under negation.'

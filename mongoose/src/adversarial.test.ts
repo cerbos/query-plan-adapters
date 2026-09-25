@@ -30,9 +30,9 @@ interface Tag {
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
@@ -85,9 +85,9 @@ interface AdversarialCategory {
 
 /** One level of the to-one chain, stored as an embedded subdocument. */
 interface AdversarialRelationLevel {
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
 }
 
@@ -97,9 +97,9 @@ interface AdversarialParent extends AdversarialRelationLevel {
 
 interface AdversarialResourceDocument {
   resourceId: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aDouble: number | null;
   aOptionalString: string | null;
   createdBy: string;
@@ -143,19 +143,19 @@ const categorySchema = new Schema<AdversarialCategory>(
 // an absent level is a missing path here exactly as it is a missing row there.
 const innerSchema = new Schema<AdversarialRelationLevel>(
   {
-    aBool: { type: Boolean, required: true },
-    // Mongoose's string `required` validator rejects the corpus's intentional empty string.
-    aString: { type: String },
-    aNumber: { type: Number, required: true },
+    // Nullable: seeds j1, j2 and j3 each store a null in one of these three (a missing attribute).
+    aBool: { type: Boolean, default: null },
+    aString: { type: String, default: null },
+    aNumber: { type: Number, default: null },
     aOptionalString: { type: String, default: null },
   },
   { _id: false, id: false },
 );
 const parentSchema = new Schema<AdversarialParent>(
   {
-    aBool: { type: Boolean, required: true },
-    aString: { type: String },
-    aNumber: { type: Number, required: true },
+    aBool: { type: Boolean, default: null },
+    aString: { type: String, default: null },
+    aNumber: { type: Number, default: null },
     aOptionalString: { type: String, default: null },
     inner: { type: innerSchema, default: null },
   },
@@ -164,10 +164,10 @@ const parentSchema = new Schema<AdversarialParent>(
 const resourceSchema = new Schema<AdversarialResourceDocument>(
   {
     resourceId: { type: String, required: true, unique: true },
-    aBool: { type: Boolean, required: true },
-    // Mongoose's string `required` validator rejects the corpus's intentional empty string.
-    aString: { type: String },
-    aNumber: { type: Number, required: true },
+    // Nullable: seeds j1, j2 and j3 each store a null in one of these three (a missing attribute).
+    aBool: { type: Boolean, default: null },
+    aString: { type: String, default: null },
+    aNumber: { type: Number, default: null },
     aDouble: { type: Number, default: null },
     aOptionalString: { type: String, default: null },
     createdBy: { type: String, required: true },
@@ -255,12 +255,19 @@ function toDocument(seed: Seed): AdversarialResourceDocument {
     createdAt: derived.createdAt === null ? null : new Date(derived.createdAt),
     updatedAt: derived.updatedAt === null ? null : new Date(derived.updatedAt),
     tags: seed.tags,
-    categories: seed.subCategoryNames.map((name) => ({
-      name: "business",
-      subCategories: [
-        { name, labels: derived.labels.map((label) => ({ name: label })) },
-      ],
-    })),
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
+    categories:
+      seed.subCategoryNames.length === 0
+        ? []
+        : [
+            {
+              name: "business",
+              subCategories: seed.subCategoryNames.map((name) => ({
+                name,
+                labels: derived.labels.map((label) => ({ name: label })),
+              })),
+            },
+          ],
     parent: storedParent(seed),
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,

@@ -99,7 +99,7 @@ Errors, all subclasses of `Cerbos::ActiveRecord::Error`:
 | --- | --- |
 | `UnmappedAttributeError` | A plan variable is missing from the map, or used where its mapping cannot go (e.g. a relation where a column is needed) |
 | `UnsupportedOperatorError` | An operator or operand shape has no exact SQL translation |
-| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, an empty hierarchy delimiter) |
+| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, a hierarchy delimiter that is not a string) |
 | `UnsupportedAssociationError` | An attribute maps to an association the adapter cannot turn into a correlated subquery |
 
 ## Mapping attributes
@@ -222,19 +222,31 @@ both, so you must tell the adapter which one you use:
 | `:explicit` (default) | An attribute whose value is null | true in Cerbos; `IS NULL` agrees |
 | `:omitted` | No attribute | Missing-attribute error; Cerbos denies the row |
 
-Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` the
-adapter refuses every null constant in the plan (including `!= null`, because a `not` above it
-could flip it back into a NULL-selecting predicate):
+Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` a
+NULL column is a missing attribute, which CEL answers with an error, and a present column is never
+null. So `==` and `!=` between a field attribute and `null` are rendered UNKNOWN for a NULL column,
+which stays UNKNOWN under any `not` above it:
+
+```
+eq(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE FALSE END
+ne(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE TRUE END
+```
+
+This holds for a column reached through a to-one path such as `parent.tag`, where an absent parent
+is NULL too. Every other null constant is refused under `:omitted`: a null in an `in` or
+`hasIntersection` list, and a null given to an operator override of `eq` or `ne`, since the
+override would receive it:
 
 ```ruby
 Cerbos::ActiveRecord.query_plan_to_relation(
   plan: plan, model: Document, attributes: MAPPING,
   null_attribute_representation: :omitted
 )
-# => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan contains a null constant
+# => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan holds such a null constant
 ```
 
-See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+See [#302](https://github.com/cerbos/query-plan-adapters/issues/302) and
+[#551](https://github.com/cerbos/query-plan-adapters/issues/551).
 
 ### Declare the convention on the attribute
 
@@ -267,20 +279,40 @@ the other declares nothing, the adapter raises `UnsupportedOperatorError`. Decla
 neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
+
 ## The collation is part of the contract
 
 CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
-`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows.
+`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows. CEL also
+orders strings by code point, and `<`, `<=`, `>` and `>=` follow the collation.
 
-- **SQLite:** set `PRAGMA case_sensitive_like = ON`.
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
+  point.
+- **PostgreSQL:** every collation is deterministic, so equality is exact, but string ordering needs
+  a byte-order collation, `"C"`. A linguistic one such as glibc's `en_US.UTF-8` (the usual default
+  on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`, so
+  `R.attr.name > "a"` over-grants it
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
+  `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders.
 - **MySQL:** use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every column your policies read. `_cs` is
   not enough — `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD
   SPACE (`'a' = 'a '` is TRUE) ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  Make the **connection** collation byte-exact too: `string()` over a boolean column compares two
-  literals, so it uses the connection collation, and under the default `utf8mb4_0900_ai_ci`
-  `string(R.attr.flag) == "TRUE"` matches rows CEL does not.
+  `utf8mb4_0900_bin` orders by code point. Make the **connection** collation byte-exact too
+  (`collation: utf8mb4_0900_bin` in the mysql2 config, which ActiveRecord applies with
+  `SET NAMES`): `string()` of a column is a `CAST` or a `CASE` over literals, so it takes the
+  connection collation, and under the default `utf8mb4_0900_ai_ci` `string(R.attr.owner) == "set"`
+  also matches `Set`.
 
-The suites here run on SQLite only; other dialects have no test coverage.
+The conformance suite runs on SQLite, PostgreSQL (initialised with `--lc-collate=C`) and MySQL
+(`utf8mb4_0900_bin` on the columns and the connection). The other suites run on SQLite.
 
 ## How the adapter keeps the three-valued logic
 
@@ -292,8 +324,10 @@ instead of collapsing it to a boolean. You will see this in the SQL:
   `NOT`.
 - Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
   element is true, `all` if any element is false, `exists_one` never does.
-- `string()` over a boolean column becomes a `CASE` starting `WHEN col IS NULL THEN NULL`, then
-  spells `'true'`/`'false'` (a plain `CAST` gives `"1"` on SQLite and MySQL).
+- `string()` over a boolean — a boolean column, or any comparison, logical operator, `in` or
+  string predicate — becomes `CASE WHEN b THEN 'true' WHEN NOT (b) THEN 'false' END`, again with
+  no `ELSE`, so a NULL stays NULL (a plain `CAST` gives `"1"` on SQLite and MySQL). Any other
+  `string()` is a `CAST` to `TEXT`, or to `CHAR` on MySQL, whose `CAST` accepts no `TEXT`.
 
 ## Supported operators
 
@@ -312,11 +346,14 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
 | `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
 | `cast/int/negative-fraction` | CEL truncates toward zero; PostgreSQL and MySQL round. |
+| `cast/string/from-int-beyond-double-precision`, `cast/string/from-int-past-exponent-threshold`, `cast/string/negated-from-int-past-exponent-threshold` | `string()` over `int()` of a string or double column: the `int()` is refused for the reasons above. |
+| `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
 | `collection/filter/as-whole-condition`, `collection/map/as-whole-condition` | `filter()`/`map()` as the whole condition is a list, not a boolean. Only `size(filter(...))` and `hasIntersection(map(...), [...])` are boolean. |
 | `collection/filter/as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `hierarchy/descendent-of/empty-delimiter` | An empty hierarchy delimiter turns `descendentOf` into a prefix test whose `LIKE` would also match the path itself. |
+| `arithmetic/modulo/negated-double-operand` | `%` over an attribute that has not gone through `int()`. Every number in a request attribute is a double and CEL's `%` has no double overload, so the row errors; SQL would compute a remainder. |
+| `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
 number of operands. The planner never emits these, but the adapter accepts plans from any source.
@@ -325,23 +362,27 @@ number of operands. The planner never emits these, but the adapter accepts plans
 
 `spec/conformance_spec.rb` replays every plan recorded in
 [`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
-rows in SQLite and compares the ids with the ones `check()` allowed. It needs no PDP. On the
-current PDP (Cerbos 0.55.0), cases that return exactly the allowed rows, out of every golden case
-in the tier:
+rows and compares the ids with the ones `check()` allowed. It needs no PDP. It runs on SQLite,
+PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
-| adversarial | 171 / 227 |
+| extended | 58 / 80 |
+| adversarial | 227 / 308 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
-skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 that is one
-extended case, `null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing
-attribute to `ALWAYS_ALLOWED`, but `check()` denies those rows. Until the planner is fixed, use
-`R.attr.x != null` instead of `has(R.attr.x)` for database attributes.
+skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
+four extended cases and three adversarial cases. In `null/has/missing-attribute` and
+`null/has/composed-with-comparison` the plan request leaves an omitted attribute unknown, so the
+planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
+the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
+planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In the other three, all `composition/*`, a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it
+denies j2, while `check()` receives `aNumber` as absent, treats the erroring DENY as not matching
+and lets the ALLOW stand ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 ## Mapping hazards
 
@@ -383,12 +424,16 @@ Everything runs in Docker; you do not need Ruby locally, and no suite needs a PD
 ```bash
 ./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/conformance_spec.rb          # the conformance harness alone
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # on PostgreSQL (or mysql)
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                   # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                   # YARD, failing on a warning or an undocumented object
 ```
 
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
+`ADAPTER_TEST_DB` picks the store: `sqlite` (the default, in memory), `postgres` or `mysql`, which
+`scripts/test.sh` starts from `docker-compose.yaml` with the images pinned in
+[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE). Any other value fails.
 Specs run in random order; rerun a failure with the seed RSpec prints (`--seed N`).
 
 | Suite | What it covers |

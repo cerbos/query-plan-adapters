@@ -12,7 +12,21 @@
 
 - Support for Ruby 4.0 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))
 
+- `==` and `!=` between a field attribute and `null` under the `:omitted` NULL convention, rendered as `CASE WHEN col IS NULL THEN NULL ELSE FALSE END` (`ELSE TRUE` for `!=`) ([#551](https://github.com/cerbos/query-plan-adapters/issues/551))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
+
 ### Changed
+
+- The conformance suite runs on PostgreSQL and MySQL as well as SQLite, and the fixes below are what those stores exposed ([#500](https://github.com/cerbos/query-plan-adapters/issues/500))
+
+  Filters get narrower or stop failing; nothing that translated now raises.
+
+  - `+`, `-` and `*` read an integer or decimal column as a double, as CEL reads every attribute number. PostgreSQL and MySQL computed `aNumber * 0.1` in exact decimal, so `aNumber * 0.1 == 0.3` held for 3, where CEL computes `0.30000000000000004`.
+  - `%` by a column that is zero is UNKNOWN (`NULLIF`), as CEL's error is. PostgreSQL raised `division by zero` and failed the whole query.
+  - `string()` of a string column casts to `CHAR` on MySQL, where `CAST(... AS VARCHAR)` was a syntax error.
+  - A whole number in a plan beyond the int64 range (`R.attr.aDouble > -1e19`) is bound as a double, where ActiveRecord refused to bind it on PostgreSQL.
+  - `ancestorOf`, `descendentOf` and `overlaps` over `hierarchy()` of a number or boolean column are UNKNOWN, as CEL's type error is. PostgreSQL refused the `LIKE` on a number.
 
 - **Breaking:** `size()`, `contains`, `startsWith` and `endsWith` raise `Cerbos::ActiveRecord::UnsupportedOperatorError` for a numeric or boolean column ([#458](https://github.com/cerbos/query-plan-adapters/pull/458))
 
@@ -45,6 +59,31 @@
 
   This applies to a relation mapped by `member_field` and to the `IN` list for a scalar column: `"2" in aNumberList` is false, where SQLite's REAL affinity read `'2'` as the number 2 and matched, and `aNumber in ["5", 2]` is `a_number IN (2)`.
   Filters get narrower; nothing that translated now raises.
+
+- **Breaking:** `%` raises `Cerbos::ActiveRecord::UnsupportedOperatorError` unless both operands are `int()` results, `size()` results or whole constants
+
+  Every number in a request attribute is a double, and CEL's `%` has no double overload, so `R.attr.n % 2` errors on every row where SQL computed a remainder.
+
+- **Breaking:** `string()` over a numeric column is translated only in `==` and `!=` against a string literal, which compare the column with the double CEL spells that way; any other use, and a `"0"` or `"-0"` literal, raises `Cerbos::ActiveRecord::UnsupportedOperatorError`
+
+  `CAST(col AS TEXT)` spells `2.0` as `"2.0"` and `1000000.0` as `"1000000.0"`, where CEL writes `"2"` and `"1e+06"`. `string(int(col))` still casts.
+
+- `hierarchy()` accepts the empty delimiter, which splits a path into one segment per character, as Cerbos does
+
+- Comparing a scalar with a list literal is false (UNKNOWN for a missing attribute), as in CEL, instead of failing with a `TypeError`
+
+- `string()` over any boolean-valued operand spells `"true"`/`"false"`, as `string()` over a boolean column already did: a comparison, a logical operator, `in`, a string predicate, a collection macro, and a `member_field` element held in a boolean column ([#471](https://github.com/cerbos/query-plan-adapters/issues/471))
+
+  They previously went through `CAST(... AS TEXT)`, which gives `"1"`/`"0"` on SQLite and MySQL, so `!(string(R.attr.n > 3) == "true")` returned rows the policy denies.
+  A NULL or missing operand still leaves the row out under both polarities.
+
+- **Breaking:** a division whose operands are both CEL ints, at least one an `int()` result or int arithmetic on one, is int division truncating toward zero, as CEL's is ([#545](https://github.com/cerbos/query-plan-adapters/issues/545))
+
+  `int(R.attr.n) / 2 == 1` used to divide as doubles, so `int(3) / 2` was `1.5`, the row was dropped, and the negation returned it though the PDP denies it. The division is now `/` over integers (`DIV` on MySQL). Its divisor must be a non-zero constant: CEL's int division by zero is an error that denies the row, where PostgreSQL aborts the query, so any other int divisor raises `Cerbos::ActiveRecord::UnsupportedOperatorError`.
+
+- **Breaking:** arithmetic between an `int()` result and an operand that is not certainly an int (a column, a fractional constant), and `string()` over a ternary of whole-number constants whose int and double spellings differ, raise `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#554](https://github.com/cerbos/query-plan-adapters/issues/554))
+
+  CEL has no overload mixing int and double, so `int(R.attr.n) + R.attr.d > 0.0` is an error that denies every row, where SQL added the two and its negation returned rows the PDP denies. The plan carries `1000000` and `1000000.0` as the same number, which CEL's `string()` spells `"1000000"` and `"1e+06"`; `string(R.attr.flag ? 1000000 : 0)` used to cast the int. A ternary with an `int()` arm fixes its other arm as an int and still translates.
 
 ### Removed
 

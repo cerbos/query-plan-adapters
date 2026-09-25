@@ -3,6 +3,7 @@ import { PlanResourcesResponse, PlanKind } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
+import { withOmittedNullDefault } from "./mapper";
 
 export { PlanKind };
 export { UnsupportedQueryPlanError };
@@ -11,7 +12,11 @@ export type MongooseFilter = Record<string, any>;
 
 export type MapperConfig = {
   field?: string;
-  /** Treat a stored null as a missing Cerbos attribute and exclude it from comparisons. */
+  /**
+   * Treat a stored null as a missing Cerbos attribute and exclude it from comparisons. Left
+   * undeclared, it follows the call's `nullAttributeRepresentation`: `false` under `"explicit"`,
+   * `true` under `"omitted"`.
+   */
   nullable?: boolean;
   valueParser?: (value: any) => any;
   /** Stored scalar type; dateTime loses the original CEL timestamp string spelling. */
@@ -55,9 +60,10 @@ export type Mapper =
  *   `null == null`, so matching null selects exactly the documents `check()` allows.
  * - `"omitted"` — a NULL field sends no attribute at all. CEL then raises a missing-attribute
  *   error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
- *   documents the PDP denies. Null comparison operands are rejected instead of translated.
+ *   documents the PDP denies. Null comparison operands are rejected instead of translated, and
+ *   every mapper entry that does not declare `nullable` is treated as `nullable: true`.
  *
- * See https://github.com/cerbos/query-plan-adapters/issues/302.
+ * See https://github.com/cerbos/query-plan-adapters/issues/302 and cerbos/query-plan-adapters#493.
  */
 export type NullAttributeRepresentation = "explicit" | "omitted";
 
@@ -85,7 +91,10 @@ export function queryPlanToMongoose({
   nullAttributeRepresentation = "explicit",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   const ctx: TranslateContext = {
-    mapper,
+    mapper:
+      nullAttributeRepresentation === "omitted"
+        ? withOmittedNullDefault(mapper)
+        : mapper,
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };

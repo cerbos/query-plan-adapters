@@ -812,23 +812,34 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     it "does not apply the convention of the call to an attribute that declares nothing" do
-      # `u` declares nothing, so the call's `:omitted` applies and the null is refused.
-      # Declared attributes are unaffected.
+      # `u` declares nothing, so the call's `:omitted` applies and a NULL column is UNKNOWN.
+      # `e` declares `:explicit`, so it keeps `IS NULL`.
+      omitted = described_class.query_plan_to_relation(
+        plan: conditional(expression("eq", variable("u"), value(nil))),
+        model: EdgeDocument, attributes: declared,
+        null_attribute_representation: :omitted
+      ).to_sql
+      expect(omitted).to include('CASE WHEN "edge_documents"."author_id" IS NULL THEN NULL')
+
+      explicit = described_class.query_plan_to_relation(
+        plan: conditional(expression("eq", variable("e"), value(nil))),
+        model: EdgeDocument, attributes: declared,
+        null_attribute_representation: :omitted
+      ).to_sql
+      expect(explicit).to include('"edge_documents"."title" IS NULL')
+      expect(explicit).not_to include("CASE")
+    end
+
+    it "keeps refusing a null constant under :omitted when an operator override owns eq" do
+      # The override would receive the null and could select the NULL rows the PDP denies.
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("eq", variable("u"), value(nil))),
           model: EdgeDocument, attributes: declared,
-          null_attribute_representation: :omitted
+          null_attribute_representation: :omitted,
+          operator_overrides: {"eq" => ->(left, right) { Arel::Nodes::Equality.new(left, right) }}
         )
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /null constant/)
-
-      expect {
-        described_class.query_plan_to_relation(
-          plan: conditional(expression("eq", variable("e"), value(nil))),
-          model: EdgeDocument, attributes: declared,
-          null_attribute_representation: :omitted
-        )
-      }.not_to raise_error
     end
   end
 
@@ -886,9 +897,31 @@ RSpec.describe Cerbos::ActiveRecord do
       end
     end
 
+    # True if every null in the plan is a scalar operand of `eq` or `ne` beside a field
+    # attribute: the one shape {Translator} renders as UNKNOWN-when-NULL (#551).
+    def only_null_equalities?(node, attributes)
+      case node
+      when Hash
+        expression = node["expression"]
+        if expression && %w[eq ne].include?(expression.fetch("operator"))
+          operands = expression.fetch("operands")
+          nulls = operands.select { |operand| operand.key?("value") && operand.fetch("value").nil? }
+          variable = operands.find { |operand| operand.key?("variable") }
+          return true if nulls.length == 1 && operands.length == 2 && variable &&
+            attributes[variable.fetch("variable")].is_a?(Cerbos::ActiveRecord::AttributeMapping::Field)
+        end
+        return false if node.key?("value") && carries_null?(node)
+
+        node.values.all? { |child| only_null_equalities?(child, attributes) }
+      when Array then node.all? { |child| only_null_equalities?(child, attributes) }
+      else true
+      end
+    end
+
     # The refusal keys on the null operand, not on a list of operators:
     # `hasIntersection(tagNames, ["public", null])` would slip past an eq/ne/in allowlist.
-    it "refuses every recorded plan that carries a null constant" do
+    # The one exception is `eq`/`ne` against a field attribute, rendered UNKNOWN-when-NULL.
+    it "refuses every recorded plan that carries a null constant, except eq/ne against a field" do
       null_carrying = goldens.values.select { |golden| carries_null?(golden.fetch("plan")) }
       # The walk still finds nulls, in an equality and inside a list.
       expect(null_carrying.map { |golden| golden.fetch("id") }).to include(
@@ -896,13 +929,22 @@ RSpec.describe Cerbos::ActiveRecord do
         "null/has-intersection/literal-list-with-null-element"
       )
 
-      not_refused = null_carrying.reject do |golden|
-        omitted_call(golden.fetch("plan"), CorpusAttributes::UNDECLARED)
-        false
+      translated, refused = null_carrying.partition do |golden|
+        omitted_call(golden.fetch("plan"), CorpusAttributes::UNDECLARED).to_sql
+        true
       rescue Cerbos::ActiveRecord::UnsupportedOperatorError => e
-        e.message.include?("null constant")
+        raise unless e.message.include?("null constant")
+
+        false
       end
-      expect(not_refused.map { |golden| golden.fetch("id") }).to be_empty
+
+      translated_ids = translated.map { |golden| golden.fetch("id") }
+      expect(translated_ids).to include("null/equals/null-literal-on-missing-attribute")
+      expect(refused.map { |golden| golden.fetch("id") })
+        .to include("null/has-intersection/literal-list-with-null-element")
+      expect(translated.reject { |golden|
+        only_null_equalities?(golden.fetch("plan"), CorpusAttributes::UNDECLARED)
+      }.map { |golden| golden.fetch("id") }).to be_empty
     end
 
     # A per-attribute declaration beats the per-call option, so one policy can mix both.
@@ -912,8 +954,9 @@ RSpec.describe Cerbos::ActiveRecord do
 
       expect(omitted_call(plan, CorpusAttributes::ATTRIBUTES).pluck(:id).sort)
         .to eq(golden.fetch("allowed").sort)
-      expect { omitted_call(plan, CorpusAttributes::UNDECLARED) }
-        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /null constant/)
+      # Undeclared, `owner` takes the call's `:omitted`: a NULL owner is a missing attribute,
+      # and a present one is never null, so `== null` allows nothing.
+      expect(omitted_call(plan, CorpusAttributes::UNDECLARED).pluck(:id)).to be_empty
     end
   end
 end

@@ -1,0 +1,81 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/and/negated-conjunction-one-hop-null-literal",
+  "intent": "A negated && of a negated parent boolean and a parent null comparison (!(!parent.aBool && parent.aOptionalString == null)).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.aBool"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.aOptionalString"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/and/negated-conjunction-one-hop-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(!R.attr.parent.aBool && R.attr.parent.aOptionalString == null)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Where parent.aBool is true the conjunction is false before the null leaf is read, so a7 is allowed although its leaf is NULL; a4 and c1 (parent.aBool false, leaf NULL) are errors that deny. De Morgan into a two-valued IS NOT NULL denies a7 or admits a4/c1."
+}

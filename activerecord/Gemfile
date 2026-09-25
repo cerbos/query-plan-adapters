@@ -27,6 +27,10 @@ group :test do
   gem "activerecord", "~> #{ENV.fetch("ACTIVERECORD_VERSION", "8.0")}.0"
   # The official Cerbos Ruby SDK. The adapter is tested against its output types.
   gem "cerbos", "~> 0.13"
+  # The conformance suite's stores (ADAPTER_TEST_DB): mysql2 and pg are ActiveRecord's own
+  # MySQL and PostgreSQL adapters. SQLite is the default.
+  gem "mysql2", "~> 0.5"
+  gem "pg", "~> 1.5"
   gem "rspec", "~> 3.13"
   gem "sqlite3", "~> 2.6"
 end

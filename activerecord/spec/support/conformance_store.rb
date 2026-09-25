@@ -2,9 +2,10 @@
 
 require "time"
 
-# The conformance dataset in SQLite: one table per attribute shape, able to hold every hostile
-# corpus row (NULL elements, duplicate or mirrored names, LIKE metacharacters, empty strings
-# and empty collections). conformance/README.md, "The dataset", says what each row must hold.
+# The conformance dataset in the store under test (spec/support/database.rb): one table per
+# attribute shape, able to hold every hostile corpus row (NULL elements, duplicate or mirrored
+# names, LIKE metacharacters, empty strings and empty collections). conformance/README.md,
+# "The dataset", says what each row must hold.
 module ConformanceStore
   module_function
 
@@ -14,7 +15,22 @@ module ConformanceStore
 
     Database.establish!
     define_schema!
+    verify_mysql_collation! if Database::STORE == "mysql"
     seed!
+  end
+
+  # A column or a session left on MySQL's default collation would pass the case-sensitivity
+  # cases only where no seed happens to discriminate, so check both before any case runs.
+  def verify_mysql_collation!
+    connection = ActiveRecord::Base.connection
+    columns = connection.select_values(<<~SQL)
+      SELECT DISTINCT collation_name FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND collation_name IS NOT NULL
+    SQL
+    session = connection.select_value("SELECT @@collation_connection")
+    return if columns == [Database::MYSQL_COLLATION] && session == Database::MYSQL_COLLATION
+
+    raise "MySQL must run on #{Database::MYSQL_COLLATION}: columns #{columns}, session #{session}"
   end
 
   def define_schema!
@@ -22,10 +38,12 @@ module ConformanceStore
     ActiveRecord::Schema.define do
       create_table :adversarial_resources, id: false, force: true do |t|
         t.string :id, null: false, primary_key: true
-        t.boolean :a_bool, null: false
-        t.string :a_string, null: false
-        t.integer :a_number, null: false
-        t.float :a_double
+        # Nullable: seeds j1, j2 and j3 each leave one of these NULL, a missing attribute (#488).
+        t.boolean :a_bool
+        t.string :a_string
+        t.integer :a_number
+        # limit 53: a double. MySQL makes a bare `float` a 4-byte single.
+        t.float :a_double, limit: 53
         t.string :a_optional_string
         t.string :created_by, null: false
         t.string :scope
@@ -67,7 +85,7 @@ module ConformanceStore
       # lists (e.g. `aNumberList[0]`) is refused at `index`.
       create_table :adversarial_number_list_elements, force: true do |t|
         t.integer :position, null: false
-        t.float :value
+        t.float :value, limit: 53
         t.string :resource_id, null: false
       end
 
@@ -154,8 +172,10 @@ module ConformanceStore
         AdvBoolListElement.create!(position: position, value: value, resource_id: id)
       end
 
-      seed.fetch("subCategoryNames").each_with_index do |sub_name, index|
-        category = AdvCategory.create!(id: "#{id}-cat#{index}", name: "business", resource_id: id)
+      # One category holding every subcategory name (conformance/README.md, "The dataset").
+      sub_names = seed.fetch("subCategoryNames")
+      category = AdvCategory.create!(id: "#{id}-cat", name: "business", resource_id: id) unless sub_names.empty?
+      sub_names.each_with_index do |sub_name, index|
         sub_category = AdvSubCategory.create!(
           id: "#{id}-sub#{index}", name: sub_name, category_id: category.id
         )
