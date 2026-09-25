@@ -32,7 +32,9 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j1",
+    "j2"
   ],
   "degenerateReason": null,
   "id": "conditional/ternary/negated-branch-on-relation",

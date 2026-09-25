@@ -25,7 +25,10 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j1",
+    "j2",
+    "j3"
   ],
   "degenerateReason": null,
   "id": "collection/all/nested-exists-over-same-collection",

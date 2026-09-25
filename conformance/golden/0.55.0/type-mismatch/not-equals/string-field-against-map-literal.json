@@ -37,12 +37,14 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j2",
+    "j3"
   ],
-  "degenerateReason": "A string is never equal to a map literal, so != holds for every seed. A store that errors or compares by coercion would drop rows.",
+  "degenerateReason": null,
   "id": "type-mismatch/not-equals/string-field-against-map-literal",
   "intent": "Inequality between a string attribute and a map literal (aString != {\"a\": 1}).",
-  "oracle": "total",
+  "oracle": "discriminating",
   "pdp": "0.55.0",
   "plan": {
     "condition": {
@@ -97,5 +99,5 @@
     }
   ],
   "tier": "adversarial",
-  "trap": "A string is never equal to a map, so != holds for every row; a store that errors or compares by coercion drops rows."
+  "trap": "A string is never equal to a map, so != holds for every row with a present aString; a store that errors or compares by coercion drops rows, and folding it to TRUE readmits the missing-aString row (j1), which CEL denies."
 }

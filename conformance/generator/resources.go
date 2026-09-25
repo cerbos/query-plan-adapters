@@ -139,8 +139,9 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 // checkAttr is the seed -> check() resource projection every harness has used
 // (activerecord/spec/support/adversarial_oracle.rb, prisma/src/adversarial.test.ts):
 //
-//   - a NULL column is a MISSING attribute (aOptionalString, aDouble, scope, createdAt,
-//     updatedAt), so CEL errors and check() denies, like SQL's UNKNOWN;
+//   - a NULL column is a MISSING attribute (aBool, aString, aNumber, aOptionalString, aDouble,
+//     scope, createdAt, updatedAt, and obj.inner, which aliases aString), so CEL errors and
+//     check() denies, like SQL's UNKNOWN;
 //   - except owner, coOwner, tagNames, aNumberList and aBoolList, which send explicit nulls,
 //     because CEL treats a null value differently from a missing one (#308);
 //   - a NULL tag name or label name is a missing element attribute;
@@ -187,12 +188,11 @@ func checkAttr(seed, derived map[string]any, parentOf func(map[string]any) (map[
 		})
 	}
 
+	obj := map[string]any{}
+	setUnlessNull(obj, "inner", seed["aString"])
 	attr := map[string]any{
-		"aBool":       seed["aBool"],
-		"aString":     seed["aString"],
-		"aNumber":     seed["aNumber"],
 		"createdBy":   derived["createdBy"],
-		"obj":         map[string]any{"inner": seed["aString"]},
+		"obj":         obj,
 		"tags":        tagAttrs,
 		"owner":       seed["aOptionalString"],
 		"coOwner":     derived["scope"],
@@ -218,6 +218,9 @@ func checkAttr(seed, derived map[string]any, parentOf func(map[string]any) (map[
 		attr["parent"] = pa
 	}
 
+	setUnlessNull(attr, "aBool", seed["aBool"])
+	setUnlessNull(attr, "aString", seed["aString"])
+	setUnlessNull(attr, "aNumber", seed["aNumber"])
 	setUnlessNull(attr, "aOptionalString", seed["aOptionalString"])
 	setUnlessNull(attr, "aDouble", derived["aDouble"])
 	setUnlessNull(attr, "scope", derived["scope"])
@@ -240,11 +243,10 @@ func checkAttr(seed, derived map[string]any, parentOf func(map[string]any) (map[
 
 // relationAttr is one hop of the to-one chain; a NULL column is omitted, as on the root.
 func relationAttr(seed map[string]any) map[string]any {
-	a := map[string]any{
-		"aBool":   seed["aBool"],
-		"aString": seed["aString"],
-		"aNumber": seed["aNumber"],
-	}
+	a := map[string]any{}
+	setUnlessNull(a, "aBool", seed["aBool"])
+	setUnlessNull(a, "aString", seed["aString"])
+	setUnlessNull(a, "aNumber", seed["aNumber"])
 	setUnlessNull(a, "aOptionalString", seed["aOptionalString"])
 	return a
 }

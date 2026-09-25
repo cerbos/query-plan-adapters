@@ -3,7 +3,8 @@
     "a1",
     "a6",
     "b2",
-    "h4"
+    "h4",
+    "j2"
   ],
   "degenerateReason": null,
   "id": "composition/variable/allow-and-deny-through-variables",
@@ -58,7 +59,14 @@
     "kind": "KIND_CONDITIONAL"
   },
   "planError": null,
-  "plannerDivergence": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/530",
+    "pdp": [
+      "0.54.0",
+      "0.55.0"
+    ],
+    "reason": "j2 has no aNumber, so V.compose_large errors and check() does not apply the DENY: the ALLOW grants j2. The plan carries the DENY as not(gt(aNumber, 10)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2."
+  },
   "request": {
     "action": "composition/variable/allow-and-deny-through-variables",
     "resourceKind": "conformance"
