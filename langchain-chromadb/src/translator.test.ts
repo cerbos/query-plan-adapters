@@ -226,8 +226,8 @@ describe("what an emitted filter may contain", () => {
   /**
    * Anti-vacuity for the rule above: the corpus has to still drive negation through both De Morgan
    * branches and through operator inversion, or "no `$not` survived" would be a statement about a
-   * corpus that never negates anything. The De Morgan cases lower to an inequality over `aBool`,
-   * which the corpus mapping cannot assert present, so they are read under `PRESENT_EVERYWHERE`.
+   * corpus that never negates anything. They are read under `PRESENT_EVERYWHERE`, the one mapping
+   * under which an inversion to `$ne` (over `aString`, which has no other spelling) is reached.
    */
   test("the corpus still drives the negations that rule polices", () => {
     const conditional = CONDITIONAL_IF_PRESENT.map(({ id }) => id);
@@ -299,6 +299,62 @@ describe("what an emitted filter may contain", () => {
 
     expect(nowRefused).toEqual(emitsInequality);
     expect(emitsInequality.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A key declared boolean or integer never carries `$ne`, whether or not it is `required`: its
+   * inequality is spelled with `$eq`, `$lt`, `$gt` and `$gte`, which (unlike `$ne`) do not match a
+   * document missing the key. Read under `PRESENT_EVERYWHERE`, where every key is `required` and
+   * `$ne` would otherwise be admitted.
+   */
+  test("a key declared boolean or integer never carries $ne, required or not", () => {
+    const typed = new Set(
+      Object.values(PRESENT_EVERYWHERE)
+        .filter(
+          ({ valueType, numericType }) =>
+            valueType === "boolean" || numericType === "integer",
+        )
+        .map(({ field }) => field),
+    );
+    const withNe = [...ALL_COMPARISONS, ...COMPARISONS_IF_PRESENT]
+      .filter(({ field, operator }) => operator === "$ne" && typed.has(field))
+      .map(({ action, field }) => `${action}: ${field}`);
+
+    expect(withNe).toEqual([]);
+    // Anti-vacuity: some translated filter compares a typed key at all.
+    expect(
+      COMPARISONS_IF_PRESENT.filter(({ field }) => typed.has(field)).length,
+    ).toBeGreaterThan(0);
+  });
+
+  /**
+   * The mutation that proves the type declarations are read, as the test above does for
+   * `required`: stripping `valueType` and `numericType` from the corpus mapping refuses only
+   * actions the corpus mapping translates, each at its `ne`, and at least one of them.
+   */
+  test("clearing the type declarations refuses inequalities, and nothing else changes", () => {
+    const untyped: Record<string, FieldNameMapperConfig> = Object.fromEntries(
+      Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
+        if (typeof entry === "string") return [reference, { field: entry }];
+        const { valueType: _v, numericType: _n, ...rest } = entry;
+        return [reference, rest];
+      }),
+    );
+    const translated = new Set(TRANSLATED.map(({ id }) => id));
+
+    const changed = readGoldens(CURRENT).flatMap(({ id }) => {
+      const raised = thrownBy(() => translate(id, { fieldNameMapper: untyped }));
+      return translated.has(id) === (raised === undefined)
+        ? []
+        : [{ id, operator: (raised as UnsupportedOperatorError)?.operator }];
+    });
+
+    expect(changed.length).toBeGreaterThan(0);
+    expect(
+      changed.filter(
+        ({ id, operator }) => !translated.has(id) || operator !== "ne",
+      ),
+    ).toEqual([]);
   });
 
   /**
@@ -462,6 +518,28 @@ describe("mapper forms", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { aNumber: { $gte: 1.5 } },
     });
+  });
+});
+
+describe("type declarations a mapper cannot combine", () => {
+  // A mapper misconfiguration, not a shape Chroma cannot hold, so a plain `Error` (#228).
+  test.each([
+    [
+      "both valueType and numericType",
+      { field: "aBool", valueType: "boolean", numericType: "integer" },
+    ],
+    ["an unknown valueType", { field: "aBool", valueType: "string" }],
+  ])("%s is a plain Error", (_label, entry) => {
+    const raised = thrownBy(() =>
+      translate("logic/not/bare-boolean-attribute", {
+        fieldNameMapper: {
+          ...FIELD_NAME_MAPPER,
+          "request.resource.attr.aBool": entry as FieldNameMapperConfig,
+        },
+      }),
+    );
+    expect(raised).toBeInstanceOf(Error);
+    expect(raised).not.toBeInstanceOf(UnsupportedOperatorError);
   });
 });
 

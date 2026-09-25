@@ -74,6 +74,7 @@ interface FieldNameMapperConfig {
   field: string;
   required?: boolean;
   numericType?: "integer" | "float";
+  valueType?: "boolean";
 }
 ```
 
@@ -82,6 +83,14 @@ interface FieldNameMapperConfig {
 | `field` | The metadata key. |
 | `required: true` | Asserts the key is present on **every** record. Required to permit `$ne` and `$nin`: Chroma matches records missing the key, whereas Cerbos denies a missing attribute. Declaring it for a key that can be absent reintroduces that over-grant. |
 | `numericType: "float"` | The key is always stored as floating-point metadata. Required for ordered comparisons against a fractional threshold, because Chroma distinguishes integer from float metadata. |
+| `numericType: "integer"` | Every value stored under the key is an integer. An inequality then needs no `$ne` and no `required`: `x != 5` becomes `$or` of `$lt: 5` and `$gt: 5`, and `x != "5"` (a string or boolean literal, which no integer equals) becomes `$or` of `$lt: 0` and `$gte: 0`. A fractional literal (`x != 2.5`) still takes `$ne` and needs `required: true`, because Chroma compares a fractional threshold with integer metadata inexactly. |
+| `valueType: "boolean"` | Every value stored under the key is a boolean. An inequality against a boolean then needs no `$ne` and no `required`: `x != true` and `!x` become `$eq: false`. Cannot be combined with `numericType`. |
+
+Chroma's `$eq`, `$lt`, `$gt` and `$gte` never match a record missing the key, so these spellings
+are sound over an optional key. They rely on the declaration holding for every record: a string
+stored under a key declared boolean or integer is never matched by them. A string key has no such
+spelling (Chroma's `$lt`/`$gt` reject a string operand), so its inequality still needs
+`required: true`.
 
 ```ts
 queryPlanToChromaDB({
@@ -146,7 +155,8 @@ both throw; `principal/in/long-list` (11) and `principal/in/short-list` (3) both
 Chroma has no `$not` or `$nor`, so `not` is pushed inward: `not(eq)` → `$ne`, `not(ne)` → `$eq`,
 `not(lt)` → `$gte`, `not(gt)` → `$lte`, `not(le)` → `$gt`, `not(ge)` → `$lt`, `not(in)` → `$nin`,
 `not(and(A, B))` → `$or[not A, not B]`, `not(or(A, B))` → `$and[not A, not B]`, `not(not(X))` → `X`.
-Resulting `$ne`/`$nin` still need `required: true`. Value-first comparisons (`3 <= R.attr.n`) are
+Resulting `$ne`/`$nin` still need `required: true`, except where a `valueType: "boolean"` or
+`numericType: "integer"` declaration spells the inequality without `$ne` (see the mapper table). Value-first comparisons (`3 <= R.attr.n`) are
 mirrored.
 
 A `Where` clause compares one metadata key with a literal, so these throw:
@@ -192,7 +202,8 @@ try {
 - a comparison is between two keys or two literals, or tests a literal contained in a field;
 - `not` wraps an operator that cannot be negated;
 - a literal is null, nested, non-finite or otherwise invalid metadata;
-- `$ne`/`$nin` targets a field not declared `required: true`;
+- `$ne`/`$nin` targets a field not declared `required: true`, and no type declaration spells it
+  another way;
 - a fractional ordered comparison targets a field without `numericType: "float"`.
 
 A malformed plan or mapper misconfiguration is a plain `Error`, so a fallback keyed on
@@ -209,9 +220,9 @@ every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 16 / 26 |
-| extended | 7 / 80 |
-| adversarial | 27 / 250 |
+| core | 18 / 26 |
+| extended | 10 / 80 |
+| adversarial | 30 / 250 |
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -224,8 +235,12 @@ same `not` as CEL's `!`, while `checkResource` treats the erroring deny rule as 
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Every scalar attribute in the corpus is missing on some seed, so the harness mapping declares no
-metadata key but the id `required: true`, and every inequality over a scalar is refused. The corpus
-therefore proves no `$ne`/`$nin` filter; `src/translator.test.ts` pins that `required` gates them.
+metadata key but the id `required: true`. It declares the boolean keys `valueType: "boolean"` and
+the integer keys `numericType: "integer"`, so their inequalities are spelled without `$ne` and
+proved by the corpus (`logic/not/bare-boolean-attribute`,
+`type-mismatch/not-equals/number-field-against-string-literal`). An inequality over a string key is
+refused. The corpus therefore proves no `$ne`/`$nin` filter; `src/translator.test.ts` pins that
+`required` gates them, and that the type declarations are what spell the others.
 
 ## Mapping hazards
 
@@ -244,6 +259,12 @@ flat metadata on the record being matched, and every shape that would reach a se
 | Absent to-one parent | **Rejected** — `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained shapes are `unsupported` in the ledger and throw | None — Chroma metadata has no relation or nested-object model, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Behaviour changes
+
+- **Widening:** an inequality over a key declared `valueType: "boolean"` (new) or
+  `numericType: "integer"` is spelled without `$ne`, so it no longer needs `required: true`
+  ([#531](https://github.com/cerbos/query-plan-adapters/issues/531)). Over such a key already
+  declared `required`, the emitted filter changes shape (`$eq: false` for `$ne: true`; `$or` of
+  `$lt`/`$gt` for `$ne: 5`) but selects the same records as long as the declaration holds.
 
 - **Widening:** a membership list mixing scalar types (`R.attr.x in ["5", 2]`) is split into one
   `$in` per type under an `$or` (`$nin` per type under an `$and` when negated), because Chroma
@@ -271,7 +292,7 @@ demo/scripts/run-example.sh langchain-chromadb
 
 | Command | What it does | Needs |
 | --- | --- | --- |
-| `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, inequalities only on `required` fields, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, the unmapped fallback) and malformed input | Node only |
+| `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, `$ne`/`$nin` only on `required` fields and never on a boolean or integer key, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, `valueType`, the unmapped fallback) and malformed input | Node only |
 | `npm run typecheck` | Type-checks `src/` and the tests | Node only |
 | `npm run chroma` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 | Docker |
 | `npm run test:adversarial` | Replays the recorded conformance goldens (`../conformance/golden/`) against the ChromaDB on `CHROMA_URL` (default `http://127.0.0.1:8234`); no PDP | A running ChromaDB |

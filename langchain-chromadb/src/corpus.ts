@@ -146,7 +146,9 @@ export function planOf(
  * `required: true` is asserted only for the metadata keys the harness's `metadataFor` writes for
  * every seed in `conformance/seeds.json`: the id alone. Every scalar attribute is NULL for some
  * seed — a missing attribute in `resources.json`, and no metadata key here — so each stays
- * optional and its inequality shapes remain fail-closed. Attributes the mapping does not name (`createdBy`, `scope`, `owner`,
+ * optional. An inequality over one is refused unless the key's declared type (`valueType:
+ * "boolean"`, `numericType: "integer"`) spells it without `$ne`, as it does for the booleans and
+ * the integers. Attributes the mapping does not name (`createdBy`, `scope`, `owner`,
  * `coOwner`, the lists and relations) are read by no case this adapter translates.
  */
 export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
@@ -156,8 +158,14 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     // separate `ids` argument to `get()` — so `metadataFor` mirrors the id into a metadata key and
     // this maps onto that.
     "request.resource.id": { field: "id", required: true },
-    // NULL for one seed each (j3, j1, j2: no metadata key), so `required: false`.
-    "request.resource.attr.aBool": { field: "aBool", required: false },
+    // NULL for one seed each (j3, j1, j2: no metadata key), so `required: false`. The type
+    // declarations (`valueType`, `numericType`) let an inequality over aBool and aNumber be spelled
+    // without `$ne`; aString has no such spelling.
+    "request.resource.attr.aBool": {
+      field: "aBool",
+      valueType: "boolean",
+      required: false,
+    },
     "request.resource.attr.aString": { field: "aString", required: false },
     "request.resource.attr.aNumber": {
       field: "aNumber",
@@ -174,11 +182,14 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     "request.resource.attr.obj.inner": { field: "obj.inner", required: false },
     // The corpus's one REAL to-one chain (the `relation/*` cases), flattened onto dotted metadata keys
     // by `metadataFor`. EVERY level stays `required: false` — the whole point of the relation is
-    // that a level can be absent — so Chroma's
-    // inequality shapes over these keys stay fail-closed. A metadata key Chroma cannot prove is
-    // present cannot answer `$ne` the way CEL's missing-attribute error does
-    // (cerbos/query-plan-adapters#375).
-    "request.resource.attr.parent.aBool": { field: "parent.aBool" },
+    // that a level can be absent — so a `$ne` over these keys stays fail-closed. A metadata key
+    // Chroma cannot prove is present cannot answer `$ne` the way CEL's missing-attribute error does
+    // (cerbos/query-plan-adapters#375). The booleans and integers declare their type, which spells
+    // their inequalities without `$ne`.
+    "request.resource.attr.parent.aBool": {
+      field: "parent.aBool",
+      valueType: "boolean",
+    },
     "request.resource.attr.parent.aString": { field: "parent.aString" },
     "request.resource.attr.parent.aNumber": {
       field: "parent.aNumber",
@@ -187,7 +198,10 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     "request.resource.attr.parent.aOptionalString": {
       field: "parent.aOptionalString",
     },
-    "request.resource.attr.parent.inner.aBool": { field: "parent.inner.aBool" },
+    "request.resource.attr.parent.inner.aBool": {
+      field: "parent.inner.aBool",
+      valueType: "boolean",
+    },
     "request.resource.attr.parent.inner.aString": {
       field: "parent.inner.aString",
     },
