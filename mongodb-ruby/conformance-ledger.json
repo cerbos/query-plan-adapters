@@ -141,10 +141,6 @@
       "status": "unsupported",
       "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
     },
-    "collection/exists-one/several-matches": {
-      "status": "unsupported",
-      "reason": "exactly-one collection cardinality is not expressible by the current match-filter translator."
-    },
     "collection/exists/arithmetic-on-outer-attribute": {
       "status": "unsupported",
       "reason": "MongoDB rejects $expr below the top level of a query ('$expr can only be applied to the top-level document'), and field arithmetic exists only as an aggregation expression inside $expr; the per-element scope this needs comes from $elemMatch, so no find filter is both element-scoped and expression-valued. It would take an aggregation pipeline ($map/$filter plus $anyElementTrue), which a query filter is not."
@@ -308,10 +304,6 @@
     "null/all/negated-null-element-with-false-sibling": {
       "status": "unsupported",
       "reason": "same nullable all-negation limitation with an absorbing false witness."
-    },
-    "null/exists-one/negated-null-element": {
-      "status": "unsupported",
-      "reason": "The negation over a collection macro whose elements are nullable is rejected first, for the same three-valued reason as `collection/exists/negated`: a $nor would turn a CEL element error into a match. The exists_one cardinality of `collection/exists-one/several-matches` is inexpressible underneath it either way."
     },
     "null/exists/negated-explicit-null-in-principal-list": {
       "status": "unsupported",

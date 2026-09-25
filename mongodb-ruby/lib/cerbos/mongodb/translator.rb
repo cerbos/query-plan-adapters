@@ -140,8 +140,7 @@ module Cerbos
         when "contains", "startsWith", "endsWith" then translate_string_predicate(expression, mapper, scope)
         when "hasIntersection" then translate_has_intersection(operands, mapper, scope)
         when "exists", "all" then translate_quantifier(operator, operands, mapper, scope)
-        when "exists_one"
-          raise UnsupportedError, "exists_one requires exact match cardinality and is unsupported"
+        when "exists_one" then translate_exists_one(operands, mapper, scope, negated: false)
         when "filter"
           # filter() yields a list. In boolean position there is no meaning to pick: `filter(...)`
           # is not `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
@@ -217,6 +216,10 @@ module Cerbos
         # where CEL raises an error and denies.
         complement = complemented_ordering(operand)
         return build(complement, mapper, scope) if complement
+        # exists_one() over a relation is a count, which negates exactly.
+        if expression_with?(operand, "exists_one") && !value?(operand.operands[0])
+          return translate_exists_one(operand.operands, mapper, scope, negated: true)
+        end
 
         if (expression?(operand) && %w[exists exists_one all].include?(operand.operator)) ||
             !nullable_guard_exact?(operand, mapper, scope)
@@ -632,6 +635,70 @@ module Cerbos
           "#{operator}() over a to-one relation ranges over the related object's keys in CEL, and " \
           "a MongoDB filter has no form that iterates a subdocument's field names"
         )
+      end
+
+      # exists_one() over a to-many relation: the number of elements whose field compares with a
+      # scalar constant, counted with $size of a $filter inside $expr, is (or, negated, is not)
+      # one. CEL evaluates the condition on every element and raises if any evaluation does, so
+      # the list must be stored as an array and, when the element field is nullable (a null is a
+      # missing attribute), no element may hold a null there; both requirements sit outside the
+      # count, so they hold under either polarity.
+      #
+      # Only `field == constant` and `field != constant` are counted: inside $filter, $eq
+      # compares numbers by value across int and double, strings byte by byte, and never a
+      # boolean equal to a number, as CEL's equality does. A null or NaN constant is refused
+      # (the aggregation $eq tells a missing field from null, and NaN equals NaN).
+      def translate_exists_one(operands, mapper, scope, negated:)
+        raise InvalidPlanError, "exists_one requires exactly two operands" unless operands.length == 2
+
+        collection, lambda = operands
+        if scope.collection?
+          raise UnsupportedError, "exists_one inside a collection predicate needs $expr, which MongoDB accepts only at the top level"
+        end
+        unless variable?(collection) && expression_with?(lambda, "lambda") && variable?(lambda.operands[1])
+          raise UnsupportedError, "exists_one requires a relation and a single-variable lambda"
+        end
+
+        relation = mapper.lookup(collection.name)&.relation
+        unless relation&.type == :many && relation.requires_parent.nil?
+          raise UnsupportedError, "exists_one requires a to-many relation"
+        end
+
+        body = lambda.operands[0]
+        variable = lambda.operands[1].name
+        field, constant = element_comparison(body, variable)
+        if field.nil?
+          raise UnsupportedError,
+            "exists_one counts only an element field compared with == or != against a string, boolean or number constant"
+        end
+
+        scoped = mapper.scoped(collection.name, variable)
+        path = scoped.resolve_field(field).path.join(".")
+        condition = {Aggregation::COMPARISONS.fetch(body.operator) => ["$$this.#{path}", Aggregation.constant(constant)]}
+        count = {"$size" => {"$filter" => {"input" => "$#{relation.name}", "cond" => condition}}}
+        # A field read on an element that is not a document is an error to CEL, and a missing
+        # value to $filter.
+        every_document = {"$cond" => {
+          "if" => {"$isArray" => "$#{relation.name}"},
+          "then" => {"$allElementsTrue" => [{"$map" => {"input" => "$#{relation.name}", "in" => {"$eq" => [{"$type" => "$$this"}, "object"]}}}]},
+          "else" => false
+        }}
+        guards = [{relation.name => {"$type" => "array"}}, {"$expr" => every_document}]
+        guards <<{relation.name => {"$not" => {"$elemMatch" => {path => nil}}}} if scoped.nullable?(field)
+        {"$and" => guards + [{"$expr" => {(negated ? "$ne" : "$eq") => [count, 1]}}]}
+      end
+
+      # [field, constant] for `variable(.field) == constant` or `!=` in either order, else nil.
+      def element_comparison(body, variable)
+        return nil unless expression?(body) && %w[eq ne].include?(body.operator) && body.operands.length == 2
+
+        reference = body.operands.find { |op| variable?(op) }
+        value = body.operands.find { |op| value?(op) }
+        return nil unless reference && value
+        return nil unless reference.name == variable || reference.name.start_with?("#{variable}.")
+        return nil unless string?(value.value) || boolean?(value.value) || (number?(value.value) && !(value.value.is_a?(Float) && value.value.nan?))
+
+        [reference.name, value.value]
       end
 
       def translate_lambda(operands, mapper, scope)
