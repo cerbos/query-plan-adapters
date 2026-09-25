@@ -323,11 +323,13 @@ class TestDeclaredCollectionStorage:
 
     def test_a_dialect_it_was_not_written_for_is_refused_at_compile_time(self):
         # `get_query` doesn't know the dialect, so an unsupported one fails at compile time.
-        from sqlalchemy.dialects import mysql
+        from sqlalchemy.dialects import mssql
 
-        with pytest.raises(CompileError, match="renders only on SQLite and PostgreSQL"):
+        with pytest.raises(
+            CompileError, match="renders only on SQLite, PostgreSQL and"
+        ):
             translate("collection/index/first-element-of-string-list").compile(
-                dialect=mysql.dialect()
+                dialect=mssql.dialect()
             )
 
     def test_str_of_a_query_still_renders_for_debugging(self):

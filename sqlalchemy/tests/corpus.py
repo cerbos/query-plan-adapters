@@ -141,6 +141,9 @@ def grpc_plan_from_golden(
 
 AdvBase = declarative_base()
 
+# MySQL's VARCHAR needs a length. Every corpus string fits, and the other stores ignore it.
+_STRING = String(255)
+
 # Ordered copies of the collections for `collection_columns` (#227). `none_as_null` makes an
 # absent collection SQL NULL, not the JSON document `null`.
 _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
@@ -156,15 +159,15 @@ _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
 class AdvResource(AdvBase):
     __tablename__ = "adversarial_resource"
 
-    id = Column(String, primary_key=True)
+    id = Column(_STRING, primary_key=True)
     # Nullable: seeds j1, j2 and j3 each leave one of them NULL, a missing attribute (#488).
     a_bool = Column(Boolean, nullable=True)
-    a_string = Column(String, nullable=True)
+    a_string = Column(_STRING, nullable=True)
     a_number = Column(Integer, nullable=True)
     a_double = Column(Float(precision=53), nullable=True)
-    a_optional_string = Column(String, nullable=True)
-    created_by = Column(String, nullable=False)
-    scope = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
+    created_by = Column(_STRING, nullable=False)
+    scope = Column(_STRING, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=True)
     tags_json = Column(_COLLECTION_JSON, nullable=True)
@@ -185,34 +188,34 @@ class AdvTag(AdvBase):
     __tablename__ = "adversarial_tag"
 
     pk = Column(Integer, primary_key=True, autoincrement=True)
-    tag_id = Column(String, nullable=False)
-    name = Column(String, nullable=True)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
+    tag_id = Column(_STRING, nullable=False)
+    name = Column(_STRING, nullable=True)
+    resource_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=False)
 
 
 class AdvCategory(AdvBase):
     __tablename__ = "adversarial_category"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    resource_id = Column(String, ForeignKey("adversarial_resource.id"), nullable=False)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=False)
+    resource_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=False)
 
 
 class AdvSubCategory(AdvBase):
     __tablename__ = "adversarial_sub_category"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    category_id = Column(String, ForeignKey("adversarial_category.id"), nullable=False)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=False)
+    category_id = Column(_STRING, ForeignKey("adversarial_category.id"), nullable=False)
 
 
 class AdvLabel(AdvBase):
     __tablename__ = "adversarial_label"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=True)
+    id = Column(_STRING, primary_key=True)
+    name = Column(_STRING, nullable=True)
     sub_category_id = Column(
-        String, ForeignKey("adversarial_sub_category.id"), nullable=False
+        _STRING, ForeignKey("adversarial_sub_category.id"), nullable=False
     )
 
 
@@ -221,26 +224,26 @@ class AdvLabel(AdvBase):
 class AdvParent(AdvBase):
     __tablename__ = "adversarial_parent"
 
-    id = Column(String, primary_key=True)
+    id = Column(_STRING, primary_key=True)
     a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
+    a_string = Column(_STRING, nullable=False)
     a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
     resource_id = Column(
-        String, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
+        _STRING, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
     )
 
 
 class AdvInner(AdvBase):
     __tablename__ = "adversarial_inner"
 
-    id = Column(String, primary_key=True)
+    id = Column(_STRING, primary_key=True)
     a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
+    a_string = Column(_STRING, nullable=False)
     a_number = Column(Integer, nullable=False)
-    a_optional_string = Column(String, nullable=True)
+    a_optional_string = Column(_STRING, nullable=True)
     parent_id = Column(
-        String, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
+        _STRING, ForeignKey("adversarial_parent.id"), nullable=False, unique=True
     )
 
 

@@ -102,9 +102,10 @@ jobs:
         if: matrix.sqlalchemy.constraint == ''
         run: npx -y pyright@1.1.411
 
-      # The unit suites and the conformance harness, which replays conformance/golden/ against
-      # SQLite and a pinned PostgreSQL (testcontainers). No PDP runs here: the plans and the
-      # decisions are recorded. Both SQLAlchemy majors run it.
+      # The unit suites and the conformance harness, which replays every case in
+      # conformance/golden/ against SQLite and a pinned PostgreSQL and MySQL (testcontainers,
+      # sqlalchemy/*_IMAGE). No PDP runs here: the plans and the decisions are recorded. Both
+      # SQLAlchemy majors run it, since each renders the SQL the stores execute.
       - run: pdm run test
 
   # Runs the example against the built wheel, testing packaging and usage shapes.

@@ -190,7 +190,7 @@ get_query(
     Resource,
     attr_map,
     collection_columns={
-        # PostgreSQL JSON/JSONB, or a SQLite JSON text column
+        # PostgreSQL JSON/JSONB, a MySQL JSON column, or a SQLite JSON text column
         "request.resource.attr.tags": CollectionColumn(Resource.tags, "json"),
         # PostgreSQL array of text, varchar, boolean, integer or smallint
         "request.resource.attr.labels": CollectionColumn(Resource.labels, "pgArray"),
@@ -223,8 +223,8 @@ projection like `x[0].name`, and comparison with a list or map literal. Elsewher
 still resolves through `attr_map`. The column must hold exactly the list you send to Cerbos, null
 elements included.
 
-The SQL is picked per dialect at compile time. SQLite (JSON1) and PostgreSQL are supported; any
-other dialect raises `CompileError`.
+The SQL is picked per dialect at compile time. SQLite (JSON1), PostgreSQL and MySQL 8.0.17+
+(`"json"` only) are supported; any other dialect raises `CompileError`.
 
 ### Operator overrides
 
@@ -313,8 +313,19 @@ Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­n
 TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
 ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
 
-`string()` over a boolean column compares the literals `'true'`/`'false'` in the connection's
-collation on MySQL — make it case-sensitive, or `string(flag) == "TRUE"` selects rows CEL does not.
+On MySQL a string literal, and `string()` of a column (`CAST(... AS CHAR)`, or the `'true'`/`'false'`
+of a boolean), take the **connection's** collation, not the column's, and a utf8mb4 session starts
+at `utf8mb4_0900_ai_ci` whatever the server default is. Set `utf8mb4_0900_bin` on every connection,
+or `!(string(R.attr.owner) == "set")` drops the `Set` row CEL keeps. The conformance harness does it
+from a `connect` listener, which runs after the driver's own character-set setup:
+
+```python
+@event.listens_for(engine, "connect")
+def _byte_exact_collation(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("SET NAMES utf8mb4 COLLATE utf8mb4_0900_bin")
+    cursor.close()
+```
 
 On SQLite a column collation does not help: SQLite's `LIKE` ignores it and folds ASCII case unless
 the connection sets `PRAGMA case_sensitive_like = ON`. Without the pragma, `contains`, `startsWith`,
@@ -356,7 +367,7 @@ instants with `timestamp()` on both operands.
 | `string()` over a text or boolean column | translated (a boolean through a `CASE` that spells `'true'`/`'false'`) | — |
 | `string()` over a numeric column | refused: CEL prints Go's shortest `%g` form (`1e+06`, `-0`) | an override matching your database |
 | `int()`, `double()` | refused | an override matching your database |
-| `size()` over a string column | `LENGTH` | — |
+| `size()` over a string column | `LENGTH` (`CHAR_LENGTH` on MySQL, whose `LENGTH` counts bytes) | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `x[i] == literal`, `x[i] != literal` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `literal in x`, `hasIntersection(x, [literals])` over a JSON or PostgreSQL array column | refused until declared | `collection_columns`, for an attribute `attr_map` does not map |
@@ -374,10 +385,11 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
 recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is translated with one mapping, executed on SQLite
-(through a `Connection` and through an `AsyncSession`), and the returned ids are compared with the
-decisions the PDP recorded. The cases that read a collection declared in `collection_columns` also
-run on PostgreSQL under both storage shapes, `json` and `pgArray`. Results for the current PDP,
-0.55.0, where the total is every golden case recorded in that tier:
+(through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL (`utf8mb4_0900_bin`),
+and the returned ids are compared with the decisions the PDP recorded. The collections are stored as
+JSON on every store; the cases that read a collection declared in `collection_columns` run once more
+on PostgreSQL with them stored as arrays (`pgArray`). The results are the same on every store. For
+the current PDP, 0.55.0, where the total is every golden case recorded in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -477,6 +489,16 @@ chain.
 
 ## Behaviour changes
 
+- [#500](https://github.com/cerbos/query-plan-adapters/issues/500), found by running the corpus on
+  PostgreSQL and MySQL:
+  - `+`, `-` and `*` read an integer or `Numeric` column as a double, as CEL reads every attribute
+    number. PostgreSQL used to multiply in exact `numeric`, so `R.attr.aNumber * 0.1 == 0.3` was true
+    for `3` (CEL: `0.30000000000000004`) — an over-grant.
+  - `size()` of a string counts characters on MySQL (`CHAR_LENGTH`), where `LENGTH` counted bytes.
+  - An ordering comparison between mismatched types inside a ternary no longer fails on PostgreSQL
+    with `CASE types text and boolean cannot be matched`.
+  - **Widening:** `collection_columns` storage `"json"` renders on MySQL 8.0.17+, where it used to
+    raise `CompileError`.
 - **Breaking:** shapes that used to return a wrong filter now raise `UnsupportedPlanError`:
   - `string()` over a numeric column. CEL prints an attribute double in Go's shortest `%g` form
     (`1e+06`, `2`, `-0`), where `CAST` prints `1000000` or `2.0`, and SQL cannot keep the sign of a
@@ -544,7 +566,7 @@ demo/scripts/run-example.sh sqlalchemy
 | --- | --- | --- |
 | `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) (declared collection storage) |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
 
 ```bash
 pdm install -G :all

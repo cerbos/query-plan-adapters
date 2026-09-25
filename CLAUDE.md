@@ -52,9 +52,11 @@ pdm run lint           # ruff check --fix; CI fails on any diff format or lint l
 Every `pdm` command also runs through the pyprojectx wrapper, `./pw` (`pw.bat` on Windows), as in
 cerbos-sdk-python: `./pw test`, `./pw format`, `./pw lint`, `./pw pdm build`.
 
-`tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite, and the
-cases that read a `collection_columns` declaration again on PostgreSQL (`sqlalchemy/POSTGRES_IMAGE`,
-Docker) under both storage shapes. The other suites start nothing. CI runs SQLAlchemy 1.4 and 2.x.
+`tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite (sync and
+async), PostgreSQL and MySQL (`sqlalchemy/POSTGRES_IMAGE`, `sqlalchemy/MYSQL_IMAGE`, testcontainers,
+Docker), and the cases that read a `collection_columns` declaration once more on PostgreSQL with the
+collections stored as native arrays. The other suites start nothing. CI runs the whole harness
+under both SQLAlchemy 1.4 and 2.x.
 
 ### Ruby (ActiveRecord)
 ```bash
