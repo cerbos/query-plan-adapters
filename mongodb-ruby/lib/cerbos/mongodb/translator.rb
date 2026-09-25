@@ -715,7 +715,7 @@ module Cerbos
           "else" => false
         }}
         guards = [{relation.name => {"$type" => "array"}}, {"$expr" => every_document}]
-        guards <<{relation.name => {"$not" => {"$elemMatch" => {path => nil}}}} if scoped.nullable?(field)
+        guards << {relation.name => {"$not" => {"$elemMatch" => {path => nil}}}} if scoped.nullable?(field)
         {"$and" => guards + [{"$expr" => {(negated ? "$ne" : "$eq") => [count, 1]}}]}
       end
 
@@ -727,7 +727,8 @@ module Cerbos
         value = body.operands.find { |op| value?(op) }
         return nil unless reference && value
         return nil unless reference.name == variable || reference.name.start_with?("#{variable}.")
-        return nil unless string?(value.value) || boolean?(value.value) || (number?(value.value) && !(value.value.is_a?(Float) && value.value.nan?))
+        scalar = string?(value.value) || boolean?(value.value) || (number?(value.value) && !(value.value.is_a?(Float) && value.value.nan?))
+        return nil unless scalar
 
         [reference.name, value.value]
       end
