@@ -310,6 +310,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
                         ConcatTranslator.textExpression(operands[1], scope),
                     )
                 }
+                if (operands.any(::alwaysRaises)) return TriLogic.unknown()
                 return arithmetic.numericComparison(operator, operands, scope)
             }
         } else if (isAddRooted(left) || isAddRooted(right)) {
@@ -349,6 +350,30 @@ internal class ComparisonTranslator(private val translation: Translation) {
         }
 
         throw leafOperandError(operator, operands)
+    }
+
+    /**
+     * Whether an arithmetic operand raises on EVERY row, whatever the data: CEL has no overload
+     * for it. Cerbos sends every attribute number as a double, so `attr % n` (`%` has no double
+     * overload) and `int(...) + attr` (no int-and-double arithmetic) raise wherever the attribute
+     * is present, and a missing one raises anyway. Arithmetic absorbs no error, so a sub-expression
+     * that always raises makes the whole operand raise, and the comparison over it is UNKNOWN
+     * under both polarities. Only a bare attribute qualifies as the double: a literal's type is
+     * not on the wire.
+     */
+    private fun alwaysRaises(operand: Operand): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
+        val expression = operand.expression
+        val operands = expression.operandsList
+        val attribute = operands.any { it.nodeCase == Operand.NodeCase.VARIABLE }
+        val intConversion = operands.any {
+            it.nodeCase == Operand.NodeCase.EXPRESSION && it.expression.operator == "int"
+        }
+        return when (expression.operator) {
+            "mod" -> attribute || operands.any(::alwaysRaises)
+            "add", "sub", "mult", "div" -> (attribute && intConversion) || operands.any(::alwaysRaises)
+            else -> false
+        }
     }
 
     /**

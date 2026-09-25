@@ -1,14 +1,6 @@
 {
   "adapter": "exposed",
   "cases": {
-    "arithmetic/add/int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
-    },
-    "arithmetic/add/negated-int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
-    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "Cannot translate a division by a floating-point column or by computed arithmetic: its zero may be -0.0, which CEL divides a non-zero number into the opposite infinity from 0.0, while SQL compares -0.0 equal to 0.0 and has no portable way to read the sign bit. Divide by an integer or decimal column, or by a constant."
@@ -30,10 +22,6 @@
       "reason": "A division as the DIVISOR: the inner division can be a zero-denominator NaN or infinity, SQL has no literal for either, and against a column the sign of the result depends on that column. Refused rather than binding a non-finite double, which PostgreSQL orders above every number"
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
-      "status": "unsupported",
-      "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
-    },
-    "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
       "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
     },
