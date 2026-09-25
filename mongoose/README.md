@@ -302,7 +302,7 @@ queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on 
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 167 / 254 |
+| adversarial | 180 / 267 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases. `null/has/missing-attribute`: the planner folds
@@ -320,14 +320,18 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
 - **Declared `valueType`.** Mongoose casts a query literal to the schema type (`"5"` is sent as
   `5`), so `R.attr.aNumber == "5"` would match `5`. Declaring the field's `valueType` lets the
   adapter answer a literal of another type as CEL does — `==` and membership false, `!=` true where
-  the field is present — including over a typed subdocument field. Membership in a native array
+  the field is present, and an ordering (`<`, `<=`, `>`, `>=`) false under either polarity —
+  including over a typed subdocument field. Membership in a native array
   field is answered inside `$expr` with `$literal` needles for the same reason.
 - **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
   from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
   demands. Under a negation its non-null guard is ANDed outside the `$nor`, so `!(x > 3)` denies
-  a document with no `x` as CEL does, where a bare `$nor` would match it. A field that does not
-  declare it takes the call's `nullAttributeRepresentation`: under `"explicit"` it compares a stored
-  null as a null *value*; under `"omitted"` it is nullable, and every null operand is refused
+  a document with no `x` as CEL does, where a bare `$nor` would match it. A negated ordering
+  against a constant is translated as its complement (`!(x > 3)` as `x <= 3`), whose MongoDB
+  comparison only matches values of the constant's own type, so a stored null or a value of
+  another type is denied under both polarities. A field that does not declare it takes the call's
+  `nullAttributeRepresentation`: under `"explicit"` it compares a stored null as a null *value*;
+  under `"omitted"` it is nullable, and every null operand is refused
   ([NULL attribute representation](#null-attribute-representation)).
 
 ## Mapping hazards
@@ -362,6 +366,12 @@ asserts that, since five of the rows below depend on it.
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.
+- An ordering against a constant of another type than the field's declared `valueType`, or
+  against null, is `false` under either polarity instead of being cast by Mongoose (`aNumber < "5"`
+  compared `5`). A negated ordering against a constant is translated as its complement rather than
+  a `$nor`, which matched a stored null or a value of another type
+  ([#516](https://github.com/cerbos/query-plan-adapters/issues/516)). Nothing that translated now
+  throws.
 - **Breaking:** value-first membership and `hasIntersection` over a native array field (a mapper
   entry with no `relation`) emit an `$expr` instead of `{ list: x }` / `{ list: { $in: [...] } }`.
   The old filter over-granted whenever the literal's type differed from the schema's element type,
