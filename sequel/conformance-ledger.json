@@ -157,14 +157,6 @@
       "status": "unsupported",
       "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position."
     },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
     "principal/filter/size-of-filtered-long-list": {
       "status": "unsupported",
       "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent."
@@ -280,30 +272,6 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "The cross-type probe `aNumberList[0] == true || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-number-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite reads the literal TRUE as the integer 1, so a positional lowering that compared the stored `aNumberList` element with the literal would return b4, whose first element is 1, where CEL's heterogeneous equality is false for every row"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator."
     }
   }
 }

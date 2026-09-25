@@ -9,15 +9,32 @@ module Cerbos
         private
 
         def membership(needle, haystack)
-          if needle.is_a?(Array) || needle.is_a?(Hash) ||
-              (haystack.is_a?(Array) && haystack.any? { |member| member.is_a?(Array) || member.is_a?(Hash) })
-            raise UnsupportedOperatorError,
-              "in requires scalar elements; SQL scalar membership cannot compare a list or map element"
-          end
+          return composite_membership(needle, haystack) if composite?(needle)
           return relation_membership(haystack.scope, needle) if haystack.is_a?(Values::Collection)
           return relation_membership(needle.scope, haystack) if needle.is_a?(Values::Collection)
 
           scalar_membership(needle, haystack)
+        end
+
+        # A list or map literal.
+        def composite?(value)
+          value.is_a?(Array) || value.is_a?(Hash)
+        end
+
+        # A list or map needle. The members of a mapped association are scalars, which a list or
+        # map never equals, so the answer is FALSE (the chain guard keeps an absent parent
+        # UNKNOWN). Against a list of constants it is folded with CEL equality.
+        def composite_membership(needle, haystack)
+          unless deep_constant?(needle)
+            raise UnsupportedOperatorError, "in with a list or map needle holding a column is not translated"
+          end
+          return haystack.scope.guarded(haystack.scope.exists(false)) if haystack.is_a?(Values::Collection)
+          if haystack.is_a?(Array) && deep_constant?(haystack)
+            return haystack.any? { |member| member == needle }
+          end
+
+          raise UnsupportedOperatorError,
+            "in with a list or map needle is translated only against an association or a list of constants"
         end
 
         # +value in R.attr.<relation>+. If the relation of a row is empty, the row stays out of
@@ -49,6 +66,18 @@ module Cerbos
         def scalar_membership(needle, values)
           members = values.is_a?(Array) ? values : [values]
           return false if members.empty?
+
+          # A list or map element never equals a scalar column, so it cannot match. A constant
+          # needle is folded against it like any other element, below.
+          if SqlSupport.sql_node?(needle) && members.any? { |member| composite?(member) }
+            members = members.reject { |member| composite?(member) }
+            if members.empty?
+              return false if explicit_null?(needle)
+
+              # A missing attribute is still an error.
+              return unknown_if_any([SqlSupport.is_null(needle)], false)
+            end
+          end
 
           # The usual shape: a column against a list of constants. An IN clause reads better than
           # a chain of equality tests.

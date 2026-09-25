@@ -36,10 +36,12 @@ module Cerbos
 
           scope = bindings[head]
 
-          # A macro over a list of constants binds the iterator to an element of that list.
-          # An element is a value and has no fields, so a reference with a dot is an error.
+          # A macro over a list of constants binds the iterator to an element of that list. A
+          # map element (a struct the planner inlined) has fields; any other value has none,
+          # so a reference with a dot is an error.
           unless scope.is_a?(Relations::Scope)
             return scope if rest.nil?
+            return translator.constant_field(scope, rest) if scope.is_a?(Hash)
 
             raise UnmappedAttributeError,
               "#{name.inspect} reads the field #{rest.inspect} from #{head.inspect}, but " \

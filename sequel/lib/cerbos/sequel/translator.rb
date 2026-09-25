@@ -128,6 +128,8 @@ module Cerbos
         "double" => Operator.new(1, ->(value) { cast_to_double(value) }),
         "int" => Operator.new(1, ->(value) { cast_to_int(value) }),
         "list" => Operator.new(nil, ->(*values) { values }),
+        "set-field" => Operator.new(2, ->(key, value) { map_entry(key, value) }),
+        "struct" => Operator.new(nil, ->(*entries) { map_literal(entries) }),
         "hierarchy" => Operator.new(1..2, ->(value, delimiter = nil) { hierarchy(value, delimiter) }),
         "ancestorOf" => Operator.new(2, ->(ancestor, descendent) { ancestor_of(ancestor, descendent) }),
         "descendentOf" => Operator.new(2, ->(descendent, ancestor) { ancestor_of(ancestor, descendent) }),
@@ -260,6 +262,19 @@ module Cerbos
         ::Sequel[model.table_name]
       end
 
+      # A field of a constant map bound to a macro's iterator, as `t.name` reads it. A key the
+      # map does not hold, or a field read from a value that is not a map, is a CEL error on
+      # every row: UNKNOWN.
+      #
+      # @api private
+      def constant_field(map, path)
+        path.split(".").reduce(map) do |value, key|
+          return cel_type_error unless value.is_a?(Hash) && value.key?(key)
+
+          value[key]
+        end
+      end
+
       # Resolves an operand to a value. The value is a Sequel expression, a Ruby constant, or one of
       # the intermediate {Values} that the operator around it uses.
       #
@@ -308,6 +323,11 @@ module Cerbos
       end
 
       def as_predicate(value)
+        # A constant list, map or scalar where a boolean belongs is a CEL error on every row, and
+        # none of them may reach `where`, which reads a Hash or an Array as conditions of its own.
+        return cel_type_error if value.is_a?(Hash) || value.is_a?(Array) || value.is_a?(Numeric) ||
+          (value.is_a?(::String) && !SqlSupport.sql_node?(value))
+
         # A collection where a boolean belongs — `filter()`, `map()` or a mapped association as
         # a condition, a conjunct or a negation's operand — is a list (or, for a to-one chain, a
         # map) to CEL. Its logical operators and a rule's condition take only a boolean, so it
@@ -423,6 +443,7 @@ module Cerbos
         assert_arity(operator, values)
 
         override = operator_overrides[operator]
+        reject_map_literals(operator, values, override)
         # Only the built-in eq and ne can resolve string() of a double.
         values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)
         plain = override ? override.call(*values) : dispatch(operator, values)
@@ -465,6 +486,56 @@ module Cerbos
 
         raise ArgumentError,
           "model must be a Sequel::Model subclass or a dataset of one, got #{model.inspect}"
+      end
+
+      # A map literal's entry. Only constants: a map holding a column would need its equality
+      # built element by element, and no shape asks for that.
+      def map_entry(key, value)
+        unless key.is_a?(::String) && deep_constant?(value)
+          raise UnsupportedOperatorError,
+            "A map literal is translated only with string keys and constant values, got " \
+            "#{describe(key)} => #{describe(value)}"
+        end
+
+        Values::MapEntry.new(key: key, value: value)
+      end
+
+      def map_literal(entries)
+        unless entries.all?(Values::MapEntry)
+          raise InvalidPlanError, "struct takes set-field operands, got #{entries.map { |e| describe(e) }.join(", ")}"
+        end
+
+        entries.to_h { |entry| [entry.key, entry.value] }
+      end
+
+      # The operators that compare a map literal by CEL equality without binding it into SQL.
+      MAP_OPERATORS = %w[eq ne in hasIntersection list struct].freeze
+
+      def reject_map_literals(operator, values, override)
+        return unless values.any? { |value| holds_map?(value) }
+        return if override.nil? && MAP_OPERATORS.include?(operator)
+
+        raise UnsupportedOperatorError,
+          "#{operator} cannot take a map literal#{" under an operator override" if override}: " \
+          "only eq, ne, in and hasIntersection compare one, by CEL equality"
+      end
+
+      def holds_map?(value)
+        case value
+        when Hash, Values::MapEntry then true
+        when Array then value.any? { |element| holds_map?(element) }
+        else false
+        end
+      end
+
+      # A constant all the way down: a scalar, a null, or a list or map of those.
+      def deep_constant?(value)
+        case value
+        when nil then true
+        when Array then value.all? { |element| deep_constant?(element) }
+        when Hash then value.values.all? { |element| deep_constant?(element) }
+        else constant?(value)
+        end
       end
 
       def record_column_type(node, type)

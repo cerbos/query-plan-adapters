@@ -31,7 +31,9 @@ module Cerbos
           reject_collection(operator, left)
           reject_collection(operator, right)
           assert_timestamp_wrapped(left, right)
-          return compare_list_literal(operator, left, right) if left.is_a?(Array) || right.is_a?(Array)
+          if [left, right].any? { |value| value.is_a?(Array) || value.is_a?(Hash) }
+            return compare_list_literal(operator, left, right)
+          end
 
           # Both sides are constants. The translator calculates the result here. It does not
           # make SQL that is always true or always false.
@@ -52,13 +54,14 @@ module Cerbos
           SqlSupport.comparison(operator, left, right)
         end
 
-        # A list literal. CEL compares lists element by element, in order, and a list never
-        # equals a scalar. A column is always a scalar here: an association was refused above.
+        # A list or map literal. CEL compares lists element by element, in order, and maps key
+        # by key; neither ever equals a scalar (heterogeneous equality is FALSE, not an error).
+        # A column is always a scalar here: an association was refused above.
         def compare_list_literal(operator, left, right)
-          constants = [left, right].grep(Array).flatten.all? { |element| element.nil? || constant?(element) }
-          unless constants && %w[eq ne].include?(operator)
+          literals = [left, right].select { |value| value.is_a?(Array) || value.is_a?(Hash) }
+          unless literals.all? { |literal| deep_constant?(literal) } && %w[eq ne].include?(operator)
             raise UnsupportedOperatorError,
-              "#{operator} with a list literal: only eq and ne against a list of constants " \
+              "#{operator} with a list or map literal: only eq and ne against constants " \
               "are translated"
           end
           return fold_comparison(operator, left, right) unless SqlSupport.sql_node?(left) || SqlSupport.sql_node?(right)
@@ -83,6 +86,7 @@ module Cerbos
           when Numeric then :number
           when true, false then :boolean
           when Array then :list
+          when Hash then :map
           else
             kind_of_column_type(column_type(value))
           end
