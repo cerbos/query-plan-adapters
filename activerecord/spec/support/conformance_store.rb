@@ -22,9 +22,10 @@ module ConformanceStore
     ActiveRecord::Schema.define do
       create_table :adversarial_resources, id: false, force: true do |t|
         t.string :id, null: false, primary_key: true
-        t.boolean :a_bool, null: false
-        t.string :a_string, null: false
-        t.integer :a_number, null: false
+        # Nullable: seeds j1, j2 and j3 each leave one of these NULL, a missing attribute (#488).
+        t.boolean :a_bool
+        t.string :a_string
+        t.integer :a_number
         t.float :a_double
         t.string :a_optional_string
         t.string :created_by, null: false

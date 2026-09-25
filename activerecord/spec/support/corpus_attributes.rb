@@ -15,9 +15,9 @@ module CorpusAttributes
   def self.relation(*args, **kwargs) = Cerbos::ActiveRecord.relation(*args, **kwargs)
 
   ATTRIBUTES = {
-    "request.resource.attr.aBool" => field("a_bool"),
-    "request.resource.attr.aString" => field("a_string"),
-    "request.resource.attr.aNumber" => field("a_number"),
+    "request.resource.attr.aBool" => omitted("a_bool"),
+    "request.resource.attr.aString" => omitted("a_string"),
+    "request.resource.attr.aNumber" => omitted("a_number"),
     "request.resource.attr.aDouble" => omitted("a_double"),
     "request.resource.attr.aOptionalString" => omitted("a_optional_string"),
     "request.resource.attr.createdBy" => field("created_by"),
@@ -31,7 +31,7 @@ module CorpusAttributes
     # alias of `a_optional_string`: a column compared with itself is always TRUE.
     "request.resource.attr.coOwner" => field("scope", null_representation: :explicit),
     # Not a real nested column: it reuses aString's column, as other harnesses do.
-    "request.resource.attr.obj.inner" => field("a_string"),
+    "request.resource.attr.obj.inner" => omitted("a_string"),
 
     # `R.id` arrives as its own variable, not under `R.attr`, so it needs its own mapping.
     "request.resource.id" => field("id"),
