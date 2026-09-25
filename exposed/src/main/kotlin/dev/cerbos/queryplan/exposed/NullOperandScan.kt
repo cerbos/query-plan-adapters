@@ -19,6 +19,9 @@ internal object NullOperandScan {
     /** The operators CEL evaluates to a definite boolean over a null value. */
     private val EQUALITY_FAMILY = setOf("eq", "ne", "in")
 
+    /** The operators [LeafTranslator] answers UNKNOWN-when-NULL for an OMITTED attribute. */
+    private val UNKNOWN_WHEN_NULL = setOf("eq", "ne")
+
     fun assertTranslatable(condition: Operand, options: Options) {
         if (condition.nodeCase != Operand.NodeCase.EXPRESSION) return
         val expression = condition.expression
@@ -31,7 +34,14 @@ internal object NullOperandScan {
         // the call-level default.
         val declared = declaredForComparedAttribute(expression.operator, operands, options.mapping)
         if (declared != null) {
-            if (declared == NullAttributeRepresentation.OMITTED && operands.any(::carriesNull)) {
+            // `==` and `!=` against a bare null are answerable under OMITTED: the NULL column is a
+            // missing attribute, which CEL denies under both polarities, so [LeafTranslator]
+            // renders the comparison UNKNOWN for it and definite for a present value. A list
+            // carrying a null is not: SQL silently drops a NULL inside an `IN` list.
+            if (declared == NullAttributeRepresentation.OMITTED &&
+                operands.any(::carriesNull) &&
+                !(expression.operator in UNKNOWN_WHEN_NULL && operands.any(::isBareNull))
+            ) {
                 throw ScalarRefusals.nullOperandUnderOmitted(expression.operator)
             }
             return
@@ -63,8 +73,33 @@ internal object NullOperandScan {
             operands[0] to operands[1]
         }
         if (variable.nodeCase != Operand.NodeCase.VARIABLE || literal.nodeCase != Operand.NodeCase.VALUE) return null
-        return (mapping.resolve(variable.variable) as? AttributeMapping.Field)?.nullAttributeRepresentation
+        return declaredField(variable.variable, mapping)?.nullAttributeRepresentation
     }
+
+    /**
+     * The field [variable] names, directly or at the end of a chain of to-one relations — the same
+     * longest-prefix walk [RootScope] resolves with. A relation-reached field carries its own
+     * declaration, and reading only the whole-name mapping would miss it and fall back to the
+     * call-level default.
+     */
+    private fun declaredField(variable: String, mapping: AttributeResolver): AttributeMapping.Field? {
+        when (val direct = mapping.resolve(variable)) {
+            is AttributeMapping.Field -> return direct
+            is AttributeMapping.Relation -> return null
+            null -> Unit
+        }
+        val parts = variable.split('.')
+        for (length in parts.size - 1 downTo 1) {
+            val head = mapping.resolve(parts.subList(0, length).joinToString(".")) as? AttributeMapping.Relation
+                ?: continue
+            val walked = ChainWalk.from(head, parts.subList(length, parts.size)) ?: continue
+            return walked.leaf
+        }
+        return null
+    }
+
+    private fun isBareNull(operand: Operand): Boolean =
+        operand.nodeCase == Operand.NodeCase.VALUE && operand.value.kindCase == Value.KindCase.NULL_VALUE
 
     /** A null constant, or a list carrying one — SQL silently drops a NULL inside an `IN` list. */
     private fun carriesNull(operand: Operand): Boolean {

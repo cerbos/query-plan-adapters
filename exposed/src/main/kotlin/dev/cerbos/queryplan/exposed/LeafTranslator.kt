@@ -36,9 +36,13 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             throw ScalarRefusals.structuredConstant(operator, target.variable, value)
         }
         if (value == null) {
+            if (target.field.nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
+                return unknownWhenNull(operator, target)
+            }
             return when (operator) {
-                // Reachable only under the EXPLICIT convention: the pre-walk scan refuses a null
-                // operand under OMITTED before anything is built (see [NullOperandScan]).
+                // Under the EXPLICIT convention, or with nothing declared under a call-level
+                // EXPLICIT: the pre-walk scan refuses an undeclared null operand under a call-level
+                // OMITTED before anything is built (see [NullOperandScan]).
                 "eq" -> IsNullOp(target.expression)
                 "ne" -> IsNotNullOp(target.expression)
                 // `x < null` is legal CEL over a dyn attribute and errors at check time, which
@@ -59,6 +63,15 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             throw ScalarRefusals.constantTypeMismatch(operator, target.variable, target.column, value)
         }
 
+        // CEL orders strings by code point. A store may compare by UTF-16 code unit instead (H2
+        // uses Java's String.compareTo), which puts an astral character's high surrogate (from
+        // 0xD800) before U+E000–U+FFFF. The two orders can only disagree at a position where one
+        // side holds a code unit at or above 0xD800, so a literal holding none cannot be ordered
+        // differently; one that does is refused, since the Op is built before the dialect is known.
+        if (operator in ORDERING_OPERATORS && value is String && value.any { it.code >= 0xD800 }) {
+            throw ScalarRefusals.codeUnitOrdering(operator, target.variable)
+        }
+
         // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
         // against a non-null operand is DEFINITE — `null == "x"` is FALSE and `null != "x"` is
         // TRUE — where SQL answers UNKNOWN and excludes the row under both polarities (#308).
@@ -73,6 +86,31 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         }
 
         return defaultLeaf(operator, target, value)
+    }
+
+    private companion object {
+        val ORDERING_OPERATORS = setOf("lt", "le", "gt", "ge")
+    }
+
+    /**
+     * `==` / `!=` against null over an attribute that declares [NullAttributeRepresentation.OMITTED].
+     *
+     * A NULL column sends no attribute, so CEL raises a missing-attribute error and `check()`
+     * denies the row under BOTH polarities; a present value is never null, so `== null` is FALSE
+     * and `!= null` TRUE. `x IS NULL AND UNKNOWN` is exactly that: UNKNOWN for the NULL column and
+     * FALSE otherwise, and its negation UNKNOWN and TRUE. The same holds through a to-one relation,
+     * whose correlated read is NULL for an absent row, which is also a missing attribute. `IS NULL`
+     * alone would return the rows the PDP denies.
+     */
+    private fun unknownWhenNull(operator: String, target: Resolution.Scalar): Op<Boolean> {
+        val missing = TriLogic.and(IsNullOp(target.expression), TriLogic.unknown())
+        return when (operator) {
+            "eq" -> missing
+            "ne" -> TriLogic.not(missing)
+            else -> throw Refusals.unsupported(
+                "Null values are only supported with eq and ne operators (got $operator)",
+            )
+        }
     }
 
     /**

@@ -25,8 +25,14 @@ internal sealed interface ArithmeticValue {
     /** A constant, possibly non-finite: a division arm is NaN or a signed infinity. */
     class Constant(val value: Double) : ArithmeticValue
 
-    /** A SQL expression in double space, already cast by [IeeeDoubleCast] where it is a column. */
-    class Sql(val expr: Expression<*>) : ArithmeticValue
+    /**
+     * A SQL expression in double space, already cast by [IeeeDoubleCast] where it is a column.
+     *
+     * [unsignedZero] is true only for a direct read of an integral or decimal column: the one
+     * operand whose zero is certainly `+0.0` on the check side. A floating-point column can store
+     * `-0.0`, and computed arithmetic can produce it (`-1.0 * 0.0`), and SQL cannot read the sign.
+     */
+    class Sql(val expr: Expression<*>, val unsignedZero: Boolean = false) : ArithmeticValue
 
     /**
      * A retained ternary. [condition] is two-valued for a present row and UNKNOWN for a NULL
@@ -145,11 +151,15 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
             // protobuf doubles preserve the sign bit — so it decides the arms.
             return nonFiniteQuotient(dividend, divisor.value)
         }
+        // A SQL denominator cannot carry a sign: SQL compares -0.0 equal to 0.0 and has no portable
+        // way to read the sign bit, while CEL divides a positive number by -0.0 into -Infinity.
+        // Only a denominator whose zero is certainly positive is lowered (#312).
+        if (divisor !is ArithmeticValue.Sql || !divisor.unsignedZero) {
+            throw ScalarRefusals.signedZeroDivisor()
+        }
         val denominator = sqlOf(divisor)
         return ArithmeticValue.Branch(
             EqOp(denominator, doubleParam(0.0)),
-            // A COLUMN denominator cannot carry a sign: SQL has no portable way to read the sign
-            // bit of a stored zero, so the positive-zero reading is assumed and documented (#312).
             nonFiniteQuotient(dividend, 0.0),
             ArithmeticValue.Sql(
                 CustomOperator(

@@ -176,13 +176,40 @@ internal object ScalarRefusals {
     /**
      * `string()` over a column whose SQL text rendering is not CEL's. A boolean column is lowered
      * portably (see [LeafTranslator]); this covers the rest — a DECIMAL renders its declared
-     * scale (`1.50`) where CEL renders the shortest round-tripping decimal (`1.5`), and a binary
-     * or temporal column has no CEL text form at all.
+     * scale (`1.50`) where CEL renders the shortest round-tripping decimal (`1.5`), a
+     * floating-point column renders `1000000.0` or `1.0E6` where CEL prints Go's shortest `%g`
+     * form (`1e+06`, `2`) and prints a stored `-0.0` as `-0`, which SQL cannot tell from `0.0`
+     * (equality against a non-zero literal is solved for the column instead), and a binary or
+     * temporal column has no CEL text form at all.
      */
     fun textCastUnsupported(columnType: String): UnsupportedPlanShapeException = Refusals.unsupported(
-        "Cannot translate string() over a $columnType column: CEL renders the shortest decimal " +
-            "that round-trips and no SQL CAST reproduces that for this column type. Only text, " +
-            "integer, floating-point and boolean columns are translatable.",
+        "Cannot translate string() over a $columnType column: CEL renders a number as Go's " +
+            "shortest round-tripping form (1e+06, 2, -0) and no SQL CAST reproduces that for this " +
+            "column type, nor reads the sign of a stored -0.0. Text, integer and boolean " +
+            "columns are translatable, and a floating-point column only under == or != against " +
+            "a string literal other than \"0\" and \"-0\".",
+    )
+
+    /**
+     * An ordering of a string attribute against a literal holding a UTF-16 code unit at or above
+     * 0xD800, where code point order (CEL) and code unit order (H2) disagree.
+     */
+    fun codeUnitOrdering(operator: String, variable: String): UnsupportedPlanShapeException = Refusals.unsupported(
+        "$operator orders '$variable' against a literal holding a character at or above U+D800 " +
+            "(an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a " +
+            "store that compares UTF-16 code units (H2, Java's String.compareTo) puts a " +
+            "surrogate pair before U+E000–U+FFFF.",
+    )
+
+    /**
+     * A division whose denominator is a floating-point column or computed arithmetic: its zero may
+     * be `-0.0`, which CEL divides into the opposite infinity and SQL cannot tell from `0.0`.
+     */
+    fun signedZeroDivisor(): UnsupportedPlanShapeException = Refusals.unsupported(
+        "Cannot translate a division by a floating-point column or by computed arithmetic: its " +
+            "zero may be -0.0, which CEL divides a non-zero number into the opposite infinity " +
+            "from 0.0, while SQL compares -0.0 equal to 0.0 and has no portable way to read the " +
+            "sign bit. Divide by an integer or decimal column, or by a constant.",
     )
 
     /**

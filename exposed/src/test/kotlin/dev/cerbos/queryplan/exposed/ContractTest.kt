@@ -5,6 +5,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
@@ -54,9 +55,15 @@ class ContractTest {
             val omitted = options.withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
             assertEquals(sqlFor(case), sqlFor(case, omitted))
 
-            // …and `aOptionalString` declares OMITTED, so a call-level EXPLICIT does not reach it.
+            // …and `aOptionalString` declares OMITTED, so a call-level EXPLICIT does not reach it:
+            // it keeps its UNKNOWN-when-NULL rendering rather than the bare `IS NULL` the same
+            // plan gets when nothing is declared and the option says EXPLICIT.
             val explicit = options.withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)
-            assertThrows(UnsupportedPlanShapeException::class.java) { filterFor(nullOnMissing, explicit) }
+            assertEquals(sqlFor(nullOnMissing), sqlFor(nullOnMissing, explicit))
+            assertNotEquals(
+                sqlFor(nullOnMissing, explicit.withMapping(MAPPING_WITHOUT_NULL_CONVENTIONS)),
+                sqlFor(nullOnMissing, explicit),
+            )
 
             // Stripping the declaration rejects `owner` under the same option, so the override
             // above is doing work rather than being equivalent to the default.

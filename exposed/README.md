@@ -37,11 +37,11 @@ You'll also need:
 - **Exposed 1.0.0 or later**, which you bring yourself. `exposed-core` and `exposed-jdbc` are
   `compileOnly` here, so installing the adapter cannot move your ORM version. The published jar is
   compiled against **1.0.0** and CI runs every suite against both **1.0.0** and **1.5.0** — the
-  floor leg including the conformance harness on H2, so the floor is proved against the PDP's
-  recorded `check()` decisions rather than only against compilation. That direction is deliberate: JetBrains promises
-  that code built against an older 1.x keeps working on a newer one and promises nothing in the
-  other direction, so compiling against the floor is the only arrangement where a green build proves
-  the claim for the artifact you actually install
+  floor legs including the conformance harness on every store, so the floor is proved against the
+  PDP's recorded `check()` decisions rather than only against compilation. That direction is
+  deliberate: JetBrains promises that code built against an older 1.x keeps working on a newer one
+  and promises nothing in the other direction, so compiling against the floor is the only
+  arrangement where a green build proves the claim for the artifact you actually install
   ([ADR 0011](../docs/adr/0011-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
   Exposed 0.x is out of scope: 1.0 moved every symbol from `org.jetbrains.exposed.sql.*` to
   `org.jetbrains.exposed.v1.*`, so one artifact cannot serve both.
@@ -362,8 +362,9 @@ and has to be told which one you use.
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
 `NullAttributeRepresentation` defaults to `EXPLICIT`. If your application omits attributes for NULL
-columns, pass `OMITTED` and the adapter rejects every null comparison operand instead of emitting a
-filter that returns rows the PDP denies:
+columns, pass `OMITTED` and the adapter rejects every null comparison operand against an attribute
+that declares no convention of its own, instead of emitting a filter that returns rows the PDP
+denies (declaring `OMITTED` per attribute does better; see below):
 
 ```kotlin
 Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
@@ -407,6 +408,15 @@ return NULL rows the PDP denies for an attribute the caller in fact omits. The c
 against a constant under-grants those rows until you declare the convention on that column, which
 fails closed. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
+**Declaring `OMITTED` answers `== null` and `!= null` instead of refusing them.** A NULL column sends
+no attribute, so CEL raises a missing-attribute error and `check()` denies the row whichever way the
+comparison is written; a present value is never null. `field(column, nulls = OMITTED)` therefore
+renders `x == null` as `x IS NULL AND UNKNOWN` — UNKNOWN for the NULL row, FALSE otherwise — and
+`x != null` as its negation, which is UNKNOWN and TRUE. The same holds for a field reached through a
+to-one relation, where an absent related row is also a missing attribute. A list constant carrying a
+null (`x in [null, "a"]`) is still refused, since SQL drops a NULL inside an `IN` list, and an
+undeclared attribute under a call-level `OMITTED` is still refused as above.
 
 ## Handling refusals
 
@@ -488,8 +498,16 @@ Both of the following are store configuration, not adapter limitations:
   matching (`contains` / `startsWith` / `endsWith`, and hierarchy prefix tests) to `LIKE`. Set
   `PRAGMA case_sensitive_like = ON` on the connection, as the harness does.
 
-PostgreSQL and H2 are case-sensitive by default and are safe unless you opt into
-case-insensitive behaviour (a nondeterministic ICU collation, `citext`).
+- **PostgreSQL.** `=` is byte-exact under any deterministic collation, but `<`, `>` and their
+  siblings order strings by the database's collation, and CEL orders them by code point. Under the
+  image default `en_US.utf8`, `"One" > "a"` is TRUE, so a string ordering returns rows the PDP denies
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use the `C` collation on every
+  string column a mapping orders (`--lc-collate=C` at `initdb`, or `COLLATE "C"` on the column). The
+  harness initialises its PostgreSQL database with `--lc-collate=C`;
+  `ADAPTER_TEST_POSTGRES_INITDB_ARGS` overrides it to reproduce the over-grant.
+
+H2 is case-sensitive and orders by code point by default. PostgreSQL and H2 are safe for `=` and
+`LIKE` unless you opt into case-insensitive behaviour (a nondeterministic ICU collation, `citext`).
 
 Role and tenancy checks are the highest-risk shapes: `'admin'` versus `'Admin'` under `eq` and `in`,
 and hierarchy descendant checks. Treat collation as part of your policy contract.
@@ -497,7 +515,7 @@ and hierarchy descendant checks. Treat collation as part of your policy contract
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 29 seed rows on
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 41 seed rows on
 H2, SQLite, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -506,12 +524,12 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 60 / 80 |
-| adversarial | 160 / 227 |
+| extended | 57 / 80 |
+| adversarial | 190 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-86 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+134 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -522,17 +540,27 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   `hasIntersection()`, whole-list equality, and a list or map constant compared with a column;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
   where CEL requires the whole string, and rounds where CEL truncates;
+- `string()` over a computed value (a conversion, a ternary, a comparison) rather than a mapped
+  column, and over a floating-point column compared with `"0"` or `"-0"`: SQL `CAST` prints numbers
+  and booleans differently from CEL, and cannot read the sign of a stored `-0.0`;
+- a division whose divisor is a floating-point column or computed arithmetic: its zero may be
+  `-0.0`, which CEL divides into the opposite infinity, and SQL compares `-0.0` equal to `0.0`;
+- a string ordering against a literal holding a character at or above U+D800: CEL orders by code
+  point, and H2 by UTF-16 code unit, which puts a surrogate pair before U+E000–U+FFFF;
+- a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has
+  no key set SQL can read;
 - a comparison whose operand type the mapped column does not hold (the `type-mismatch/*` cases, and
   two instant columns compared without `timestamp()`): CEL does not coerce, and SQL does. See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);
 - a hierarchy with an empty delimiter, a division as a divisor, a macro over a principal value
   another macro computes, and `exists_one` over a principal list;
-- a `null` literal against an attribute mapped `OMITTED` (`null/equals/null-literal-on-missing-attribute`),
-  and `!=` between two columns under mixed null conventions.
+- `!=` between two columns under mixed null conventions.
 
-One case, `null/has/missing-attribute`, is a planner divergence the corpus skips: the planner folds
-`has()` to always-allowed while `check()` denies the missing-attribute rows. Until the planner is
-fixed, write `R.attr.x != null` rather than `has(R.attr.x)` for database-backed attributes.
+The cases the corpus declares a planner divergence (`plannerDivergence`: the plan and `check()`
+disagree, so no adapter can pass them) are skipped. Among them is `null/has/missing-attribute`: the
+planner folds `has()` to always-allowed while `check()` denies the missing-attribute rows. Until the
+planner is fixed, write `R.attr.x != null` rather than `has(R.attr.x)` for database-backed
+attributes, with the attribute declared `OMITTED`.
 
 Other guarantees:
 
@@ -540,8 +568,9 @@ Other guarantees:
   UNKNOWN under negation rather than becoming false.
 - Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
   true (in 0.54 it was an error and stayed denied under negation).
-- A null comparison against an attribute declared `field(column, nulls = OMITTED)` throws; declared
-  `EXPLICIT`, `eq`, `ne` and `in` include NULL rows where CEL's null value says they should
+- `== null` and `!= null` against an attribute declared `field(column, nulls = OMITTED)` are
+  UNKNOWN for a NULL column, so the row is denied under both polarities as `check()` denies it;
+  declared `EXPLICIT`, `eq`, `ne` and `in` include NULL rows where CEL's null value says they should
   (cerbos/query-plan-adapters#302, #308).
 
 ### What a column type buys over a query plan
@@ -551,13 +580,13 @@ need the caller to declare something like `ValueString` or `ValueBool` before th
 two `+` overloads apart, and why the reference fails closed on shapes that need a cast at all. An
 Exposed `Column` carries its own type, and the dialect is known at render time, so the same
 questions are answered from the mapping you already wrote — with **no per-column type declarations
-of any kind**. Five corpus cases translate here that the reference or most other SQL adapters
+of any kind**. Seven corpus cases translate here that the reference or most other SQL adapters
 refuse:
 
 | Case | What it is, and what settles it |
 | --- | --- |
-| `cast/string/from-boolean` | `string()` over a boolean column. Deliberately not a `CAST`: SQLite and MySQL store a boolean as 1/0 and would render `"1"` where CEL and PostgreSQL render `"true"`. It is lowered to a `CASE` with an explicit NULL arm, so a NULL column stays NULL rather than falling through to the `ELSE`, and every engine says the same thing |
-| `cast/string/from-double` | `string()` over a floating-point column, which CEL renders as the shortest round-tripping decimal. A `DECIMAL` column is still refused, because it renders its declared scale (`1.50`) where CEL renders `1.5`; the cast target itself is spelled per dialect (`CHAR` on MySQL, `VARCHAR` elsewhere) inside the rendered expression |
+| `cast/string/from-boolean`, `cast/string/from-boolean-case-changed-literal` | `string()` over a boolean column. Deliberately not a `CAST`: SQLite and MySQL store a boolean as 1/0 and would render `"1"` where CEL and PostgreSQL render `"true"`. Against a string literal under `==` or `!=` it is solved for the column (`"true"` is `x = TRUE`, any other spelling such as `"True"` matches no row), which also keeps the comparison out of MySQL's case-insensitive connection collation. Anywhere else it is lowered to a `CASE` with an explicit NULL arm, so a NULL column stays NULL rather than falling through to the `ELSE`, and every engine says the same thing |
+| `cast/string/from-double`, `cast/string/from-double-spellings` | `string()` over a floating-point column compared with `==` or `!=`, which CEL renders as Go's shortest `%g` form (`1e+06`, `2`, `-9.5e+18`) and no SQL `CAST` does. Exactly one double prints as a given string, so the comparison is **solved** for the column: `string(x) == "1e+06"` is `x = 1000000.0`, and a literal that is not CEL's spelling of any double matches no row. `"0"` and `"-0"` are refused, since SQL cannot tell `-0.0` from `0.0` (`cast/string/from-negative-zero-double`), and so is an ordering over it. A `DECIMAL` column is refused, because it renders its declared scale (`1.50`) where CEL renders `1.5` |
 | `identifier/equals/concatenation`, `string/concatenate/field-to-field` | CEL's `+` over strings — against a constant, and between two columns. One text operand, a string constant or a text column, settles the whole expression, because CEL has no mixed-type `+`. The emitted operator **propagates** NULL: `||`, and `CONCAT()` on MySQL alone, where `||` is logical OR outside `PIPES_AS_CONCAT`. Exposed's own `Concat` and PostgreSQL's `CONCAT()` *skip* a NULL argument, which would compare a partial string and match rows `check()` denies |
 | `hierarchy/overlaps/path-built-from-identifier` | A hierarchy path constructed by `list()` rather than read from a column — a shape several SQL adapters refuse |
 
@@ -668,16 +697,15 @@ in one of them. Treat them as constraints on the policies you write.
 
 | Gap | Effect |
 | --- | --- |
-| Division by a **stored** negative zero | SQL cannot tell `-0.0` from `0.0`: both satisfy `= 0`, and no portable function reads the sign bit (H2 does not even return the sign over JDBC). So when the denominator is a **column** the adapter reads a zero as positive, and `x / column` is `+Infinity` here where CEL gives `-Infinity` for a stored `-0.0`. On a store that keeps the sign in a floating-point column, such as PostgreSQL, that is a row admitted under `> 0` that the PDP denies. A **constant** denominator is exact: the planner ships the sign and the adapter applies it (`arithmetic/divide/negative-zero-divisor`). |
 | A NaN or an infinity **stored** in a floating-point column | The adapter folds the non-finite values it produces itself, from a division, with IEEE rules at translation time. A non-finite value already in a column is compared by the database, whose ordering is not IEEE's: PostgreSQL orders NaN above every number. |
 
 ## Dialects
 
 | Dialect | What CI executes | What is distinctive about it |
 | --- | --- | --- |
-| H2 | the default (`ADAPTER_TEST_DB=h2`), in process, on both the baseline and the floor Exposed release | Case-sensitive by default; the store the floor leg is proved against |
+| H2 | the default (`ADAPTER_TEST_DB=h2`), in process | Case-sensitive by default |
 | SQLite | `ADAPTER_TEST_DB=sqlite`, in process | Needs `PRAGMA case_sensitive_like = ON`; no boolean and no temporal type, so both are stored as text or integers; a multi-row scalar subquery does not raise |
-| PostgreSQL | `ADAPTER_TEST_DB=postgres`, Testcontainers | Real `boolean` and `timestamptz`; cannot type a bound `NULL` (`$1 IS NULL` is an error), which is why the adapter renders NULL as a literal |
+| PostgreSQL | `ADAPTER_TEST_DB=postgres`, Testcontainers, initialised with `--lc-collate=C` | Needs a code-point collation for string ordering; real `boolean` and `timestamptz`; cannot type a bound `NULL` (`$1 IS NULL` is an error), which is why the adapter renders NULL as a literal |
 | MySQL | `ADAPTER_TEST_DB=mysql`, Testcontainers, **twice** — once per Connector/J prepared-statement mode | Needs a case- and accent-sensitive collation; no boolean type; `LIKE` backslash handling and cast spellings differ; coerces a *string* when a comparison mixes types |
 
 These are not the same test four times, which is the point: collation, LIKE escaping, cast targets
@@ -747,6 +775,7 @@ and MySQL:
 | `ADAPTER_TEST_CONTAINER_SUITES` | `run` (default), `skip` | Whether the suites that start containers of their own run (below) |
 | `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
+| `ADAPTER_TEST_POSTGRES_INITDB_ARGS` | e.g. `--lc-collate=en_US.utf8` | Override the PostgreSQL leg's `--lc-collate=C` |
 
 An unknown value fails rather than falling back to the default.
 

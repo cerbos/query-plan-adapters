@@ -54,13 +54,13 @@ class AdversarialConformanceTest {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private data class Tag(val id: String, val name: String?)
 
-    /** One `seeds.json` row. List elements are nullable: the corpus carries null elements. */
+    /** One `seeds.json` row. Scalars and list elements are nullable: the corpus carries nulls. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private data class Seed(
         val id: String,
-        val aBool: Boolean,
-        val aString: String,
-        val aNumber: Int,
+        val aBool: Boolean?,
+        val aString: String?,
+        val aNumber: Int?,
         val aOptionalString: String?,
         val aNumberList: List<Double?>,
         val aBoolList: List<Boolean?>,
@@ -153,6 +153,7 @@ class AdversarialConformanceTest {
 
             // Distinct category graphs per seed, so no two rows share a relation by accident.
             var catSeq = 0
+            var subSeq = 0
             for (s in seeds) {
                 val d = derived[s.id] ?: error("derived-fields.json has no entry for \"${s.id}\"")
                 Resources.insert {
@@ -189,23 +190,27 @@ class AdversarialConformanceTest {
                         it[resourceId] = s.id
                     }
                 }
-                for (subName in s.subCategoryNames) {
-                    catSeq++
-                    val cat = "adv-cat-$catSeq"
-                    val sub = "adv-sub-$catSeq"
+                // ONE category holding every subcategory name (conformance/README.md, "The
+                // dataset"), not one category per name: a seed with two names has one category of
+                // size two, which `size(c.subCategories) == 1` must not match.
+                val cat = if (s.subCategoryNames.isEmpty()) null else "adv-cat-${++catSeq}"
+                if (cat != null) {
                     Categories.insert {
                         it[id] = cat
                         it[name] = "business"
                         it[resourceId] = s.id
                     }
+                }
+                for (subName in s.subCategoryNames) {
+                    val sub = "adv-sub-${++subSeq}"
                     SubCategories.insert {
                         it[id] = sub
                         it[name] = subName
-                        it[categoryId] = cat
+                        it[categoryId] = cat!!
                     }
                     d.labels.forEachIndexed { index, labelName ->
                         Labels.insert {
-                            it[id] = "adv-lab-$catSeq-${index + 1}"
+                            it[id] = "adv-lab-$subSeq-${index + 1}"
                             it[name] = labelName
                             it[subCategoryId] = sub
                         }
@@ -397,8 +402,8 @@ class AdversarialConformanceTest {
     /**
      * **Corpus gap.** #509: the corpus counts the `mainCategory` chain with two spellings. These are
      * the other thresholds and polarities, and rows without a `mainCategory` must stay out of every
-     * one (#316). Seeds with one have exactly one subCategory, and the rest are CEL missing-path
-     * errors, so each of these is empty.
+     * one (#316). Seeds with one have at least one subCategory (i9 has two), and the rest are CEL
+     * missing-path errors, so each of these is empty.
      */
     @Test
     fun everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
@@ -410,10 +415,8 @@ class AdversarialConformanceTest {
             "size(chain) == 0" to compare("eq", size, 0.0),
             "size(chain) <= 0" to compare("le", size, 0.0),
             "size(chain) < 1" to compare("lt", size, 1.0),
-            "size(chain) >= 2" to compare("ge", size, 2.0),
             "!(size(chain) > 0)" to expression("not", compare("gt", size, 0.0)),
             "!(size(chain) >= 1)" to expression("not", compare("ge", size, 1.0)),
-            "!(size(chain) < 2)" to expression("not", compare("lt", size, 2.0)),
         )
         emptyByConstruction.forEach { (shape, condition) ->
             assertEquals(emptyList<String>(), filteredIdsFor(condition), "absent-parent guard leaked for $shape")
@@ -423,7 +426,7 @@ class AdversarialConformanceTest {
         val withParent = filteredIdsFor(compare("ge", size, 0.0))
         assertFalse(withParent.isEmpty(), "some seed must carry a mainCategory")
         assertTrue(withParent.size < seeds.size, "not every seed carries one")
-        assertEquals(withParent, filteredIdsFor(compare("lt", size, 2.0)))
+        assertEquals(withParent, filteredIdsFor(compare("lt", size, 3.0)))
     }
 
     private fun expression(operator: String, vararg operands: Operand): Operand {

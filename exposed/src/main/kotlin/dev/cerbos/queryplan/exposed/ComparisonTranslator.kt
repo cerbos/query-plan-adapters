@@ -342,9 +342,59 @@ internal class ComparisonTranslator(private val translation: Translation) {
         operands: List<Operand>,
         scope: Scope,
     ): Op<Boolean> {
+        solvedTextCastEquality(operator, left, right, scope)?.let { return it }
         val leftExpression = textCastOperand(left, operands[0], scope)
         val rightExpression = textCastOperand(right, operands[1], scope)
         return compare(operator, leftExpression, rightExpression)
+    }
+
+    /**
+     * `string(column) ==/!= "literal"` over a floating-point or boolean column, SOLVED for the
+     * column rather than rendered. A boolean prints as exactly `true` or `false`. No SQL CAST
+     * prints a double as CEL does (Go's shortest `%g`: `1e+06`, `2`, `-9.5e+18`), but exactly one
+     * double prints as a given string, so the comparison is the column against that double. A
+     * literal that is not CEL's spelling of any value matches no row: FALSE for a present value,
+     * UNKNOWN for a NULL one, which CEL denies under both polarities. A zero is refused, since CEL
+     * prints `-0.0` as `-0` and SQL cannot tell it from `0.0`. `null` when the shape is not this
+     * one; an ordering over it falls through to the refusal in [textCastOperand].
+     */
+    private fun solvedTextCastEquality(
+        operator: String,
+        left: Resolved,
+        right: Resolved,
+        scope: Scope,
+    ): Op<Boolean>? {
+        if (operator != "eq" && operator != "ne") return null
+        val (cast, constant) = when {
+            left is Resolved.TextCast && right is Resolved.Constant -> left to right
+            right is Resolved.TextCast && left is Resolved.Constant -> right to left
+            else -> return null
+        }
+        val target = scope.scalar(cast.variable)
+        val kind = ScalarColumnTypes.kindOf(target.column)
+        if (kind != ScalarColumnKind.FLOATING && kind != ScalarColumnKind.BOOLEAN) return null
+        val text = constant.value() as? String ?: return null
+        val solved: Any? = if (kind == ScalarColumnKind.BOOLEAN) {
+            // CEL prints exactly "true" and "false". Solving rather than comparing the rendered
+            // word keeps the comparison out of the store's collation: under MySQL's client-side
+            // prepared statements a bound word lands in the connection's case-insensitive
+            // collation, and `'true' = 'True'` would hold.
+            when (text) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+        } else {
+            CelDoubleText.parseCanonical(text)
+        }
+        if (solved == null) {
+            // FALSE for a present value and UNKNOWN for a NULL one; `ne` is its negation.
+            val never = TriLogic.and(IsNullOp(target.expression), TriLogic.unknown())
+            return if (operator == "eq") never else TriLogic.not(never)
+        }
+        // Smart-cast so the comparison is IEEE: a boxed -0.0 does not equal 0.0.
+        if (solved is Double && solved == 0.0) throw ScalarRefusals.textCastUnsupported(ScalarColumnTypes.describe(target.column))
+        return compare(operator, target.expression, Params.of(solved))
     }
 
     private fun textCastOperand(resolved: Resolved, operand: Operand, scope: Scope): Expression<*> = when (resolved) {
@@ -364,9 +414,10 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 // column declares is lost and `'Set' = 'set'` becomes true
                 // (`cast-not-string-missing` on MySQL).
                 ScalarColumnKind.TEXT -> target.expression
-                // Digits and a sign have no case, so the collation a cast lands in cannot matter.
-                ScalarColumnKind.INTEGRAL, ScalarColumnKind.FLOATING ->
-                    TextCastExpression(target.expression)
+                // An integer column holds only integral values, which CEL prints in plain decimal
+                // below 1e21, and digits and a sign have no case, so the collation a cast lands
+                // in cannot matter. A floating-point column is refused: see textCastUnsupported.
+                ScalarColumnKind.INTEGRAL -> TextCastExpression(target.expression)
                 else -> throw ScalarRefusals.textCastUnsupported(ScalarColumnTypes.describe(target.column))
             }
         }
@@ -542,6 +593,13 @@ internal class ComparisonTranslator(private val translation: Translation) {
                             "compare with either.",
                     )
                     "int", "double" -> ScalarRefusals.numericCastUnsupported(inner)
+                    // string() reaches a leaf only when its argument is not a mapped column.
+                    "string" -> Refusals.unsupported(
+                        "Cannot translate string() over a computed value (a conversion, a " +
+                            "ternary or a comparison): string() is lowered only over a mapped " +
+                            "column, whose type decides CEL's spelling, and SQL CAST prints " +
+                            "numbers and booleans differently from CEL (\"1e+06\", \"true\").",
+                    )
                     "index" -> Refusals.unsupported(
                         "Cannot translate index(): a list element is addressed by position, and " +
                             "the rows a relation subquery returns carry no CEL list order to " +

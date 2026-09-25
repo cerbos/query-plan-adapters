@@ -70,10 +70,6 @@ class ArithmeticTranslatorTest {
         }
 
         @Test
-        fun `a column divisor is guarded so a zero row cannot abort the query`() =
-            assertSelects("arithmetic/divide/field-by-field", "r1", "r5", "r6", "r7", "f1", "c1")
-
-        @Test
         fun `arithmetic COMPOSED on a zero-capable division keeps the non-finite arm`() {
             // CEL carries the NaN through the surrounding sum, so the division stays symbolic and
             // the `+ 1.0` is applied to each IEEE arm instead: the sum reaching SQL is the finite
@@ -130,15 +126,16 @@ class ArithmeticTranslatorTest {
 
         @Test
         fun `every shape putting a division where a constant was expected is REFUSED, by name`() {
-            // Corpus gap for the first three of the four — `R.attr.aNumber / (0.0/0.0) > 0` is
+            // Corpus gap for the first two of the three — `R.attr.aNumber / (0.0/0.0) > 0` is
             // policy-reachable and the corpus carries no action for it. Delete them when it lands
             // (https://github.com/cerbos/query-plan-adapters/issues/414).
             //
-            // The four ways a non-finite value reaches an operand that is not a fold, none of them
-            // in the corpus and none needing a hand-built NON-plan: the inner `div(0, 0)` the
-            // planner ships UNFOLDED (`conformance/wire-fixtures/nan-ord-le.json` is the proof),
-            // a division whose own divisor is a division, one on each side, and a constant
-            // dividend that is itself non-finite.
+            // The ways a non-finite value reaches an operand that is not a fold, none of them in
+            // the corpus and none needing a hand-built NON-plan: the inner `div(0, 0)` the planner
+            // ships UNFOLDED (`conformance/wire-fixtures/nan-ord-le.json` is the proof), a division
+            // whose own divisor is a division, and a constant dividend that is itself non-finite.
+            // (A division on each side of a division is refused earlier, by the signed-zero rule
+            // on a computed divisor.)
             //
             // Every one of them MUST refuse, and refuse through `ArithmeticValues.sqlOf` — so the
             // exception TYPE and the MESSAGE are pinned rather than "some IllegalArgumentException".
@@ -152,11 +149,6 @@ class ArithmeticTranslatorTest {
                 "divisor folds to NaN" to ReviewPlans.expression("div", aNumber, zeroOverZero),
                 "divisor is a column division" to
                     ReviewPlans.expression("div", aNumber, ReviewPlans.expression("div", aDouble, aNumber)),
-                "a division on each side" to ReviewPlans.expression(
-                    "div",
-                    ReviewPlans.expression("div", aNumber, aDouble),
-                    ReviewPlans.expression("div", aDouble, aNumber),
-                ),
                 "a non-finite constant dividend" to
                     ReviewPlans.expression("div", ReviewPlans.value(Double.NaN), aNumber),
             ).forEach { (name, arithmetic) ->

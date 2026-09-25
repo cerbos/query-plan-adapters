@@ -1,13 +1,49 @@
 {
   "adapter": "exposed",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "Cannot translate a division by a floating-point column or by computed arithmetic: its zero may be -0.0, which CEL divides a non-zero number into the opposite infinity from 0.0, while SQL compares -0.0 equal to 0.0 and has no portable way to read the sign bit. Divide by an integer or decimal column, or by a constant."
+    },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "A division as the DIVISOR: the inner division can be a zero-denominator NaN or infinity, SQL has no literal for either, and against a column the sign of the result depends on that column. Refused rather than binding a non-finite double, which PostgreSQL orders above every number"
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
+    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "CEL `%` is integer-only while an attribute value is always a double at check time, so a satisfiable policy has to cast with int() first, and int() has no faithful SQL lowering: CAST rounds to nearest on PostgreSQL and MySQL where CEL truncates toward zero. The modulo is refused by name before its operands are read, on the same ground that refuses `cast/int/negative-fraction`"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "arithmetic between a column and the NaN or infinity a zero denominator produces is not supported: SQL has no literal for either value, and neither folds to one constant against a column, because an infinity times or divided by a column depends on that column's sign. Compare the division itself, or keep the composition constant."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -16,6 +52,10 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
+    },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
     },
     "cast/int/malformed-string": {
       "status": "unsupported",
@@ -28,6 +68,46 @@
     "cast/int/negative-fraction": {
       "status": "unsupported",
       "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a DoubleColumnType column: CEL renders a number as Go's shortest round-tripping form (1e+06, 2, -0) and no SQL CAST reproduces that for this column type, nor reads the sign of a stored -0.0. Text, integer and boolean columns are translatable, and a floating-point column only under == or != against a string literal other than \"0\" and \"-0\"."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-boolean-expression": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -48,6 +128,14 @@
     "collection/except/size-of-difference": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A related row has no key set SQL can iterate, and the mapping declares no element column to stand for one, so the macro is refused when its collection is resolved"
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/exists/map-keys, under negation: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate"
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -113,17 +201,41 @@
       "status": "unsupported",
       "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole, so neither the order nor the multiplicity CEL compares can be expressed"
+    },
+    "comparison/less-than/astral-string-against-high-bmp": {
+      "status": "unsupported",
+      "reason": "lt orders 'request.resource.attr.aString' against a literal holding a character at or above U+D800 (an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a store that compares UTF-16 code units (H2, Java's String.compareTo) puts a surrogate pair before U+E000–U+FFFF."
+    },
+    "comparison/less-than/negated-astral-string-against-high-bmp": {
+      "status": "unsupported",
+      "reason": "lt orders 'request.resource.attr.aString' against a literal holding a character at or above U+D800 (an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a store that compares UTF-16 code units (H2, Java's String.compareTo) puts a surrogate pair before U+E000–U+FFFF."
+    },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself"
     },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test. The adapter lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter is a bare prefix LIKE that also matches the path itself. The delimiter is refused when the hierarchy operand is parsed, before any LIKE is built"
     },
-    "null/equals/null-literal-on-missing-attribute": {
+    "hierarchy/overlaps/empty-delimiter": {
       "status": "unsupported",
-      "reason": "aOptionalString is omitted from the resource when its column is NULL, so the mapping declares NullAttributeRepresentation.OMITTED: `== null` is then a CEL missing-attribute error that denies every row, while SQL `IS NULL` returns exactly those rows. The planner emits the same eq(var, null) node for an explicit null, so the adapter refuses a null operand against an OMITTED attribute rather than guess"
+      "reason": "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself"
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A related row has no key set SQL can test, and the mapping declares no element column to stand for one, so the membership is refused when its container is resolved"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation: `in` over the to-one `parent` tests its attribute names, which SQL has no row to read"
     },
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",
@@ -132,6 +244,10 @@
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "principal/exists-one/duplicate-elements": {
+      "status": "unsupported",
+      "reason": "exists_one over a literal collection value is not supported; only exists() and all() fold into a flat filter"
     },
     "principal/exists-one/long-list": {
       "status": "unsupported",
@@ -161,6 +277,14 @@
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
@@ -176,6 +300,10 @@
     "regex/matches/dot-excludes-newline": {
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
     },
     "regex/matches/end-anchor-before-final-newline": {
       "status": "unsupported",
@@ -197,9 +325,17 @@
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
       "status": "unsupported",
@@ -212,6 +348,14 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
@@ -245,6 +389,10 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "eq compares 'request.resource.attr.aDouble' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
     "type-mismatch/equals/number-field-against-string-literal": {
       "status": "unsupported",
       "reason": "eq compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
@@ -256,6 +404,10 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "type-mismatch/equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "A mapped column holds one scalar, and CEL's equality between a string and a list is decided from the types alone (false), while SQL would compare the column with a list parameter by the driver's coercion or reject it. Refused as a structured constant before any comparison is built"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",
@@ -280,6 +432,26 @@
     "type-mismatch/exists/element-field-against-number-literal": {
       "status": "unsupported",
       "reason": "eq compares 't.name' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
+    },
+    "type-mismatch/greater-or-equal/negated-number-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "ge compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/greater-or-equal/string-field-against-number-literal-value-first": {
+      "status": "unsupported",
+      "reason": "le compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/greater-than/boolean-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "gt compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/greater-than/number-field-against-string-literal-value-first": {
+      "status": "unsupported",
+      "reason": "lt compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/greater-than/string-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "gt compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
     },
     "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
       "status": "unsupported",
@@ -317,9 +489,29 @@
       "status": "unsupported",
       "reason": "in compares 'request.resource.attr.aNumberList' against a String constant, but it maps to a DoubleColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies."
     },
+    "type-mismatch/less-or-equal/negated-boolean-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "le compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first": {
+      "status": "unsupported",
+      "reason": "ge compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/less-than/negated-string-field-against-number-literal": {
+      "status": "unsupported",
+      "reason": "lt compares 'request.resource.attr.aString' against a Long constant, but it maps to a VarCharColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/less-than/number-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "lt compares 'request.resource.attr.aNumber' against a String constant, but it maps to a IntegerColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
+    },
+    "type-mismatch/less-than/number-literal-against-boolean-field-value-first": {
+      "status": "unsupported",
+      "reason": "gt compares 'request.resource.attr.aBool' against a Long constant, but it maps to a BooleanColumnType column. CEL decides a comparison between those from the values alone — equality is false and an ordering raises a no-overload error — while SQL coerces one side, and MySQL coerces the column, so the filter returns rows the PDP denies. Compare it against a value of the column's own type, or map the attribute onto one of the kinds this adapter compares: text, integer, floating-point, decimal or boolean. A temporal column is compared by wrapping both sides in timestamp()."
     },
     "type-mismatch/not-equals/number-field-against-string-literal": {
       "status": "unsupported",

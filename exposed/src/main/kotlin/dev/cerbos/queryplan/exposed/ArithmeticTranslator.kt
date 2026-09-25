@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
+import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import com.google.protobuf.Value
 import org.jetbrains.exposed.v1.core.Op
@@ -53,7 +54,12 @@ internal class ArithmeticTranslator(comparisons: ComparisonTranslator) {
                         "to a ${ScalarColumnTypes.describe(target.column)} column",
                 )
             }
-            ArithmeticValue.Sql(IeeeDoubleCast(target.expression))
+            ArithmeticValue.Sql(
+                IeeeDoubleCast(target.expression),
+                unsignedZero = ScalarColumnTypes.kindOf(target.column).let {
+                    it == ScalarColumnKind.INTEGRAL || it == ScalarColumnKind.DECIMAL
+                },
+            )
         }
         Operand.NodeCase.VALUE -> {
             // The raw double, not PlanValues.toKotlin, which narrows an integral value to a Long

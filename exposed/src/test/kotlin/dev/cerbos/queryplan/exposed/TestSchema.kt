@@ -24,14 +24,15 @@ import org.jetbrains.exposed.v1.javatime.timestamp
 
 /**
  * The resource rows. Every nullable column is nullable BECAUSE the corpus discriminates on it: a
- * NULL `a_optional_string`, `scope`, `a_double`, `created_at` or `updated_at` is a missing attribute on the check
- * side, so both the predicate and its negation must exclude the row.
+ * NULL `a_bool`, `a_string`, `a_number`, `a_optional_string`, `scope`, `a_double`, `created_at` or
+ * `updated_at` is a missing attribute on the check side, so both the predicate and its negation must
+ * exclude the row.
  */
 internal object Resources : Table("adversarial_resources") {
     val id = varchar("id", 64)
-    val aBool = bool("a_bool")
-    val aString = varchar("a_string", 255)
-    val aNumber = integer("a_number")
+    val aBool = bool("a_bool").nullable()
+    val aString = varchar("a_string", 255).nullable()
+    val aNumber = integer("a_number").nullable()
     val aDouble = double("a_double").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
     val createdBy = varchar("created_by", 64)
@@ -50,9 +51,9 @@ internal object Resources : Table("adversarial_resources") {
  */
 internal object Parents : Table("adversarial_parents") {
     val id = varchar("id", 64)
-    val aBool = bool("a_bool")
-    val aString = varchar("a_string", 255)
-    val aNumber = integer("a_number")
+    val aBool = bool("a_bool").nullable()
+    val aString = varchar("a_string", 255).nullable()
+    val aNumber = integer("a_number").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
     val resourceId = varchar("resource_id", 64).uniqueIndex()
     override val primaryKey = PrimaryKey(id)
@@ -61,9 +62,9 @@ internal object Parents : Table("adversarial_parents") {
 /** The second hop of the chain. It is cut here: there is no `parent.inner.inner`. */
 internal object Inners : Table("adversarial_inners") {
     val id = varchar("id", 64)
-    val aBool = bool("a_bool")
-    val aString = varchar("a_string", 255)
-    val aNumber = integer("a_number")
+    val aBool = bool("a_bool").nullable()
+    val aString = varchar("a_string", 255).nullable()
+    val aNumber = integer("a_number").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
     val parentId = varchar("parent_id", 64).uniqueIndex()
     override val primaryKey = PrimaryKey(id)
@@ -139,9 +140,9 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
     // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
     // never sees this name.
     "request.resource.id" to Resources.id
-    "request.resource.attr.aBool" to Resources.aBool
-    "request.resource.attr.aString" to Resources.aString
-    "request.resource.attr.aNumber" to Resources.aNumber
+    "request.resource.attr.aBool" to omitted(Resources.aBool)
+    "request.resource.attr.aString" to omitted(Resources.aString)
+    "request.resource.attr.aNumber" to omitted(Resources.aNumber)
     "request.resource.attr.aDouble" to omitted(Resources.aDouble)
     "request.resource.attr.aOptionalString" to omitted(Resources.aOptionalString)
     // ISO-date string column; the `p-timestamp` probe asks timestamp() of it, which is why it is
@@ -166,20 +167,20 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
     // A FLAT column wearing a dotted name, the same trick every reference harness uses for the
     // `p-struct` probe. `parent.inner` below is the opposite — a genuine two-level join — and the
     // two are kept side by side so a reader can tell which dotted name emits a subquery.
-    "request.resource.attr.obj.inner" to Resources.aString
+    "request.resource.attr.obj.inner" to omitted(Resources.aString)
     // The corpus's one REAL to-one chain (the `rel-*` actions). ONE is what tells the adapter the
     // hop can be ABSENT, which the negated shapes discriminate: a row with no parent sends no
     // attribute, so CEL raises a missing-path error and the PDP denies, while an unguarded
     // two-valued read of the hop is TRUE for exactly those rows.
     "request.resource.attr.parent" to one(Parents, from = Resources.id, to = Parents.resourceId) {
-        "aBool" to Parents.aBool
-        "aString" to Parents.aString
-        "aNumber" to Parents.aNumber
+        "aBool" to omitted(Parents.aBool)
+        "aString" to omitted(Parents.aString)
+        "aNumber" to omitted(Parents.aNumber)
         "aOptionalString" to omitted(Parents.aOptionalString)
         "inner" to one(Inners, from = Parents.id, to = Inners.parentId) {
-            "aBool" to Inners.aBool
-            "aString" to Inners.aString
-            "aNumber" to Inners.aNumber
+            "aBool" to omitted(Inners.aBool)
+            "aString" to omitted(Inners.aString)
+            "aNumber" to omitted(Inners.aNumber)
             "aOptionalString" to omitted(Inners.aOptionalString)
         }
     }
