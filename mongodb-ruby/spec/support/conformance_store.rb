@@ -45,19 +45,22 @@ module ConformanceStore
       "createdAt" => created_at && Time.iso8601(created_at).utc,
       "updatedAt" => updated_at && Time.iso8601(updated_at).utc,
       "tags" => seed.fetch("tags").map { |tag| {"id" => tag.fetch("id"), "name" => tag.fetch("name")} },
-      "categories" => seed.fetch("subCategoryNames").map { |name|
-        {
-          "name" => "business",
-          "subCategories" => [
-            {"name" => name, "labels" => ConformanceCorpus.derived(seed, "labels").map { |label| {"name" => label} }}
-          ]
-        }
-      },
+      # A seed with subCategoryNames owns ONE category holding every name as a subcategory
+      # (conformance/README.md, "The dataset"), so a category can be partly matched.
+      "categories" => categories(seed),
       "parent" => stored_parent(seed),
       # Verbatim, null elements included: a null element is a value CEL compares.
       "aNumberList" => seed.fetch("aNumberList"),
       "aBoolList" => seed.fetch("aBoolList")
     }
+  end
+
+  def categories(seed)
+    names = seed.fetch("subCategoryNames")
+    return [] if names.empty?
+
+    labels = ConformanceCorpus.derived(seed, "labels").map { |label| {"name" => label} }
+    [{"name" => "business", "subCategories" => names.map { |name| {"name" => name, "labels" => labels} }}]
   end
 
   # The to-one chain as embedded subdocuments (ADR 0005). Every document owns a FRESH copy of
