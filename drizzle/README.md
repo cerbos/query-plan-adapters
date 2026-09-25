@@ -180,17 +180,36 @@ Attributes compared through CEL's `timestamp()` must opt in:
 "request.resource.attr.createdAt": { column: resources.createdAt, valueType: "timestamp" },
 ```
 
-Constants must be strict RFC 3339 and within years 0001–9999. They are normalized to UTC. A
-constant exactly representable at millisecond precision is compared as it is; your column and
-database must keep at least that precision.
+The column must be one the adapter can compare as an instant, and any other column type throws
+`UnsupportedQueryPlanError`:
 
-A finer constant — in practice `now()`, which the planner folds at nanosecond precision — is
-compared with the nearest point of the column's own precision grid on the correct side (`c < T`
-becomes `c < ceil(T)`, `c <= T` becomes `c <= floor(T)`, and so on; `==` is false for every present
-row). That is exact because the column holds no value between two grid points. The grid is read
-from the Drizzle declaration: a PostgreSQL `timestamp`'s `precision` (default 6), a MySQL `datetime`
-or `timestamp`'s `fsp` (default 0), and milliseconds for a SQLite text column. Any other column
-type throws for such a constant, as does `timestamp()` over an untyped string.
+| Column | How a `timestamp()` comparison runs |
+| --- | --- |
+| PostgreSQL `timestamp` (with or without time zone), MySQL `datetime` / `timestamp` | The database parses the bound constant and compares instants |
+| SQLite `text` | Both sides are rewritten to one fixed-width UTC string, `YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ`, and compared as strings |
+| Anything else: SQLite `integer` in `timestamp` or `timestamp_ms` mode, a PostgreSQL `text` or `date`, a custom type | Refused. SQLite ranks every integer below every string, and a text column compares two spellings of one instant as different strings |
+
+Constants must be strict RFC 3339 and within years 0001–9999. They are normalized to UTC.
+
+On a native column, a constant exactly representable at millisecond precision is compared as it
+is; your column and database must keep at least that precision. A finer constant — in practice
+`now()`, which the planner folds at nanosecond precision — is compared with the nearest point of the
+column's own precision grid on the correct side (`c < T` becomes `c < ceil(T)`, `c <= T` becomes
+`c <= floor(T)`, and so on; `==` is false for every present row). That is exact because the column
+holds no value between two grid points. The grid is read from the Drizzle declaration: a PostgreSQL
+`timestamp`'s `precision` (default 6), or a MySQL `datetime` or `timestamp`'s `fsp` (default 0).
+
+On a SQLite text column, every RFC-3339 spelling of an instant compares equal: `…00Z`, JavaScript's
+`toISOString()` output `…00.000Z`, an offset such as `+02:00`, and a fraction of up to nine digits.
+The rewrite keeps the stored fraction digit for digit, so a constant of any precision is compared
+exactly. A stored value CEL's `timestamp()` cannot parse is NULL after the rewrite, so the row is
+excluded under both polarities, as CEL's error denies it. That covers a value with no offset, a
+space or a lower-case `t` in place of `T`, a day or hour that does not exist, more than nine
+fractional digits, or an instant before year 1. SQLite rejects an offset beyond ±14:00, which CEL
+accepts, so such a row is excluded too. On SQLite a timestamp can be compared only with a
+`timestamp()` constant or another SQLite text timestamp; anywhere else it throws.
+
+`timestamp()` over an untyped string throws.
 
 ## Indexed collection columns
 
@@ -387,7 +406,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 73 / 80 |
-| adversarial | 255 / 267 |
+| adversarial | 257 / 269 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -453,6 +472,18 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- **Breaking:** a `timestamp()` comparison on a SQLite text column compares instants, not strings
+  ([#497](https://github.com/cerbos/query-plan-adapters/issues/497)). The constant used to be bound
+  as `…00Z` and compared with the stored text as a string. So a row storing `toISOString()` output
+  (`…00.000Z`) or an offset was over-granted by `<` and `!=` and dropped by `==` and `>=`. A stored
+  value CEL cannot parse as a timestamp now excludes the row, and a SQLite timestamp compared with
+  anything other than a `timestamp()` constant or another SQLite text timestamp throws. A constant
+  finer than a millisecond is compared exactly, not with a millisecond grid point. See
+  [Timestamps](#timestamps).
+- **Breaking:** a `valueType: "timestamp"` comparison against a column the adapter cannot compare as
+  an instant throws `UnsupportedQueryPlanError` instead of binding a text constant. That covers a
+  SQLite `integer` in `timestamp` or `timestamp_ms` mode, which SQLite ranked below every text
+  constant so `<` matched every row, and a PostgreSQL or MySQL text column.
 - A null operand under the `"omitted"` convention now translates instead of throwing: `== null` is
   false for a present value and UNKNOWN for a NULL column, `!= null` true and UNKNOWN, and a null
   `in` element is dropped. A field-to-field equality mixing the two conventions translates too,

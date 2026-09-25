@@ -29,7 +29,7 @@ import {
   requireLeadingHops,
   resolveTableName,
 } from "./relations";
-import { normalizeRfc3339Milliseconds } from "./timestamp";
+import { normalizeRfc3339Milliseconds, timestampColumnForm } from "./timestamp";
 import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
 
 /**
@@ -578,6 +578,16 @@ const buildTimestampExpression = (
     ) {
       throw new UnsupportedQueryPlanError(
         `'timestamp' field '${inner.name}' requires a mapping with valueType: "timestamp"`,
+      );
+    }
+    const { column } = resolved.mapping;
+    // A direct comparison owns every column it can compare (`comparison.ts`); reaching here means
+    // the timestamp sits somewhere else, where only a native temporal column orders instants.
+    if (column !== undefined && timestampColumnForm(column, inner.name) === "sqlite-text") {
+      throw new UnsupportedQueryPlanError(
+        `Cannot use the SQLite text timestamp '${inner.name}' outside a direct comparison with a ` +
+          "timestamp() constant or another SQLite text timestamp: elsewhere its stored string " +
+          "would be compared as a string, not as an instant",
       );
     }
     return buildValueExpression(inner, mapper, options);

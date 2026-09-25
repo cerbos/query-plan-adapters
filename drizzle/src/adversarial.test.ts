@@ -417,9 +417,9 @@ const POSTGRES_IMAGE =
  * The PostgreSQL leg (cerbos/query-plan-adapters#320).
  *
  * The column types are the point: `boolean` and `timestamptz` exercise the typed paths SQLite
- * cannot reach — on SQLite a boolean is an integer and a timestamp is text compared
- * lexicographically, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
- * layout only string comparison tolerates, passes there and fails here. PostgreSQL also raises on
+ * cannot reach — on SQLite a boolean is an integer and a timestamp is text the adapter rewrites into
+ * its own string form, so a CASE arm yielding `1` instead of `true`, or a timestamp bound in a
+ * layout PostgreSQL cannot parse, passes there and fails here. PostgreSQL also raises on
  * division by zero where SQLite returns NULL, which is what proves the adapter's IEEE CASE arms
  * guard the division rather than merely reshaping its NULL.
  *

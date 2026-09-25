@@ -1,3 +1,9 @@
+import { is, sql } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { PgColumn } from "drizzle-orm/pg-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
+
 import { UnsupportedQueryPlanError } from "./errors";
 
 /**
@@ -94,3 +100,74 @@ export const formatRfc3339Nanoseconds = (nanoseconds: bigint, digits: number): s
   const fraction = `${iso.slice(20, 23)}${remainder.toString().padStart(6, "0")}`;
   return `${iso.slice(0, 19)}.${fraction.slice(0, digits)}Z`;
 };
+
+/**
+ * How a `valueType: "timestamp"` column is compared as an instant:
+ *
+ * - `"native"`: a PostgreSQL `timestamp` or a MySQL `datetime` / `timestamp`. The database parses the
+ *   bound RFC-3339 literal into its own temporal type and compares instants.
+ * - `"sqlite-text"`: a SQLite `text` column holding RFC-3339 strings. SQLite has no temporal type,
+ *   so the stored string is rewritten into one fixed-width UTC form first (`sqliteTextInstant`).
+ *
+ * Any other column — a SQLite `integer` in `timestamp` or `timestamp_ms` mode, a PostgreSQL `text`
+ * or `date`, a custom type — is refused: the database would compare the bound literal with it as
+ * something other than an instant (SQLite ranks every integer below every string; a text column
+ * compares two spellings of one instant as different strings).
+ */
+export type TimestampColumnForm = "native" | "sqlite-text";
+
+export const timestampColumnForm = (
+  column: AnyColumn,
+  reference: string,
+): TimestampColumnForm => {
+  if (is(column, PgColumn) && column.columnType.startsWith("PgTimestamp")) return "native";
+  if (
+    is(column, MySqlColumn) &&
+    (column.columnType.startsWith("MySqlDateTime") || column.columnType.startsWith("MySqlTimestamp"))
+  ) {
+    return "native";
+  }
+  if (is(column, SQLiteColumn) && column.columnType === "SQLiteText") return "sqlite-text";
+  throw new UnsupportedQueryPlanError(
+    `Cannot compare '${reference}' as a timestamp: its ${column.columnType} column is not a ` +
+      "PostgreSQL timestamp, a MySQL datetime or timestamp, or a SQLite text column, so the " +
+      "database would compare a timestamp literal with it as something other than an instant " +
+      "(SQLite ranks every integer below every string)",
+  );
+};
+
+const SQLITE_DATE_TIME_PREFIX = sql.raw(
+  "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*'",
+);
+
+/**
+ * A SQLite text column's RFC-3339 value in the fixed-width UTC form `sqliteInstantLiteral` renders,
+ * `YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ`, so that comparing two of them as strings compares the instants,
+ * whichever spelling the row stored (`…00Z`, `…00.000Z`, an offset, a microsecond fraction).
+ *
+ * SQLite's date functions apply the offset, but they round the fraction to a millisecond and they
+ * accept spellings CEL's `timestamp()` rejects. So only the whole seconds go through `strftime`,
+ * and the stored fraction is carried over digit for digit. A value CEL cannot parse becomes NULL,
+ * which leaves the comparison UNKNOWN under both polarities, as CEL's error denies the row: no
+ * offset, a space, a lower-case `t`, a day or hour that does not exist, more than nine fractional
+ * digits, an instant before year 1. So does an offset SQLite itself rejects (beyond ±14:00).
+ */
+export const sqliteTextInstant = (expr: SQL): SQL => {
+  const zone = sql`(case when ${expr} glob '*Z' then 1 when ${expr} glob '*[+-][0-9][0-9]:[0-9][0-9]' then 6 end)`;
+  const digits = sql`(length(${expr}) - 20 - ${zone})`;
+  const wholeSeconds = sql`strftime('%Y-%m-%dT%H:%M:%S', substr(${expr}, 1, 19) || substr(${expr}, length(${expr}) - ${zone} + 1))`;
+  const valid = sql.join(
+    [
+      sql`${expr} glob ${SQLITE_DATE_TIME_PREFIX}`,
+      sql`strftime('%Y-%m-%dT%H:%M:%S', julianday(substr(${expr}, 1, 19))) = substr(${expr}, 1, 19)`,
+      sql`(${digits} = -1 or (substr(${expr}, 20, 1) = '.' and ${digits} between 1 and 9 and substr(${expr}, 21, ${digits}) not glob '*[^0-9]*'))`,
+      sql`${wholeSeconds} >= '0001-01-01T00:00:00'`,
+    ],
+    sql` and `,
+  );
+  return sql`(case when ${valid} then ${wholeSeconds} || '.' || substr(substr(${expr}, 21, max(${digits}, 0)) || '000000000', 1, 9) || 'Z' end)`;
+};
+
+/** An RFC-3339 literal in the fixed-width UTC form `sqliteTextInstant` gives a stored value. */
+export const sqliteInstantLiteral = (value: string): string =>
+  formatRfc3339Nanoseconds(parseRfc3339Nanoseconds(value), 9);
