@@ -34,6 +34,38 @@ cases:
   condition:
     match:
       expr: 'R.attr.aDouble + 0.7 != 0.1'
+- id: 'arithmetic/add/int-literal-negated'
+  tier: adversarial
+  intent: 'The int-literal sum under negation (!(aNumber + 1 > 2.0)).'
+  trap: 'The plan is the double spelling''s, so a translation returns the complement of field-plus-constant; check() errors on double + int and denies every row under both polarities.'
+  condition:
+    match:
+      expr: '!(R.attr.aNumber + 1 > 2.0)'
+  degenerate:
+    oracle: empty
+    reason: 'aNumber is a CEL double and CEL has no double + int overload, so check() errors on every row and the negation cannot rescue it.'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/544
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'The planner drops the int type of the literal 1: the plan is byte-identical to !(aNumber + 1.0 > 2.0), which allows rows, while check() has no double + int overload and denies every row.'
+- id: 'arithmetic/add/int-literal-plus-constant'
+  tier: adversarial
+  intent: 'Attribute plus an int constant compared with a double threshold (aNumber + 1 > 2.0).'
+  trap: 'The plan is the double spelling''s, so a translation returns field-plus-constant''s rows; check() errors on double + int and denies every row.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber + 1 > 2.0'
+  degenerate:
+    oracle: empty
+    reason: 'aNumber is a CEL double and CEL has no double + int overload, so check() errors on every row.'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/544
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'The planner drops the int type of the literal 1: the plan is byte-identical to aNumber + 1.0 > 2.0, which allows rows, while check() has no double + int overload and denies every row.'
 - id: 'arithmetic/add/on-both-sides'
   tier: extended
   intent: 'Arithmetic over the same attribute on both sides of a comparison (aNumber + 1.0 > aNumber * 2.0).'

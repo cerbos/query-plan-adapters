@@ -309,13 +309,13 @@ queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on 
 | --- | --- |
 | core | 26 / 26 |
 | extended | 49 / 80 |
-| adversarial | 196 / 284 |
+| adversarial | 196 / 286 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases and one adversarial case.
+pass them. On 0.55.0 that is four extended cases and three adversarial cases.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
 the plan while `checkResource` denies the missing-attribute documents, so use `R.attr.x != null`
-for database-backed attributes instead of `has(R.attr.x)`. Three `composition/*` cases whose DENY condition reads a missing attribute: the
+for database-backed attributes instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads a missing attribute: the
 plan negates the deny condition with the same `not` as CEL's `!`, while `checkResource` treats the
 erroring deny rule as not matching and allows the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;

@@ -251,7 +251,7 @@ PDP's goldens (0.54.0) are replayed too.
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 222 / 284 |
+| adversarial | 222 / 286 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -260,7 +260,9 @@ Every case that does not pass is either refused with `ErrUnsupported` or a recor
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the
 skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the Cerbos
 planner dropping `has()` from the plan while `check()` denies rows missing the attribute, so use
-`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
+`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
+while `check()` has no double + int overload and denies every row, so write `1.0`.
 
 ### Known gaps
 

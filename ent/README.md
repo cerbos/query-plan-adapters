@@ -241,21 +241,23 @@ Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are 
 recorded `check()` decisions. The previous PDP's goldens (0.54.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
-and counts toward the total but not toward passed — on 0.55.0 that is four extended cases and one
-adversarial case.
+and counts toward the total but not toward passed — on 0.55.0 that is four extended cases and three
+adversarial cases.
 
 | Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
 | core | 26 / 26 |
 | extended | 56 / 80 |
-| adversarial | 222 / 284 |
+| adversarial | 222 / 286 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
 holds for every dialect. Two of the skipped cases, `null/has/missing-attribute` and
 `null/has/composed-with-comparison`, are the Cerbos planner dropping `has()` from the plan while
 `check()` denies rows missing the attribute, so use `R.attr.x != null` for database-backed
-attributes instead of `has(R.attr.x)`.
+attributes instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
+while `check()` has no double + int overload and denies every row, so write `1.0`.
 
 ### Known gaps
 

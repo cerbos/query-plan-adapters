@@ -269,14 +269,14 @@ total is every golden case in that tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 67 / 80 |
-| adversarial | 255 / 284 |
+| adversarial | 255 / 286 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there are five, four extended and one
+them, because the plan and `check()` disagree. On 0.55.0 there are seven, four extended and three
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the planner drops `has()` from
 the plan while `checkResource` denies the missing-attribute documents, so use `R.attr.x != null` for
-database-backed attributes instead of `has(R.attr.x)`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
+database-backed attributes instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
 missing-`aNumber` document the DENY condition errors, so `check()` does not deny it, while the plan
 negates that condition and the negation is itself a missing-attribute error.
 

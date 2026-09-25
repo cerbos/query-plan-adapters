@@ -2,7 +2,7 @@
 
 # PDP 0.54.0 → 0.55.0
 
-What changes for the 390 cases between the previous PDP (`0.54.0`) and the current one (`0.55.0`).
+What changes for the 392 cases between the previous PDP (`0.54.0`) and the current one (`0.55.0`).
 
 | Change | Cases |
 |---|---|
