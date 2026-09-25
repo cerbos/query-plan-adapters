@@ -2336,6 +2336,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.mainCategory.subCategories.all(s, s.name == "finance")
+    # relation/and/negated-conjunction-one-hop-null-literal
+    - actions:
+        - relation/and/negated-conjunction-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(!R.attr.parent.aBool && R.attr.parent.aOptionalString == null)'
     # relation/and/negated-conjunction-short-circuits-absent-parent
     - actions:
         - relation/and/negated-conjunction-short-circuits-absent-parent
@@ -2345,6 +2354,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(!R.attr.aBool && R.attr.parent.aString == "one")'
+    # relation/and/negated-conjunction-two-hops-null-literal
+    - actions:
+        - relation/and/negated-conjunction-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(!R.attr.parent.inner.aBool && R.attr.parent.inner.aOptionalString == null)'
     # relation/and/one-hop-and-root-attribute
     - actions:
         - relation/and/one-hop-and-root-attribute
@@ -2408,6 +2426,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.aString == "One")'
+    # relation/equals/negated-one-hop-null-literal
+    - actions:
+        - relation/equals/negated-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString == null)'
+    # relation/equals/negated-two-hops-null-literal
+    - actions:
+        - relation/equals/negated-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString == null)'
+    # relation/equals/one-hop-null-literal
+    - actions:
+        - relation/equals/one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString == null
     # relation/equals/one-hop-number
     - actions:
         - relation/equals/one-hop-number
@@ -2435,6 +2480,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.inner.aBool == true
+    # relation/equals/two-hops-null-literal
+    - actions:
+        - relation/equals/two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString == null
     # relation/exists/negated-to-one-chain
     - actions:
         - relation/exists/negated-to-one-chain
@@ -2525,6 +2579,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aNumber < 2
+    # relation/not-equals/negated-one-hop-null-literal
+    - actions:
+        - relation/not-equals/negated-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString != null)'
+    # relation/not-equals/negated-two-hops-null-literal
+    - actions:
+        - relation/not-equals/negated-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString != null)'
     # relation/not-equals/one-hop-null-literal
     - actions:
         - relation/not-equals/one-hop-null-literal
@@ -2534,6 +2606,51 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aOptionalString != null
+    # relation/not-equals/two-hops-null-literal
+    - actions:
+        - relation/not-equals/two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString != null
+    # relation/or/negated-one-hop-not-null-or-negated-root-attribute
+    - actions:
+        - relation/or/negated-one-hop-not-null-or-negated-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString != null) || !R.attr.aBool'
+    # relation/or/negated-two-hops-not-null-or-negated-root-attribute
+    - actions:
+        - relation/or/negated-two-hops-not-null-or-negated-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString != null) || !R.attr.aBool'
+    # relation/or/one-hop-null-literal-or-root-attribute
+    - actions:
+        - relation/or/one-hop-null-literal-or-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString == null || R.attr.aBool
+    # relation/or/two-hops-null-literal-or-root-attribute
+    - actions:
+        - relation/or/two-hops-null-literal-or-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString == null || R.attr.aBool
     # relation/or/two-hops-or-collection-exists
     - actions:
         - relation/or/two-hops-or-collection-exists

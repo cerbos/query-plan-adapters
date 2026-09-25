@@ -645,6 +645,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)"
     },
+    "relation/equals/one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "`parent.aOptionalString == null` is a null-selecting comparison. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/equals/two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
     "relation/exists/negated-to-one-chain": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a negated exists over a chained collection cannot distinguish an absent to-one parent from an empty collection"
@@ -660,6 +668,30 @@
     "relation/in/negated-to-one-chain": {
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/exists/negated-to-one-chain, reached through negated membership: a bool must_not over a nested collection matches a document with no nested array at all, and Elasticsearch cannot tell that from a document whose array holds no match"
+    },
+    "relation/not-equals/negated-one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "`parent.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/not-equals/negated-two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/or/negated-one-hop-not-null-or-negated-root-attribute": {
+      "status": "unsupported",
+      "reason": "`parent.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`, and the `||` does not change the leaf. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/or/negated-two-hops-not-null-or-negated-root-attribute": {
+      "status": "unsupported",
+      "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`, and the `||` does not change the leaf. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/or/one-hop-null-literal-or-root-attribute": {
+      "status": "unsupported",
+      "reason": "`parent.aOptionalString == null` is a null-selecting comparison, and the `||` does not change the leaf. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/or/two-hops-null-literal-or-root-attribute": {
+      "status": "unsupported",
+      "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison, and the `||` does not change the leaf. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
     },
     "relation/size/negated-non-empty-to-one-chain": {
       "status": "unsupported",

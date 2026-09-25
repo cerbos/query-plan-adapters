@@ -557,6 +557,30 @@
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the chained collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.mainCategory.subCategories` is a list reached through a relation, which Chroma metadata has no model for, so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "relation/and/negated-conjunction-one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through De Morgan on the negated conjunction, which turns `parent.aOptionalString == null` into `!= null`: `!= null` over the parent chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/and/negated-conjunction-two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through De Morgan on the negated conjunction, which turns `parent.inner.aOptionalString == null` into `!= null`: `!= null` over the parent.inner chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/equals/negated-one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through the negation pushed into `== null`: `!= null` over the parent chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/equals/negated-two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through the negation pushed into `== null`: `!= null` over the parent.inner chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/equals/one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused: a missing parent hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/equals/two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused: a missing parent or inner hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
     "relation/exists/negated-to-one-chain": {
       "status": "unsupported",
       "reason": "Chroma has no negation of a collection predicate, and no relation model to reach the chained collection with in the first place. `allowPostFilter` does not lift it: `R.attr.mainCategory.subCategories` is a list reached through a relation, which Chroma metadata has no model for, so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -581,9 +605,37 @@
       "status": "unsupported",
       "reason": "Chroma's $in tests a metadata field against a literal list, not whether a literal is a member of a list-valued metadata field. `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them. `allowPostFilter` does not lift it: `R.attr.mainCategory.subNames` is a list reached through a relation, which Chroma metadata has no model for, so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "relation/not-equals/negated-one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused (the negation pushed into `!= null` makes it `== null`): a missing parent hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/not-equals/negated-two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused (the negation pushed into `!= null` makes it `== null`): a missing parent or inner hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
     "relation/not-equals/one-hop-null-literal": {
       "status": "unsupported",
       "reason": "`!= null` over the chain key parent.aOptionalString lowers to $ne, and a Chroma $ne matches a document missing that key, where CEL denies on the missing-attribute error; a null literal has no other Chroma spelling, since Chroma metadata has no null. Both flavours of absence — no parent at all, and a parent whose optional column is NULL — are stored as a missing key, so there is nothing for Chroma to distinguish them with. `allowPostFilter` does not lift it: `ne` compares a null literal, and Chroma metadata has no null, so a record cannot tell an explicit null attribute from a missing one."
+    },
+    "relation/not-equals/two-hops-null-literal": {
+      "status": "unsupported",
+      "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, two levels out: `!= null` over the parent.inner chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
+    },
+    "relation/or/negated-one-hop-not-null-or-negated-root-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused under the `||` as well (the negation pushed into `!= null` makes it `== null`): a missing parent hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/or/negated-two-hops-not-null-or-negated-root-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused under the `||` as well (the negation pushed into `!= null` makes it `== null`): a missing parent or inner hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/or/one-hop-null-literal-or-root-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused under the `||` as well: a missing parent hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/or/two-hops-null-literal-or-root-attribute": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused under the `||` as well: a missing parent or inner hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
     },
     "relation/or/two-hops-or-collection-exists": {
       "status": "unsupported",
