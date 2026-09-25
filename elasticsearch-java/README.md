@@ -464,14 +464,14 @@ would change the security and performance profile of every filter.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
-indexes the 38 seed documents in a real Elasticsearch, translates every plan recorded from the
+indexes the 41 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
 the current PDP (0.55.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 25 / 26 |
-| extended | 31 / 80 |
+| extended | 28 / 80 |
 | adversarial | 87 / 250 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
@@ -479,9 +479,12 @@ with a wrong filter, or skipped as a planner divergence. The refused shapes are 
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute`: the planner folds
+pass them. On 0.55.0 that is four extended cases. In `null/has/missing-attribute` the planner folds
 `has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those documents, so use
-`R.attr.x != null` for indexed attributes instead of `has(R.attr.x)`.
+`R.attr.x != null` for indexed attributes instead of `has(R.attr.x)`. In three `composition/*`
+cases a DENY condition over a missing attribute does not fire in `check()`, while the plan negates
+it and so excludes the document
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 ## Mapping hazards
 

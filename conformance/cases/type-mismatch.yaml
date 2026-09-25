@@ -254,13 +254,10 @@ cases:
 - id: 'type-mismatch/not-equals/string-field-against-map-literal'
   tier: adversarial
   intent: 'Inequality between a string attribute and a map literal (aString != {"a": 1}).'
-  trap: 'A string is never equal to a map, so != holds for every row; a store that errors or compares by coercion drops rows.'
+  trap: 'A string is never equal to a map, so != holds for every row with a present aString; a store that errors or compares by coercion drops rows, and folding it to TRUE readmits the missing-aString row (j1), which CEL denies.'
   condition:
     match:
       expr: 'R.attr.aString != {"a": 1}'
-  degenerate:
-    oracle: total
-    reason: 'A string is never equal to a map literal, so != holds for every seed. A store that errors or compares by coercion would drop rows.'
 - id: 'type-mismatch/size/boolean-field'
   tier: adversarial
   intent: 'size() of a boolean attribute (size(R.attr.aBool) > 0).'

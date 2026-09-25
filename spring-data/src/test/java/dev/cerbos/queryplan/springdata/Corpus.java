@@ -162,9 +162,9 @@ final class Corpus {
      */
     static final Map<String, AttributeMapping> MAPPING = Map.ofEntries(
             Map.entry("request.resource.id", AttributeMapping.field("id")),
-            Map.entry("request.resource.attr.aBool", AttributeMapping.field("aBool")),
-            Map.entry("request.resource.attr.aString", AttributeMapping.field("aString")),
-            Map.entry("request.resource.attr.aNumber", AttributeMapping.field("aNumber")),
+            Map.entry("request.resource.attr.aBool", omitted("aBool")),
+            Map.entry("request.resource.attr.aString", omitted("aString")),
+            Map.entry("request.resource.attr.aNumber", omitted("aNumber")),
             Map.entry("request.resource.attr.aDouble", omitted("aDouble")),
             Map.entry("request.resource.attr.aOptionalString", omitted("aOptionalString")),
             // An ISO-date string column.
@@ -173,20 +173,20 @@ final class Corpus {
             Map.entry("request.resource.attr.scope", omitted("scope")),
             Map.entry("request.resource.attr.createdAt", omitted("createdAt")),
             Map.entry("request.resource.attr.updatedAt", omitted("updatedAt")),
-            Map.entry("request.resource.attr.obj.inner", AttributeMapping.field("aString")),
+            Map.entry("request.resource.attr.obj.inner", omitted("aString")),
             // The to-one chain. Associations are LEFT-joined, so an absent parent leaves only its
             // own comparison UNKNOWN.
-            Map.entry("request.resource.attr.parent.aBool", AttributeMapping.field("parent.aBool")),
-            Map.entry("request.resource.attr.parent.aString", AttributeMapping.field("parent.aString")),
-            Map.entry("request.resource.attr.parent.aNumber", AttributeMapping.field("parent.aNumber")),
+            Map.entry("request.resource.attr.parent.aBool", omitted("parent.aBool")),
+            Map.entry("request.resource.attr.parent.aString", omitted("parent.aString")),
+            Map.entry("request.resource.attr.parent.aNumber", omitted("parent.aNumber")),
             Map.entry("request.resource.attr.parent.aOptionalString",
                     omitted("parent.aOptionalString")),
             Map.entry("request.resource.attr.parent.inner.aBool",
-                    AttributeMapping.field("parent.inner.aBool")),
+                    omitted("parent.inner.aBool")),
             Map.entry("request.resource.attr.parent.inner.aString",
-                    AttributeMapping.field("parent.inner.aString")),
+                    omitted("parent.inner.aString")),
             Map.entry("request.resource.attr.parent.inner.aNumber",
-                    AttributeMapping.field("parent.inner.aNumber")),
+                    omitted("parent.inner.aNumber")),
             Map.entry("request.resource.attr.parent.inner.aOptionalString",
                     omitted("parent.inner.aOptionalString")),
             // `owner` and `coOwner` reuse the aOptionalString and scope columns, but send a NULL

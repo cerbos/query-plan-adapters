@@ -21,6 +21,12 @@ cases:
     condition:
       match:
         expr: 'R.attr.aNumber > 10'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/530
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'j2 has no aNumber, so the DENY condition errors and check() does not apply the rule: the ALLOW (aBool == true) grants j2. The plan carries the DENY as not(gt(aNumber, 10)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2.'
 - id: 'composition/allow-and-deny/deny-over-two-allows'
   tier: extended
   intent: 'Two conditional ALLOW rules plus a DENY (aNumber > 20), planned as and(not(gt), or(and, and)).'
@@ -71,6 +77,12 @@ cases:
     condition:
       match:
         expr: R.attr.aNumber < 0
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/530
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'j2 has no aNumber, so the DENY condition errors and check() does not apply the rule: the unconditional ALLOW grants j2. The plan is not(lt(aNumber, 0)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2.'
 - id: 'composition/derived-role/conditional-derived-role'
   tier: extended
   intent: 'An ALLOW for a derived role whose condition reads the resource (aBool == true), plus aNumber < 5, planned as and(lt, eq).'
@@ -141,3 +153,9 @@ cases:
     condition:
       match:
         expr: V.compose_large
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/530
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'j2 has no aNumber, so V.compose_large errors and check() does not apply the DENY: the ALLOW grants j2. The plan carries the DENY as not(gt(aNumber, 10)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2.'

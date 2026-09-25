@@ -26,7 +26,7 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 38 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 41 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |
@@ -164,6 +164,10 @@ a vacuous pass.
   *explicit null value*. Under CEL, `null != "x"` is true. `resources.json` shows each attribute's
   convention per row. See
   [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+- **Every scalar a case reads can be missing.** Seeds `j1`, `j2` and `j3` each leave exactly one of
+  `aString` (and `obj.inner`, its alias), `aNumber` and `aBool` NULL, with every other attribute
+  present, so each negated case over those attributes meets a missing-attribute row, and a failure
+  names the column. A harness maps all three as nullable, on the omitted convention.
 - **The real to-one relation.** `parentSeedId` names the seed whose `aBool`, `aNumber`, `aString`
   and `aOptionalString` form this row's `parent`. That seed's own parent forms `parent.inner`, and the
   chain stops there.

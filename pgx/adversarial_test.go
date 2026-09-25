@@ -68,9 +68,9 @@ const (
 const schemaDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
-	a_bool             boolean          NOT NULL,
-	a_string           text             NOT NULL,
-	a_number           bigint           NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_double           double precision,
 	a_optional_string  text,
 	created_by         text             NOT NULL,
@@ -106,18 +106,18 @@ CREATE TABLE adversarial_label (
 
 CREATE TABLE adversarial_parent (
 	id                 text    PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 
 CREATE TABLE adversarial_inner (
 	id                 text    PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -222,12 +222,15 @@ func buildMapper() cerbospgx.Mapper {
 		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
 		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
 		// and PostgreSQL render "true", and nothing in the plan names a column's type.
-		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbospgx.ValueBool},
+		//
+		// aBool, aString and aNumber are NULL on one seed each (j3, j1, j2), and the corpus omits
+		// the attribute there, so each is declared NullConventionOmitted like aOptionalString.
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
 		// undeclared pair fails closed rather than emitting a numeric `+`.
-		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbospgx.ValueString},
-		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbospgx.ValueNumber},
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbospgx.ValueNumber, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbospgx.ValueNumber},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
@@ -242,7 +245,7 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbospgx.ValueTimestamp},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
-		"request.resource.attr.obj.inner": {Column: "a_string"},
+		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
 
 		"request.resource.attr.tags":     {Relation: tags},
 		"request.resource.attr.tagNames": {Relation: &tagNames},

@@ -27,7 +27,9 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j2",
+    "j3"
   ],
   "degenerateReason": null,
   "id": "string/starts-with/negated-field-to-field",

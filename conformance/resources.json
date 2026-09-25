@@ -1356,6 +1356,67 @@
         "tags": []
       },
       "id": "i9"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 33.3,
+        "aNumber": 33,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {},
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "j1"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 34.3,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "nullnumber",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nullnumber"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "j2"
+    },
+    {
+      "attr": {
+        "aBoolList": [],
+        "aDouble": 35.3,
+        "aNumber": 35,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "nullbool",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nullbool"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "j3"
     }
   ]
 }

@@ -380,23 +380,26 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
-queries over the corpus's 38 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+queries over the corpus's 41 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
 `utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
 out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 63 / 80 |
+| extended | 60 / 80 |
 | adversarial | 195 / 250 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is one extended case, `null/has/missing-attribute`: the planner
+never as passed. On 0.55.0 that is four extended cases. `null/has/missing-attribute`: the planner
 folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
 missing-attribute rows, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`.
+`has(R.attr.x)`. And the three `composition/*` cases with a conditional `DENY` rule: a deny
+condition that errors on a missing attribute does not deny in `checkResource`, while the plan
+negates it as an ordinary condition, which a missing attribute leaves unsatisfiable
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 **Providers.** `ADAPTER_TEST_MYSQL_COLLATION` replays the MySQL legs under another collation, which
 is how the figures in the collation section were measured. MySQL adds no refused shape. SQL Server

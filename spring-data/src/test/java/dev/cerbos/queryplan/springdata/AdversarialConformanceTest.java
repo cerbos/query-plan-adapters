@@ -252,9 +252,9 @@ class AdversarialConformanceTest {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record Tag(String id, String name) {}
 
-    /** One {@code seeds.json} row. List elements are boxed: the corpus carries null elements. */
+    /** One {@code seeds.json} row. Scalars and list elements are boxed: the corpus carries nulls. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record Seed(String id, boolean aBool, String aString, int aNumber,
+    private record Seed(String id, Boolean aBool, String aString, Integer aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
                         List<Tag> tags, List<String> subCategoryNames, String parentSeedId) {}
 

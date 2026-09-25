@@ -175,10 +175,29 @@ export const MAPPER: Mapper = {
   // casts a query literal to it (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the
   // declaration is what lets the adapter answer a literal of another type as CEL does instead
   // (the `type-mismatch/*` scalar cases).
-  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
-  "request.resource.attr.aString": { field: "aString", valueType: "string" },
-  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
-  "request.resource.attr.aDouble": { field: "aDouble", nullable: true },
+  //
+  // All three are `nullable` as well: seeds j1, j2 and j3 store a null in one of them, which the
+  // corpus sends as a missing attribute (conformance/README.md, "The dataset").
+  "request.resource.attr.aBool": {
+    field: "aBool",
+    valueType: "boolean",
+    nullable: true,
+  },
+  "request.resource.attr.aString": {
+    field: "aString",
+    valueType: "string",
+    nullable: true,
+  },
+  "request.resource.attr.aNumber": {
+    field: "aNumber",
+    valueType: "number",
+    nullable: true,
+  },
+  "request.resource.attr.aDouble": {
+    field: "aDouble",
+    valueType: "number",
+    nullable: true,
+  },
   "request.resource.attr.aOptionalString": {
     field: "aOptionalString",
     nullable: true,
@@ -203,7 +222,7 @@ export const MAPPER: Mapper = {
   "request.resource.attr.coOwner": { field: "scope" },
   // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
   // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": { field: "aString" },
+  "request.resource.attr.obj.inner": { field: "aString", nullable: true },
   // The corpus's one REAL to-one chain (the `relation/*` cases), stored as an embedded subdocument
   // per level rather than a joined collection. `type: "one"` flattens the path to `parent.aBool`
   // AND declares the level as absent-able, which is what makes the adapter require it outside
@@ -214,9 +233,9 @@ export const MAPPER: Mapper = {
       name: "parent",
       type: "one",
       fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
+        aBool: { field: "aBool", nullable: true },
+        aString: { field: "aString", nullable: true },
+        aNumber: { field: "aNumber", nullable: true },
         aOptionalString: { field: "aOptionalString", nullable: true },
       },
     },
@@ -226,9 +245,9 @@ export const MAPPER: Mapper = {
       name: "parent.inner",
       type: "one",
       fields: {
-        aBool: { field: "aBool" },
-        aString: { field: "aString" },
-        aNumber: { field: "aNumber" },
+        aBool: { field: "aBool", nullable: true },
+        aString: { field: "aString", nullable: true },
+        aNumber: { field: "aNumber", nullable: true },
         aOptionalString: { field: "aOptionalString", nullable: true },
       },
     },

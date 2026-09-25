@@ -157,9 +157,10 @@ class AdvResource(AdvBase):
     __tablename__ = "adversarial_resource"
 
     id = Column(String, primary_key=True)
-    a_bool = Column(Boolean, nullable=False)
-    a_string = Column(String, nullable=False)
-    a_number = Column(Integer, nullable=False)
+    # Nullable: seeds j1, j2 and j3 each leave one of them NULL, a missing attribute (#488).
+    a_bool = Column(Boolean, nullable=True)
+    a_string = Column(String, nullable=True)
+    a_number = Column(Integer, nullable=True)
     a_double = Column(Float(precision=53), nullable=True)
     a_optional_string = Column(String, nullable=True)
     created_by = Column(String, nullable=False)
@@ -580,9 +581,14 @@ def reads_declared_collection(case: dict[str, Any]) -> bool:
 
 
 # `owner` and `coOwner` reuse columns under the other null convention: the corpus
-# sends an explicit null instead of omitting the attribute (#308). `aOptionalString`
-# is omitted when NULL, so `== null` against it is a CEL error, not a match (#302).
+# sends an explicit null instead of omitting the attribute (#308). The root scalars
+# are omitted when NULL, so `== null` against one is a CEL error, not a match (#302,
+# #488); `obj.inner` aliases `aString`.
 ATTRIBUTE_NULL_REPRESENTATION = {
+    "request.resource.attr.aBool": "omitted",
+    "request.resource.attr.aString": "omitted",
+    "request.resource.attr.aNumber": "omitted",
+    "request.resource.attr.obj.inner": "omitted",
     "request.resource.attr.aOptionalString": "omitted",
     "tagName": "explicit",
     "request.resource.attr.owner": "explicit",

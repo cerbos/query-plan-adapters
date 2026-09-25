@@ -66,6 +66,33 @@ const CONDITIONAL = TRANSLATED.filter(
   ({ kind }) => kind === PlanKind.CONDITIONAL,
 );
 
+/**
+ * The corpus mapping with every key asserted present (`required: true`) — a caller-supplied
+ * argument the corpus cannot vary. The corpus mapping itself can assert it for no scalar, since
+ * every scalar attribute is missing on some seed, so this is the only mapping under which the
+ * adapter's inequality path is reached at all. It is not a sound mapping for the corpus dataset
+ * and is never used to select documents.
+ */
+const PRESENT_EVERYWHERE: Record<string, FieldNameMapperConfig> =
+  Object.fromEntries(
+    Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => [
+      reference,
+      typeof entry === "string"
+        ? { field: entry, required: true }
+        : { ...entry, required: true },
+    ]),
+  );
+
+/** Every current golden this adapter translates under `PRESENT_EVERYWHERE`, as a conditional. */
+const CONDITIONAL_IF_PRESENT = readGoldens(CURRENT).flatMap(({ id }) => {
+  try {
+    const result = translate(id, { fieldNameMapper: PRESENT_EVERYWHERE });
+    return result.kind === PlanKind.CONDITIONAL ? [{ id, ...result }] : [];
+  } catch {
+    return [];
+  }
+});
+
 describe("the refusal type", () => {
   // Every shape this adapter cannot express raises `UnsupportedOperatorError`, which the
   // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
@@ -158,6 +185,10 @@ describe("what an emitted filter may contain", () => {
   const ALL_COMPARISONS = CONDITIONAL.flatMap(({ id, filters }) =>
     literalsOf(filters).map((comparison) => ({ action: id, ...comparison })),
   );
+  const COMPARISONS_IF_PRESENT = CONDITIONAL_IF_PRESENT.flatMap(
+    ({ id, filters }) =>
+      literalsOf(filters).map((comparison) => ({ action: id, ...comparison })),
+  );
 
   /**
    * An unmapped reference falls back to the Cerbos path verbatim (`request.resource.attr.aString`),
@@ -184,7 +215,9 @@ describe("what an emitted filter may contain", () => {
    */
   test("no negation operator survives into an emitted filter", () => {
     const logical = new Set(
-      CONDITIONAL.flatMap(({ filters }) => shapeOf(filters).logical),
+      [...CONDITIONAL, ...CONDITIONAL_IF_PRESENT].flatMap(
+        ({ filters }) => shapeOf(filters).logical,
+      ),
     );
 
     expect([...logical].sort()).toEqual(["$and", "$or"]);
@@ -193,10 +226,11 @@ describe("what an emitted filter may contain", () => {
   /**
    * Anti-vacuity for the rule above: the corpus has to still drive negation through both De Morgan
    * branches and through operator inversion, or "no `$not` survived" would be a statement about a
-   * corpus that never negates anything.
+   * corpus that never negates anything. The De Morgan cases lower to an inequality over `aBool`,
+   * which the corpus mapping cannot assert present, so they are read under `PRESENT_EVERYWHERE`.
    */
   test("the corpus still drives the negations that rule polices", () => {
-    const conditional = CONDITIONAL.map(({ id }) => id);
+    const conditional = CONDITIONAL_IF_PRESENT.map(({ id }) => id);
     for (const id of [
       "logic/not/double-negation",
       "logic/not/triple-negation",
@@ -206,7 +240,7 @@ describe("what an emitted filter may contain", () => {
     ]) {
       expect(conditional).toContain(id);
     }
-    const inverted = ALL_COMPARISONS.filter(({ operator }) =>
+    const inverted = COMPARISONS_IF_PRESENT.filter(({ operator }) =>
       ["$ne", "$nin", "$gte", "$lte"].includes(operator),
     );
     expect(inverted.length).toBeGreaterThan(0);
@@ -233,8 +267,8 @@ describe("what an emitted filter may contain", () => {
 
   /**
    * The anti-vacuity half of the rule above, and the assertion that proves `required` is read at
-   * all: stripping it from the mapper must move exactly the actions whose filter uses an inequality
-   * out of the translated set, and nothing else.
+   * all: starting from `PRESENT_EVERYWHERE`, stripping it from the mapper must move exactly the
+   * actions whose filter uses an inequality out of the translated set, and nothing else.
    *
    * A rule about a flag nothing consults passes for every corpus. This is the mutation that says
    * otherwise — it is the same argument convex's `nullable` pin makes, applied to the flag this
@@ -251,12 +285,13 @@ describe("what an emitted filter may contain", () => {
         ]),
       );
 
-    const nowRefused = CONDITIONAL.map(({ id }) => id).filter((id) =>
-      thrownBy(() => translate(id, { fieldNameMapper: optionalEverywhere })),
+    const nowRefused = CONDITIONAL_IF_PRESENT.map(({ id }) => id).filter(
+      (id) =>
+        thrownBy(() => translate(id, { fieldNameMapper: optionalEverywhere })),
     );
     const emitsInequality = [
       ...new Set(
-        ALL_COMPARISONS.filter(({ operator }) =>
+        COMPARISONS_IF_PRESENT.filter(({ operator }) =>
           ["$ne", "$nin"].includes(operator),
         ).map(({ action }) => action),
       ),
@@ -316,7 +351,7 @@ describe("what an emitted filter may contain", () => {
  */
 describe("mapper forms", () => {
   /** A translated shape whose filter names two different metadata keys. */
-  const RECORD_ACTION = "logic/and/three-conjuncts";
+  const RECORD_ACTION = "logic/or/at-root";
 
   test("a function mapper resolves the same references as a record mapper", () => {
     const asFunction: FieldMapper = (reference) =>
@@ -329,14 +364,19 @@ describe("mapper forms", () => {
 
   /**
    * `comparison/not-equals/value-first` is the discriminating case for the two tests below: under
-   * the corpus mapper, where `aString` is declared `required: true`, it translates to an inequality
-   * over that key. This pins that precondition, so the tests below cannot pass against some other
-   * shape.
+   * a mapper that declares `aString` `required: true`, it translates to an inequality over that
+   * key. This pins that precondition, so the tests below cannot pass against some other shape.
    */
   const VF_NE = "comparison/not-equals/value-first";
 
   test("the discriminating case is an inequality over a required key", () => {
-    expect(literalsOf(translate(VF_NE).filters)).toEqual([
+    const aStringRequired = {
+      ...FIELD_NAME_MAPPER,
+      "request.resource.attr.aString": { field: "aString", required: true },
+    };
+    expect(
+      literalsOf(translate(VF_NE, { fieldNameMapper: aStringRequired }).filters),
+    ).toEqual([
       { field: "aString", operator: "$ne", value: "one" },
     ]);
   });

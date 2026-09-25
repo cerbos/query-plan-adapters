@@ -253,6 +253,57 @@ const translateBareVariable = (
   );
 };
 
+/**
+ * Whether evaluating `operand` always reads the variable `name`, so that a missing attribute
+ * there is an error CEL cannot avoid. `&&` and `||` absorb an erroring operand when another
+ * decides the result, a ternary reads only the branch its condition selects, and a lambda body
+ * is never evaluated over an empty collection: each of those reads `name` unconditionally only
+ * if every path through it does. Every other operator is strict in its operands.
+ */
+const alwaysReads = (operand: PlanExpressionOperand, name: string): boolean => {
+  if (isVariable(operand)) {
+    return operand.name === name;
+  }
+  if (!isExpression(operand)) {
+    return false;
+  }
+  const [first, ...rest] = operand.operands;
+  switch (operand.operator) {
+    case "and":
+    case "or":
+      return operand.operands.every((child) => alwaysReads(child, name));
+    case "if":
+      return (
+        (first !== undefined && alwaysReads(first, name)) ||
+        (rest.length > 0 && rest.every((child) => alwaysReads(child, name)))
+      );
+    default:
+      if (LAMBDA_BINDING_OPERATORS.has(operand.operator)) {
+        return first !== undefined && alwaysReads(first, name);
+      }
+      return operand.operands.some((child) => alwaysReads(child, name));
+  }
+};
+
+const nullableGuardIsExact = (
+  operand: PlanExpressionOperand,
+  ctx: TranslateContext,
+): boolean => {
+  const nullable = collectVariableNames(operand).filter((name) =>
+    isNullableReference(name, ctx.mapper),
+  );
+  if (nullable.length === 0) {
+    return true;
+  }
+  return (
+    ctx.scope.kind === "root" &&
+    nullable.every((name) => alwaysReads(operand, name)) &&
+    nullable.every(
+      (name) => resolveFieldReference(name, ctx.mapper).relation?.type !== "many",
+    )
+  );
+};
+
 const translateNot = (
   operands: PlanExpressionOperand[],
   ctx: TranslateContext,
@@ -275,11 +326,9 @@ const translateNot = (
     };
   }
   if (
-    collectVariableNames(operand).some((name) =>
-      isNullableReference(name, ctx.mapper),
-    ) ||
     (isExpression(operand) &&
-      ["exists", "exists_one", "all"].includes(operand.operator))
+      ["exists", "exists_one", "all"].includes(operand.operator)) ||
+    !nullableGuardIsExact(operand, ctx)
   ) {
     throw new UnsupportedQueryPlanError(
       "not over nullable fields or collection macros cannot preserve Cerbos error semantics",

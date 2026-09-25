@@ -28,7 +28,9 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j1",
+    "j3"
   ],
   "degenerateReason": null,
   "id": "type-mismatch/not-equals/number-field-against-string-literal",

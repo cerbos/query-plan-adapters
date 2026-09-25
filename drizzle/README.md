@@ -379,21 +379,29 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Drizzle
-queries over the corpus's 38 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+queries over the corpus's 41 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
 Passed cases on the current PDP, 0.55.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 76 / 80 |
+| extended | 73 / 80 |
 | adversarial | 240 / 250 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
-reason. One extended case, `null/has/missing-attribute`, is a known Cerbos planner divergence and is
-skipped: the planner folds it to `ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute
-rows, so use `R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
+reason. Four extended cases are known Cerbos planner divergences and are skipped:
+
+- `null/has/missing-attribute`: the planner folds it to `ALWAYS_ALLOWED` while `checkResource`
+  denies the missing-attribute rows, so use `R.attr.x != null` for database-backed attributes
+  instead of `has(R.attr.x)`.
+- `composition/allow-and-deny/conditional-deny`,
+  `composition/allow-and-deny/unconditional-allow-conditional-deny` and
+  `composition/variable/allow-and-deny-through-variables`: a DENY condition that errors on a
+  missing attribute does not fire, so `check()` allows the row, but the plan spells the deny as a
+  plain `not(...)` that denies it
+  ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 ## Mapping hazards
 

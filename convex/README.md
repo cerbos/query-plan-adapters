@@ -244,21 +244,23 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 38 seed documents. Passed cases on the current PDP, 0.55.0, where the
+function over the corpus's 41 seed documents. Passed cases on the current PDP, 0.55.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 70 / 80 |
+| extended | 67 / 80 |
 | adversarial | 222 / 250 |
 
 Cases the golden marks as a Cerbos planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there is one, `null/has/missing-attribute`
-(extended), which is why that tier's passed and refused cases add up to one fewer than its total:
+them, because the plan and `check()` disagree. On 0.55.0 there are four, all extended, which is why
+that tier's passed and refused cases add up to four fewer than its total. `null/has/missing-attribute`:
 the planner folds `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies
 the missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead
-of `has(R.attr.x)`.
+of `has(R.attr.x)`. And three `composition/*` cases whose DENY rule reads `aNumber`: on the
+missing-`aNumber` document the DENY condition errors, so `check()` does not deny it, while the plan
+negates that condition and the negation is itself a missing-attribute error.
 
 Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
 documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -271,19 +273,21 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 318 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 315 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
-| Convex's filter engine, alone | 55 |
-| the engine narrowing and the `postFilter` deciding (a root `and` mixing both) | 2 |
-| the adapter's `postFilter`, alone | 255 |
+| Convex's filter engine, alone | 15 |
+| the adapter's `postFilter`, alone | 294 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
-Convex's own comparison semantics only decide the 55, which include the null comparisons against
+Convex's own comparison semantics only decide the 15, which include the null comparisons against
 the explicit-null `owner` field (`q.eq(field, null)` against a stored null).
+The corpus's three most-read scalars, `aBool`, `aString` and `aNumber`, can each be absent (one
+seed apiece), so the harness declares them `nullable` and their predicates are post-filtered too:
+Convex's filter engine cannot tell an absent field from a present one the way CEL does.
 
 The harness runs against a self-hosted `convex-backend` container pinned in `docker-compose.yml`.
 Convex Cloud is not exercised: any difference in its filter engine, value ordering or

@@ -100,13 +100,10 @@ cases:
 - id: 'size/less-than/huge-threshold'
   tier: adversarial
   intent: 'size() of a string compared < 4294967296 (2^32), outside 32-bit int range.'
-  trap: 'A narrowing int cast wraps 2^32 to 0 and returns nothing; the comparison is true for every present string, the empty one included.'
+  trap: 'A narrowing int cast wraps 2^32 to 0 and returns nothing; the comparison is true for every present string, the empty one included, and errors on the missing one (j1), which a guard folded to TRUE readmits.'
   condition:
     match:
       expr: size(R.attr.aString) < 4294967296
-  degenerate:
-    oracle: total
-    reason: 'Every seed carries a non-null aString shorter than 2^32. An unguarded int narrowing that wraps the threshold to 0 would return nothing; the greater-than sibling is the other half.'
 - id: 'size/less-than/negated-huge-negative-threshold-on-missing-attribute'
   tier: adversarial
   intent: 'Negated size(optional string) < -5000000000, OR''d with aNumber > 10.'

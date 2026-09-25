@@ -270,7 +270,8 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
   outer-document references inside a collection predicate, nested collection counts, correlated
   variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
   non-zero integer constant, negated collection
-  macros over nullable fields (including a negated string match against a nullable field needle),
+  macros, a negation over a nullable field that some path through it can leave unread (one side of
+  `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation,
   whole-list equality (including over a `map()` projection), list-valued membership needles, and
   `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
   refused corpus case with its reason).
@@ -279,20 +280,23 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 38 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 41 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
 0.55.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 52 / 80 |
-| adversarial | 153 / 250 |
+| extended | 49 / 80 |
+| adversarial | 163 / 250 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute` — the planner folds
+pass them. On 0.55.0 that is four extended cases. `null/has/missing-attribute`: the planner folds
 `has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
 missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`. Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
+`has(R.attr.x)`. Three `composition/*` cases whose DENY condition reads a missing attribute: the
+plan negates the deny condition with the same `not` as CEL's `!`, while `checkResource` treats the
+erroring deny rule as not matching and allows the document
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
@@ -305,7 +309,9 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
   field is answered inside `$expr` with `$literal` needles for the same reason.
 - **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
   from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
-  demands. A field without it compares a stored null as a null *value*. The global
+  demands. Under a negation its non-null guard is ANDed outside the `$nor`, so `!(x > 3)` denies
+  a document with no `x` as CEL does, where a bare `$nor` would match it. A field without it
+  compares a stored null as a null *value*. The global
   `nullAttributeRepresentation: "omitted"` option is the fail-closed backstop for mappings that do
   not declare it: it refuses every null operand.
 

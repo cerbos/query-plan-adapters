@@ -34,7 +34,10 @@
     "i6",
     "i7",
     "i8",
-    "i9"
+    "i9",
+    "j1",
+    "j2",
+    "j3"
   ],
   "degenerateReason": null,
   "id": "composition/allow-and-deny/unconditional-allow-conditional-deny",
@@ -65,7 +68,14 @@
     "kind": "KIND_CONDITIONAL"
   },
   "planError": null,
-  "plannerDivergence": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/530",
+    "pdp": [
+      "0.54.0",
+      "0.55.0"
+    ],
+    "reason": "j2 has no aNumber, so the DENY condition errors and check() does not apply the rule: the unconditional ALLOW grants j2. The plan is not(lt(aNumber, 0)), which is itself a missing-attribute error on j2 and denies it, so every faithful translation drops j2."
+  },
   "request": {
     "action": "composition/allow-and-deny/unconditional-allow-conditional-deny",
     "resourceKind": "conformance"

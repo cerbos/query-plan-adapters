@@ -41,9 +41,9 @@ const BASE_EMBEDDING = [0.1, 0.2, 0.3, 0.4];
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
@@ -88,14 +88,18 @@ function metadataFor(seed: Seed): Metadata {
   const metadata: Metadata = {
     // Chroma's `where` filters metadata only, so the id is mirrored into a key for `R.id`.
     id: seed.id,
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-    // `obj.inner` mirrors aString in the corpus resource.
-    "obj.inner": seed.aString,
   };
-  if (seed.aOptionalString !== null) {
-    metadata["aOptionalString"] = seed.aOptionalString;
+  // `obj.inner` mirrors aString in the corpus resource. Every scalar can be NULL (seeds j1, j2 and
+  // j3 each leave one of the first three out), and a NULL column writes no key.
+  const scalars: [string, string | number | boolean | null][] = [
+    ["aBool", seed.aBool],
+    ["aString", seed.aString],
+    ["aNumber", seed.aNumber],
+    ["obj.inner", seed.aString],
+    ["aOptionalString", seed.aOptionalString],
+  ];
+  for (const [key, value] of scalars) {
+    if (value !== null) metadata[key] = value;
   }
   for (const key of ["aDouble", "createdAt", "updatedAt"] as const) {
     const value = derived[key];
@@ -110,11 +114,14 @@ function metadataFor(seed: Seed): Metadata {
   ];
   for (const [prefix, level] of levels) {
     if (level === undefined) continue;
-    metadata[`${prefix}.aBool`] = level.aBool;
-    metadata[`${prefix}.aString`] = level.aString;
-    metadata[`${prefix}.aNumber`] = level.aNumber;
-    if (level.aOptionalString !== null) {
-      metadata[`${prefix}.aOptionalString`] = level.aOptionalString;
+    for (const key of [
+      "aBool",
+      "aString",
+      "aNumber",
+      "aOptionalString",
+    ] as const) {
+      const value = level[key];
+      if (value !== null) metadata[`${prefix}.${key}`] = value;
     }
   }
   return metadata;

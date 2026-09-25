@@ -333,16 +333,19 @@ in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
+| extended | 58 / 80 |
 | adversarial | 182 / 250 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
-skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 that is one
-extended case, `null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing
+skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
+four extended cases. In `null/has/missing-attribute` the Cerbos planner folds `has()` on a missing
 attribute to `ALWAYS_ALLOWED`, but `check()` denies those rows. Until the planner is fixed, use
-`R.attr.x != null` instead of `has(R.attr.x)` for database attributes.
+`R.attr.x != null` instead of `has(R.attr.x)` for database attributes. In the other three, all
+`composition/*`, a DENY condition reads an attribute the row is missing: `check()` skips the
+erroring DENY and the ALLOW stands, while the plan's `not(...)` of it denies the row
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 ## Mapping hazards
 

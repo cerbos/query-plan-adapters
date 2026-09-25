@@ -193,21 +193,28 @@ field name.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
-metadata queries over the corpus's 38 seed records. Passed cases on the current PDP, 0.55.0, out of
+metadata queries over the corpus's 41 seed records. Passed cases on the current PDP, 0.55.0, out of
 every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 19 / 26 |
-| extended | 13 / 80 |
-| adversarial | 30 / 250 |
+| core | 16 / 26 |
+| extended | 7 / 80 |
+| adversarial | 27 / 250 |
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
-one extended case, `null/has/missing-attribute`: the planner folds `has()` on a missing attribute to
-`ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute documents, so use
-`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`.
+four extended cases. `null/has/missing-attribute`: the planner folds `has()` on a missing attribute
+to `ALWAYS_ALLOWED` while `checkResource` denies the missing-attribute documents, so use
+`R.attr.x != null` for database-backed attributes instead of `has(R.attr.x)`. Three `composition/*`
+cases whose DENY condition reads a missing attribute: the plan negates the deny condition with the
+same `not` as CEL's `!`, while `checkResource` treats the erroring deny rule as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+
+Every scalar attribute in the corpus is missing on some seed, so the harness mapping declares no
+metadata key but the id `required: true`, and every inequality over a scalar is refused. The corpus
+therefore proves no `$ne`/`$nin` filter; `src/translator.test.ts` pins that `required` gates them.
 
 ## Mapping hazards
 
