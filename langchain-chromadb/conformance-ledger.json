@@ -145,6 +145,10 @@
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no relation or nested-object model, so a macro over the to-one parent's keys cannot be translated"
+    },
     "collection/exists/negated": {
       "status": "unsupported",
       "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -156,6 +160,10 @@
     "collection/exists/negated-empty-collection": {
       "status": "unsupported",
       "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one"
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
