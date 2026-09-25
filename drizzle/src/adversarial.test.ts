@@ -52,9 +52,9 @@ interface Tag {
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   tags: Tag[];
   subCategoryNames: string[];
@@ -106,9 +106,9 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 
 interface ResourceRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aDouble: number | null;
   aOptionalString: string | null;
   createdBy: string;
@@ -147,18 +147,18 @@ interface LabelRow {
 /** One level of the to-one chain. `resourceId`/`parentId` is unique: this is a to-ONE relation. */
 interface ParentRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   resourceId: string;
 }
 
 interface InnerRow {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   parentId: string;
 }
@@ -321,9 +321,9 @@ function sqliteStore(): AdversarialStore {
       sqlite.exec(`
         CREATE TABLE adversarial_resources (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_double REAL,
           a_optional_string TEXT,
           created_by TEXT NOT NULL,
@@ -336,17 +336,17 @@ function sqliteStore(): AdversarialStore {
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_optional_string TEXT,
           resource_id TEXT NOT NULL UNIQUE
         );
         CREATE TABLE adversarial_inners (
           id TEXT PRIMARY KEY,
-          a_bool INTEGER NOT NULL,
-          a_string TEXT NOT NULL,
-          a_number INTEGER NOT NULL,
+          a_bool INTEGER,
+          a_string TEXT,
+          a_number INTEGER,
           a_optional_string TEXT,
           parent_id TEXT NOT NULL UNIQUE
         );
@@ -477,9 +477,9 @@ function postgresStore(): AdversarialStore {
       await db.execute(sql`
         CREATE TABLE adversarial_resources (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_double           double precision,
           a_optional_string  text,
           created_by         text NOT NULL,
@@ -498,17 +498,17 @@ function postgresStore(): AdversarialStore {
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_optional_string  text,
           resource_id        text NOT NULL UNIQUE REFERENCES adversarial_resources(id)
         );
         CREATE TABLE adversarial_inners (
           id                 text PRIMARY KEY,
-          a_bool             boolean NOT NULL,
-          a_string           text NOT NULL,
-          a_number           integer NOT NULL,
+          a_bool             boolean,
+          a_string           text,
+          a_number           integer,
           a_optional_string  text,
           parent_id          text NOT NULL UNIQUE REFERENCES adversarial_parents(id)
         );
@@ -691,9 +691,9 @@ function mysqlStore(): AdversarialStore {
   const DDL = [
     `CREATE TABLE adversarial_resources (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_double           double,
        a_optional_string  varchar(255),
        created_by         varchar(64) NOT NULL,
@@ -706,17 +706,17 @@ function mysqlStore(): AdversarialStore {
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_optional_string  varchar(255),
        resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resources(id)
      )`,
     `CREATE TABLE adversarial_inners (
        id                 varchar(64) PRIMARY KEY,
-       a_bool             boolean NOT NULL,
-       a_string           varchar(255) NOT NULL,
-       a_number           int NOT NULL,
+       a_bool             boolean,
+       a_string           varchar(255),
+       a_number           int,
        a_optional_string  varchar(255),
        parent_id          varchar(64) NOT NULL UNIQUE REFERENCES adversarial_parents(id)
      )`,
