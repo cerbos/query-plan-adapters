@@ -114,7 +114,7 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | Option | Meaning |
 | --- | --- |
 | `field` | The document field the Cerbos path maps to. Dot notation reaches nested fields (`metadata.value`), including chained paths such as `mainCategory.subCategories`. Omit it (`{}`) if the document field really is named like the plan path. |
-| `nullable` | The field may be **absent** from a document. Predicates on it are evaluated by `postFilter`, where an absent path is a CEL missing-attribute error (deny), instead of in Convex's filter engine, which cannot tell absent from null or false. Required for every field that can be absent. |
+| `nullable` | The field may be **absent** from a document. Predicates on it are evaluated by `postFilter`, where an absent path is a CEL missing-attribute error (deny), instead of in Convex's filter engine, which cannot tell absent from null or false. Required for every field that can be absent. Left undeclared, it follows the call's [`nullAttributeRepresentation`](#null-attribute-representation): off under `"explicit"`, on under `"omitted"`. |
 
 ```ts
 const mapper: Mapper = {
@@ -167,18 +167,28 @@ field in the attributes you send to `check()`, so tell the adapter which convent
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects a stored null — **over-grants** |
 
 `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for NULL fields, set
-`"omitted"`: the adapter then rejects every null comparison operand, in both `filter` and
-`postFilter`, rather than return documents the PDP denies.
+`"omitted"`:
 
 ```ts
-queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted", allowPostFilter: true });
 ```
 
-The rejection is wider than the shapes that actually over-grant (`x != null` is aligned under both
-conventions), because a leaf cannot see whether an enclosing `not` will flip it. Storing the field
-as absent (with `nullable: true`) also aligns the two via `postFilter`, but that depends on your
-document shape; the option is the reliable guard. See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+The call-level option is the default for every mapper entry that does not declare `nullable`, so
+under `"omitted"` the adapter:
+
+- rejects every null comparison operand, in both `filter` and `postFilter`. The rejection is wider
+  than the shapes that actually over-grant (`x != null` is aligned under both conventions), because
+  a leaf cannot see whether an enclosing `not` will flip it
+  ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
+- treats every entry that does not declare `nullable` as `nullable: true`, so its comparisons are
+  answered by `postFilter` and need `allowPostFilter: true`. Convex's engine cannot guard them:
+  `q.neq(...)` and a negated comparison match a document the field is absent from, which `check()`
+  denies ([#493](https://github.com/cerbos/query-plan-adapters/issues/493));
+- has `postFilter` read a stored `null` as a missing attribute, which denies under both polarities,
+  since under this convention the application sends no attribute for it.
+
+`nullable: false` opts an entry out: it asserts the field is always stored and never null, and its
+comparisons go to Convex's filter engine as they do under `"explicit"`.
 
 ## Supported operators
 
@@ -313,6 +323,13 @@ document — so most do not apply.
 
 See also [CHANGELOG.md](CHANGELOG.md).
 
+- **Breaking:** under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
+  declare `nullable` is treated as `nullable: true`, and `postFilter` reads a stored `null` as a
+  missing attribute. Comparisons over such an entry move to `postFilter` and need
+  `allowPostFilter: true`; the old pushed-down `q.neq(...)` and negations matched documents the
+  field was missing from, which `check()` denies. Declare `nullable: false` on an entry that is
+  always stored and never null to keep it on Convex's engine. `"explicit"` output is unchanged
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; an unmapped
   reference and a missing `allowPostFilter` opt-in stay a plain `Error`.

@@ -28,6 +28,7 @@ import {
   isNullableReference,
   resolveFieldReference,
   resolveMapperConfig,
+  withOmittedNullDefault,
 } from "./mapper";
 import {
   carriesNullOperand,
@@ -831,11 +832,27 @@ const withoutUnequalConstants = (
   );
 
 /** `hasIntersection(collection.map(e, e.field), [values])`: some element's field is in the list. */
+/**
+ * The mapper a lambda body over `collection` is translated with. Under `"omitted"` the element
+ * fields the relation does not declare are nullable by default too, like every other field.
+ */
+const scopedMapperFor = (
+  collection: string,
+  variable: string,
+  ctx: TranslateContext,
+): Mapper => {
+  const scoped = createScopedMapper(collection, variable, ctx.mapper);
+  return ctx.nullRepresentation === "omitted"
+    ? withOmittedNullDefault(scoped)
+    : scoped;
+};
+
 const translateMapIntersection = (
   map: PlanExpression,
   valuesOperand: PlanExpressionOperand,
-  { mapper }: TranslateContext,
+  ctx: TranslateContext,
 ): MongooseFilter => {
+  const { mapper } = ctx;
   const collectionOperand = getOperandAt(
     map.operands,
     0,
@@ -883,10 +900,10 @@ const translateMapIntersection = (
     throw new UnsupportedQueryPlanError("Map projection must be a variable reference");
   }
 
-  const scopedMapper = createScopedMapper(
+  const scopedMapper = scopedMapperFor(
     collectionOperand.name,
     variableOperand.name,
-    mapper,
+    ctx,
   );
   const elementPath = resolveFieldReference(
     projectionOperand.name,
@@ -977,10 +994,10 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
 
     const elementCondition = buildFilter(conditionOperand, {
       ...ctx,
-      mapper: createScopedMapper(
+      mapper: scopedMapperFor(
         collectionOperand.name,
         variableOperand.name,
-        ctx.mapper,
+        ctx,
       ),
       scope: { kind: "collection", variable: variableOperand.name },
     });

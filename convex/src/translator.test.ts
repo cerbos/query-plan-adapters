@@ -374,6 +374,97 @@ describe("nullAttributeRepresentation", () => {
   });
 });
 
+/**
+ * Under "omitted" a NULL field sends no attribute, so CEL denies every comparison against it, while
+ * the pushed-down `q.neq(...)` and a negated comparison match a document the path is absent from.
+ * An entry that declares no `nullable` therefore takes the call-level convention as its default,
+ * exactly as if it declared `nullable: true`, and the post-filter reads a stored null as missing
+ * (#493). A caller-supplied argument no corpus case can vary: the harness runs one mapping, under
+ * "explicit".
+ */
+describe("omitted: an undeclared entry is nullable", () => {
+  const omitted = (id: string, options: TranslateOptions = {}) =>
+    translate(id, { ...options, nullAttributeRepresentation: "omitted" });
+
+  // The corpus mapping declares `aString` and `aNumber` nullable, so each case strips the
+  // declaration from the field it reads, leaving the entry for the call-level default to decide.
+  const undeclared = (field: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER).map(([key, config]) => {
+        if (key !== `request.resource.attr.${field}`) return [key, config];
+        const { nullable: _nullable, ...rest } = config;
+        return [key, rest];
+      }),
+    );
+
+  // `ne`, a negated ordering, and a negated `in` over an undeclared entry, each of which Convex's
+  // engine answers as a match on an absent path.
+  const CASES = [
+    ["string/equals/case-sensitive", "aString", "one", "two"],
+    ["comparison/not-equals/value-first", "aString", "two", "one"],
+    ["logic/not/greater-than", "aNumber", 0, 2],
+    ["null/in/negated-explicit-null-in-literal-list", "owner", "y", "x"],
+  ] as const;
+
+  test.each(CASES)(
+    "%s stays off Convex's engine, and needs the post-filter opt-in",
+    (id, field, _allowed, _denied) => {
+      const mapper = undeclared(field);
+      expect(translate(id, { mapper }).path).toBe("db");
+      expect(omitted(id, { mapper }).path).toBe("post");
+      expect(() => omitted(id, { mapper, allowPostFilter: false })).toThrow(
+        "allowPostFilter",
+      );
+    },
+  );
+
+  test.each(CASES)(
+    "%s denies a document %s is missing or null in",
+    (id, field, allowed, denied) => {
+      const { postFilter } = omitted(id, { mapper: undeclared(field) });
+      expect(postFilter!({ [field]: allowed })).toBe(true);
+      expect(postFilter!({ [field]: denied })).toBe(false);
+      expect(postFilter!({})).toBe(false);
+      expect(postFilter!({ [field]: null })).toBe(false);
+    },
+  );
+
+  test("a function mapper takes the default too", () => {
+    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const asFunction: Mapper = (reference) => mapper[reference]!;
+    expect(
+      omitted("string/equals/case-sensitive", { mapper: asFunction }).path,
+    ).toBe("post");
+  });
+
+  // `nullable: false` is the per-entry opt-out: it asserts the field is always stored and never
+  // null. With every entry declaring its own `nullable`, nothing is left for the default to decide,
+  // so every null-free plan asks Convex's engine for exactly what it does under "explicit".
+  test("declaring nullable: false keeps the explicit translation", () => {
+    const declared: Mapper = Object.fromEntries(
+      Object.entries(MAPPER).map(([key, config]) => [
+        key,
+        { ...config, nullable: config.nullable ?? false },
+      ]),
+    );
+    const pushedDown = (result: QueryPlanToConvexResult<Recorder, unknown>) =>
+      result.filter ? recordFilter("filter", result.filter) : undefined;
+    const differing = TRANSLATED.filter(
+      ({ id }) => !/\bnull\b/.test(JSON.stringify(golden(id).plan)),
+    )
+      .filter(({ id, result }) => {
+        const declaredResult = omitted(id, { mapper: declared });
+        return (
+          declaredResult.path !== result.path ||
+          JSON.stringify(pushedDown(declaredResult)) !==
+            JSON.stringify(pushedDown(result))
+        );
+      })
+      .map(({ id }) => id);
+    expect(differing).toEqual([]);
+  });
+});
+
 // -- hand-built plans ------------------------------------------------------------------------------
 
 /** A conditional plan around a hand-built condition, for the two sections below that need one. */

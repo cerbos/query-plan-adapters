@@ -382,6 +382,14 @@ class Translator:
         operands = operand.operands
 
         if operator in _BOOLEAN_OPERATORS:
+            if operator != "not" and not operands:
+                # and_() / or_() with no arguments render an empty clause that
+                # .where() drops, returning every row. See #498.
+                raise UnsupportedPlanError(
+                    f"{operator!r} with no operands has no SQL rendering: SQLAlchemy "
+                    "emits an empty clause that .where() drops, which would return "
+                    "every row"
+                )
             branches = [
                 require_boolean(self.predicate(o), f"{operator!r} operand")
                 for o in operands

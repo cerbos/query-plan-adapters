@@ -107,7 +107,7 @@ carries, so the filter silently selects nothing; map every attribute your polici
 
 Other adapters take a `nullAttributeRepresentation` option because `R.attr.x == null` produces the
 same plan whether a NULL field is sent to `check()` as an explicit `null` or omitted. **This adapter
-needs none**: Chroma metadata holds only finite numbers, strings and booleans, so every null
+needs none**: Chroma metadata has no null (it rejects a null value or list element), so every null
 comparison operand is rejected under either convention (every `null/*` corpus case that compares a
 null literal throws, including `null/equals/null-literal-on-missing-attribute`). See
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
@@ -149,10 +149,21 @@ Chroma has no `$not` or `$nor`, so `not` is pushed inward: `not(eq)` → `$ne`, 
 Resulting `$ne`/`$nin` still need `required: true`. Value-first comparisons (`3 <= R.attr.n`) are
 mirrored.
 
-Metadata is flat scalars, so these throw: string helpers (`contains`, `startsWith`, `endsWith`),
-null comparisons, collection operators (`hasIntersection`, `exists`, `exists_one`, `all`, `filter`,
-`map`, `lambda`, `size`), field-to-field comparisons, arithmetic, casts, ternaries, hierarchy and
-timestamp operations, and relation chains.
+A `Where` clause compares one metadata key with a literal, so these throw:
+
+- string helpers (`contains`, `startsWith`, `endsWith`): Chroma has no prefix, substring or pattern
+  operator on a string value, and its `$contains` tests list membership, not a substring;
+- null comparisons: Chroma metadata has no null, and rejects a null value or list element;
+- collection operators (`hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`,
+  `size`), positional reads (`R.attr.list[0]`) and value-first membership in a list-valued key
+  (`"x" in R.attr.list`). The pinned server stores a homogeneous list, but `$eq` on a list key and a
+  dotted `key.N` both match nothing, there is no count function, and there is no quantifier over a
+  list's elements. Its position-blind `$contains` is not translated: Chroma stores an empty list as
+  an absent key and rejects null elements and mixed types, so a list cannot always be stored as the
+  PDP sees it ([#475](https://github.com/cerbos/query-plan-adapters/issues/475));
+- collections reached through a relation, and lists of objects: Chroma metadata has no relation or array-of-object model;
+- field-to-field comparisons, arithmetic, casts, ternaries, hierarchy and timestamp operations: an
+  operand must be a bare key or a literal, never a computed value or a second key.
 
 ## Error handling
 
@@ -230,7 +241,7 @@ flat metadata on the record being matched, and every shape that would reach a se
 | Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter never sees the collection, so it cannot check that it is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
 | To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Rejected** — `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained shapes are `unsupported` in the ledger and throw | None — Chroma metadata is flat, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Rejected** — `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained shapes are `unsupported` in the ledger and throw | None — Chroma metadata has no relation or nested-object model, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Behaviour changes
 

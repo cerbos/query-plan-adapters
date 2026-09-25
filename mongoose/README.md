@@ -86,7 +86,7 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | Option | What it does |
 | --- | --- |
 | `field` | Document path for this attribute. |
-| `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. |
+| `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. Left undeclared, it follows the call's [`nullAttributeRepresentation`](#null-attribute-representation): off under `"explicit"`, on under `"omitted"`. |
 | `valueParser` | Converts plan literals before they reach the filter (for example string → `ObjectId`). Applied to `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `in` values, and inside relation `fields`. |
 | `valueType` | The stored scalar type. Declare number, string and boolean fields — top-level, and inside relation `fields` — so Mongoose does not cast a mismatched CEL literal into the field's type: without it, `R.attr.flag == "true"` is sent as `true` and matches. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
 | `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). |
@@ -196,16 +196,31 @@ const mapper: Mapper = {
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects it — **over-grants** |
 
 `nullAttributeRepresentation` defaults to `"explicit"`. If you omit NULL attributes, set
-`"omitted"`: the adapter then rejects every null comparison operand instead of emitting a filter
-that returns documents the PDP denies.
+`"omitted"`:
 
 ```ts
 queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
 
-The rejection is wider than the shapes that actually over-grant, because a leaf cannot tell whether
-an enclosing `not` will flip it. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
-For a single field, `nullable: true` on its mapper entry is the per-attribute alternative.
+The call-level option is the default for every mapper entry that does not declare `nullable`, so
+under `"omitted"` the adapter:
+
+- rejects every null comparison operand. The rejection is wider than the shapes that actually
+  over-grant, because a leaf cannot tell whether an enclosing `not` will flip it
+  ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
+- treats every entry that does not declare `nullable` as `nullable: true`, relation `fields`
+  included. A comparison ANDs `{ field: { $ne: null } }` in front of it, so `R.attr.x != "a"` no
+  longer returns the documents `x` is missing or null in, which `check()` denies. A `not` over such a
+  field is handled as it is for a declared-nullable field: the guard is ANDed outside the `$nor`,
+  and where some path through the negation can leave the field unread (one side of `&&`/`||`, a
+  ternary branch) the adapter throws `UnsupportedQueryPlanError` instead
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
+
+`nullable: false` opts an entry out: it asserts the field is always stored and never null, and the
+entry translates as it does under `"explicit"`. Declare it where you know that, because a nullable
+guard is a `$ne: null`, which MongoDB applies per element to an array field: an array that holds a
+`null` element is excluded too. Under `"explicit"`, `nullable: true` on one entry is the
+per-attribute way to declare the omitted convention.
 
 ## Timestamps and conversions
 
@@ -310,10 +325,10 @@ Two behaviours the corpus relies on that a caller's mapping has to provide:
 - **`nullable: true`** declares that a stored null is a *missing* attribute (the caller omits it
   from `check()`), so `== null` against it selects nothing, as CEL's missing-attribute error
   demands. Under a negation its non-null guard is ANDed outside the `$nor`, so `!(x > 3)` denies
-  a document with no `x` as CEL does, where a bare `$nor` would match it. A field without it
-  compares a stored null as a null *value*. The global
-  `nullAttributeRepresentation: "omitted"` option is the fail-closed backstop for mappings that do
-  not declare it: it refuses every null operand.
+  a document with no `x` as CEL does, where a bare `$nor` would match it. A field that does not
+  declare it takes the call's `nullAttributeRepresentation`: under `"explicit"` it compares a stored
+  null as a null *value*; under `"omitted"` it is nullable, and every null operand is refused
+  ([NULL attribute representation](#null-attribute-representation)).
 
 ## Mapping hazards
 
@@ -336,6 +351,14 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- **Breaking** — under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
+  declare `nullable` is treated as `nullable: true`. Comparisons on it gain a
+  `{ field: { $ne: null } }` guard, and a `not` over it carries that guard outside the `$nor`, or
+  throws `UnsupportedQueryPlanError` where some path through it can leave the field unread. The old
+  filter's `$ne` and `$nor` returned documents the field was missing or null in, which `check()`
+  denies. Declare `nullable: false` on an entry that is always stored and never null to keep its old
+  translation. `"explicit"` output is unchanged
+  ([#493](https://github.com/cerbos/query-plan-adapters/issues/493)).
 - A shape the adapter refuses now throws `UnsupportedQueryPlanError`, an exported subclass of
   `Error`. What it translates is unchanged, and existing `catch` blocks keep working; mapper
   misconfiguration stays a plain `Error`.
