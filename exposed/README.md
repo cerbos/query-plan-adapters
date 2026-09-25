@@ -519,11 +519,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 223 / 308 |
+| adversarial | 226 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-101 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+98 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -547,7 +547,8 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   hierarchy path, and two instant columns compared without `timestamp()`. A comparison between
   recognised types that differ is not refused: it is answered from the types. See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);
-- a hierarchy with an empty delimiter, a division as a divisor, a macro over a principal value
+- a hierarchy split on the empty delimiter anywhere but between a column and a constant (which
+  translates as a code-point prefix test), a division as a divisor, a macro over a principal value
   another macro computes, and `exists_one` over a principal list;
 - `!=` between two columns under mixed null conventions.
 

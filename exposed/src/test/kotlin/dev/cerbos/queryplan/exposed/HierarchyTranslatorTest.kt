@@ -54,16 +54,4 @@ class HierarchyTranslatorTest {
         // asserted so a change of lowering cannot silently start matching.
         assertSelects("hierarchy/ancestor-of/like-metacharacters-in-path")
     }
-
-    @Test
-    fun `an empty delimiter is refused rather than emitted with the wrong boundary`() {
-        // Cerbos splits on an empty delimiter per CHARACTER, so the relation becomes a strict
-        // string-prefix test — and `LIKE prefix || '' || '%'` also matches the path ITSELF, which
-        // is never its own descendant.
-        val error = assertThrows<UnsupportedPlanShapeException> { Scalars.ids("hierarchy/descendent-of/empty-delimiter") }
-        assertTrue(
-            error.message!!.startsWith("hierarchy delimiter must be a non-empty string"),
-            error.message,
-        )
-    }
 }

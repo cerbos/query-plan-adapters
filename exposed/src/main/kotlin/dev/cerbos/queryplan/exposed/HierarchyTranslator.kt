@@ -6,6 +6,7 @@ import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
 import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
+import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.stringParam
 
@@ -20,7 +21,17 @@ import org.jetbrains.exposed.v1.core.stringParam
  */
 internal class HierarchyTranslator(private val translation: Translation) {
 
-    fun translate(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> = when (operator) {
+    fun translate(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> {
+        if (operator in setOf("overlaps", "ancestorOf", "descendentOf")) {
+            val (first, second) = extract(operator, operands, scope)
+            if (isPerCharacter(first) || isPerCharacter(second)) {
+                return perCharacterRelation(operator, first, second)
+            }
+        }
+        return translateDelimited(operator, operands, scope)
+    }
+
+    private fun translateDelimited(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> = when (operator) {
         "overlaps" -> overlaps(operands, scope)
         "ancestorOf" -> ancestorOrDescendant(operands, scope, isAncestor = true)
         "descendentOf" -> ancestorOrDescendant(operands, scope, isAncestor = false)
@@ -191,19 +202,7 @@ internal class HierarchyTranslator(private val translation: Translation) {
                     throw Refusals.unsupported("hierarchy delimiter must be a value")
                 }
                 val delimiter = PlanValues.toKotlin(delimiterOperand.value).toString()
-                if (delimiter.isEmpty()) {
-                    // Cerbos splits a path on an empty delimiter into one segment per CHARACTER,
-                    // so the relation becomes a strict string-prefix test. The descendant lowering
-                    // here is `LIKE prefix || delimiter || '%'`, which with an empty delimiter also
-                    // matches the path ITSELF — never its own descendant — as well as every string
-                    // extension of it, so the shape is refused rather than emitted with the wrong
-                    // boundary.
-                    throw Refusals.unsupported(
-                        "hierarchy delimiter must be a non-empty string: an empty delimiter splits " +
-                            "the path per character, and the prefix LIKE this adapter emits would " +
-                            "also match the path itself",
-                    )
-                }
+                // An empty delimiter is kept as-is: [perCharacterRelation] owns that case.
                 pathOperand(name, operands[0], delimiter, scope)
             }
             1 -> when (val inner = operands[0].nodeCase) {
@@ -323,6 +322,68 @@ internal class HierarchyTranslator(private val translation: Translation) {
         return prefixes
     }
 
-    /** Splits on a LITERAL delimiter, keeping trailing empty segments. */
-    private fun splitLiteral(raw: String, delimiter: String): List<String> = raw.split(delimiter)
+    /**
+     * Splits on a LITERAL delimiter, keeping trailing empty segments. An EMPTY delimiter splits
+     * as Go's `strings.Split` does: one segment per code point (never per UTF-16 unit, which would
+     * cut an astral character in two), and none at all for the empty string.
+     */
+    private fun splitLiteral(raw: String, delimiter: String): List<String> =
+        if (delimiter.isEmpty()) {
+            raw.codePoints().toArray().map { String(Character.toChars(it)) }
+        } else {
+            raw.split(delimiter)
+        }
+
+    private fun isPerCharacter(hierarchy: Hierarchy): Boolean = when (hierarchy) {
+        is Hierarchy.Constant -> hierarchy.delimiter.isEmpty()
+        is Hierarchy.FieldRef -> hierarchy.delimiter.isEmpty()
+        is Hierarchy.Segmented -> false
+    }
+
+    /**
+     * A relation between a column and a constant that are BOTH split on the empty delimiter.
+     *
+     * Cerbos splits such a path into one segment per code point, and the empty string into none,
+     * so a segment prefix is a string prefix. With `c` the constant:
+     *  - the column is a strict DESCENDANT of `c` when it starts with `c` and is not `c` itself:
+     *    `col LIKE c || '%' AND col <> c` (a string with `c` as a prefix and unequal to it is
+     *    longer, in code points as in any other unit);
+     *  - a strict ANCESTOR when it is one of `c`'s strict code-point prefixes, the empty string
+     *    (zero segments) included;
+     *  - they OVERLAP when either is a prefix of the other: a prefix of `c`, `c` itself included,
+     *    or an extension of `c`.
+     * A NULL column is a missing attribute: `IN`, `=`, `<>` and `LIKE` are all UNKNOWN for it.
+     * Every comparison is `=` or a prefix `LIKE`, which is byte-exact on the collations the
+     * conformance harness requires (README, "Database collation and case sensitivity").
+     * Any other pairing with an empty delimiter — two columns, a column against a path split on a
+     * real delimiter, a `list()` — is refused.
+     */
+    private fun perCharacterRelation(operator: String, first: Hierarchy, second: Hierarchy): Op<Boolean> {
+        val field = (first as? Hierarchy.FieldRef) ?: (second as? Hierarchy.FieldRef)
+        val constant = (first as? Hierarchy.Constant) ?: (second as? Hierarchy.Constant)
+        if (field == null || constant == null || !isPerCharacter(first) || !isPerCharacter(second)) {
+            throw Refusals.unsupported(
+                "$operator: a hierarchy split on the empty delimiter is only supported between a " +
+                    "column and a constant that both split per character",
+            )
+        }
+        val fieldFirst = first === field
+        val characters = constant.segments
+        val whole = characters.joinToString("")
+        val column = field.expression
+        val prefixes = (0..characters.size).map { characters.subList(0, it).joinToString("") }
+        fun isOneOf(values: List<String>): Op<Boolean> = if (values.isEmpty()) {
+            TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(column))
+        } else {
+            TriLogic.or(values.map { EqOp(column, stringParam(it)) })
+        }
+        val descendant = TriLogic.and(startsWith(column, whole), NeqOp(column, stringParam(whole)))
+        return when (operator) {
+            "overlaps" -> TriLogic.or(isOneOf(prefixes), startsWith(column, whole))
+            // ancestorOf(first, second): first is the strict ancestor.
+            "ancestorOf" -> if (fieldFirst) isOneOf(prefixes.dropLast(1)) else descendant
+            "descendentOf" -> if (fieldFirst) descendant else isOneOf(prefixes.dropLast(1))
+            else -> throw Refusals.internal("Unsupported hierarchy operator: $operator")
+        }
+    }
 }

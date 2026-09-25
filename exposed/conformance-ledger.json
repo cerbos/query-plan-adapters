@@ -217,18 +217,6 @@
       "status": "unsupported",
       "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
     },
-    "hierarchy/ancestor-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself"
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test. The adapter lowers descendentOf as `LIKE prefix + delimiter + '%'`, which with an empty delimiter is a bare prefix LIKE that also matches the path itself. The delimiter is refused when the hierarchy operand is parsed, before any LIKE is built"
-    },
-    "hierarchy/overlaps/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the prefix LIKE this adapter emits would also match the path itself"
-    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A related row has no key set SQL can test, and the mapping declares no element column to stand for one, so the membership is refused when its container is resolved"
