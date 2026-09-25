@@ -306,8 +306,8 @@ fi
 # and two scans disagreeing about whether that counts would make one of them wrong.
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
-  --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
+  --include='*.json' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
@@ -342,6 +342,11 @@ source_grep() {
 # reading none of a Ruby adapter. Stated over any adapter rather than one by name.
 if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '/lib/.*\.rb$'; then
   fail "the source scan reaches no .rb file under a lib/ directory, so a Ruby adapter's source is invisible to every check below"
+fi
+# `*.kts` matches build.gradle.kts and nothing under src/, so without `*.kt` a Kotlin example's
+# source is invisible to every check below.
+if ! source_grep -rl '' "${REPO_ROOT}" | grep -q '\.kt$'; then
+  fail "the source scan reaches no .kt file, so a Kotlin adapter's source is invisible to every check below"
 fi
 for adapter in "${ADAPTERS[@]}"; do
   example_dir="${REPO_ROOT}/${adapter}/example"

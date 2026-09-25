@@ -1,0 +1,217 @@
+{
+  "adapter": "exposed",
+  "cases": {
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "Cannot translate a division by a floating-point column or by computed arithmetic: its zero may be -0.0, which CEL divides a non-zero number into the opposite infinity from 0.0, while SQL compares -0.0 equal to 0.0 and has no portable way to read the sign bit. Divide by an integer or decimal column, or by a constant."
+    },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "A division as the DIVISOR: the inner division can be a zero-denominator NaN or infinity, SQL has no literal for either, and against a column the sign of the result depends on that column. Refused rather than binding a non-finite double, which PostgreSQL orders above every number"
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "CEL `%` is integer-only while an attribute value is always a double at check time, so a satisfiable policy has to cast with int() first, and int() has no faithful SQL lowering: CAST rounds to nearest on PostgreSQL and MySQL where CEL truncates toward zero. The modulo is refused by name before its operands are read, on the same ground that refuses `cast/int/negative-fraction`"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "arithmetic between a column and the NaN or infinity a zero denominator produces is not supported: SQL has no literal for either value, and neither folds to one constant against a column, because an infinity times or divided by a column depends on that column's sign. Compare the division itself, or keep the composition constant."
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "Cannot translate double(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "int() and double() over a string have no faithful SQL cast: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates, so the negated cast would admit rows the PDP denies. Refused by the cast's own name"
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a DoubleColumnType column: CEL renders a number as Go's shortest round-tripping form (1e+06, 2, -0) and no SQL CAST reproduces that for this column type, nor reads the sign of a stored -0.0. Text, integer and boolean columns are translatable, and a floating-point column only under == or != against a string literal other than \"0\" and \"-0\"."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() comparison requires a column that stores an absolute instant — an exposed-java-time or exposed-kotlin-datetime timestamp() or timestampWithTimeZone() column — but 'request.resource.attr.createdBy' maps to a VarCharColumnType column. A local date-time, a date and a string are all ambiguous about which instant they hold; remap the column."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() needs a column that stores an absolute instant; createdBy is the varchar the corpus deliberately maps it to, and a string column is ambiguous about which instant it holds, so the conversion failure CEL raises for a malformed string has no SQL counterpart. Refused when the timestamp() operand is resolved"
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A related row has no key set SQL can iterate, and the mapping declares no element column to stand for one, so the macro is refused when its collection is resolved"
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/exists/map-keys, under negation: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate"
+    },
+    "collection/filter/as-conjunct": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
+    },
+    "collection/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
+    },
+    "collection/index/first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Cannot translate get-field(): it projects a member out of a single element, and a relation subquery has no single element to project from."
+    },
+    "collection/index/first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a scalar list. tagNames is a related table read through a correlated subquery, and the rows a SQL relation returns carry no order for a position to index into, so there is no first element to read. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/first-element-of-string-list-equals-null": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-boolean-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-number-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-first-element-of-string-list": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negated-out-of-bounds": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/index/negative-position": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "collection/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() returns a list, not a boolean, so it cannot be a condition on its own; only hasIntersection(map(...), [...]) gives the list a scalar meaning"
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "map() is held as a deferred projection until hasIntersection() gives it a scalar meaning, as the inner select of an EXISTS; that is the only consumer this adapter has for one, and size(map(...)) is refused as well. Comparing the ORDERED projection itself to a literal list gives it no scalar meaning, and a correlated subquery cannot be compared to a list value"
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole, so neither the order nor the multiplicity CEL compares can be expressed"
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A related row has no key set SQL can test, and the mapping declares no element column to stand for one, so the membership is refused when its container is resolved"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation: `in` over the to-one `parent` tests its attribute names, which SQL has no row to read"
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "matches() is translated only where LIKE, = and REPLACE spell the RE2 pattern exactly: finite alternatives, anchored .* and .+, and ^[set]*$. An unbounded repetition of a literal (x*, a+) inside a pattern has no finite expansion and no LIKE wildcard that counts only one character's repeats, so it is refused when the pattern is compiled"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
+    },
+    "type-mismatch/equals/boolean-list-element-against-number-literal": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "type-mismatch/equals/number-list-element-against-boolean-literal": {
+      "status": "unsupported",
+      "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    }
+  }
+}
