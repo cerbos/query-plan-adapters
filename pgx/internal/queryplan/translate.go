@@ -1158,10 +1158,10 @@ func addValue(lv, rv value) (value, error) {
 //
 // A text operand is cast as it stands. A column declared ValueNumber is not: CEL spells a double
 // with Go's %g, which no engine's CAST prints, so it is held as numberText for the comparison that
-// consumes it. A constant or undeclared operand is cast as it stands. A BOOLEAN column cannot be — SQLite and MySQL
-// have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say
-// 'true' (#376). Nothing in the plan names the operand's type, so the caller declares it with
-// ValueBool, and the column is spelled through boolText before it is cast.
+// consumes it. A constant or undeclared operand is cast as it stands. A BOOLEAN operand cannot be —
+// SQLite and MySQL have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL
+// and PostgreSQL say 'true' (#376) — so boolOperand picks out every operand known to be boolean and
+// it is spelled through boolText before it is cast.
 func castValue(v value) (value, error) {
 	e, err := asExpr(v)
 	if err != nil {
@@ -1170,36 +1170,64 @@ func castValue(v value) (value, error) {
 	if _, constant := v.(float64); !constant && scalarKind(v) == "number" {
 		return numberText{x: e}, nil
 	}
-	if c, ok := v.(Column); ok && c.Type == ValueBool {
-		e = boolText(c)
+	if boolOperand(e) {
+		e = boolText(e)
 	}
 	return Cast{X: e, To: CastText}, nil
 }
 
-// boolText spells a boolean column the way CEL's string() does:
+// boolOperand reports whether string()'s operand is known to be boolean. That is three shapes:
 //
-//	CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+//   - a column declared ValueBool;
+//   - a column declared ValueBool and read through a to-one hop, which is a scalar subquery
+//     projecting it (cast/string/negated-from-boolean-through-relation);
+//   - a predicate node, the lowering of a boolean-valued expression such as
+//     `string(R.attr.n > 3)` (cast/string/negated-from-boolean-expression).
 //
-// A bare boolean column is read as a condition by SQLite, MySQL and PostgreSQL alike — it is how a
-// bare boolean conjunct already renders — so this one tree gives CEL's two words on every engine,
-// where a CAST gives them on one (cerbos/query-plan-adapters#418).
+// Nothing in the plan names an attribute's type, so an undeclared column is not known to be
+// boolean, through a hop or not, and keeps the plain CAST: declaring ValueBool is what tells the
+// adapter a column holds a boolean (#470).
+func boolOperand(e Expr) bool {
+	switch t := e.(type) {
+	case Column:
+		return t.Type == ValueBool
+	case Subquery:
+		if t.Kind == SubqueryExists {
+			return true
+		}
+		c, ok := t.Select.(Column)
+		return t.Kind == SubqueryScalar && ok && c.Type == ValueBool
+	case Cmp, Logic, Not, IsNull, TruthTest, Like, NotDistinct, InList, BoolConst:
+		return true
+	}
+	return false
+}
+
+// boolText spells a boolean operand the way CEL's string() does:
 //
-// The IS NULL arm is load-bearing. A NULL boolean is a missing attribute or a null value, and CEL
-// has no string() for either: it raises, and the PDP denies. `WHEN col` is UNKNOWN for a NULL
-// column, so without the arm the CASE would fall through to its ELSE and say 'false', and
-// `string(x) != "true"` would return a row the PDP denies. With it the result is NULL, and the row
-// stays out under both polarities.
+//	CASE WHEN x IS NULL THEN NULL WHEN x THEN 'true' ELSE 'false' END
+//
+// A boolean column, a scalar subquery projecting one, and a predicate are all read as a condition
+// by SQLite, MySQL and PostgreSQL alike — it is how a bare boolean conjunct already renders — so
+// this one tree gives CEL's two words on every engine, where a CAST gives them on one
+// (cerbos/query-plan-adapters#418, #470).
+//
+// The IS NULL arm is load-bearing. A NULL operand is a missing attribute, an absent hop or a null
+// value, and CEL has no string() for any of them: it raises, and the PDP denies. `WHEN x` is
+// UNKNOWN for a NULL operand, so without the arm the CASE would fall through to its ELSE and say
+// 'false', and `string(x) != "true"` would return a row the PDP denies. With it the result is
+// NULL, and the row stays out under both polarities.
 //
 // castValue still casts the result to text, so the renderer treats it exactly as it treats any
 // other string(). On MySQL that cast is what gives the two words a byte-exact collation. A bare
 // CASE compares in the connection's collation, which ignores case and trailing spaces by default:
 // `string(x) == "TRUE"` and `== "true "` would both match a true row CEL rejects. The corpus case
 // cast/string/from-boolean-case-changed-literal fails on MySQL without it.
-func boolText(c Column) Expr {
+func boolText(x Expr) Expr {
 	return Case{
 		Whens: []When{
-			{Cond: IsNull{X: c}, Then: Lit{V: nil}},
-			{Cond: c, Then: Lit{V: "true"}},
+			{Cond: IsNull{X: x}, Then: Lit{V: nil}},
+			{Cond: x, Then: Lit{V: "true"}},
 		},
 		Else: Lit{V: "false"},
 	}

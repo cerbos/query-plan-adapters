@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-- **Breaking:** `string()` over a boolean-valued expression (`string(R.attr.n > 3)`), or over a
-  column declared `ValueBool` and read through a to-one `ScalarRelation`, now returns an error
-  wrapping `ErrUnsupported` on every dialect. It used to emit a plain `CAST`, which SQLite and MySQL
-  render as `"1"`/`"0"` where CEL says `"true"`/`"false"`, so a negated comparison with `"true"`
-  returned rows the PDP denies (#470).
 - **Breaking:** `%` over an attribute, a comparison decided by the sign of an infinity from a zero
   column denominator, and `string()` over a `ValueNumber` column outside `==`/`!=` against a
   string constant (or against `"0"`/`"-0"`) now return an error wrapping `ErrUnsupported` instead of
@@ -18,6 +13,10 @@
   returning an error wrapping `ErrUnsupported`. The `CASE` spells CEL's `"true"` and `"false"` on
   SQLite, PostgreSQL and MySQL alike, where a `CAST` renders a stored boolean as `"1"` on two of
   them (#418).
+- `string()` over a boolean-valued expression (`string(R.attr.n > 3)`), or over a column declared
+  `ValueBool` and read through a to-one `ScalarRelation`, is spelled through the same `CASE` as a
+  plain `ValueBool` column. It used to emit a plain `CAST`, which SQLite and MySQL render as
+  `"1"`/`"0"`, so a negated comparison with `"true"` returned rows the PDP denies (#470).
 - **Breaking:** `Translate` rejects unknown `WithDialect` values with a configuration error.
   Use `dialect.SQLite` (the default), `dialect.Postgres` or `dialect.MySQL`; aliases and empty
   strings are no longer accepted.
