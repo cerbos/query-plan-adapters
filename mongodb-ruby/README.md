@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 75 / 80 |
-| adversarial | 297 / 308 |
+| extended | 76 / 80 |
+| adversarial | 298 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -212,7 +212,7 @@ erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is `map()` anywhere but as a `hasIntersection` or whole-list operand, macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
+The refused set is macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
 carry, a bare comparison of a
 date field with anything but null (a stored date has lost the string CEL compares), a regular expression using a case-insensitive non-ASCII character, a
@@ -244,7 +244,8 @@ the elements whose condition is true and raises if any raises; `except()` keeps 
 the first list the second does not contain, repeats included (null where either holds a list or a
 map); a hierarchy the filter cannot compare with a literal prefix (a field on both sides, a path
 built with `list()`, an empty separator, which splits into code points as Go's `strings.Split` does)
-is compared as an array of segments; and exists_one()
+is compared as an array of segments; `map()` projects each element and raises if any projection does, and
+`hasIntersection` against a list holding a one-key map constant compares it as a value; and exists_one()
 over a literal list of up to 32 elements expands to "this one and no other". A `matches()`
 pattern is parsed as RE2 and written as the PCRE2 pattern that matches the same strings: `$` as
 `\z`, `.` as `[^\n]`, `\s` as RE2's `[\t\n\f\r ]` (PCRE2's also holds the vertical tab), a POSIX

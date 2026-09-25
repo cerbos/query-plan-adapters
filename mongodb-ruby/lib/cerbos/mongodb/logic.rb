@@ -42,7 +42,7 @@ module Cerbos
         when "exists", "all", "exists_one" then macro(node, mapper, bound)
         when "if" then ternary(node, mapper, bound)
         when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in",
-          "ancestorOf", "descendentOf", "overlaps"
+          "ancestorOf", "descendentOf", "overlaps", "hasIntersection"
           leaf(node, mapper, bound)
         when "filter", "map", "except", "list", "struct"
           # A list or map where CEL needs a boolean is a runtime type error.
@@ -115,6 +115,7 @@ module Cerbos
           ])
         end
         return {"$ne" => [filter_value(node, mapper, bound), nil]} if node.operator == "filter"
+        return {"$ne" => [map_value(node, mapper, bound), nil]} if node.operator == "map"
         if Aggregation::LAMBDA_OPERATORS.include?(node.operator)
           raise UnsupportedError, "#{node.operator} inside a value has no three-valued form"
         end
@@ -231,6 +232,24 @@ module Cerbos
         end
         values = {"$map" => {"input" => input, "as" => binding, "in" => condition}}
         guarded(list_ok, {"$cond" => [{"$in" => [nil, values]}, nil, kept]})
+      end
+
+      # map(): each element's projection, or null (a CEL error) where the list is not an array or
+      # any projection raises.
+      def map_value(node, mapper, bound = mapper.bound)
+        collection, lambda = node.operands
+        unless collection && expression_with?(lambda, "lambda") && variable?(lambda.operands[1]) && lambda.operands.length == 2
+          raise UnsupportedError, "map requires a collection and a single-variable lambda"
+        end
+
+        variable = lambda.operands[1].name
+        binding = "#{BINDING_PREFIX}#{variable}"
+        input, list_ok, scoped = element_scope(collection, variable, mapper, bound)
+        projection = lambda.operands[0]
+        inner = bound + [variable]
+        projected = {"$map" => {"input" => input, "as" => binding, "in" => Aggregation.build(projection, scoped)}}
+        evaluated = {"$allElementsTrue" => [{"$map" => {"input" => input, "as" => binding, "in" => evaluates(projection, scoped, inner)}}]}
+        guarded(list_ok, {"$cond" => [evaluated, projected, nil]})
       end
 
       # The array a macro ranges over, what must hold for it to be one, and the mapper its body

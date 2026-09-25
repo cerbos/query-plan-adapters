@@ -141,7 +141,8 @@ module Cerbos
         when "in" then with_logic_fallback(expression, mapper, scope, true) { translate_in(operands, mapper, scope) }
         when "matches" then translate_matches(operands, mapper, scope)
         when "contains", "startsWith", "endsWith" then translate_string_predicate(expression, mapper, scope)
-        when "hasIntersection" then translate_has_intersection(operands, mapper, scope)
+        when "hasIntersection"
+          with_logic_fallback(expression, mapper, scope, true) { translate_has_intersection(operands, mapper, scope) }
         when "exists", "all"
           with_logic_fallback(expression, mapper, scope, true) { translate_quantifier(operator, operands, mapper, scope) }
         when "exists_one"

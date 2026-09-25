@@ -35,7 +35,7 @@ module Cerbos
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
       NOT_NULL_GUARDED = %w[
         string double int size contains startsWith endsWith add sub mult div mod in except
-        hierarchy ancestorOf descendentOf overlaps
+        hierarchy ancestorOf descendentOf overlaps hasIntersection map
       ].freeze
 
       module_function
@@ -98,7 +98,7 @@ module Cerbos
       # element, so `R.attr.a + "q" == "$b"` would compare with the document's own `b` field and
       # return documents the PDP denies. $literal keeps each such constant the value it is.
       def constant(value)
-        if value.is_a?(Hash) || (value.is_a?(Array) && value.any? { |element| element.is_a?(Hash) || element.is_a?(Array) || (element.is_a?(Float) && element.nan?) })
+        if value.is_a?(Hash) || (value.is_a?(Array) && value.any? { |element| !comparable_element?(element) })
           raise UnsupportedError,
             "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it"
         end
@@ -123,6 +123,8 @@ module Cerbos
         when "in" then build_in(operands, mapper)
         when "filter" then Logic.filter_value(expression, mapper)
         when "except" then build_except(operands, mapper)
+        when "hasIntersection" then build_has_intersection(operands, mapper)
+        when "map" then Logic.map_value(expression, mapper)
         when "hierarchy" then build_hierarchy(operands, mapper)
         when "ancestorOf" then hierarchy_prefix(operands.map { |op| build(op, mapper) }, :ancestor)
         when "descendentOf" then hierarchy_prefix(operands.map { |op| build(op, mapper) }.reverse, :ancestor)
@@ -284,6 +286,33 @@ module Cerbos
             ],
             "default" => {"$in" => ["$$cerbos_needle", "$$cerbos_list"]}
           }}
+        }}
+      end
+
+      # An element a constant list may hold inside $expr: a scalar other than NaN, or a map of
+      # one such scalar, whose equality has no field order to disagree on.
+      def comparable_element?(element)
+        return element.length == 1 && comparable_element?(element.values.first) && !element.values.first.is_a?(Hash) if element.is_a?(Hash)
+
+        !element.is_a?(Array) && !(element.is_a?(Float) && element.nan?)
+      end
+
+      # hasIntersection(a, b): some element of +a+ that +b+ contains; null where either is not a
+      # list. NaN is never contained in CEL.
+      def build_has_intersection(operands, mapper)
+        left, right = operands
+        raise InvalidPlanError, "hasIntersection requires two operands" unless left && right
+
+        {"$let" => {
+          "vars" => {"cerbos_left" => build(left, mapper), "cerbos_right" => build(right, mapper)},
+          "in" => {"$cond" => [
+            {"$and" => [{"$isArray" => "$$cerbos_left"}, {"$isArray" => "$$cerbos_right"}]},
+            {"$anyElementTrue" => [{"$map" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "in" => {"$and" => [
+              {"$ne" => ["$$cerbos_item", Float::NAN]},
+              {"$in" => ["$$cerbos_item", "$$cerbos_right"]}
+            ]}}}]},
+            nil
+          ]}
         }}
       end
 

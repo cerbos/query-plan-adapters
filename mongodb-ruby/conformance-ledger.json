@@ -25,17 +25,9 @@
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
     },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "map() over a literal list whose projection reads a resource attribute: the plan's list is built per document, and the adapter has no aggregation form for map(), which a lambda over a constant list would need; membership in it is refused."
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "hasIntersection against a map element: the relation's element field declares no scalar type, and a query $in with an embedded-document needle compares it field by field in stored order, and also matches an array-valued element field that merely contains it, where CEL's map equality ignores order and a list never equals a map."
     }
   }
 }
