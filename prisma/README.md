@@ -194,6 +194,15 @@ present value and an error for an absent one, so it becomes `NOT startsWith(x, "
 column): FALSE when present, UNKNOWN when NULL, under either polarity. `x != null` is the
 presence test itself. Every other null comparison operand is rejected.
 
+A typed column read through to-one relations (`parent.x`) is also missing when a relation on the way is
+absent, and a relation filter cannot promise UNKNOWN on the rows it fails. So the rendering follows
+the comparison's polarity, which the enclosing `!`, `&&`, `||`, `exists` and `all` fix: where the
+comparison needs to be TRUE, `parent.x != null` is the relation-reached presence test (the parent
+exists and `x` is not NULL) and `parent.x == null` is never true; where it needs to be FALSE,
+`parent.x == null` is the negated presence test and `parent.x != null` is never false. A missing
+parent or a NULL `x` is then denied under any nesting of `!`. A null comparison whose polarity is
+not fixed (a ternary condition, an operand of `==`, the body of `exists_one`) is still rejected.
+
 ```ts
 queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
 ```
@@ -388,7 +397,7 @@ out of every golden case in the tier:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 60 / 80 |
-| adversarial | 212 / 270 |
+| adversarial | 213 / 270 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -490,7 +499,10 @@ vacuously true, matching the empty list your application would send to `check()`
 - A list-valued `filter()`, `map()` or `except()` where a boolean is required is a CEL error, and
   settles as one: a whole condition that is one returns `ALWAYS_DENIED` rather than throwing. Under
   `nullAttributeRepresentation: "omitted"`, `x == null` and `x != null` over a typed column
-  translate to presence tests instead of being refused.
+  translate to presence tests instead of being refused. A column reached through to-one relations
+  (`parent.x != null`) now translates too, by the comparison's polarity (see
+  [NULL attribute representation](#null-attribute-representation)), where it used to be refused
+  ([#551](https://github.com/cerbos/query-plan-adapters/issues/551)).
 - `size()` of a `valueType: "string"` column translates for any threshold, as `LIKE` patterns of
   `_` (`size(x) > 4` is `startsWith: "_____"`). A threshold of 2^32 or more, which no store can
   hold, needs no pattern; one past 1024 characters short of that is refused. Fractional and

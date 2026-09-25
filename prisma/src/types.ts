@@ -32,6 +32,15 @@ type Outcomes = {
    * value is there and UNKNOWN when it is NULL (see presence).
    */
   missing?: PlanExpressionOperand[];
+  /**
+   * When the only error is a missing attribute reached through a to-one relation: a test TRUE
+   * exactly when the relation exists and the column is not NULL, and FALSE or UNKNOWN otherwise.
+   * Unlike `missing`, a relation filter cannot promise UNKNOWN for the error rows (Prisma matches a
+   * to-one relation through a join or subquery, which can collapse UNKNOWN to FALSE), so the test
+   * is only used where the leaf's polarity is fixed and FALSE-or-UNKNOWN is the value that
+   * polarity needs (see settleTypeMismatches).
+   */
+  reached?: PlanExpressionOperand;
 };
 
 const ORDERING_OPERATORS = new Set(["lt", "le", "gt", "ge"]);
@@ -102,6 +111,15 @@ export function settleTypeMismatches(
   }
   if (positive && !outcomes.true) return { value: false };
   if (!positive && !outcomes.false) return { value: true };
+  // What is left is a leaf that is TRUE (positive) or FALSE (negative) once the relation and its
+  // column are present, and an error otherwise. The error rows must not satisfy the leaf's
+  // polarity: `reached` is FALSE or UNKNOWN on them, so it stands for the TRUE leaf under an even
+  // number of negations, and its negation for the FALSE leaf under an odd number, where that
+  // negation meets the enclosing one and is TRUE only for a present value (Kleene logic is
+  // regular, so an error leaf decides no more rows than the value its polarity can least use).
+  if (outcomes.reached !== undefined) {
+    return positive ? outcomes.reached : { operator: "not", operands: [outcomes.reached] };
+  }
   if (!outcomes.error && !(outcomes.true && outcomes.false)) {
     return { value: outcomes.true === true };
   }
@@ -629,6 +647,10 @@ function leafOutcomes(
  * `x == null` / `x != null` over a column the caller omits when NULL: a present value is never
  * null, and an absent one is a missing-attribute error, so neither outcome can select the NULL
  * rows an `IS NULL` would.
+ *
+ * A column read through to-one relations (`parent.x`) is also missing when a relation on the way
+ * is absent. Its presence test is `reached` rather than `missing`: a relation filter is not
+ * guaranteed to be UNKNOWN on the rows it fails, so it only answers where polarity is fixed.
  */
 function omittedNullComparison(
   operator: string,
@@ -642,14 +664,17 @@ function omittedNullComparison(
     return undefined;
   }
   const fieldRef = resolveFieldReference(field.name, context);
-  if (fieldRef.relations && fieldRef.relations.length > 0) return undefined;
+  const relations = fieldRef.relations ?? [];
+  if (relations.some((relation) => relation.type !== "one")) return undefined;
   const convention = fieldRef.nullAttributeRepresentation ?? context.nullRepresentation;
   if (convention !== "omitted") return undefined;
   const test = presence(field, fieldRef);
+  const presenceTest =
+    test === undefined ? {} : relations.length > 0 ? { reached: test } : { missing: [test] };
   return {
     [operator === "eq" ? "false" : "true"]: true,
     error: true,
-    ...(test === undefined ? {} : { missing: [test] }),
+    ...presenceTest,
   };
 }
 
