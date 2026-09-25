@@ -168,12 +168,11 @@ class AdversarialConformanceTest {
                     it[createdAt] = d.createdAt?.let(Instant::parse)
                     it[updatedAt] = d.updatedAt?.let(Instant::parse)
                 }
-                s.tags.forEachIndexed { index, tag ->
+                for (tag in s.tags) {
                     Tags.insert {
                         it[tagId] = tag.id
                         it[name] = tag.name
                         it[resourceId] = s.id
-                        it[position] = index
                     }
                 }
                 // One related row per element; a null element becomes a NULL column.
@@ -182,7 +181,6 @@ class AdversarialConformanceTest {
                         it[id] = "${s.id}-n$index"
                         it[this.element] = element
                         it[resourceId] = s.id
-                        it[position] = index
                     }
                 }
                 s.aBoolList.forEachIndexed { index, element ->
@@ -190,7 +188,6 @@ class AdversarialConformanceTest {
                         it[id] = "${s.id}-b$index"
                         it[this.element] = element
                         it[resourceId] = s.id
-                        it[position] = index
                     }
                 }
                 // ONE category holding every subcategory name (conformance/README.md, "The

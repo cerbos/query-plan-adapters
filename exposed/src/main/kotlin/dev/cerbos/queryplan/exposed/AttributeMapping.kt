@@ -80,13 +80,6 @@ public sealed interface AttributeMapping {
          * resource attributes. It is built against the alias each subquery instance reads through.
          */
         internal val visibleWhen: ((Alias<Table>) -> Op<Boolean>)?,
-        /**
-         * The integer column holding each row's zero-based position in the list the application
-         * sends to `check()`, for positional reads such as `R.attr.tags[0]`. It must hold exactly
-         * the list index: `0` for the first element, one row per position, no gaps. `null` when
-         * undeclared, and a positional read is then refused.
-         */
-        public val position: Column<*>? = null,
     ) : AttributeMapping {
 
         public enum class Cardinality {
@@ -106,11 +99,6 @@ public sealed interface AttributeMapping {
         init {
             require(to.table === table) {
                 "Relation target column ${to.table.tableName}.${to.name} is not a column of ${table.tableName}"
-            }
-            position?.let {
-                require(it.table === table) {
-                    "Relation position column ${it.table.tableName}.${it.name} is not a column of ${table.tableName}"
-                }
             }
             element?.let {
                 require(it.column.table === table) {
@@ -238,19 +226,6 @@ public open class MappingBuilder internal constructor() {
 @CerbosMappingDsl
 public class RelationBuilder<T : Table> internal constructor() : MappingBuilder() {
     private var visibleWhen: ((Alias<T>) -> Op<Boolean>)? = null
-    private var position: Column<*>? = null
-
-    /**
-     * Declares the column holding each row's zero-based position in the list the application
-     * sends to `check()`, which is what a positional read such as `R.attr.tags[0]` reads. It must
-     * hold exactly the list index — `0` for the first element, one row per position, no gaps —
-     * because the adapter trusts it: a read at a position no row holds is CEL's out-of-range
-     * error, and two rows at one position are two answers.
-     */
-    public fun position(column: Column<*>) {
-        require(position == null) { "position is declared twice" }
-        position = column
-    }
 
     /**
      * Declares the predicate the application itself applies when it reads this relation's table.
@@ -283,7 +258,6 @@ public class RelationBuilder<T : Table> internal constructor() : MappingBuilder(
             visibleWhen = predicate?.let { typed ->
                 { alias -> @Suppress("UNCHECKED_CAST") typed(alias as Alias<T>) }
             },
-            position = position,
         )
     }
 }

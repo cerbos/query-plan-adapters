@@ -310,26 +310,6 @@ A pattern RE2 rejects (a lookaround, a backreference, a stacked quantifier) make
 raise, so it is UNKNOWN on every row, as is a number or boolean receiver. Anything else is refused.
 `matches(...) == true` and its `false` / `!=` spellings translate the same way.
 
-### Positional reads: `position(column)`
-
-A to-many relation is a correlated subquery, and its rows carry no list order, so `R.attr.tags[0]`
-needs the mapping to say where each element sits. Declare the column holding each row's zero-based
-index in the list the application sends to `check()`:
-
-```kotlin
-"request.resource.attr.tags" to many(Tags, from = Documents.id, to = Tags.documentId) {
-    "name" to Tags.name
-    position(Tags.position)
-}
-```
-
-It must hold exactly the list index: `0` for the first element, one row per position, no gaps. The
-adapter trusts it. `list[k] op constant` and `list[k].member op constant` then read the one row at
-position `k`: a read past the end, a negative index or a fractional one is CEL's error and
-UNKNOWN; a scalar element is compared as a value (a NULL element is CEL's null element), a member
-under its own declared convention. Without a position column, or through a to-many hop, a
-positional read is refused.
-
 ### A resolver instead of a table
 
 `AttributeResolver` is a `fun interface`, so a mapping can be a rule rather than a table:
@@ -558,21 +538,20 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 72 / 80 |
-| adversarial | 269 / 308 |
+| extended | 68 / 80 |
+| adversarial | 260 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-40 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+53 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
 - a regex `matches()` pattern `LIKE`, `=` and `REPLACE` cannot spell exactly (an unbounded
   repetition of a literal, a lone `.`, a negated class, an inline flag other than a leading `(?i)`):
   CEL matches with RE2, which no SQL engine implements. See [Regular expressions](#regular-expressions);
-- a positional read of a list (`[i]`, `.member` of `[i]`) over a relation that declares no
-  `position(column)`, or through a to-many hop: without a position column the rows carry no list
-  order to index into;
+- a positional read of a list (`[i]`, `.member` of `[i]`): a to-many relation is a correlated
+  subquery over an association, and an association carries no element order to index into;
 - `except()`, `filter()` or `map()` used as a value rather than inside `size()` or
   `hasIntersection()`, and whole-list equality against a relation;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix

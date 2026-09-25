@@ -361,26 +361,6 @@ class ColumnTypeGuardTest {
     }
 
     @Test
-    fun `a positional read of a relation with no position column is refused`() {
-        // CEL: `R.attr.tagNames[0] == "a"`. The corpus maps every list with a position column, so
-        // only a mapping written here can leave it out; without one the rows carry no list order.
-        val error = assertThrows<UnsupportedPlanShapeException> {
-            translate(
-                ReviewPlans.expression(
-                    "eq",
-                    ReviewPlans.expression(
-                        "index",
-                        ReviewPlans.variable("request.resource.attr.tagNames"),
-                        ReviewPlans.value(0),
-                    ),
-                    ReviewPlans.value("a"),
-                ),
-            )
-        }
-        assertTrue(error.message!!.contains("declares no position column"), error.message)
-    }
-
-    @Test
     fun `a member column and an element column of different kinds are refused`() {
         // CEL: `R.attr.aNumber in R.attr.tagNames` — the `in-var-var` shape with the two sides
         // mapped onto columns of different types, which is a mapping the corpus cannot vary.
