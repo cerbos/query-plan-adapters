@@ -53,8 +53,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
-| adversarial | 254 / 308 |
+| extended | 62 / 80 |
+| adversarial | 256 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -86,6 +86,11 @@ equality without reaching SQL: a scalar column never equals one (FALSE, or UNKNO
 attribute is missing), a list or map needle is never a member of a mapped association, and
 `exists`/`all` over a list of maps read each map's fields (`t.name`), a missing key being UNKNOWN.
 
+`size()` of `filter()` over a list of constants, `size()` of `except()` (an association's
+members, or constants, minus a list), and `in` over `map()` of a list of constants are
+translated element by element; an element's error makes the whole list UNKNOWN, as it does in
+CEL.
+
 `int()` over a double column truncates toward zero on every dialect (SQLite's `CAST` to
 `INTEGER`, `TRUNC` on PostgreSQL, `TRUNCATE` on MySQL, then an exact `CAST`), inside a `CASE`
 that is NULL outside CEL's range `(-2^63, 2^63)` and for a NaN, where CEL raises.
@@ -103,7 +108,7 @@ The refusals fall into a few mechanisms:
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a decimal column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. A decimal's attribute is the double nearest it, which can truncate to a different whole number. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
 | A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |
-| A list difference, `filter`/`map` over a list of constants, a map attribute's keys, a map literal holding a column | None has a scalar SQL form. |
+| A list difference compared as a whole or over an association of unknown member type, a map attribute's keys, a map literal holding a column | None has a scalar SQL form. |
 | Two raw temporal columns | CEL compares RFC-3339 spellings without `timestamp()`. |
 
 The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any

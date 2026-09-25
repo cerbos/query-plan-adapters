@@ -11,9 +11,20 @@ module Cerbos
         def membership(needle, haystack)
           return composite_membership(needle, haystack) if composite?(needle)
           return relation_membership(haystack.scope, needle) if haystack.is_a?(Values::Collection)
+          return projection_membership(needle, haystack.projections) if haystack.is_a?(Values::ConstantProjection)
           return relation_membership(needle.scope, haystack) if needle.is_a?(Values::Collection)
 
           scalar_membership(needle, haystack)
+        end
+
+        # `needle in list.map(t, ...)` over a list of constants. `map()` never ignores an
+        # element's error, so a NULL projection (the translator's error) makes the list, and the
+        # lookup, UNKNOWN. A needle that does not declare `:explicit` is a missing attribute when
+        # NULL, UNKNOWN too. Otherwise it is an ordinary lookup in the projected values.
+        def projection_membership(needle, projections)
+          errors = projections.filter_map { |projection| SqlSupport.is_null(projection) if SqlSupport.sql_node?(projection) }
+          errors << SqlSupport.is_null(needle) if SqlSupport.sql_node?(needle) && !explicit_null?(needle)
+          unknown_if_any(errors, as_predicate(scalar_membership(needle, projections)))
         end
 
         # A list or map literal.

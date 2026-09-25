@@ -122,6 +122,7 @@ module Cerbos
         "div" => Operator.new(2, ->(numerator, denominator) { divide(numerator, denominator) }),
         "in" => Operator.new(2, ->(needle, haystack) { membership(needle, haystack) }),
         "hasIntersection" => Operator.new(2, ->(left, right) { has_intersection(left, right) }),
+        "except" => Operator.new(2, ->(left, right) { except(left, right) }),
         "size" => Operator.new(1, ->(target) { size(target) }),
         "timestamp" => Operator.new(1, ->(value) { timestamp(value) }),
         "string" => Operator.new(1, ->(value) { cast_to_string(value) }),
@@ -550,7 +551,9 @@ module Cerbos
       def collection?(value)
         value.is_a?(Values::Collection) ||
           value.is_a?(Values::FilteredCollection) ||
-          value.is_a?(Values::MappedCollection)
+          value.is_a?(Values::MappedCollection) ||
+          value.is_a?(Values::ConstantList) ||
+          value.is_a?(Values::ConstantProjection)
       end
 
       # A value that may be NaN or an Infinity. It stays out of SQL until a comparison
@@ -586,6 +589,8 @@ module Cerbos
         when Values::Collection then "an association"
         when Values::FilteredCollection then "a filtered association"
         when Values::MappedCollection then "a projected association"
+        when Values::ConstantList then "a filtered list of constants"
+        when Values::ConstantProjection then "a projected list of constants"
         when Values::Hierarchy then "a hierarchy"
         when Values::DoubleText then "string() of a double"
         else "#{value.inspect} (#{value.class})"

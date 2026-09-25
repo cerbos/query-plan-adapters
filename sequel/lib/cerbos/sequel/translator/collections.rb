@@ -84,18 +84,104 @@ module Cerbos
           when "exists" then SqlSupport.or_node(bodies)
           when "all" then SqlSupport.and_node(bodies)
           when "exists_one" then exactly_one_of(bodies)
+          when "filter" then Values::ConstantList.new(elements: values, keeps: bodies)
+          when "map"
+            projections = values.map { |value| evaluate(body_node, environment.bind(iterator, value)) }
+            projections.each do |projection|
+              reject_double_text("map", projection)
+              reject_collection("map", projection)
+              reject_deferred("map", projection)
+            end
+            Values::ConstantProjection.new(projections: projections)
           else
-            # `filter` and `map` give a list, and the operator that uses it — `size` or
-            # `hasIntersection` — would need a second list-valued form. No corpus shape needs it,
-            # so the adapter refuses instead of keeping code that nothing proves.
-            raise UnsupportedOperatorError,
-              "#{operator} over a list of constants is not supported: only exists, all and " \
-              "exists_one have a translation for that shape"
+            raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
           end
+        end
+
+        # `left.except(right)`: the elements of `left` that no element of `right` equals, by CEL
+        # equality, duplicates kept (Cerbos's `exceptList`). An error in either list — a missing
+        # attribute inside `right`, say — is an error of the whole call.
+        def except(left, right)
+          unless right.is_a?(Array) && right.none? { |element| collection?(element) }
+            raise UnsupportedOperatorError,
+              "except is translated only with a list literal on its right, got #{describe(right)}"
+          end
+
+          case left
+          when Values::Collection then except_from_association(left.scope, right)
+          when Array then except_from_constants(left, right)
+          else
+            raise UnsupportedOperatorError,
+              "except needs a list on its left, got #{describe(left)}"
+          end
+        end
+
+        # An association's members that equal no constant on the right, as the body of a
+        # filtered association that `size()` counts. A member is a stored scalar list element,
+        # which holds null values: `null` equals only a null constant, and a constant of another
+        # kind (or a list or map) equals no member at all.
+        def except_from_association(scope, right)
+          kind = member_kind(scope)
+          unless kind && right.all? { |element| deep_constant?(element) }
+            raise UnsupportedOperatorError,
+              "except over an association is translated only for a member column of a known " \
+              "type against a list of constants"
+          end
+
+          member = scope.member_column
+          candidates = right.reject { |element| composite?(element) || cross_type_literal?(element, kind) }
+          present = candidates.compact
+          removes_null = candidates.include?(nil)
+          body =
+            if present.empty?
+              removes_null ? SqlSupport.comparison("ne", member, nil) : true
+            else
+              outside = SqlSupport.not_node(SqlSupport.in_list(member, present))
+              if removes_null
+                SqlSupport.and_node([SqlSupport.comparison("ne", member, nil), outside])
+              else
+                SqlSupport.or_node([SqlSupport.comparison("eq", member, nil), outside])
+              end
+            end
+          Values::FilteredCollection.new(scope: scope, body: body)
+        end
+
+        # Constants on the left, and on the right constants or columns. A column that does not
+        # declare `:explicit` is a missing attribute when NULL, which makes the list, and so the
+        # call, an error: every keep is UNKNOWN there. Otherwise an element stays unless it
+        # equals some right element, a null only equalling an explicit null.
+        def except_from_constants(left, right)
+          unless left.all? { |element| deep_constant?(element) }
+            raise UnsupportedOperatorError, "except is translated only over a list of constants"
+          end
+
+          missing = right.filter_map { |element|
+            SqlSupport.is_null(element) if SqlSupport.sql_node?(element) && !explicit_null?(element)
+          }
+          keeps = left.map do |element|
+            equal = SqlSupport.or_node(right.map { |other| as_predicate(member_equality(element, other)) })
+            kept = (equal == true || equal == false) ? !equal : SqlSupport.not_node(equal)
+            unknown_if_any(missing, kept)
+          end
+          Values::ConstantList.new(elements: left, keeps: keeps)
         end
 
         # `exists_one` never ignores an element that made an error, so the guard for the error
         # comes first. After that it is an exact count of the elements that are true.
+        # How many keeps are TRUE, or UNKNOWN when one is: `filter()` never ignores an element's
+        # error, and an error in `except()` is an error of the whole list.
+        def count_constant_list(keeps)
+          return keeps.count(true) if keeps.all? { |keep| keep == true || keep == false }
+
+          total = keeps
+            .map { |keep| SqlSupport.case_node([[keep, 1]], else_value: 0) }
+            .reduce { |left, right| SqlSupport.infix("+", left, right) }
+          SqlSupport.case_node(
+            [[SqlSupport.or_node(keeps.map { |keep| SqlSupport.is_null(keep) }), nil]],
+            else_value: total
+          )
+        end
+
         def exactly_one_of(bodies)
           matches = bodies
             .map { |body| SqlSupport.case_node([[body, 1]], else_value: 0) }
@@ -136,6 +222,8 @@ module Cerbos
 
         def count_of(target)
           case target
+          when Values::ConstantList
+            count_constant_list(target.keeps)
           when Values::Collection
             # size() counts the elements and does not evaluate them. Thus it also counts a
             # member column that is NULL, and no element can make an error. The hop guard is

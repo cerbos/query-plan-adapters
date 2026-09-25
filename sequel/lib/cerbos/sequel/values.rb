@@ -24,6 +24,15 @@ module Cerbos
       # because its segments are already separate.
       Hierarchy = Struct.new(:value, :segments, :delimiter)
 
+      # `filter()` over a list of constants, or a list of constants `except()` another list: the
+      # constant elements, and for each one whether it stays (a predicate, or a Ruby boolean
+      # where the translator could decide). Held until `size()` counts it.
+      ConstantList = Struct.new(:elements, :keeps)
+
+      # `map()` over a list of constants: one projection per element. Held until `in` looks a
+      # needle up in it.
+      ConstantProjection = Struct.new(:projections)
+
       # One `set-field` of a map literal: a key and its constant value, held until the
       # `struct` around it builds the Hash.
       MapEntry = Struct.new(:key, :value)
