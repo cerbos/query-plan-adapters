@@ -53,8 +53,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 62 / 80 |
-| adversarial | 256 / 308 |
+| extended | 69 / 80 |
+| adversarial | 271 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -91,6 +91,15 @@ members, or constants, minus a list), and `in` over `map()` of a list of constan
 translated element by element; an element's error makes the whole list UNKNOWN, as it does in
 CEL.
 
+`matches()` is parsed by the adapter, never handed to the store (no store's regex dialect is
+RE2, CEL's engine), and lowered only when what it matches can be said with the exact string
+predicates: a finite set of literals under its anchors (`^ab$` is `=`, `^h` is `startsWith`,
+`e$` is `endsWith`, `\d` is `contains` any digit), every character from a small set
+(`^[ab@#]+$`, through `REPLACE`), or a prefix and a suffix around a run of `.`, which excludes a
+newline (`^a.*b$`). A top-level alternation is the OR of its branches; `(?i)` folds case as RE2
+does, including `k` to KELVIN SIGN and `s` to LONG S. A pattern RE2 rejects (a lookahead, `a**`,
+a backreference) is an error in CEL, so it is UNKNOWN. The lowering is drizzle's.
+
 `int()` over a double column truncates toward zero on every dialect (SQLite's `CAST` to
 `INTEGER`, `TRUNC` on PostgreSQL, `TRUNCATE` on MySQL, then an exact `CAST`), inside a `CASE`
 that is NULL outside CEL's range `(-2^63, 2^63)` and for a NaN, where CEL raises.
@@ -103,7 +112,7 @@ The refusals fall into a few mechanisms:
 | A division whose denominator is a second column | IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`. A division of a value by itself stays safe, and so does a constant denominator. |
 | More arithmetic on a division that can give NaN or Infinity | SQL has no NaN and no signed Infinity, so the adapter resolves such a division only where it is the comparison operand. |
 | `int()` beside, or `%` over, an operand whose CEL type the plan does not settle (a ternary of whole constants) | The plan carries `2` and `2.0` as the same number, so whether CEL raises cannot be known. |
-| `matches()` | RE2 has no portable SQL form, and `LIKE` cannot show a regular expression. |
+| `matches()` with a pattern outside the lowered forms below (a negated class, `\b`, a flag other than a leading `(?i)`, more than 256 literals), or over anything but a string column | No store's regex dialect is RE2, so a pattern is never handed to the store. |
 | `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a decimal column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. A decimal's attribute is the double nearest it, which can truncate to a different whole number. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |

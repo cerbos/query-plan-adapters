@@ -18,6 +18,71 @@ module Cerbos
           matcher.match(receiver, needle, **STRING_MATCHES.fetch(operator))
         end
 
+        # `receiver.matches(pattern)`, lowered through {Regex.compile} into the exact string
+        # predicates this module already writes — never into the store's own regex dialect, none
+        # of which is RE2. The receiver must be a string column: a NULL there is a missing
+        # attribute or a null value, and CEL has no `matches()` for either, so the whole predicate
+        # is NULL for it, even where the pattern matches every string.
+        def regex_match(receiver, pattern)
+          reject_collection("matches", receiver)
+          return cel_type_error if known_non_string?(receiver)
+          unless pattern.is_a?(::String)
+            raise UnsupportedOperatorError,
+              "matches is translated only with a constant pattern, got #{describe(pattern)}"
+          end
+          unless SqlSupport.sql_node?(receiver) && STRING_COLUMN_TYPES.include?(column_type(receiver))
+            raise UnsupportedOperatorError,
+              "matches is translated only over a string column, got #{describe(receiver)}"
+          end
+
+          plans = Regex.compile(pattern)
+          return cel_type_error if plans == :error
+
+          matched = SqlSupport.or_node(plans.map { |plan| regex_condition(receiver, plan) })
+          SqlSupport.case_node([[SqlSupport.is_null(receiver), nil]], else_value: matched)
+        end
+
+        def regex_condition(receiver, plan)
+          case plan
+          when Regex::Literals
+            if plan.kind == :equals
+              return SqlSupport.or_node(plan.literals.map { |literal| SqlSupport.comparison("eq", receiver, literal) })
+            end
+
+            affixes = {starts_with: [false, true], ends_with: [true, false], contains: [true, true]}.fetch(plan.kind)
+            SqlSupport.or_node(plan.literals.map { |literal|
+              matcher.match(receiver, literal, prefix: affixes[0], suffix: affixes[1])
+            })
+          when Regex::AllCharactersIn
+            # Remove every allowed character; nothing may be left. REPLACE is literal and
+            # case-sensitive on all three stores, as the LIKE escaping already relies on.
+            rest = plan.characters.reduce(receiver) { |current, character|
+              SqlSupport.function(:REPLACE, [current, character, ""])
+            }
+            SqlSupport.and_node([SqlSupport.comparison("eq", dialect.char_length(rest), 0), at_least(receiver, plan.min)].compact)
+          when Regex::NoNewline
+            SqlSupport.and_node([no_newline(receiver), at_least(receiver, plan.min)].compact)
+          when Regex::PrefixSuffix
+            pairs = plan.pairs.map { |prefix, suffix|
+              SqlSupport.and_node([
+                matcher.match(receiver, prefix, prefix: false, suffix: true),
+                matcher.match(receiver, suffix, prefix: true, suffix: false),
+                at_least(receiver, prefix.length + plan.min + suffix.length)
+              ].compact)
+            }
+            SqlSupport.and_node([SqlSupport.or_node(pairs), no_newline(receiver)])
+          end
+        end
+
+        # At least +count+ characters, or nil when any string has that many.
+        def at_least(receiver, count)
+          SqlSupport.comparison("ge", dialect.char_length(receiver), count) if count.positive?
+        end
+
+        def no_newline(receiver)
+          SqlSupport.not_node(matcher.match(receiver, "\n", prefix: true, suffix: true))
+        end
+
         # A value CEL certainly holds as a number or a boolean: a constant, a numeric or boolean
         # column, or a computed int, double or boolean. `contains`, `startsWith`, `endsWith` and
         # `size()` have no overload for either, so CEL raises a no-such-overload error on every

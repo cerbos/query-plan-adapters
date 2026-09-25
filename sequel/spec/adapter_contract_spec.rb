@@ -719,12 +719,13 @@ RSpec.describe Cerbos::Sequel do
   end
 
   describe "unsupported operators" do
+    # Kind 1: no CEL function plans as this operator, so only a plan from elsewhere carries it.
     it "raises for an operator it does not implement" do
       expect {
         translate(conditional(
-          expression("matches", variable("request.resource.attr.aString"), value("^s"))
+          expression("frobnicate", variable("request.resource.attr.aString"), value("^s"))
         ))
-      }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /Unsupported operator: matches/)
+      }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /Unsupported operator: frobnicate/)
     end
 
     it "raises for a sub-microsecond timestamp literal" do

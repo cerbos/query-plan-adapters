@@ -5,6 +5,7 @@ require_relative "attribute_mapping"
 require_relative "dialect"
 require_relative "errors"
 require_relative "plan"
+require_relative "regex"
 require_relative "relations"
 require_relative "string_matching"
 require_relative "timestamps"
@@ -65,7 +66,7 @@ module Cerbos
       # boolean only when an arm is: see {#ternary}.
       BOOLEAN_OPERATORS = (
         %w[and or not exists all exists_one in hasIntersection ancestorOf descendentOf overlaps] +
-        COMPARISONS + STRING_MATCHES.keys
+        COMPARISONS + STRING_MATCHES.keys + %w[matches]
       ).freeze
 
       NULL_REPRESENTATIONS = AttributeMapping::NULL_REPRESENTATIONS
@@ -120,6 +121,7 @@ module Cerbos
           [name, Operator.new(2, ->(receiver, needle) { string_match(name, receiver, needle) })]
         },
         "div" => Operator.new(2, ->(numerator, denominator) { divide(numerator, denominator) }),
+        "matches" => Operator.new(2, ->(receiver, pattern) { regex_match(receiver, pattern) }),
         "in" => Operator.new(2, ->(needle, haystack) { membership(needle, haystack) }),
         "hasIntersection" => Operator.new(2, ->(left, right) { has_intersection(left, right) }),
         "except" => Operator.new(2, ->(left, right) { except(left, right) }),
