@@ -1,52 +1,20 @@
 # Services for the Sequel adapter's suites. Only Docker is required.
 #
-#   ./scripts/test.sh                 # all the suites, on SQLite
+#   ./scripts/test.sh                 # all the suites
 #   ./scripts/test.sh spec/conformance_spec.rb
+#   ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb
 #
 # `tests` mounts the repository root because the suites read ../conformance/. No suite needs a
-# PDP: the conformance suite replays the plans and decisions recorded in conformance/golden/.
-#
-# `postgres-store` and `mysql-store` are the real stores the conformance harness replays the
-# corpus on when ADAPTER_TEST_DB names one. Each sits behind a profile of its own, so a SQLite
-# run starts neither; scripts/test.sh starts the one it needs. Their images come from
-# POSTGRES_IMAGE and MYSQL_IMAGE beside this file, pinned by tag AND digest, and scripts/test.sh
-# exports both.
+# PDP. SQLite runs in memory; the conformance suite can run on `postgres` or `mysql` instead
+# (ADAPTER_TEST_DB), which scripts/test.sh starts. Their images are pinned in POSTGRES_IMAGE and
+# MYSQL_IMAGE, which scripts/test.sh exports, so each pin lives in one file.
 
 services:
-  postgres-store:
-    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE - run via scripts/test.sh}
-    profiles: ["postgres"]
-    environment:
-      POSTGRES_USER: cerbos
-      POSTGRES_PASSWORD: cerbos
-      POSTGRES_DB: cerbos
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "cerbos", "-d", "cerbos"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
-
-  mysql-store:
-    image: ${MYSQL_IMAGE:?set MYSQL_IMAGE - run via scripts/test.sh}
-    profiles: ["mysql"]
-    # MySQL's default collation makes `=` case- and accent-insensitive, and CEL's equality is
-    # byte-exact: a store misconfiguration, not an adapter limitation. The harness also pins the
-    # collation on every table and on its connection (spec/support/database.rb).
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin"]
-    environment:
-      MYSQL_ROOT_PASSWORD: cerbos
-      MYSQL_DATABASE: cerbos
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pcerbos"]
-      interval: 2s
-      timeout: 5s
-      retries: 60
-
   tests:
     build:
       context: .
       args:
-        RUBY_VERSION: ${RUBY_VERSION:-3.4}
+        RUBY_VERSION: ${RUBY_VERSION:-4.0}
         SEQUEL_VERSION: ${SEQUEL_VERSION:-}
     environment:
       ADAPTER_TEST_DB: ${ADAPTER_TEST_DB:-sqlite}
@@ -56,3 +24,40 @@ services:
       - ..:/repo
     working_dir: /repo/sequel
     command: ["bundle", "exec", "rspec"]
+
+  postgres:
+    profiles: ["postgres"]
+    image: ${POSTGRES_IMAGE:-}
+    environment:
+      POSTGRES_PASSWORD: conformance
+      POSTGRES_DB: conformance
+      # A byte-order collation, stated rather than inherited. CEL orders strings by code point,
+      # and <, <=, > and >= on a text column follow the column's collation: under glibc's
+      # en_US.utf8 'One' > 'a' is TRUE (#489). The Alpine image reports en_US.utf8 and orders by
+      # byte only because musl's strcoll does. ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it to
+      # reproduce the over-grant, for example "--locale-provider=icu --icu-locale=en-US"; a
+      # measurement, not a CI leg.
+      POSTGRES_INITDB_ARGS: ${ADAPTER_TEST_POSTGRES_INITDB_ARGS:---lc-collate=C}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "conformance"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mysql:
+    profiles: ["mysql"]
+    image: ${MYSQL_IMAGE:-}
+    # Byte-exact and NO PAD. MySQL's default collation makes `=` case-insensitive, and
+    # utf8mb4_0900_as_cs still ignores a soft hyphen (#474). The harness pins it on every table
+    # and on its connection too (spec/support/database.rb): a literal takes the connection's
+    # collation, not the column's.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin"]
+    environment:
+      MYSQL_ROOT_PASSWORD: conformance
+      MYSQL_DATABASE: conformance
+    healthcheck:
+      # Over TCP: during initialisation a temporary server answers on the socket only.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pconformance"]
+      interval: 2s
+      timeout: 5s
+      retries: 60

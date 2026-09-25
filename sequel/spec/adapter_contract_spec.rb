@@ -1,22 +1,33 @@
 # frozen_string_literal: true
 
-# Tests for what the corpus cannot ask. Read CLAUDE.md, "What a translator unit test may pin",
-# before adding here. Three kinds:
+# What the adapter can be asked WITHOUT a corpus case, and nothing that has one.
 #
-# * Caller-supplied arguments (kind 2, permanent): operator overrides, mapper forms, the
-#   per-call null representation, and Sequel model shapes (a many_to_many through a join table,
-#   an association with conditions, a block or a custom dataset, a model over a filtered
-#   dataset, single-table inheritance, composite keys). The corpus uses one mapping, so it
-#   cannot vary these.
-# * Plans the planner never emits: empty `and`, wrong operand count, unknown kind. The adapter
-#   accepts plans from any source, so these must fail closed.
-# * Cast and division refusals the corpus also covers, kept here to pin which operand type
-#   raises. Not a substitute for the corpus cases.
+# Read CLAUDE.md, "What a translator unit test may pin", before adding to this file. Most of it
+# is kind 2 — **a caller-supplied argument the corpus structurally cannot vary**, and permanent.
+# The conformance harness uses ONE attribute map for every case, so an operator override, a
+# second mapper form, a per-call `null_attribute_representation` and the association shapes this
+# adapter refuses to guess at have no corpus spelling at all: the corpus asks what a POLICY
+# produces, not what a caller passes. The association block is the largest of them and the
+# reason this file is worth its length — a many_to_many through a join table, an association
+# with conditions, a block or a custom dataset, a model over a filtered dataset, single-table
+# inheritance and a composite key are Sequel MODEL shapes, and no policy can describe one.
 #
-# Anything a conformance golden already decides does not belong here. New shapes go in the
-# corpus.
+# Two other kinds are here, and they are not the same thing:
 #
-# No PDP or database server needed (SQLite in memory).
+# * **Shapes CEL cannot reach.** A plan whose `and` carries no operands, an operator with the
+#   wrong operand count, an unrecognised plan kind. The planner never emits one, so the corpus
+#   is built from real plans and cannot carry them — but this adapter accepts a plan from any
+#   source, and a plan that lost or gained an operand must not widen the filter. Permanent.
+# * **Refusals the corpus also carries, kept for the MECHANISM rather than the shape.** The cast
+#   and division blocks below drive their refusals through purpose-built columns
+#   (`EdgeDocument`), so each message names the operand type that raised it; the corpus proves
+#   the same shapes end to end against its own mapping. These are not a substitute for those
+#   cases and must never become one.
+#
+# Anything a conformance golden already decides does not belong here. A new shape goes in
+# conformance/cases/, never here.
+#
+# Needs no PDP and no database server: the models are SQLite in memory.
 
 Database.require_sqlite!("spec/adapter_contract_spec.rb")
 
@@ -105,11 +116,11 @@ RSpec.describe Cerbos::Sequel do
 
   # The four transports a plan can arrive over, held to ONE answer.
   #
-  # No corpus case can ask this: the harness only ever hands the adapter a parsed golden plan, so
-  # the SDK, REST/protobuf and duck-typed shapes are executed nowhere else. Every case below compares against the Hash
-  # decoding of the same condition rather than a written-down id set — a hand-written set is the
-  # thing conformance/ exists to abolish, and it would also have to be rewritten whenever the
-  # seeds move.
+  # No corpus case can ask this: the harness only ever hands the adapter a parsed golden plan,
+  # so the SDK object, the REST/protobuf shape and the duck-typed one are executed nowhere
+  # else. Every case below compares against the Hash decoding of the same condition rather than
+  # a written-down id set — a hand-written set is the thing conformance/ exists to abolish, and
+  # it would also have to be rewritten whenever the seeds move.
   describe "accepted plan shapes" do
     let(:condition) do
       expression("eq", variable("request.resource.attr.aString"), value("one"))
@@ -137,8 +148,10 @@ RSpec.describe Cerbos::Sequel do
       expect(translate(plan).select_map(:id).sort).to eq(reference_ids)
     end
 
-    # Uses the real Ruby SDK types, so an SDK change fails here with a clear name. No other
-    # suite hands the adapter an SDK object: the harness replays parsed golden plans.
+    # The official Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby) is the usual source of
+    # plans. Thus these tests use its output types directly and do not use a substitute. This
+    # test holds the contract with a name. Thus a change in the SDK makes this test fail, and it does not make
+    # an unclear failure in a harness.
     def sdk_plan(kind, condition)
       Cerbos::Output::PlanResources.new(
         request_id: "test", kind: kind, condition: condition,
@@ -341,8 +354,7 @@ RSpec.describe Cerbos::Sequel do
   #
   # The caller writes the chain as a nested `fields:` mapping, and that nesting is what tells
   # the adapter which hops are the parent. The corpus proves the behaviour end to end with the
-  # `relation/<operator>/*to-one-chain` cases over `mainCategory`; these tests hold each
-  # polarity on a small model.
+  # w1-*-chain actions; these tests hold each polarity on a small model.
   describe "a collection reached through a parent hop" do
     CHAIN_ATTRIBUTES = {
       "request.resource.attr.tag" => Cerbos::Sequel.association(:tags, fields: {
@@ -896,23 +908,34 @@ RSpec.describe Cerbos::Sequel do
     end
 
     it "does not apply the convention of the call to an attribute that declares nothing" do
-      # `u` declares nothing, so the `:omitted` of the call reaches it and the null constant
-      # is refused. The declared attributes above are unaffected.
+      # `u` declares nothing, so the call's `:omitted` applies and a NULL column is UNKNOWN.
+      # `e` declares `:explicit`, so it keeps `IS NULL`.
+      omitted = described_class.query_plan_to_dataset(
+        plan: conditional(expression("eq", variable("u"), value(nil))),
+        model: EdgeDocument, attributes: declared,
+        null_attribute_representation: :omitted
+      ).sql
+      expect(omitted).to include("CASE WHEN (`edge_documents`.`author_id` IS NULL) THEN NULL")
+
+      explicit = described_class.query_plan_to_dataset(
+        plan: conditional(expression("eq", variable("e"), value(nil))),
+        model: EdgeDocument, attributes: declared,
+        null_attribute_representation: :omitted
+      ).sql
+      expect(explicit).to include("`edge_documents`.`title` IS NULL")
+      expect(explicit).not_to include("CASE")
+    end
+
+    it "keeps refusing a null constant under :omitted when an operator override owns eq" do
+      # The override would receive the null and could select the NULL rows the PDP denies.
       expect {
         described_class.query_plan_to_dataset(
           plan: conditional(expression("eq", variable("u"), value(nil))),
           model: EdgeDocument, attributes: declared,
-          null_attribute_representation: :omitted
+          null_attribute_representation: :omitted,
+          operator_overrides: {"eq" => ->(left, right) { Sequel::SQL::BooleanExpression.new(:"=", left, right) }}
         )
       }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /null constant/)
-
-      expect {
-        described_class.query_plan_to_dataset(
-          plan: conditional(expression("eq", variable("e"), value(nil))),
-          model: EdgeDocument, attributes: declared,
-          null_attribute_representation: :omitted
-        )
-      }.not_to raise_error
     end
   end
 

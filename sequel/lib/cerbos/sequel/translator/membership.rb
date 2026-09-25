@@ -31,7 +31,7 @@ module Cerbos
               # `"2" in [2]` is false in CEL, whose equality is heterogeneous. SQL would coerce
               # one side onto the other's type: SQLite's REAL affinity reads the literal '2' as
               # the number 2, MySQL reads 'true' as 0, and PostgreSQL rejects
-              # `double precision = text` outright.
+              # `double precision = text` outright (#505).
               false
             else
               SqlSupport.comparison("eq", member, value)
@@ -56,7 +56,7 @@ module Cerbos
             # `R.attr.aNumber in ["5", 2]` is false for the string in CEL, whose equality is
             # heterogeneous. Inside IN, SQLite's NUMERIC affinity reads '5' as the number 5, so
             # the adapter drops each constant the column's kind can never equal, as it does for
-            # the member column of an association.
+            # the member column of an association (#505).
             kind = scalar_kind(needle)
             members = members.reject { |member| cross_type_literal?(member, kind) }
             if members.empty?
@@ -127,8 +127,8 @@ module Cerbos
           case left
           when Values::Collection
             # As with membership: a bare EXISTS is FALSE for an absent parent, so
-            # `!hasIntersection(chain, [...])` would be TRUE for it (#315).
-            # A literal of another type than the elements never intersects, as in membership.
+            # `!hasIntersection(chain, [...])` would be TRUE for it (#315). Literals of another
+            # type never intersect.
             kind = member_kind(left.scope)
             values = values.reject { |value| cross_type_literal?(value, kind) }
             left.scope.guarded(

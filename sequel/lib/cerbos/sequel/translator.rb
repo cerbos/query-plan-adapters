@@ -60,6 +60,14 @@ module Cerbos
         "endsWith" => {prefix: true, suffix: false}
       }.freeze
 
+      # The operators whose result CEL holds as a boolean, so `string()` over one spells
+      # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
+      # boolean only when an arm is: see {#ternary}.
+      BOOLEAN_OPERATORS = (
+        %w[and or not exists all exists_one in hasIntersection ancestorOf descendentOf overlaps] +
+        COMPARISONS + STRING_MATCHES.keys
+      ).freeze
+
       NULL_REPRESENTATIONS = AttributeMapping::NULL_REPRESENTATIONS
 
       # The operators that CEL evaluates to a definite boolean over a null value, and thus the
@@ -74,6 +82,10 @@ module Cerbos
       STRING_COLUMN_TYPES = %i[string].freeze
       INTEGER_COLUMN_TYPES = %i[integer].freeze
       NUMERIC_COLUMN_TYPES = %i[integer float decimal].freeze
+      # The column types that hold a CEL number exactly, not as a double.
+      EXACT_NUMERIC_COLUMN_TYPES = %i[integer decimal].freeze
+      # CEL's int range. A wider whole number in a plan can only be a double.
+      INT64_RANGE = (-(2**63))..(2**63 - 1)
       TEMPORAL_COLUMN_TYPES = %i[datetime time date].freeze
 
       include Arithmetic
@@ -171,7 +183,9 @@ module Cerbos
         # identity is the correct comparison here.
         @column_types = {}.compare_by_identity
         @timestamp_operands = {}.compare_by_identity
+        @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
+        @omitted_attributes = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         dataset.where(predicate(normalised.condition, environment))
       end
@@ -181,9 +195,18 @@ module Cerbos
 
       # @api private
       def register_column_type(node, owner_model, column_name)
-        type = owner_model&.db_schema&.dig(column_name.to_sym, :type)
+        column = owner_model&.db_schema&.[](column_name.to_sym)
+        type = column && (column[:type] || fractional_temporal_type(column[:db_type]))
         @column_types[node] = type if type
         node
+      end
+
+      # Sequel from 5.32 until 5.91 types a fractional-second `datetime(6)` column as nil,
+      # although it types `datetime` and `timestamp(6)` as +:datetime+ (jeremyevans/sequel#2293).
+      # An untyped column is refused by `timestamp()`, so a MySQL schema that keeps microseconds
+      # would lose every timestamp comparison; read the precision-qualified spelling here.
+      def fractional_temporal_type(db_type)
+        :datetime if db_type.to_s.match?(/\Adatetime\(\d+\)\z/i)
       end
 
       # @api private
@@ -199,6 +222,27 @@ module Cerbos
       def register_null_representation(node, representation)
         @null_representations[node] = representation if representation
         node
+      end
+
+      # Records the column a top-level field attribute resolved to when its convention, declared
+      # or inherited from the call, is `:omitted`. Only such a column may meet a null constant in
+      # `eq` or `ne`; {#assert_no_null_operands} refuses every other null operand under `:omitted`.
+      #
+      # @api private
+      def register_attribute_field(node, mapping)
+        if mapping.is_a?(AttributeMapping::Field) &&
+            (mapping.null_representation || null_attribute_representation) == :omitted
+          @omitted_attributes[node] = true
+        end
+        node
+      end
+
+      # True if the node is a top-level field attribute under `:omitted`. See
+      # {#register_attribute_field}.
+      #
+      # @api private
+      def omitted_attribute?(node)
+        @omitted_attributes.key?(node)
       end
 
       # True if this node came from an attribute that the caller declares it sends as an
@@ -222,7 +266,7 @@ module Cerbos
       # @api private
       def evaluate(node, environment)
         case node
-        when Plan::Value then plan_constant(node.value)
+        when Plan::Value then constant(node.value)
         when Plan::Variable then environment.resolve(node.name)
         when Plan::Expression then evaluate_expression(node, environment)
         else raise InvalidPlanError, "Unrecognised query plan node: #{node.inspect}"
@@ -231,25 +275,22 @@ module Cerbos
 
       private
 
-      INT64_RANGE = (-(2**63))..(2**63 - 1)
-
-      # A plan carries its constants as protobuf Values, whose numbers are doubles. JSON writes a
-      # whole double without a fraction, so `-1e19` arrives as a Ruby Integer that no 64-bit SQL
-      # integer holds: PostgreSQL's literalizer refuses it outright. Outside the int64 range the
-      # number can only have been a double, so it goes back to one, which is also the type CEL
-      # compares it as.
-      def plan_constant(value)
+      # A plan number reaches Ruby through JSON, which decodes a whole double such as -1e19 as
+      # an Integer. Beyond int64 it can only be a double, so hold it as the Float it is.
+      def constant(value)
         case value
         when Integer then INT64_RANGE.cover?(value) ? value : value.to_f
-        when Array then value.map { |element| plan_constant(element) }
+        when Array then value.map { |element| constant(element) }
         else value
         end
       end
 
       def evaluate_expression(node, environment)
-        operator = node.operator
-        operands = node.operands
+        result = evaluate_operator(node.operator, node.operands, environment)
+        BOOLEAN_OPERATORS.include?(node.operator) ? record_boolean(result) : result
+      end
 
+      def evaluate_operator(operator, operands, environment)
         case operator
         when "and", "or" then combine(operator, operands, environment)
         when "not" then negate(operands, environment)
@@ -272,6 +313,8 @@ module Cerbos
             "#{describe(value)} cannot be used as a condition: CEL collection expressions " \
             "such as filter() and map() evaluate to a list, not to a boolean"
         end
+
+        reject_double_text("a condition", value)
 
         # A boolean column alone is a correct CEL condition. But SQLite and MySQL hold a boolean
         # as an integer, and a CASE or a NOT over a bare column then reads a number and not a
@@ -320,6 +363,9 @@ module Cerbos
         then_value = evaluate(operands[1], environment)
         else_value = evaluate(operands[2], environment)
 
+        reject_double_text("if", then_value)
+        reject_double_text("if", else_value)
+
         # An arm with a value that is not finite must not go to the database. Thus the
         # translator keeps the ternary, and the comparison around it calculates each branch.
         if deferred_value?(then_value) || deferred_value?(else_value)
@@ -328,7 +374,37 @@ module Cerbos
           )
         end
 
-        branches(condition, then_value, else_value)
+        result = branches(condition, then_value, else_value)
+        return record_boolean(result) if boolean_arm?(then_value) || boolean_arm?(else_value)
+
+        record_cel_type(result, branch_cel_type(then_value, else_value))
+      end
+
+      def boolean_arm?(value)
+        value == true || value == false || boolean_value?(value)
+      end
+
+      # Records that CEL holds a node as a boolean. See {Casts#boolean_value?}.
+      def record_boolean(value)
+        SqlSupport.sql_node?(value) ? record_cel_type(value, :bool) : value
+      end
+
+      # CEL gives both arms of a ternary one type, so an arm whose type is certain fixes the
+      # other's. A whole constant on its own is not certain: the plan ships `1000000` and
+      # `1000000.0` as the same number, and string() spells them "1000000" and "1e+06".
+      def branch_cel_type(*arms)
+        return :int if arms.any? { |arm| cel_type(arm) == :int }
+        return :double if arms.any? { |arm| arm.is_a?(Float) && arm.finite? && arm != arm.truncate }
+        return :ambiguous_number if arms.any? { |arm| ambiguous_number?(arm) }
+
+        nil
+      end
+
+      def ambiguous_number?(value)
+        return true if cel_type(value) == :ambiguous_number
+        return false unless value.is_a?(Numeric) && value.finite? && value == value.truncate
+
+        value.to_i.to_s != cel_double_spelling(value.to_f)
       end
 
       # +CASE WHEN c THEN a WHEN NOT c THEN b END+, with no ELSE clause, so an UNKNOWN
@@ -346,6 +422,8 @@ module Cerbos
         assert_uniform_null_conventions(operator, values)
 
         override = operator_overrides[operator]
+        # Only the built-in eq and ne can resolve string() of a double.
+        values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)
         plain = override ? override.call(*values) : dispatch(operator, values)
 
         with_null_conventions(operator, values, plain, overridden: !override.nil?)
@@ -437,6 +515,7 @@ module Cerbos
         when Values::FilteredCollection then "a filtered association"
         when Values::MappedCollection then "a projected association"
         when Values::Hierarchy then "a hierarchy"
+        when Values::DoubleText then "string() of a double"
         else "#{value.inspect} (#{value.class})"
         end
       end

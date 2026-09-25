@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   DESC
   spec.homepage = "https://github.com/cerbos/query-plan-adapters"
   spec.license = "Apache-2.0"
-  spec.required_ruby_version = ">= 3.2.0"
+  spec.required_ruby_version = ">= 3.3"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "#{spec.homepage}/tree/main/sequel"
@@ -29,7 +29,8 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "README.md", "LICENSE"]
   spec.require_paths = ["lib"]
 
-  # One major. 5.60 is the floor CI tests: the conformance suite runs on it as well as on the
-  # newest release, so a wider range would be a claim nothing checks.
-  spec.add_dependency "sequel", ">= 5.60", "< 6.0"
+  # 5.69 is the first release with the trilogy adapter, which the conformance harness reaches
+  # MySQL through. It is the floor CI tests, on every store, so a wider range would be a claim
+  # nothing checks.
+  spec.add_dependency "sequel", ">= 5.69", "< 6.0"
 end

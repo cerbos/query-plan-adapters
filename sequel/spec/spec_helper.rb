@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "cerbos"
-require "fileutils"
 require "json"
 require "sequel"
 

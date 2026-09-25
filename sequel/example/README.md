@@ -9,7 +9,7 @@
 This is the Sequel adapter's instance of the shared **demo domain**. It proves *plumbing* —
 that the published gem installs, that `require "cerbos/sequel"` resolves from it, and that
 the dataset the adapter returns composes with the query methods a consumer actually reaches for.
-It proves nothing about *semantics*; that is `../spec/conformance_spec.rb` against
+It proves nothing about *semantics*; that is `../spec/adversarial_conformance_spec.rb` against
 [`../../conformance/`](../../conformance/).
 
 Read [`../../demo/README.md`](../../demo/README.md) first. Everything about the domain — the rows,

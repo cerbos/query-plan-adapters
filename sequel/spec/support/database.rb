@@ -10,9 +10,8 @@
 #
 # Only the conformance harness runs on the real servers. Collation, LIKE escaping, cast targets
 # and literal typing are translator behaviour, so a store the harness does not execute is a
-# store the adapter does not cover. The two offline suites — the translator unit test and the
-# contract suite — record and assert SQLite's rendering, and refuse to run anywhere else (see
-# Database.require_sqlite!).
+# store the adapter does not cover. The contract suite asserts SQLite's rendering and refuses to
+# run anywhere else (see Database.require_sqlite!).
 module Database
   STORES = %w[sqlite postgres mysql].freeze
 
@@ -73,8 +72,7 @@ module Database
   # literals — and they would agree only because they were wrong in the same way.
   Sequel.default_timezone = :utc
 
-  # The offline suites pin SQLite's rendering byte for byte, and the contract suite reads
-  # SQLite's quoting in its patterns. On another store they would fail for a reason that says
+  # The contract suite reads SQLite's quoting in its patterns. On another store they would fail for a reason that says
   # nothing about the adapter, so they refuse to start instead.
   def self.require_sqlite!(suite)
     return if STORE == "sqlite"

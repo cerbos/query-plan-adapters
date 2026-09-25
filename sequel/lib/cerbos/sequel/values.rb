@@ -24,6 +24,10 @@ module Cerbos
       # because its segments are already separate.
       Hierarchy = Struct.new(:value, :segments, :delimiter)
 
+      # `string()` of a value CEL holds as a double, held until `eq` or `ne` compares it with
+      # a literal. See {Translator::Casts#compare_double_text}.
+      DoubleText = Struct.new(:value)
+
       # A collection after the adapter resolves it. It holds the correlated subquery scope
       # that the association mapping of an attribute made. A macro or a membership test uses it.
       Collection = Struct.new(:scope)

@@ -2,9 +2,10 @@
 
 require "time"
 
-# The conformance dataset: one table per attribute shape, able to hold every hostile corpus row
-# (NULL elements, duplicate or mirrored names, LIKE metacharacters, empty strings and empty
-# collections). conformance/README.md, "The dataset", says what each row must hold.
+# The conformance dataset in the store under test (spec/support/database.rb): one table per
+# attribute shape, able to hold every hostile corpus row (NULL elements, duplicate or mirrored
+# names, LIKE metacharacters, empty strings and empty collections). conformance/README.md,
+# "The dataset", says what each row must hold.
 #
 # The schema is created when this file is loaded, and not in a method, because a Sequel::Model
 # class reads the columns of its table when it is defined. It is created on whichever store
@@ -14,9 +15,10 @@ module ConformanceStore
 
   DB.create_table!(:adversarial_resources, **Database::TABLE_OPTIONS) do
     String :id, primary_key: true
-    TrueClass :a_bool, null: false
-    String :a_string, null: false
-    Integer :a_number, null: false
+    # Nullable: seeds j1, j2 and j3 each leave one of these NULL, a missing attribute (#488).
+    TrueClass :a_bool
+    String :a_string
+    Integer :a_number
     Float :a_double
     String :a_optional_string
     String :created_by, null: false
@@ -61,7 +63,7 @@ module ConformanceStore
   # relational schema holds a list: one row per element, a nullable value (a null element is a
   # value, as it is in `tagNames`), and the element's position. The position is the one thing
   # `aNumberList[0]` needs and the one thing an association mapping cannot carry, which is why
-  # every corpus action that reads these lists is refused at `index`.
+  # every corpus case that indexes these lists is refused at `index`.
   DB.create_table!(:adversarial_number_list_elements, **Database::TABLE_OPTIONS) do
     primary_key :id
     Integer :position, null: false
@@ -100,12 +102,24 @@ module ConformanceStore
     return if @established
     @established = true
 
+    verify_mysql_collation! if Database::STORE == "mysql"
     seed!
   end
 
-  # Each row gets its own category graph, with one category for each sub-name. The prisma,
-  # sqlalchemy and activerecord harnesses make the same shape. Thus no two resources use the
-  # same relation rows.
+  # A column or a session left on MySQL's default collation would pass the case-sensitivity
+  # cases only where no seed happens to discriminate, so check both before any case runs.
+  def verify_mysql_collation!
+    columns = DB.fetch(<<~SQL).map(:collation_name)
+      SELECT DISTINCT collation_name AS collation_name FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND collation_name IS NOT NULL
+    SQL
+    session = DB.get(::Sequel.lit("@@collation_connection"))
+    return if columns == [Database::MYSQL_COLLATION] && session == Database::MYSQL_COLLATION
+
+    raise "MySQL must run on #{Database::MYSQL_COLLATION}: columns #{columns}, session #{session}"
+  end
+
+  # Each row gets its own category graph, so no two resources share relation rows.
   #
   # The rows go in through the datasets and not through the models: the models exist for the
   # associations the adapter reads, and a model's typecasting or hooks must not be what decides
@@ -166,9 +180,13 @@ module ConformanceStore
         DB[:adversarial_bool_list_elements].insert(position: position, value: value, resource_id: id)
       end
 
-      seed.fetch("subCategoryNames").each_with_index do |sub_name, index|
-        category_id = "#{id}-cat#{index}"
+      # One category holding every subcategory name (conformance/README.md, "The dataset").
+      sub_names = seed.fetch("subCategoryNames")
+      category_id = "#{id}-cat"
+      unless sub_names.empty?
         DB[:adversarial_categories].insert(id: category_id, name: "business", resource_id: id)
+      end
+      sub_names.each_with_index do |sub_name, index|
         sub_category_id = "#{id}-sub#{index}"
         DB[:adversarial_sub_categories].insert(
           id: sub_category_id, name: sub_name, category_id: category_id

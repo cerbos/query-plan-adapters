@@ -13,8 +13,8 @@ module Cerbos
     # The translator builds each node with its constructor and never with the operator methods
     # of Sequel (+~+, +&+, +|+). Those methods simplify: +~(a = b)+ becomes +a != b+ and
     # +~(a & b)+ is pushed through De Morgan. Each rewrite is sound under three-valued logic, but
-    # an explicit +NOT+ keeps the emitted SQL in the shape of the plan, so the golden asset reads
-    # as the plan it came from.
+    # an explicit +NOT+ keeps the emitted SQL in the shape of the plan, so it reads as the plan it
+    # came from.
     module SqlSupport
       module_function
 

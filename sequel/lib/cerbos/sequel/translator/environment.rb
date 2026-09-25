@@ -19,7 +19,10 @@ module Cerbos
 
         def resolve(name)
           mapping = translator.attributes[name]
-          return resolve_mapping(mapping, translator.model, translator.root_table) if mapping
+          if mapping
+            resolved = resolve_mapping(mapping, translator.model, translator.root_table)
+            return translator.register_attribute_field(resolved, mapping)
+          end
 
           head, rest = name.split(".", 2)
           unless bindings.key?(head)
@@ -108,8 +111,13 @@ module Cerbos
         def element(scope)
           return Values::Collection.new(scope: scope) unless scope.mapping&.member_field
 
-          # A scalar list contains null VALUES, unlike an absent field on a struct element.
-          translator.register_null_representation(scope.member_column, :explicit)
+          # A scalar list contains null VALUES, unlike an absent field on a struct element. The
+          # column type is registered like any field's, so `string()` over a boolean element
+          # spells "true"/"false".
+          column = translator.register_column_type(
+            scope.member_column, scope.model, scope.mapping.member_field
+          )
+          translator.register_null_representation(column, :explicit)
         end
 
         def resolve_mapping(mapping, owner_model, owner_table)

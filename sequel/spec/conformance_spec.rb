@@ -9,8 +9,8 @@
 #    still give a wrong answer.
 # 3. Fail if the ledger names a case that has no golden file.
 #
-# Needs no PDP: the plans and decisions are recorded. The store is the one ADAPTER_TEST_DB chose
-# (spec/support/database.rb): SQLite in memory, or a real PostgreSQL or MySQL.
+# Needs no PDP: the plans and decisions are recorded. The store is SQLite in memory, or
+# PostgreSQL or MySQL (ADAPTER_TEST_DB, spec/support/database.rb).
 
 RSpec.describe "conformance" do
   before { ConformanceStore.establish! }

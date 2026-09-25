@@ -17,6 +17,7 @@ module Cerbos
           # comparison calculates it. More arithmetic on those branches has no SQL equivalent,
           # so the adapter raises instead of making an incorrect filter.
           require_scalars(operator, left, right)
+          reject_int_beside_non_int(operator, left, right)
 
           # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
           # `'a' + 'b'` is an addition of numbers, and it changes both sides into 0. Thus string
@@ -27,35 +28,68 @@ module Cerbos
             return dialect.concat(left, right)
           end
 
+          if operator == "mod" && !(cel_int?(left) && cel_int?(right))
+            raise UnsupportedOperatorError,
+              "% has no double overload in CEL, and every number in a request attribute is a " \
+              "double, so % over an attribute that has not gone through int() is an error that " \
+              "denies the row. SQL computes a remainder instead. Wrap the operands in int()."
+          end
+
           if left.is_a?(Numeric) && right.is_a?(Numeric)
             return left.public_send(ARITHMETIC.fetch(operator), right)
           end
 
-          # CEL arithmetic on attributes uses doubles, and SQL does not. PostgreSQL and MySQL type
-          # a literal such as `0.1` as an EXACT decimal, so `integer_column * 0.1` is exact there:
-          # `3 * 0.1 = 0.3` is TRUE in SQL and `0.30000000000000004 == 0.3` is FALSE in CEL, and
-          # the filter would give a row that the PDP denies (the corpus case
-          # `arithmetic/multiply/inexact-fraction-equals`). A column beside a constant with a
-          # fraction is thus cast to a double, which makes the database do the arithmetic that
-          # CEL does. SQLite already uses doubles there, so it only gains a cast that changes
-          # nothing.
-          if fractional_constant?(left) || fractional_constant?(right)
-            left = as_double(left) unless left.is_a?(Numeric)
-            right = as_double(right) unless right.is_a?(Numeric)
+          if cel_int?(left) && cel_int?(right)
+            # CEL's `%` by zero is an error, which denies the row under either polarity.
+            # PostgreSQL raises instead, failing the whole query; NULLIF makes it UNKNOWN, as
+            # SQLite and MySQL already make it.
+            right = SqlSupport.function("NULLIF", [right, 0]) if operator == "mod" && !right.is_a?(Numeric)
+            return record_cel_type(SqlSupport.infix(ARITHMETIC.fetch(operator), left, right), :int)
           end
 
-          SqlSupport.infix(ARITHMETIC.fetch(operator), left, right)
+          # CEL holds every attribute number as a double. PostgreSQL and MySQL would compute an
+          # integer or decimal column with a literal like 0.1 in exact decimal, so
+          # `aNumber * 0.1 == 0.3` would hold for 3 where CEL computes 0.30000000000000004.
+          left, right = [left, right].map { |operand| exact_numeric_column?(operand) ? as_double(operand) : operand }
+          record_cel_type(SqlSupport.infix(ARITHMETIC.fetch(operator), left, right), :double)
         end
 
-        def fractional_constant?(value)
-          value.is_a?(Float) && value.finite? && value != value.truncate
+        def exact_numeric_column?(value)
+          SqlSupport.sql_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
 
-        # Cerbos sends each number as a double, and CEL arithmetic on attributes uses doubles.
-        # Thus the division must also use doubles. If it did not, SQLite and PostgreSQL would do
-        # an integer division and change +5 / 2+ into +2+.
+        # CEL has no overload mixing an int with a double: `int(x) + R.attr.d` is an error that
+        # denies the row under either polarity, where SQL adds the two numbers and a negation
+        # turns the sum into a grant. An int() result beside an operand that is not certainly an
+        # int (a column, whose attribute is a double, or a fractional constant) is refused.
+        def reject_int_beside_non_int(operator, left, right)
+          mixed = (cel_type(left) == :int && !cel_int?(right)) ||
+            (cel_type(right) == :int && !cel_int?(left))
+          return unless mixed
+
+          raise UnsupportedOperatorError,
+            "#{operator} of an int() result and an operand that is not an int: CEL has no " \
+            "overload mixing int and double, so the expression is an error that denies the row, " \
+            "but SQL computes it. Every number in a request attribute is a double; wrap both " \
+            "operands in int(), or neither."
+        end
+
+        # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole
+        # constant counts too, since the plan does not say whether a literal was `2` or `2.0`
+        # and CEL's type checker rejects an int mixed with a double.
+        def cel_int?(value)
+          return value.finite? && value == value.truncate if value.is_a?(Float)
+          return true if value.is_a?(Integer)
+
+          cel_type(value) == :int
+        end
+
+        # Divides as doubles, like CEL. Otherwise SQLite and PostgreSQL make `5 / 2` into `2`.
+        # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
+          reject_int_beside_non_int("div", numerator, denominator)
+          return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 
           if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)
             return divide_constants(numerator.to_f, denominator.to_f)
@@ -64,10 +98,34 @@ module Cerbos
           # A constant denominator that is not zero can never divide by zero. Thus a plain
           # division is exact, and it keeps the SQL small.
           if denominator.is_a?(Numeric) && !denominator.to_f.zero?
-            return SqlSupport.infix("/", as_double(numerator), denominator.to_f)
+            return record_cel_type(SqlSupport.infix("/", as_double(numerator), denominator.to_f), :double)
           end
 
           divide_with_zero_denominator(numerator, denominator)
+        end
+
+        # Int division: both operands are CEL ints and at least one is an int() result (or int
+        # arithmetic on one), since a bare whole constant may have been written `2.0`.
+        def int_division?(numerator, denominator)
+          (cel_type(numerator) == :int || cel_type(denominator) == :int) &&
+            cel_int?(numerator) && cel_int?(denominator)
+        end
+
+        # CEL's `int / int` truncates toward zero, as SQLite's and PostgreSQL's integer `/`
+        # and MySQL's `DIV` do. A zero divisor is a CEL error that denies the row under either
+        # polarity, where PostgreSQL aborts the query, so only a non-zero constant divisor is
+        # translated.
+        def int_divide(numerator, denominator)
+          unless denominator.is_a?(Numeric) && !denominator.zero?
+            raise UnsupportedOperatorError,
+              "int division by a value that may be zero: CEL makes an error that denies the " \
+              "row, but PostgreSQL aborts the whole query, so only a non-zero constant divisor " \
+              "is translated"
+          end
+
+          return (numerator.to_i.to_r / denominator.to_i).truncate if numerator.is_a?(Numeric)
+
+          record_cel_type(dialect.int_divide(numerator, denominator.to_i), :int)
         end
 
         def divide_constants(numerator, denominator)

@@ -44,55 +44,47 @@ into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards 
 
 ### Conformance contract
 
-**Compatibility:** constant NaN ordering follows Cerbos 0.55: an unordered comparison is
-false, so its negation is true. Missing attributes and other evaluation errors keep the row out
-under both polarities.
-
 `spec/conformance_spec.rb` replays every plan recorded in
 [`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
-rows and compares the ids with the ones `check()` allowed. It needs no PDP. CI runs it on SQLite,
-PostgreSQL and MySQL. On the current PDP (Cerbos 0.55.0), cases that return exactly the allowed
-rows, out of every golden case in the tier:
+rows and compares the ids with the ones `check()` allowed. It needs no PDP. It runs on SQLite,
+PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 61 / 80 |
-| adversarial | 170 / 227 |
+| extended | 58 / 80 |
+| adversarial | 227 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
-[`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. A case whose
-golden file records a `plannerDivergence` for the PDP is skipped, because the plan and `check()`
-disagree and no adapter can pass it. On 0.55.0 that is one extended case,
-`null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing attribute to
-`ALWAYS_ALLOWED`, but `check()` denies those rows. Until the planner is fixed, use
-`R.attr.x != null` instead of `has(R.attr.x)` for database attributes.
+[`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
+wrong result. A case whose golden file records a `plannerDivergence` for the PDP is skipped,
+because the plan and `check()` disagree and no adapter can pass it: on 0.55.0 those are four
+extended cases and three adversarial cases. In `null/has/missing-attribute` and
+`null/has/composed-with-comparison` the planner folds `has()` to true by design, while `check()`
+denies the row whose attribute is absent: write `R.attr.x != null` instead of `has(R.attr.x)`.
+In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the plan
+drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
+and denies every row: write `1.0`. In the three `composition/*` cases a DENY condition reads an
+attribute one row lacks, which the plan and `check()` treat differently
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
-The refused set is small, because SQL can show most of the corpus directly. The adapter makes
-`LIKE` with an ESCAPE clause. It makes correlated `COUNT` subqueries for the relation counts and
-for `exists_one`. The database calculates the arithmetic on columns and the lengths of the
-strings; arithmetic with a fractional constant runs in doubles, as CEL's does. `string()` over a
-boolean column becomes a `CASE` that spells `'true'` and `'false'`, because `CAST(col AS TEXT)`
-gives `"1"` on SQLite and MySQL. These shapes stay refused:
+The refusals fall into a few mechanisms:
 
-| Cases | Why the adapter raises an error |
+| Shape | Why the adapter raises an error |
 | --- | --- |
-| `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner makes a `now()` literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds. Thus the query would compare with a different instant from the instant in the policy. |
-| `arithmetic/divide/field-by-field`, `arithmetic/divide/nested-division-divisor` | A division whose denominator is a second column. IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`, so the sign of the Infinity is unknown. A division of a value by ITSELF stays safe, and so does a constant denominator, whose sign the plan carries. |
-| `arithmetic/add/self-division-plus-constant-*` | More arithmetic on the result of a division that can give a value which is not finite. SQL has no NaN and no signed Infinity to bind, so the adapter keeps such a division as branches until a comparison resolves them, and an addition on those branches has no SQL form. |
-| `regex/matches/*` | `matches()` uses RE2. No SQL dialect gives the behaviour of RE2, and `LIKE` cannot show a regular expression. |
-| `collection/index/*`, and the two `type-mismatch/equals/*-list-element-*` cases | `tags[0]` selects an element of a list by its position. An association has no order of its own, so `index` has no case in the operator dispatch. A caller whose table has a deterministic ordering column can supply an operator override. |
-| `cast/timestamp/*` | `timestamp()` on a column that holds a timestamp in text. Map the attribute to a `DateTime` column. |
-| `cast/int/*malformed-string`, `cast/double/*` | `int()` and `double()` over a text column. CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front: `CAST('1junk' AS INTEGER)` is `1` on SQLite. |
-| `cast/int/negative-fraction` | `int()` over a double column. CEL removes the fraction toward zero. PostgreSQL and MySQL round a `CAST` to the nearest whole number. |
-| `collection/filter/as-*`, `collection/map/as-whole-condition` | A `filter()` or a `map()` where a boolean belongs. Only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning. |
-| `timestamp/equals/field-to-field-without-conversion` | Two temporal columns compared without `timestamp()`. CEL compares their RFC-3339 spellings there, and SQL compares instants. |
-| `type-mismatch/{size,contains,starts-with,ends-with,descendent-of}/*` | `size()`, `contains`, `startsWith`, `endsWith` and `hierarchy()` over a numeric or boolean column. CEL has no such overload, and SQL would coerce the value to text — or, on PostgreSQL, reject the `LIKE`. |
-| `comparison/{equals,not-equals}/whole-list-literal`, `collection/map/equals-list-literal` | A whole collection compared with `==`. A correlated subquery has no ordered list to compare element by element. |
-| `type-mismatch/in/{list-literal-in-resource-string-list,string-field-in-list-of-lists}`, `type-mismatch/*map*`, `principal/exists/list-of-structs*`, `principal/except/*`, `collection/except/*`, `principal/filter/*`, `principal/map/*` | A list or a map as a list element, a struct built in the policy, a list difference, or `filter`/`map` over a list of constants. None has a scalar SQL form. |
-| `hierarchy/descendent-of/empty-delimiter` | A hierarchy with an empty delimiter. The adapter refuses it before it builds the prefix `LIKE`, which would also match the path itself. |
-| `null/equals/null-literal-on-missing-attribute`, `relation/not-equals/one-hop-null-literal` | A `null` literal against an attribute the harness declares `:omitted` — see [The NULL convention of the caller](#the-null-convention-of-the-caller). |
-| `null/not-equals/field-to-field-mixed-null-conventions` | A comparison between two columns under different NULL conventions — see below. |
+| `timestamp(...)` against `now() - duration(...)` | The planner folds `now()` into a literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds at best, so the query would compare with a different instant from the one in the policy. |
+| A division whose denominator is a second column | IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`. A division of a value by itself stays safe, and so does a constant denominator. |
+| More arithmetic on a division that can give NaN or Infinity | SQL has no NaN and no signed Infinity, so the adapter resolves such a division only where it is the comparison operand. |
+| `int()` beside a double, `%` over a bare attribute | CEL has no overload mixing int and double, and no `%` over doubles; every number in a request attribute is a double. SQL computes both. |
+| `matches()` | RE2 has no portable SQL form, and `LIKE` cannot show a regular expression. |
+| `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
+| `int()`, `double()` or `timestamp()` over a text column; `int()` over a double column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. CEL truncates a double toward zero, and PostgreSQL and MySQL round a `CAST`. |
+| `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
+| `filter()` or `map()` where a boolean belongs; a whole collection compared with `==` | Only `size(filter(...))` or `hasIntersection(map(...), [...])` has a boolean meaning, and a correlated subquery has no ordered list to compare element by element. |
+| `size()`, `contains`, `startsWith` or `endsWith` over a numeric or boolean column | CEL has no such overload, and SQL would coerce the value to text. |
+| A list or map as a list element, a struct built in the policy, a list difference, `filter`/`map` over a list of constants, a map's keys | None has a scalar SQL form. |
+| Two raw temporal columns, or two columns under mixed NULL conventions | CEL compares RFC-3339 spellings without `timestamp()`; a mixed pair needs both a definite and an UNKNOWN answer for NULL. |
 
 The adapter also raises an error for a plan whose `and` or `or` carries no operands, and for any
 operator that carries the wrong number of operands. The planner does not make those shapes, but
@@ -131,9 +123,20 @@ You must tell the adapter which one your application uses.
 | `:explicit` (the default) | An attribute whose value is null | Cerbos gives true, and `IS NULL` agrees |
 | `:omitted` | No attribute at all | CEL raises a missing-attribute error, and Cerbos denies the row |
 
-With `:omitted`, a filter that selects NULL would give exactly the rows that the PDP denies, so
-the adapter refuses each null constant in the plan
-([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
+Under `:omitted` a NULL column is a missing attribute, which CEL answers with an error, and a
+present column is never null. So `==` and `!=` between a field attribute and `null` are rendered
+UNKNOWN for a NULL column, which stays UNKNOWN under any `not` above it:
+
+```
+eq(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE FALSE END
+ne(col, null)  ->  CASE WHEN col IS NULL THEN NULL ELSE TRUE END
+```
+
+This holds for a column reached through a to-one path such as `parent.tag`, where an absent parent
+is NULL too. Every other null constant is refused under `:omitted`: a null in an `in` or
+`hasIntersection` list, and a null given to an operator override of `eq` or `ne`, since the
+override would receive it. See [#302](https://github.com/cerbos/query-plan-adapters/issues/302)
+and [#551](https://github.com/cerbos/query-plan-adapters/issues/551).
 
 `null_attribute_representation:` is the fallback for the whole call. Declare the convention on
 each attribute that can be NULL, with `null_representation:` on the mapping:
@@ -162,11 +165,23 @@ that does. Refer to [#308](https://github.com/cerbos/query-plan-adapters/issues/
 
 ### The collation is part of the contract
 
-CEL compares strings with attention to the case of the letters. Sequel renders the string
-operators as `LIKE`, which is `LIKE BINARY` on MySQL. On SQLite, set
-`PRAGMA case_sensitive_like = ON`, or `contains`, `startsWith` and `endsWith` select more rows
-than the policy permits. For `=` on MySQL, use a `_bin` or `_cs` collation for the columns in
-your policies.
+CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
+`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows. CEL also
+orders strings by code point, and `<`, `<=`, `>` and `>=` follow the collation.
+
+- **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
+  point.
+- **PostgreSQL:** equality is exact, but string ordering needs a byte-order collation, `"C"`. A
+  linguistic one such as glibc's `en_US.UTF-8` sorts `"One"` after `"a"`, so `R.attr.name > "a"`
+  over-grants it ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the
+  database with `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders.
+- **MySQL:** use `utf8mb4_0900_bin` on every column your policies read. `_cs` is not enough —
+  `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD SPACE
+  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Make the **connection**
+  collation byte-exact too: `string()` of a column is a `CAST` or a `CASE` over literals, so it
+  takes the connection collation. With the `trilogy` driver, set it with
+  `connect_sqls: ["SET collation_connection = utf8mb4_0900_bin"]`; `SET NAMES ... COLLATE`
+  crashes that driver.
 
 ### Timestamps are compared in the database timezone
 
@@ -174,13 +189,14 @@ The adapter reads each `timestamp()` literal as a UTC `Time`, and Sequel convert
 `Sequel.database_timezone` when it writes the SQL. Set that to the zone your columns hold — on
 SQLite a datetime is text, and a literal in another zone compares as the wrong instant.
 
-The conformance harness replays the corpus on SQLite, PostgreSQL and MySQL, so all three
-dialects are covered. The contract suite runs on SQLite only.
+The conformance harness replays the corpus on SQLite, PostgreSQL (initialised with
+`--lc-collate=C`) and MySQL (`utf8mb4_0900_bin` on the columns and the connection). The contract
+suite runs on SQLite only.
 
 ## Requirements
 
-- Ruby 3.2 or a later version
-- Sequel 5.60 or a later 5.x (CI tests 5.60 and the newest release)
+- Ruby 3.3 or a later version
+- Sequel 5.69 or a later 5.x (CI tests 5.69 and the newest release). 5.69 is the first release with the trilogy adapter, the MySQL driver the conformance harness runs on
 - Cerbos after v0.40
 - The official [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby)
   (the [`cerbos`](https://rubygems.org/gems/cerbos) gem)
@@ -346,34 +362,22 @@ does not select it. The translation keeps UNKNOWN and does not change it into a 
 Everything runs in Docker; you do not need Ruby locally, and no suite needs a PDP.
 
 ```bash
-./scripts/test.sh                                   # all suites, on SQLite
+./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/conformance_spec.rb          # the conformance harness alone
-RUBY_VERSION=3.2 SEQUEL_VERSION="= 5.60.0" ./scripts/test.sh
-ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb
-ADAPTER_TEST_DB=mysql ./scripts/test.sh spec/conformance_spec.rb
-./scripts/lint.sh
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # on PostgreSQL (or mysql)
+RUBY_VERSION=3.3 SEQUEL_VERSION="= 5.69.0" ./scripts/test.sh
+./scripts/lint.sh                                   # standardrb
 ```
 
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
-
-`ADAPTER_TEST_DB` chooses the store the conformance harness runs on: `sqlite` (the default, in
-memory), `postgres` or `mysql`; any other value fails. The two servers are pinned by tag and
-digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE), and
-`scripts/test.sh` starts the one it needs. MySQL runs with `utf8mb4_0900_bin` on the server, the
-tables and the connection, because the default collation makes `=` case-insensitive and CEL's
-string equality is byte-exact. CI replays the corpus on all three.
-
-The real stores are not a formality. PostgreSQL found filters that SQLite answered correctly by
-accident: `integer_column * 0.1` computing in exact decimals (`3 * 0.1 = 0.3` is TRUE there and
-FALSE in CEL, an over-grant — the adapter now casts to a double), `hierarchy()` over an integer
-column reaching a `LIKE` the server rejects (now refused at translation time), and a double
-constant below the int64 range that JSON spells as an integer Sequel will not write for
-PostgreSQL (now read back as the double it is).
+`ADAPTER_TEST_DB` picks the store: `sqlite` (the default, in memory), `postgres` or `mysql`, which
+`scripts/test.sh` starts from `docker-compose.yaml` with the images pinned in
+[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE). Any other value fails.
 
 | Suite | What it covers |
 | --- | --- |
-| `spec/conformance_spec.rb` | The conformance harness over [`../conformance/`](../conformance/README.md): one mapping, every recorded plan, and the ledger |
-| `spec/adapter_contract_spec.rb` | What a caller supplies: mapper forms, a `many_to_many`, operator overrides, the per-call NULL convention, the four plan transports, refused association shapes. SQLite only |
+| `spec/conformance_spec.rb` | The conformance harness: every golden plan of both pinned PDPs, against the corpus rows, on the store `ADAPTER_TEST_DB` names. |
+| `spec/adapter_contract_spec.rb` | What a **caller** supplies and the corpus therefore cannot vary: the mapper forms, a `many_to_many`, operator overrides, the per-call NULL convention, the four transports a plan can arrive over, and the association shapes the adapter refuses to guess at. SQLite only. |
 
 The example application in [`example/`](example/) runs the shared demo domain. Start it with
 `../demo/scripts/run-example.sh sequel` — see [example/README.md](example/README.md).

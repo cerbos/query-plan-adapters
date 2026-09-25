@@ -31,6 +31,14 @@ module Cerbos
         ::Sequel.join([left, right])
       end
 
+      # CEL's +int / int+, which truncates toward zero. SQLite's and PostgreSQL's +/+ over two
+      # integers already does; MySQL's +/+ gives a decimal, and its +DIV+ truncates.
+      def int_divide(left, right)
+        return ::Sequel.lit("(? DIV ?)", left, right) if mysql?
+
+        SqlSupport.infix("/", left, right)
+      end
+
       # CEL +size()+ counts the characters of a string.
       def char_length(expression)
         ::Sequel.char_length(expression)

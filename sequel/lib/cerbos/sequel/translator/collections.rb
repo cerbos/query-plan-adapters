@@ -23,7 +23,9 @@ module Cerbos
 
           case operator
           when "map"
-            Values::MappedCollection.new(scope: scope, projection: evaluate(body_node, inner))
+            projection = evaluate(body_node, inner)
+            reject_double_text("map", projection)
+            Values::MappedCollection.new(scope: scope, projection: projection)
           when "filter"
             Values::FilteredCollection.new(scope: scope, body: predicate(body_node, inner))
           else
@@ -126,7 +128,13 @@ module Cerbos
             "map that attribute with Cerbos::Sequel.association"
         end
 
+        # CEL's size() is an int, so the count can take `%`.
         def size(target)
+          count = count_of(target)
+          SqlSupport.sql_node?(count) ? record_cel_type(count, :int) : count
+        end
+
+        def count_of(target)
           case target
           when Values::Collection
             # size() counts the elements and does not evaluate them. Thus it also counts a

@@ -3,10 +3,10 @@
 # The harnesses read the shared corpus at ../conformance/. Thus you must mount the root
 # directory of the repository and not only this directory. Refer to docker-compose.yaml and to
 # the instructions in CLAUDE.md.
-ARG RUBY_VERSION=3.4
+ARG RUBY_VERSION=4.0
 FROM ruby:${RUBY_VERSION}-slim-bookworm
 
-# The version of Sequel to use, as a Gemfile requirement (`= 5.60.0`). CI tests the first
+# The version of Sequel to use, as a Gemfile requirement (`= 5.69.0`). CI tests the first
 # version of the range in the gemspec and the newest one. Empty, the default, resolves the
 # newest 5.x.
 ARG SEQUEL_VERSION=

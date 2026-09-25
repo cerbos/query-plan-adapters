@@ -13,7 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
-| sequel | Ruby | `cerbos-sequel` | Sequel 5.x (5.60+) |
+| sequel | Ruby | `cerbos-sequel` | Sequel 5.x (5.69+) |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -88,7 +88,7 @@ become 7.2.
 cd sequel
 ./scripts/test.sh                                      # all the specs, on SQLite
 ./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
-RUBY_VERSION=3.2 SEQUEL_VERSION="= 5.60.0" ./scripts/test.sh
+RUBY_VERSION=3.3 SEQUEL_VERSION="= 5.69.0" ./scripts/test.sh
 ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb
 ADAPTER_TEST_DB=mysql ./scripts/test.sh spec/conformance_spec.rb
 ./scripts/lint.sh                                      # standardrb
@@ -103,8 +103,10 @@ adapter; the library is `::Sequel`.
 Unlike ActiveRecord, the conformance harness also replays the corpus on a real PostgreSQL and a real
 MySQL (`ADAPTER_TEST_DB`, as on drizzle and prisma; an unknown value fails), pinned in
 `sequel/POSTGRES_IMAGE` and `sequel/MYSQL_IMAGE` and started by `scripts/test.sh` through Compose
-profiles. The contract suite refuses any store but SQLite. The MySQL driver is `trilogy`; set the
-collation with `collation_connection`, never `SET NAMES ... COLLATE`, which crashes that driver.
+profiles. The contract suite refuses any store but SQLite. The MySQL driver is `trilogy`, which
+Sequel supports from 5.69, the gemspec's floor; set the collation with `collation_connection`,
+never `SET NAMES ... COLLATE`, which crashes that driver. CI runs the corpus on all three stores
+under Sequel 5.69 and the newest 5.x.
 
 ### Go (Ent, pgx)
 ```bash

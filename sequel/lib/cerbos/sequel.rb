@@ -57,7 +57,9 @@ module Cerbos
     #   <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with the PDP. With
     #   +:omitted+, a NULL column sends no attribute at all. CEL then raises a
     #   missing-attribute error and the PDP denies the row, but +IS NULL+ would give that row.
-    #   Thus the adapter refuses each null constant in the plan under +:omitted+.
+    #   Thus under +:omitted+, +==+ and +!=+ between a field and null are UNKNOWN for a NULL
+    #   column, and the adapter refuses every other null constant in the plan
+    #   (cerbos/query-plan-adapters#551).
     #
     #   Declare the convention PER ATTRIBUTE with the +null_representation:+ argument of
     #   {Cerbos::Sequel.field}, and this value is then the fallback
