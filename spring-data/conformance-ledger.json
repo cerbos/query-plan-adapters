@@ -1,6 +1,14 @@
 {
   "adapter": "spring-data",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "int() is solved only against a constant (int(column) == literal), never inside arithmetic, so int(aNumber) + aDouble is refused; CEL has no int + double overload and errors on every row, which a JPA sum over the two columns would answer with a number."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as arithmetic/add/int-beside-double-field, under negation: int() inside arithmetic has no JPA Criteria form, and the missing int + double overload is an error a JPA sum could not reproduce."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
@@ -53,9 +61,17 @@
       "status": "unsupported",
       "reason": "string() is solved only over a mapped attribute compared with a constant. string(int(column)) nests a conversion JPA Criteria cannot spell: int() truncates the double toward zero, and string() renders the int in plain decimal (\"1000000\", not the double's \"1e+06\")."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() is lowered only over a mapped column, not over a ternary; here the branches are int literals the plan ships as bare numbers, so CEL's \"1000000\" and a double's \"1e+06\" could not be told apart even if it were."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "string() is lowered only over a mapped column, not over a ternary, and int() is solved only against a constant, so string(aBool ? int(aDouble) : 1000000) is refused."
     },
     "cast/string/negated-from-boolean-expression": {
       "status": "unsupported",
@@ -68,6 +84,10 @@
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same refusal as cast/string/from-int-past-exponent-threshold, under negation: string(int(column)) has no JPA Criteria form."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as cast/string/from-integral-ternary, under negation: string() over a ternary of int literals has no JPA form."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -108,6 +128,14 @@
     "comparison/less-than/negated-astral-string-against-high-bmp": {
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "in over a map tests its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to test, so R.attr.parent itself is an unmapped attribute."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation: the to-one parent is mapped per field, and a JPA relation row has no key set to test."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
