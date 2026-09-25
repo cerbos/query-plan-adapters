@@ -45,6 +45,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
     },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts, and int() over the field is a computed operand too."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates: int(field) / 2 is a computed operand the Query DSL cannot compare."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates, under negation."
+    },
     "arithmetic/divide/negated-self-division-equals": {
       "status": "unsupported",
       "reason": "Same scriptless-division limitation as arithmetic/divide/self-division-greater-than under a negated equality"
@@ -137,6 +149,14 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: string(int(field)) nests two conversions, and a term query compares a field against a literal only."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's decimal rendering of int(field) without scripts."
+    },
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
@@ -160,6 +180,10 @@
     "cast/string/negated-from-boolean-through-relation": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double, reached through a field of the to-one parent"
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double, under negation."
     },
     "cast/string/negated-missing-attribute": {
       "status": "unsupported",
@@ -213,6 +237,10 @@
       "status": "unsupported",
       "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping"
     },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "CEL ranges a macro over a map's keys; parent is an object field in the index, and a query matches its sub-fields' values, never the set of keys the object holds."
+    },
     "collection/exists/negated": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)"
@@ -224,6 +252,10 @@
     "collection/exists/negated-empty-collection": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so negated exists cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same limitation as collection/exists/map-keys, under negation: no query enumerates an object field's keys."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",

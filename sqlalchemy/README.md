@@ -418,9 +418,9 @@ the current PDP, 0.55.0, where the total is every golden case recorded in that t
 | --- | --- |
 | core | 26 / 26 |
 | extended | 57 / 80 |
-| adversarial | 224 / 289 |
+| adversarial | 228 / 301 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (89 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
 harness does not compare. Under 0.55.0 those are four extended cases and three adversarial cases:
 `null/has/missing-attribute` and `null/has/composed-with-comparison` (the planner drops `has()` from

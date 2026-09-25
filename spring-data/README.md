@@ -412,10 +412,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 267 / 289 |
+| adversarial | 269 / 301 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 19 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 29 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
 extended cases and three adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
