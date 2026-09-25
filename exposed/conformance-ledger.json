@@ -333,10 +333,6 @@
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
     },
-    "type-mismatch/descendent-of/number-field-as-path": {
-      "status": "unsupported",
-      "reason": "CEL has no overload of this string function for a non-string operand, so the expression raises and denies, while SQL coerces the column to text (MySQL and SQLite match, PostgreSQL aborts). The operand-type guard requires a text column wherever a column reaches a LIKE or a character count, and refuses before rendering"
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"

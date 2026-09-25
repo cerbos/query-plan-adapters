@@ -267,7 +267,7 @@ val mapping = cerbosMapping {
 | A list or map — a constant, or one the planner builds with `list()` / `struct()` from constants alone — against a scalar column, or as the member of `in` over a relation | Never equal to a scalar, so answered as a type mismatch; `["a"] in tagNames` is FALSE. One built from an attribute is refused, since the attribute may be missing. Against a relation-mapped attribute it is whole-list equality, and refused |
 | A member column against a relation's `element` column | Same family, or refused |
 | `contains`, `startsWith`, `endsWith` (haystack **or** column needle) and `size()` over a number or boolean column | UNKNOWN: CEL has no overload, so the call raises and denies on every row, under either polarity |
-| Every hierarchy operator's path column | A **text** column, or refused |
+| Every hierarchy operator's path column (or `list()` segment) | A **text** column. A number or boolean one is UNKNOWN, since `hierarchy()` has no overload for it; any other kind is refused |
 | A column type the adapter has no CEL reading for — temporal, binary, array, enum, a custom `ColumnType` | Refused against any constant, **against every element of an `in` list**, **against any other column, including one of its own type**, and under a string match or `size()`. Cerbos carries a timestamp attribute as an RFC 3339 **string**, so `R.attr.createdAt == R.attr.updatedAt` compares strings in CEL and instants in SQL, and `"…T00:00:00Z"` and `"…T00:00:00.000Z"` are one instant and two strings. A DAO key lands here too — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)` — so `request.resource.id in [...]` is refused there while a `varchar` key is fine. Compare two temporal columns as `timestamp(R.attr.a) < timestamp(R.attr.b)`, which means the instant on both sides and translates when both columns pin an absolute instant in the same representation |
 
 A DAO id column and a `transform`ed column are read through the type underneath, so a `varchar`
@@ -520,11 +520,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 236 / 308 |
+| adversarial | 237 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-87 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+86 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -542,8 +542,7 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   `-0.0`, which CEL divides into the opposite infinity, and SQL compares `-0.0` equal to `0.0`;
 - a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has
   no key set SQL can read;
-- a number or boolean column as a hierarchy path, and two instant columns compared without
-  `timestamp()`. A comparison between recognised types that differ, or between a scalar column or
+- two instant columns compared without `timestamp()`. A comparison between recognised types that differ, or between a scalar column or
   element and a list or map built from constants, is not refused: it is answered from the types.
   See
   [The operand's type has to match the column's](#the-operands-type-has-to-match-the-columns);

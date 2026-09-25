@@ -30,7 +30,7 @@ import org.junit.jupiter.api.assertThrows
  * definite false, anything else a no-overload error, SQL UNKNOWN), so the adapter answers it the
  * same way and never hands the store a coercion. The corpus type-mismatch cases prove those
  * answers. What stays refused here is the rest: a type the adapter has no CEL reading for, a
- * hierarchy path, a concatenation, and a member/element pair.
+ * concatenation, and a member/element pair.
  *
  * The cases below are NOT all of one kind, and the banner over each block says which. Most are
  * KIND 3 corpus gaps and are deleted when their action lands; a few are KIND 2 — the column type is
@@ -56,25 +56,6 @@ class ColumnTypeGuardTest {
     // ============================================================================================
 
     // -- a string match needs a text column, on whichever side the column lands ------------------
-
-    @Test
-    fun `a hierarchy path read from a non-text column is refused`() {
-        // Corpus gap. CEL: `hierarchy(R.attr.aNumber).descendentOf(hierarchy("1.2"))`. Every hierarchy relation
-        // is a prefix test lowered to `=` or to a prefix LIKE, so it is the same hole.
-        val error = assertThrows<UnmappedAttributeException> {
-            translate(
-                ReviewPlans.expression(
-                    "descendentOf",
-                    ReviewPlans.expression("hierarchy", ReviewPlans.variable("request.resource.attr.aNumber")),
-                    ReviewPlans.expression("hierarchy", ReviewPlans.value("1.2")),
-                ),
-            )
-        }
-        assertTrue(
-            error.message!!.startsWith("descendentOf over 'request.resource.attr.aNumber' requires a text column"),
-            error.message,
-        )
-    }
 
     @Test
     fun `the CONTROL for those refusals - the text-column forms of every one of them still translate`() {

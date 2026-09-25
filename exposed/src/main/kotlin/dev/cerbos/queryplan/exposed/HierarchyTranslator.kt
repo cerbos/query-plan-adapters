@@ -22,6 +22,9 @@ import org.jetbrains.exposed.v1.core.stringParam
 internal class HierarchyTranslator(private val translation: Translation) {
 
     fun translate(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> {
+        // `hierarchy()` has no overload for a number or a boolean, so a path read from such a
+        // column raises before any relation is asked, on every row: UNKNOWN, under both polarities.
+        if (operands.any { readsNonTextPath(it, scope) }) return TriLogic.unknown()
         if (operator in setOf("overlaps", "ancestorOf", "descendentOf")) {
             val (first, second) = extract(operator, operands, scope)
             if (isPerCharacter(first) || isPerCharacter(second)) {
@@ -36,6 +39,21 @@ internal class HierarchyTranslator(private val translation: Translation) {
         "ancestorOf" -> ancestorOrDescendant(operands, scope, isAncestor = true)
         "descendentOf" -> ancestorOrDescendant(operands, scope, isAncestor = false)
         else -> throw Refusals.internal("Unsupported hierarchy operator: $operator")
+    }
+
+    /** Whether a `hierarchy(...)` operand reads its path, or a `list()` segment, from a number or boolean column. */
+    private fun readsNonTextPath(operand: Operand, scope: Scope): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "hierarchy") return false
+        val path = operand.expression.operandsList.firstOrNull() ?: return false
+        val variables = when {
+            path.nodeCase == Operand.NodeCase.VARIABLE -> listOf(path.variable)
+            path.nodeCase == Operand.NodeCase.EXPRESSION && path.expression.operator == "list" ->
+                path.expression.operandsList.filter { it.nodeCase == Operand.NodeCase.VARIABLE }.map { it.variable }
+            else -> emptyList()
+        }
+        return variables.any { variable ->
+            (scope.resolve(variable) as? Resolution.Scalar)?.let(translation.leaf::lacksTextOverload) == true
+        }
     }
 
     /** A resolved `hierarchy(...)` operand. */
