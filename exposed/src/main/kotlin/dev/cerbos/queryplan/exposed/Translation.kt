@@ -18,6 +18,7 @@ internal class Translation(val options: Options) {
     val comparisons = ComparisonTranslator(this)
     val ternary = TernaryTranslator(this)
     val hierarchy = HierarchyTranslator(this)
+    val regex = RegexTranslator(this)
 
     // The relation side: everything that needs a correlated subquery.
     val subqueries = Subqueries(this)

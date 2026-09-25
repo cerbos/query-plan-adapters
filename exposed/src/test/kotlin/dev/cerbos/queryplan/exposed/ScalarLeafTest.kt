@@ -248,13 +248,5 @@ class ScalarLeafTest {
             val error = assertThrows<UnmappedAttributeException> { Scalars.ids("comparison/equals/nested-map-member") }
             assertEquals("Unknown attribute: request.resource.attr.obj.inner", error.message)
         }
-
-        @Test
-        fun `matches is refused, because CEL's regex dialect is not any SQL engine's`() {
-            listOf("regex/matches/anchored-prefix", "regex/matches/top-level-alternation-prefix-or-suffix").forEach { action ->
-                val error = assertThrows<UnsupportedPlanShapeException>(action) { Scalars.ids(action) }
-                assertTrue(error.message!!.startsWith("Unsupported operator: matches"), error.message)
-            }
-        }
     }
 }

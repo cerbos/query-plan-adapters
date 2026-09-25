@@ -197,93 +197,9 @@
       "status": "unsupported",
       "reason": "The membership pair has no column-and-constant reading: the container is a literal list whose elements are themselves lists or maps, or a map() over a principal value, and a scalar column can equal neither"
     },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/brace-without-count-is-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/case-fold-kelvin-and-long-s": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/dot-plus-excludes-empty-and-newline": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/negated-invalid-patterns-from-principal": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/posix-class-and-range-bounded": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no lowering: CEL matches with RE2, which no SQL engine implements — LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and how it treats anchors and a final newline. Refused by the operator's name wherever the walk meets it, including under an `== true` wrapper"
-    },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
-    },
-    "regex/matches/whitespace-class": {
-      "status": "unsupported",
-      "reason": "Unsupported operator: matches. CEL matches its pattern with RE2, which no SQL engine implements: LIKE has no alternation or anchors, and each engine's own regular expression operator differs from RE2 in what it accepts and in how it treats anchors, so a translated pattern would match strings the PDP does not."
+      "reason": "matches() is translated only where LIKE, = and REPLACE spell the RE2 pattern exactly: finite alternatives, anchored .* and .+, and ^[set]*$. An unbounded repetition of a literal (x*, a+) inside a pattern has no finite expansion and no LIKE wildcard that counts only one character's repeats, so it is refused when the pattern is compiled"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",

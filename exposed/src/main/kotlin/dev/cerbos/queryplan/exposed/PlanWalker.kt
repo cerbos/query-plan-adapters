@@ -58,8 +58,45 @@ internal class PlanWalker(private val translation: Translation) {
             "in" -> translation.membership.translateIn(operands, scope)
             "if" -> translation.ternary.translateBare(operands, scope)
             "overlaps", "ancestorOf", "descendentOf" -> translation.hierarchy.translate(operator, operands, scope)
-            else -> translation.comparisons.translate(operator, operands, scope)
+            "matches" -> matches(operands, scope)
+            else -> matchesComparedWithBoolean(operator, operands, scope)
+                ?: translation.comparisons.translate(operator, operands, scope)
         }
+    }
+
+    /**
+     * `matches(attribute, "pattern")`. A pattern that is not a string constant (read from a column,
+     * or computed) has nothing to translate at build time and is refused; a non-string constant has
+     * no `matches()` overload, so it is UNKNOWN.
+     */
+    private fun matches(operands: List<Operand>, scope: Scope): Op<Boolean> {
+        if (operands.size != 2) throw Refusals.malformed("matches requires exactly 2 operands, got ${operands.size}")
+        val (receiver, pattern) = operands
+        if (receiver.nodeCase != Operand.NodeCase.VARIABLE || pattern.nodeCase != Operand.NodeCase.VALUE) {
+            throw Refusals.unsupported(
+                "matches() is translated only between a mapped attribute and a constant pattern: " +
+                    "the pattern is compiled into LIKE at translation time",
+            )
+        }
+        val target = scope.scalar(receiver.variable)
+        val text = PlanValues.toKotlin(pattern.value) as? String ?: return TriLogic.unknown()
+        return translation.regex.matches(target, text)
+    }
+
+    /**
+     * `matches(...) == true`, `!= false` and their mirrors, which keep their wrapper on the wire: the
+     * match itself, or its negation. `null` when the node is not that shape.
+     */
+    private fun matchesComparedWithBoolean(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
+        val match = operands.firstOrNull {
+            it.nodeCase == Operand.NodeCase.EXPRESSION && it.expression.operator == "matches"
+        } ?: return null
+        val other = operands.first { it !== match }
+        if (other.nodeCase != Operand.NodeCase.VALUE) return null
+        val expected = PlanValues.toKotlin(other.value) as? Boolean ?: return null
+        val translated = matches(match.expression.operandsList, scope)
+        return if (expected == (operator == "eq")) translated else TriLogic.not(translated)
     }
 
     private fun junction(operator: String, operands: List<Operand>, scope: Scope): List<Op<Boolean>> {

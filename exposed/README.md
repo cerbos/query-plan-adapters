@@ -291,6 +291,25 @@ floating-point, decimal or boolean. A temporal column is compared by wrapping bo
 `timestamp()`. It is an `UnmappedAttributeException` rather than an `UnsupportedPlanShapeException`:
 the plan is fine, and the fix is in your mapping.
 
+### Regular expressions
+
+`R.attr.s.matches("re")` is translated only when the RE2 pattern's language can be spelled
+**exactly** with `LIKE`, `=` and `REPLACE`, since no SQL engine's regex dialect is RE2:
+
+- each top-level alternative is a finite set of strings (literals, escapes, classes including
+  `\d \w \s` and POSIX ones, groups, alternation, bounded repetition), anchored or not: `= s`,
+  `LIKE 's%'`, `LIKE '%s'` or `LIKE '%s%'`. RE2's `$` matches only at the end of the text, so an
+  anchored alternative is an exact `=`;
+- in an alternative anchored at both ends, `.*` and `.+` become `%` and `_%`, with
+  `NOT LIKE '%\n%'`, because RE2's `.` excludes a newline;
+- `^[set]*$` and `^[set]+$` hold when deleting every member of the set with `REPLACE` leaves `''`;
+- a leading `(?i)` expands each ASCII letter to its case-fold orbit, as RE2 does (`k` also matches
+  U+212A KELVIN SIGN, `s` also U+017F LONG S).
+
+A pattern RE2 rejects (a lookaround, a backreference, a stacked quantifier) makes `matches()`
+raise, so it is UNKNOWN on every row, as is a number or boolean receiver. Anything else is refused.
+`matches(...) == true` and its `false` / `!=` spellings translate the same way.
+
 ### Positional reads: `position(column)`
 
 A to-many relation is a correlated subquery, and its rows carry no list order, so `R.attr.tags[0]`
@@ -539,16 +558,18 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 62 / 80 |
-| adversarial | 246 / 308 |
+| extended | 69 / 80 |
+| adversarial | 260 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-73 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+52 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
-- regex `matches()`: CEL matches with RE2, which no SQL engine implements;
+- a regex `matches()` pattern `LIKE`, `=` and `REPLACE` cannot spell exactly (an unbounded
+  repetition of a literal, a lone `.`, a negated class, an inline flag other than a leading `(?i)`):
+  CEL matches with RE2, which no SQL engine implements. See [Regular expressions](#regular-expressions);
 - a positional read of a list (`[i]`, `.member` of `[i]`) over a relation that declares no
   `position(column)`, or through a to-many hop: without a position column the rows carry no list
   order to index into;
