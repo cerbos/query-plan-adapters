@@ -16,9 +16,9 @@ module CorpusMapper
   }.freeze
 
   RELATION_LEVEL_FIELDS = {
-    "aBool" => {field: "aBool"},
-    "aString" => {field: "aString"},
-    "aNumber" => {field: "aNumber"},
+    "aBool" => {field: "aBool", nullable: true},
+    "aString" => {field: "aString", nullable: true},
+    "aNumber" => {field: "aNumber", nullable: true},
     "aOptionalString" => {field: "aOptionalString", nullable: true}
   }.freeze
 
@@ -28,10 +28,12 @@ module CorpusMapper
     # the `identifier/*` cases compare the key with a STRING field, so a single mapping cannot be an
     # ObjectId and satisfy them. An ObjectId `value_parser` is pinned in the contract suite.
     "request.resource.id" => {field: "resourceId"},
-    "request.resource.attr.aBool" => {field: "aBool"},
-    "request.resource.attr.aString" => {field: "aString", value_type: :string},
-    "request.resource.attr.aNumber" => {field: "aNumber", value_type: :number},
-    "request.resource.attr.aDouble" => {field: "aDouble", nullable: true},
+    # Seeds j1, j2 and j3 each store a null in one of aString, aNumber and aBool, which the corpus
+    # sends as a missing attribute (conformance/README.md, "The dataset"), so all three are nullable.
+    "request.resource.attr.aBool" => {field: "aBool", value_type: :boolean, nullable: true},
+    "request.resource.attr.aString" => {field: "aString", value_type: :string, nullable: true},
+    "request.resource.attr.aNumber" => {field: "aNumber", value_type: :number, nullable: true},
+    "request.resource.attr.aDouble" => {field: "aDouble", value_type: :number, nullable: true},
     "request.resource.attr.aOptionalString" => {field: "aOptionalString", nullable: true},
     "request.resource.attr.createdBy" => {field: "createdBy"},
     "request.resource.attr.scope" => {field: "scope", nullable: true},
@@ -44,7 +46,7 @@ module CorpusMapper
     "request.resource.attr.coOwner" => {field: "scope"},
     # obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
     # opposite: a real two-level to-one chain. The two are kept side by side on purpose.
-    "request.resource.attr.obj.inner" => {field: "aString"},
+    "request.resource.attr.obj.inner" => {field: "aString", nullable: true},
     # The corpus's one REAL to-one chain (the `relation/*` cases), stored as an embedded subdocument
     # per level. `type: :one` flattens the path AND declares the level absent-able, which is
     # what makes the adapter require it outside any $nor.

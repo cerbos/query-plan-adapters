@@ -119,9 +119,9 @@ silently ignored would drop a guard.
 | Key | Meaning |
 | --- | --- |
 | `field` | The document path; dotted for a subdocument. |
-| `nullable` | A stored `null` is a **missing** Cerbos attribute (the application omits it from `check()`). Comparisons then keep null documents out, and `not` over the field is refused. Do not set it where `null` is an explicit Cerbos value. |
+| `nullable` | A stored `null` is a **missing** Cerbos attribute (the application omits it from `check()`). Comparisons then keep null documents out, and a `not` CEL is certain to evaluate keeps the guard outside its `$nor`; a `not` that may skip the field (a ternary branch, a lambda body) or reads it through a to-many relation is refused. Do not set it where `null` is an explicit Cerbos value. |
 | `value_parser` | Rewrites each constant compared with the field — for example a string id into a `BSON::ObjectId`. |
-| `value_type` | `:number`, `:string`, `:boolean` or `:date_time`. Settles an equality against a constant of another type without a query, and refuses shapes a stored `Date` cannot answer (a bare comparison of two date fields: MongoDB has discarded the strings CEL compares). |
+| `value_type` | `:number`, `:string`, `:boolean` or `:date_time`. Settles an equality or an ordering against a constant of another type without a query, and refuses shapes a stored `Date` cannot answer (a bare comparison of two date fields: MongoDB has discarded the strings CEL compares). |
 | `relation` | `type: :one` for an embedded subdocument (a to-one hop, required to be present outside any negation), `type: :many` for an array of subdocuments (`$elemMatch`). `field` names the element field the relation stands for, `fields` maps element fields, `requires_parent` names an optional to-one parent array the path is reached through. |
 
 **An unmapped reference raises `Cerbos::MongoDB::MapperError`** rather than being used verbatim as
@@ -165,7 +165,7 @@ Anything else raises `Cerbos::MongoDB::UnsupportedError`. Every error is a `Cerb
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 29 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
+queries over the corpus's 41 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
 and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
 current PDP, 0.55.0, identical on both servers and through both, where the total is every golden
 case in that tier:
@@ -173,24 +173,33 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 53 / 80 |
-| adversarial | 148 / 227 |
+| extended | 50 / 80 |
+| adversarial | 202 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute`. The planner folds
-`has()` on a missing attribute to `ALWAYS_ALLOWED` while `checkResource` denies the
-missing-attribute documents, so use `R.attr.x != null` for database-backed attributes instead of
-`has(R.attr.x)`. Every other case that does not pass is refused with a `Cerbos::MongoDB::Error`;
+pass them. On 0.55.0 that is four extended cases and three adversarial cases.
+`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true, while `checkResource` receives the
+omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`.
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
+drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
+and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads
+`aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while `checkResource` treats the
+erroring deny rule as not matching and allows the document
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with a `Cerbos::MongoDB::Error`;
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
 The refused set is exact-one cardinality, aggregation expressions or outer-document references
 inside `$elemMatch` (MongoDB accepts `$expr` only at the top level), CEL's `int()`/`double()`
 (`$convert` parses a numeric prefix and rounds where CEL raises and truncates), division by
-anything but a non-zero constant (`$divide` by zero aborts the query), `+` between two fields
-(nothing tells `$add` from `$concat`), negations over nullable fields or collection macros (a
-filter has no UNKNOWN), regular expressions outside the common subset, whole-list comparisons and
-list equality over a `map()` projection.
+anything but a non-zero constant (`$divide` by zero aborts the query), `%` over anything but an
+integer `size()` (CEL's `%` has no double overload), `string()` over an untyped integral constant
+of 1e6 or more, `+` between two fields (nothing tells `$add` from `$concat`), negations over
+collection macros or over a nullable field CEL may not evaluate (a filter has no UNKNOWN), macros
+and `in` over a to-one relation (CEL iterates a map's keys), an empty hierarchy separator, regular
+expressions outside the common subset, whole-list comparisons and list equality over a `map()`
+projection.
 
 It shares its MongoDB semantics with the [Mongoose adapter](../mongoose/), and its ledger is the
 same but for one case: the driver sends a filter to the server untouched, so a comparison between
@@ -198,8 +207,12 @@ two conditionals (`conditional/ternary/on-both-sides`) translates here, where Mo
 caster fails to build it.
 
 The harness uses the `nullable: true` mapper flag for the attributes whose NULL the corpus sends
-as a *missing* attribute, so `== null` against them selects nothing, as CEL's missing-attribute
-error demands. The call-wide `null_attribute_representation: :omitted` has no case spelling, since
+as a *missing* attribute (`aString`, `aNumber` and `aBool` among them, which seeds j1, j2 and j3
+leave NULL), so `== null` against them selects nothing, as CEL's missing-attribute error demands.
+Under a negation the non-null guard is ANDed outside the `$nor`, and a negated ordering against a
+constant is translated as its complement (`!(x > 3)` as `x <= 3`), so a missing field is denied
+under both polarities. A declared `value_type` answers an ordering against a constant of another
+type as CEL does: false under either polarity. The call-wide `null_attribute_representation: :omitted` has no case spelling, since
 the harness uses one mapping, so the contract suite covers it.
 
 ### How it is tested

@@ -88,6 +88,7 @@ RSpec.describe "Cerbos::MongoDB::Mongoid" do
     expect(Cerbos::MongoDB::Mongoid.criteria(scope, denied)).to be_empty_and_chainable
 
     composed = Cerbos::MongoDB::Mongoid.criteria(scope, result_for("comparison/less-or-equal/value-first")).where(aBool: true)
-    expect(composed.selector).to include("createdBy" => "alice", "aBool" => true, "aNumber" => {"$gte" => 3})
+    expect(composed.selector).to include("createdBy" => "alice", "aBool" => true,
+      "$and" => [{"aNumber" => {"$ne" => nil}}, {"aNumber" => {"$gte" => 3}}])
   end
 end

@@ -26,7 +26,7 @@ module Cerbos
       NULL_REPRESENTATIONS = %i[explicit omitted].freeze
 
       # Operators whose second operand is a lambda that binds an iteration variable.
-      LAMBDA_BINDING = %w[exists exists_one all filter map except].freeze
+      LAMBDA_BINDING = Guards::LAMBDA_BINDING
 
       # `value OP field` is `field MIRROR(OP) value`.
       MIRRORED = {"eq" => "eq", "ne" => "ne", "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le"}.freeze
@@ -164,14 +164,92 @@ module Cerbos
 
       def translate_not(operands, mapper, scope)
         operand = operand_at(operands, 0, "not operator requires at least one operand")
-        if variable_names(operand).any? { |name| mapper.nullable?(name) } ||
-            (expression?(operand) && %w[exists exists_one all].include?(operand.operator))
+
+        # De Morgan, pushed down to the leaves. CEL's `&&`/`||` let a decided operand absorb an
+        # error in the other, so `!(!aBool && parent.x == "one")` is TRUE on a parentless document
+        # whose aBool is true. Guarding the whole negation for every field it reads denies that
+        # document; negating each operand instead gives every leaf its own guard. The rewrite is
+        # exact under CEL's error semantics: `!(a && b)` and `!a || !b` agree on every
+        # combination of true, false and error.
+        if expression_with?(operand, "and") || expression_with?(operand, "or")
+          dual = (operand.operator == "and") ? "$or" : "$and"
+          return {dual => operand.operands.map { |child| translate_not([child], mapper, scope) }}
+        end
+        # `!!x` is `x`, errors included, and eliminating the pair keeps a leaf that answers an
+        # error as `false` from being flipped twice by nested $nors.
+        if expression_with?(operand, "not")
+          return build(operand_at(operand.operands, 0, "not operator requires at least one operand"), mapper, scope)
+        end
+        # An ordering between a field and a constant negates to its complement, so it keeps the
+        # positive leaf's semantics: MongoDB's $lt compares only values of the constant's own
+        # BSON type, and a constant CEL cannot order against the field answers false either way.
+        # A $nor over the ordering would instead be TRUE for a null, or a value of another type,
+        # where CEL raises an error and denies.
+        complement = complemented_ordering(operand)
+        return build(complement, mapper, scope) if complement
+
+        if (expression?(operand) && %w[exists exists_one all].include?(operand.operator)) ||
+            !nullable_guard_exact?(operand, mapper, scope)
           raise UnsupportedError, "not over nullable fields or collection macros cannot preserve Cerbos error semantics"
         end
 
         # with_evaluation ANDs its conjuncts OUTSIDE this $nor, which is where the absent-parent
-        # requirement has to sit: inside, the negation would flip it with the predicate (#315).
-        Guards.with_evaluation({"$nor" => [build(operand, mapper, scope)]}, [operand], mapper)
+        # requirement has to sit: inside, the negation would flip it with the predicate (#315). A
+        # null or absent list is the same kind of error CEL denies, so its array requirement sits
+        # there too.
+        guarded = Guards.with_evaluation({"$nor" => [build(operand, mapper, scope)]}, [operand], mapper)
+        list_shape = Guards.list_shape_guard(operand, mapper, !scope.collection?)
+        list_shape ? {"$and" => [list_shape, guarded]} : guarded
+      end
+
+      # `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all.
+      COMPLEMENTED_ORDERING = {"lt" => "ge", "le" => "gt", "gt" => "le", "ge" => "lt"}.freeze
+
+      # The complement of an ordering between one field and one constant; nil for anything else.
+      def complemented_ordering(operand)
+        return nil unless expression?(operand)
+
+        complement = COMPLEMENTED_ORDERING[operand.operator]
+        return nil if complement.nil? || operand.operands.length != 2
+
+        left, right = operand.operands
+        field_and_constant = (variable?(left) && value?(right)) || (value?(left) && variable?(right))
+        return nil unless field_and_constant
+
+        Plan::Expression.new(complement, operand.operands)
+      end
+
+      # Whether guarding every nullable field the negated +operand+ reads is exact: it is when
+      # CEL is certain to read each of them, so a null one is an error CEL cannot avoid.
+      def nullable_guard_exact?(operand, mapper, scope)
+        nullable = variable_names(operand).select { |name| mapper.nullable?(name) }
+        return true if nullable.empty?
+
+        !scope.collection? &&
+          nullable.all? { |name| always_reads?(operand, name) } &&
+          nullable.all? { |name| mapper.resolve_field(name).relation&.type != :many }
+      end
+
+      # Whether evaluating +operand+ always reads the variable +name+. `&&` and `||` absorb an
+      # erroring operand when another decides the result, a ternary reads only the branch its
+      # condition selects, and a lambda body is never evaluated over an empty collection: each of
+      # those reads +name+ unconditionally only if every path through it does. Every other
+      # operator is strict in its operands.
+      def always_reads?(operand, name)
+        return operand.name == name if variable?(operand)
+        return false unless expression?(operand)
+
+        first, *rest = operand.operands
+        case operand.operator
+        when "and", "or"
+          operand.operands.all? { |child| always_reads?(child, name) }
+        when "if"
+          (!first.nil? && always_reads?(first, name)) || (!rest.empty? && rest.all? { |child| always_reads?(child, name) })
+        else
+          return !first.nil? && always_reads?(first, name) if LAMBDA_BINDING.include?(operand.operator)
+
+          operand.operands.any? { |child| always_reads?(child, name) }
+        end
       end
 
       def translate_comparison(operator, operands, mapper, scope)
@@ -206,6 +284,12 @@ module Cerbos
 
         assert_scoped(variable.name, scope)
         effective = variable.equal?(left) ? operator : MIRRORED.fetch(operator)
+        # CEL has no ordering between types, so `aNumber < "5"` is an error that denies. A
+        # negation reaches here as the complemented ordering (translate_not), so this
+        # match-nothing leaf holds under both polarities.
+        if !%w[eq ne].include?(effective) && !can_order?(variable.name, value.value, mapper)
+          return leaf(mapper, scope, variable.name, {"$in" => []}, nullable: false, require_exists: false)
+        end
         # A constant of a different scalar type than the declared field never equals it.
         config = mapper.resolve_config(variable.name)
         if %w[eq ne].include?(effective) && config&.value_type && config.value_type != :date_time &&
@@ -218,6 +302,18 @@ module Cerbos
           {Aggregation::COMPARISONS.fetch(effective) => mapper.apply_value_parser(variable.name, value.value)},
           value.value, "`#{effective}` against a null operand"
         )
+      end
+
+      # False when CEL cannot order +reference+ against +constant+: the constant is not a number,
+      # a string or a boolean (ordering against null, a list or a map is always an error), or it
+      # is a scalar of another type than the one +reference+ declares.
+      def can_order?(reference, constant, mapper)
+        return false unless number?(constant) || string?(constant) || boolean?(constant)
+
+        declared = mapper.value_type(reference)
+        return true if declared.nil? || declared == :date_time
+
+        matches_type?(constant, declared)
       end
 
       def translate_in(operands, mapper, scope)
@@ -238,6 +334,12 @@ module Cerbos
             "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element"
         end
         if value?(left) && variable?(right)
+          if mapper.relation_of(right.name)&.type == :one
+            raise UnsupportedError,
+              "`in` over a to-one relation tests the related object's keys in CEL, which are the " \
+              "fields its subdocument carries, and the adapter has no filter for a subdocument's field names"
+          end
+
           return value_comparison(
             mapper, scope, right.name,
             {"$eq" => mapper.apply_value_parser(right.name, left.value)},
@@ -322,7 +424,7 @@ module Cerbos
         values = values_operand.value
         relation = mapper.resolve_field(collection.name).relation
         raise UnsupportedError, "map operator requires a relation mapping" if relation.nil?
-        raise UnsupportedError, "map operator requires a collection relation" unless relation.type == :many
+        raise to_one_macro_refusal("map") unless relation.type == :many
         raise UnsupportedError, "Map projection must be a variable reference" unless variable?(projection)
 
         scoped = mapper.scoped(collection.name, variable.name)
@@ -352,13 +454,23 @@ module Cerbos
 
         relation = mapper.resolve_field(collection.name).relation
         raise UnsupportedError, "#{operator} operator requires a relation mapping" if relation.nil?
-        raise UnsupportedError, "#{operator} operator requires a collection relation" unless relation.type == :many
+        raise to_one_macro_refusal(operator) unless relation.type == :many
 
         element = build(condition, mapper.scoped(collection.name, variable.name), Scope.new(variable.name))
         return {relation.name => {"$elemMatch" => element}} if operator == "exists"
 
         # "No element fails the condition", on a field that must be an array.
         {relation.name => {"$type" => "array", "$not" => {"$elemMatch" => {"$nor" => [element]}}}}
+      end
+
+      # A macro over a reference mapped as a to-one relation. To CEL that attribute is a map, and a
+      # macro over a map ranges over its KEYS; the adapter translates a macro only as an element
+      # match over a collection relation's subdocuments.
+      def to_one_macro_refusal(operator)
+        UnsupportedError.new(
+          "#{operator}() over a to-one relation ranges over the related object's keys in CEL, and " \
+          "a MongoDB filter has no form that iterates a subdocument's field names"
+        )
       end
 
       def translate_lambda(operands, mapper, scope)

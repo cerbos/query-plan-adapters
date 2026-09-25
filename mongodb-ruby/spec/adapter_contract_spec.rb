@@ -247,8 +247,10 @@ RSpec.describe "adapter contract" do
       mapper = {"request.resource.attr.x" => {field: "x", nullable: true}}
       expect(filter(expr("ne", var("request.resource.attr.x"), val("a")), mapper))
         .to eq({"$and" => [{"x" => {"$ne" => nil}}, {"x" => {"$ne" => "a"}}]})
-      expect { filter(expr("not", expr("eq", var("request.resource.attr.x"), val("a"))), mapper) }
-        .to raise_error(Cerbos::MongoDB::UnsupportedError, /not over nullable fields/)
+      # A negation CEL is certain to evaluate keeps the guard outside its $nor, so a stored null
+      # is denied under both polarities.
+      expect(filter(expr("not", expr("eq", var("request.resource.attr.x"), val("a"))), mapper))
+        .to eq({"$and" => [{"x" => {"$ne" => nil}}, {"$nor" => [{"$and" => [{"x" => {"$ne" => nil}}, {"x" => {"$eq" => "a"}}]}]}]})
     end
   end
 end
