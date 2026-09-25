@@ -37,10 +37,29 @@ jobs:
       matrix:
         ruby-version: ["3.3", "3.4", "4.0"]
         activerecord-version: ["8.0"]
+        # The conformance suite's store (ADAPTER_TEST_DB). Every suite runs on SQLite; the
+        # PostgreSQL and MySQL legs run only the conformance suite.
+        database: [sqlite]
         include:
           # Low end of the gemspec's ActiveRecord range. The Gemfile pins each leg's minor.
           - ruby-version: "3.3"
             activerecord-version: "7.1"
+            database: sqlite
+          # The datastore is a dimension: the adapter's MySQL and PostgreSQL branches (string
+          # length, concatenation, cast targets) execute nowhere else. Each ActiveRecord end
+          # renders its own SQL, so both run on both stores.
+          - ruby-version: "4.0"
+            activerecord-version: "8.0"
+            database: postgres
+          - ruby-version: "4.0"
+            activerecord-version: "8.0"
+            database: mysql
+          - ruby-version: "3.3"
+            activerecord-version: "7.1"
+            database: postgres
+          - ruby-version: "3.3"
+            activerecord-version: "7.1"
+            database: mysql
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,27 +70,31 @@ jobs:
       # Suites run in Docker, and none needs a PDP: the conformance suite replays the plans and
       # decisions recorded in conformance/golden/.
       - name: Run the adapter contract suite
+        if: matrix.database == 'sqlite'
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
         run: ./scripts/test.sh spec/adapter_contract_spec.rb
 
-      # Keep this in the same job as the tests. The corpus tests the translator and the SQL
-      # ActiveRecord renders, not the Ruby version, so it runs on the baseline leg and on the
-      # low end of the ActiveRecord range.
-      - name: Run the conformance suite
+      # Keep this in the same job as the tests. The corpus tests the translator, the SQL
+      # ActiveRecord renders and the store it runs on, not the Ruby version, so it runs on the
+      # baseline leg and on the low end of the ActiveRecord range, once per store.
+      # scripts/test.sh starts the store from docker-compose.yaml (images pinned in
+      # POSTGRES_IMAGE and MYSQL_IMAGE; MySQL on utf8mb4_0900_bin).
+      - name: Run the conformance suite (${{ matrix.database }})
         if: (matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0') || matrix.activerecord-version == '7.1'
         env:
           RUBY_VERSION: ${{ matrix.ruby-version }}
           ACTIVERECORD_VERSION: ${{ matrix.activerecord-version }}
+          ADAPTER_TEST_DB: ${{ matrix.database }}
         run: ./scripts/test.sh spec/conformance_spec.rb
 
       - name: Lint
-        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
+        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0' && matrix.database == 'sqlite'
         run: ./scripts/lint.sh
 
       - name: Docs
-        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0'
+        if: matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0' && matrix.database == 'sqlite'
         run: ./scripts/docs.sh
 
   # Keep this job in this workflow. Renovate automerges non-major bumps, and this job is the

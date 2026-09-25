@@ -35,8 +35,23 @@ module Cerbos
             return left.public_send(ARITHMETIC.fetch(operator), right)
           end
 
-          result = ArelSupport.infix(ARITHMETIC.fetch(operator), left, right)
-          record_cel_type(result, (cel_int?(left) && cel_int?(right)) ? :int : :double)
+          if cel_int?(left) && cel_int?(right)
+            # CEL's `%` by zero is an error, which denies the row under either polarity.
+            # PostgreSQL raises instead, failing the whole query; NULLIF makes it UNKNOWN, as
+            # SQLite and MySQL already make it.
+            right = ArelSupport.function("NULLIF", [right, 0]) if operator == "mod" && !right.is_a?(Numeric)
+            return record_cel_type(ArelSupport.infix(ARITHMETIC.fetch(operator), left, right), :int)
+          end
+
+          # CEL holds every attribute number as a double. PostgreSQL and MySQL would compute an
+          # integer or decimal column with a literal like 0.1 in exact decimal, so
+          # `aNumber * 0.1 == 0.3` would hold for 3 where CEL computes 0.30000000000000004.
+          left, right = [left, right].map { |operand| exact_numeric_column?(operand) ? as_double(operand) : operand }
+          record_cel_type(ArelSupport.infix(ARITHMETIC.fetch(operator), left, right), :double)
+        end
+
+        def exact_numeric_column?(value)
+          ArelSupport.arel_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
 
         # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole

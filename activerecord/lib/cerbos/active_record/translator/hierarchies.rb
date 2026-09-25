@@ -34,6 +34,15 @@ module Cerbos
           end
         end
 
+        # `hierarchy()` of a number or boolean column is a no-such-overload error in CEL, which
+        # denies the row under either polarity, so the operator is UNKNOWN (nil). Rendered, it
+        # would put a LIKE on a number: PostgreSQL refuses it, SQLite and MySQL coerce it.
+        def hierarchy_type_error?(*hierarchies)
+          hierarchies.flat_map { |path| path.segments || [path.value] }.any? do |part|
+            ArelSupport.arel_node?(part) && !scalar_kind(part).nil? && scalar_kind(part) != :string
+          end
+        end
+
         # If either side is list-built, compare both segment by segment.
         def segment_wise?(left, right)
           !left.segments.nil? || !right.segments.nil?
@@ -74,6 +83,7 @@ module Cerbos
 
         def ancestor_of(ancestor, descendent)
           assert_hierarchies(ancestor, descendent)
+          return nil if hierarchy_type_error?(ancestor, descendent)
 
           if segment_wise?(ancestor, descendent)
             above = require_segments(ancestor)
@@ -117,6 +127,7 @@ module Cerbos
 
         def overlaps(left, right)
           assert_hierarchies(left, right)
+          return nil if hierarchy_type_error?(left, right)
 
           result = ArelSupport.or_node([
             as_predicate(hierarchy_equal(left, right)),

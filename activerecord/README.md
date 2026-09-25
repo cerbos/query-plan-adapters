@@ -276,11 +276,13 @@ CEL string comparison is byte-exact. A case-insensitive or otherwise lenient col
 - **MySQL:** use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every column your policies read. `_cs` is
   not enough — `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD
   SPACE (`'a' = 'a '` is TRUE) ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  Make the **connection** collation byte-exact too: `string()` over a boolean column compares two
-  literals, so it uses the connection collation, and under the default `utf8mb4_0900_ai_ci`
-  `string(R.attr.flag) == "TRUE"` matches rows CEL does not.
+  Make the **connection** collation byte-exact too (`collation: utf8mb4_0900_bin` in the mysql2
+  config, which ActiveRecord applies with `SET NAMES`): `string()` of a column is a `CAST` or a
+  `CASE` over literals, so it takes the connection collation, and under the default
+  `utf8mb4_0900_ai_ci` `string(R.attr.owner) == "set"` also matches `Set`.
 
-The suites here run on SQLite only; other dialects have no test coverage.
+The conformance suite runs on SQLite, PostgreSQL and MySQL (`utf8mb4_0900_bin` on the columns
+and the connection). The other suites run on SQLite.
 
 ## How the adapter keeps the three-valued logic
 
@@ -326,9 +328,9 @@ number of operands. The planner never emits these, but the adapter accepts plans
 
 `spec/conformance_spec.rb` replays every plan recorded in
 [`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
-rows in SQLite and compares the ids with the ones `check()` allowed. It needs no PDP. On the
-current PDP (Cerbos 0.55.0), cases that return exactly the allowed rows, out of every golden case
-in the tier:
+rows and compares the ids with the ones `check()` allowed. It needs no PDP. It runs on SQLite,
+PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -387,12 +389,16 @@ Everything runs in Docker; you do not need Ruby locally, and no suite needs a PD
 ```bash
 ./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/conformance_spec.rb          # the conformance harness alone
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # on PostgreSQL (or mysql)
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                   # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                   # YARD, failing on a warning or an undocumented object
 ```
 
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
+`ADAPTER_TEST_DB` picks the store: `sqlite` (the default, in memory), `postgres` or `mysql`, which
+`scripts/test.sh` starts from `docker-compose.yaml` with the images pinned in
+[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE). Any other value fails.
 Specs run in random order; rerun a failure with the seed RSpec prints (`--seed N`).
 
 | Suite | What it covers |

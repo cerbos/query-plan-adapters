@@ -64,11 +64,16 @@ under both SQLAlchemy 1.4 and 2.x.
 cd activerecord
 ./scripts/test.sh                                      # all the specs
 ./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql; default sqlite
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                      # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                      # YARD, failing on a warning or an undocumented object
 ```
 
+`ADAPTER_TEST_DB` selects the conformance store; an unknown value fails. `scripts/test.sh` starts
+PostgreSQL or MySQL (`utf8mb4_0900_bin`) from `docker-compose.yaml`, with the images pinned in
+`activerecord/POSTGRES_IMAGE` and `activerecord/MYSQL_IMAGE`. CI runs the corpus on all three stores
+under ActiveRecord 8.0 and 7.1; every other suite runs on SQLite.
 `spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
@@ -233,7 +238,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle and Prisma run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL) — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
