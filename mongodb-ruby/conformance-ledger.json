@@ -11,15 +11,15 @@
     },
     "collection/exists/map-keys": {
       "status": "unsupported",
-      "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY; the adapter translates a macro only as an element match over a collection relation's subdocuments, and a MongoDB filter has no form that iterates a subdocument's field names"
+      "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY. The keys are the attribute names the application sends, which the stored subdocument does not carry: $objectToArray yields stored field names, which the mapping may rename, a null a nullable field stores is a key MongoDB keeps and CEL never sees, and a nested relation (parent.inner) is a separate mapper entry. No expression reads the key set without guessing it."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
-      "reason": "Same macro over a to-one relation's keys as `collection/exists/map-keys`, under negation: neither the filter nor the three-valued evaluation has a form that iterates a subdocument's field names."
+      "reason": "Same key iteration over a to-one relation as `collection/exists/map-keys`, under negation."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
-      "reason": "`in` over a to-one relation, which CEL reads as a map and tests by KEY; the keys are the fields the embedded subdocument carries, and the adapter has no filter over a subdocument's field names, so it refuses"
+      "reason": "`in` over a to-one relation tests the related map's KEYS, the attribute names the application sends, which the stored subdocument does not carry (see `collection/exists/map-keys`: renamed fields, stored nulls CEL never sees, nested relations mapped separately)."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
@@ -27,7 +27,7 @@
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
-      "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."
+      "reason": "A bare comparison of two date_time fields: CEL compares the strings the application sent, and a stored BSON date has discarded the lexical spelling (two spellings of one instant are equal dates and unequal strings). Refused in the filter and in the three-valued evaluation alike; compare timestamp(...) values instead."
     }
   }
 }
