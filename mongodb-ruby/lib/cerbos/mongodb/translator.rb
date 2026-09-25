@@ -61,7 +61,7 @@ module Cerbos
       def assert_null_translatable(context)
         return unless @null_representation == :omitted
 
-        raise UnsupportedError,
+        raise FinalUnsupportedError,
           "Cannot translate #{context} under null_attribute_representation :omitted: a NULL field " \
           "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " \
           "(deny) while a null-selecting filter would return those documents. Send NULL fields " \
@@ -136,7 +136,8 @@ module Cerbos
         when "and" then {"$and" => operands.map { |op| build(op, mapper, scope) }}
         when "or" then {"$or" => operands.map { |op| build(op, mapper, scope) }}
         when "not" then translate_not(operands, mapper, scope)
-        when *Aggregation::COMPARISONS.keys then translate_comparison(operator, operands, mapper, scope)
+        when *Aggregation::COMPARISONS.keys
+          with_logic_fallback(expression, mapper, scope, true) { translate_comparison(operator, operands, mapper, scope) }
         when "in" then with_logic_fallback(expression, mapper, scope, true) { translate_in(operands, mapper, scope) }
         when "matches" then translate_matches(operands, mapper, scope)
         when "contains", "startsWith", "endsWith" then translate_string_predicate(expression, mapper, scope)
@@ -245,7 +246,7 @@ module Cerbos
       def with_logic_fallback(condition, mapper, scope, polarity)
         yield
       rescue UnsupportedError => refusal
-        raise refusal if scope.collection?
+        raise refusal if scope.collection? || refusal.is_a?(FinalUnsupportedError)
 
         begin
           {"$expr" => {"$eq" => [Logic.truth(condition, mapper), polarity]}}
@@ -309,9 +310,10 @@ module Cerbos
         right = operand_at(operands, 1, "#{operator} operator requires a right operand")
         both = [left, right]
 
-        if variable?(left) && variable?(right) && both.any? { |op| mapper.value_type(op.name) == :date_time }
-          raise UnsupportedError,
-            "Bare temporal field comparison cannot preserve CEL string equality: stored Dates " \
+        # A null constant asks only whether the field is stored, which a Date still says.
+        if both.any? { |op| variable?(op) && mapper.value_type(op.name) == :date_time } && both.none? { |op| value?(op) && op.value.nil? }
+          raise FinalUnsupportedError,
+            "Bare temporal field comparison cannot preserve CEL string comparison: stored Dates " \
             "discard the original lexical spelling; compare timestamp(...) values instead"
         end
         composite = both.find { |op| value?(op) && composite?(op.value) }

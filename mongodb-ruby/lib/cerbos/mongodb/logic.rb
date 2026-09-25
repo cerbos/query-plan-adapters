@@ -85,6 +85,14 @@ module Cerbos
 
       # A comparison or string predicate: its value where every operand evaluates, else null.
       def leaf(node, mapper, bound)
+        if Aggregation::COMPARISONS.key?(node.operator) &&
+            node.operands.any? { |op| variable?(op) && mapper.value_type(op.name) == :date_time } &&
+            node.operands.none? { |op| value?(op) && op.value.nil? }
+          raise FinalUnsupportedError,
+            "Bare temporal field comparison cannot preserve CEL string comparison: stored Dates " \
+            "discard the original lexical spelling; compare timestamp(...) values instead"
+        end
+
         guarded(evaluates(node, mapper, bound), Aggregation.build(node, mapper))
       end
 

@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 72 / 80 |
-| adversarial | 289 / 308 |
+| extended | 74 / 80 |
+| adversarial | 290 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -212,11 +212,10 @@ erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is `map()` anywhere but as a `hasIntersection` or whole-list operand, `except()`
-anywhere but in boolean position (where any list is a runtime type error, and denied), macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
+The refused set is `map()` anywhere but as a `hasIntersection` or whole-list operand, macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
-carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of two
-date fields (a stored date has lost the string CEL compares), an empty hierarchy separator or a
+carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of a
+date field with anything but null (a stored date has lost the string CEL compares), an empty hierarchy separator or a
 constructed hierarchy path, a regular expression using a case-insensitive non-ASCII character, a
 group flag or named group, `\p`/`\Q` and other escapes RE2 has and PCRE2 reads otherwise, or a counted
 repetition nested in another, and a comparison with
@@ -241,7 +240,9 @@ comparison inside `$expr` answers NaN as CEL does (false, but true for `!=`) whe
 NaN below every number and equal to itself; an ordering between two types CEL cannot order is an
 error. A list constant is compared whole inside `$expr` with a field, a to-many relation's
 projection or a `map()` over one, element by element and in order, as CEL does; `filter()` keeps
-the elements whose condition is true and raises if any raises; and exists_one()
+the elements whose condition is true and raises if any raises; `except()` keeps the elements of
+the first list the second does not contain, repeats included (null where either holds a list or a
+map); and exists_one()
 over a literal list of up to 32 elements expands to "this one and no other". A `matches()`
 pattern is parsed as RE2 and written as the PCRE2 pattern that matches the same strings: `$` as
 `\z`, `.` as `[^\n]`, `\s` as RE2's `[\t\n\f\r ]` (PCRE2's also holds the vertical tab), a POSIX

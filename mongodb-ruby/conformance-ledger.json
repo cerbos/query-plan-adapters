@@ -9,14 +9,6 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
     },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
-    },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
-    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY; the adapter translates a macro only as an element match over a collection relation's subdocuments, and a MongoDB filter has no form that iterates a subdocument's field names"
@@ -52,10 +44,6 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: Unsupported operator inside aggregation expression: except."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",

@@ -30,10 +30,10 @@ module Cerbos
       ARITHMETIC = {"add" => "$add", "sub" => "$subtract", "mult" => "$multiply", "div" => "$divide"}.freeze
 
       # Operators whose second operand is a lambda, which Logic evaluates rather than guards.
-      LAMBDA_OPERATORS = %w[exists exists_one all filter map except lambda].freeze
+      LAMBDA_OPERATORS = %w[exists exists_one all filter map lambda].freeze
 
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
-      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod in].freeze
+      NOT_NULL_GUARDED = %w[string double int size contains startsWith endsWith add sub mult div mod in except].freeze
 
       module_function
 
@@ -95,7 +95,7 @@ module Cerbos
       # element, so `R.attr.a + "q" == "$b"` would compare with the document's own `b` field and
       # return documents the PDP denies. $literal keeps each such constant the value it is.
       def constant(value)
-        if value.is_a?(Hash) || (value.is_a?(Array) && value.any? { |element| element.is_a?(Hash) || element.is_a?(Array) })
+        if value.is_a?(Hash) || (value.is_a?(Array) && value.any? { |element| element.is_a?(Hash) || element.is_a?(Array) || (element.is_a?(Float) && element.nan?) })
           raise UnsupportedError,
             "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it"
         end
@@ -119,6 +119,8 @@ module Cerbos
         when "int" then build_int(operands, mapper)
         when "in" then build_in(operands, mapper)
         when "filter" then Logic.filter_value(expression, mapper)
+        when "except" then build_except(operands, mapper)
+        when "list" then operands.map { |op| build(op, mapper) }
         when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
         when "index"
@@ -266,6 +268,33 @@ module Cerbos
             ],
             "default" => {"$in" => ["$$cerbos_needle", "$$cerbos_list"]}
           }}
+        }}
+      end
+
+      # Cerbos's `a.except(b)`: the elements of +a+, in order and with repeats, that +b+ does not
+      # contain. Null (a CEL error) where either is not a list. $in compares as $eq does, which is
+      # CEL's equality for scalars but NaN (never contained in CEL); an element that is a list or
+      # a map makes the whole value null, since MongoDB compares embedded documents in stored
+      # field order (which denies where CEL might allow).
+      def build_except(operands, mapper)
+        left, right = operands
+        raise InvalidPlanError, "except requires two operands" unless left && right
+
+        scalars = ->(list) { {"$allElementsTrue" => [{"$map" => {"input" => list, "in" => {"$not" => [{"$in" => [{"$type" => "$$this"}, %w[object array]]}]}}}]} }
+        {"$let" => {
+          "vars" => {"cerbos_left" => build(left, mapper), "cerbos_right" => build(right, mapper)},
+          "in" => {"$cond" => [
+            {"$and" => [{"$isArray" => "$$cerbos_left"}, {"$isArray" => "$$cerbos_right"}]},
+            {"$cond" => [
+              {"$and" => [scalars.call("$$cerbos_left"), scalars.call("$$cerbos_right")]},
+              {"$filter" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "cond" => {"$or" => [
+                {"$eq" => ["$$cerbos_item", Float::NAN]},
+                {"$not" => [{"$in" => ["$$cerbos_item", "$$cerbos_right"]}]}
+              ]}}},
+              nil
+            ]},
+            nil
+          ]}
         }}
       end
 

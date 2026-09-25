@@ -13,6 +13,11 @@ module Cerbos
     # CEL's semantics.
     class UnsupportedError < Error; end
 
+    # A refusal that holds whatever form the filter takes: the documents the store keeps cannot
+    # answer the question (a date field has lost the string CEL compares), or the caller's null
+    # convention rules the shape out. The three-valued evaluation is not tried after it.
+    class FinalUnsupportedError < UnsupportedError; end
+
     # The plan is malformed, or carries a literal the adapter cannot represent exactly (a
     # timestamp with more than millisecond precision, an empty hierarchy separator).
     class InvalidPlanError < Error; end
