@@ -10,6 +10,10 @@ module Cerbos
         private
 
         def compare(operator, left, right)
+          if left.is_a?(Values::DoubleText) || right.is_a?(Values::DoubleText)
+            return compare_double_text(operator, left, right)
+          end
+
           # A kept ternary: compare each arm, then rebuild the branches. The CASE has no ELSE,
           # so an UNKNOWN condition stays UNKNOWN.
           if left.is_a?(Values::ConditionalValue)
@@ -28,6 +32,7 @@ module Cerbos
           reject_collection(operator, left)
           reject_collection(operator, right)
           assert_timestamp_wrapped(left, right)
+          return compare_list_literal(operator, left, right) if left.is_a?(Array) || right.is_a?(Array)
 
           # Two constants: compute the result here instead of emitting constant SQL.
           if constant?(left) && constant?(right)
@@ -46,6 +51,20 @@ module Cerbos
           ArelSupport.comparison(operator, left, right)
         end
 
+        # A list literal. CEL compares lists element by element, in order, and a list never
+        # equals a scalar. A column is always a scalar here: a relation was refused above.
+        def compare_list_literal(operator, left, right)
+          constants = [left, right].grep(Array).flatten.all? { |element| element.nil? || constant?(element) }
+          unless constants && %w[eq ne].include?(operator)
+            raise UnsupportedOperatorError,
+              "#{operator} with a list literal: only eq and ne against a list of constants " \
+              "are translated"
+          end
+          return fold_comparison(operator, left, right) unless ArelSupport.arel_node?(left) || ArelSupport.arel_node?(right)
+
+          heterogeneous_comparison(operator, left, right, false, false)
+        end
+
         # Two temporal columns must both go through `timestamp()`. A raw comparison would
         # lose the RFC-3339 spelling that CEL compares.
         def assert_timestamp_wrapped(left, right)
@@ -62,6 +81,7 @@ module Cerbos
           when ::String then :string
           when Numeric then :number
           when true, false then :boolean
+          when Array then :list
           else
             kind_of_column_type(column_type(value))
           end

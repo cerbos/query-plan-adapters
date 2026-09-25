@@ -13,9 +13,21 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: div."
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "Same gap as arithmetic/modulo/negative-dividend: Prisma filters have no column arithmetic and `mod` is not in the translator's operator set, so a divisor that is itself a column expression (with CEL's truncating sign and its divide-by-zero error) has no where-filter form"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "`mod` is not in the translator's operator set, so the walk refuses it before it could tell that % over a double is a CEL no-overload error; Prisma filters have no column arithmetic to evaluate it with either way"
+    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set — the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "Column arithmetic on every side: aNumber / aNumber * 0.0 + aDouble has no constant to solve against, and Prisma filters cannot compute over columns, nor reproduce the NaN that 0/0 carries through the product; the translator refuses at the division"
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -25,6 +37,10 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: int() over a double column truncates toward zero and errors outside int64, and no where-filter over the double column reproduces either"
+    },
     "cast/int/malformed-string": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: int() over a string column cannot be expressed, and CEL's whole-string-or-error parse has no filter form."
@@ -32,6 +48,10 @@
     "cast/int/negated-malformed-string": {
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: int() over a string column cannot be expressed, and CEL's exact int64 parse (2^53 + 1 stays distinct from 2^53) has no filter form"
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -129,6 +149,10 @@
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements, and an ordered, multiplicity-counting list equality (with a null element) has no relation filter form; the translator refuses before constructing a filter."
+    },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
@@ -181,6 +205,14 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
     },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly; an unbounded repetition of anything but `.` (x*, a+) is refused rather than simplified"
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
+    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
@@ -200,6 +232,10 @@
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still an arbitrary count threshold none/some cannot express"
+    },
+    "string/concatenate/ordering": {
+      "status": "unsupported",
+      "reason": "Both operands of the concatenation are columns: aString + aOptionalString has no value side to solve against, and Prisma filters cannot concatenate columns or compare a computed string"
     },
     "string/contains/field-to-field": {
       "status": "unsupported",

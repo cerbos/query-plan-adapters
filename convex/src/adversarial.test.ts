@@ -141,18 +141,22 @@ function storedDocument(seed: Seed): StoredDocument {
     tags: seed.tags.map((tag) =>
       tag.name === null ? { id: tag.id } : { id: tag.id, name: tag.name },
     ),
-    categories: seed.subCategoryNames.map((name) => ({
-      name: "business",
-      subCategories: [
-        {
-          name,
-          // A null element is a NULL label name — a missing element attribute.
-          labels: derived.labels.map((labelName) =>
-            labelName === null ? {} : { name: labelName },
-          ),
-        },
-      ],
-    })),
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
+    categories:
+      seed.subCategoryNames.length === 0
+        ? []
+        : [
+            {
+              name: "business",
+              subCategories: seed.subCategoryNames.map((name) => ({
+                name,
+                // A null element is a NULL label name — a missing element attribute.
+                labels: derived.labels.map((labelName) =>
+                  labelName === null ? {} : { name: labelName },
+                ),
+              })),
+            },
+          ],
   };
   if (seed.aOptionalString !== null) {
     document.aOptionalString = seed.aOptionalString;

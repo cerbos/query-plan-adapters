@@ -263,6 +263,11 @@ class Parser {
     const control = LITERAL_ESCAPES[character];
     if (control) return this.literal(control);
     if (/^[!-/:-@[-`{-~]$/.test(character)) return this.literal(character);
+    // A lone \1-\7 would be a backreference and \8, \9 are nothing: RE2 rejects both, and reads
+    // \1-\7 before another octal digit as an octal escape, which is not read here.
+    if (/^[89]$/.test(character) || (/^[1-7]$/.test(character) && !/^[0-7]$/.test(this.peek() ?? ""))) {
+      throw new InvalidPattern(); // "invalid escape sequence"
+    }
     throw unsupported(this.pattern, `the escape \\${character} is not read`);
   }
 

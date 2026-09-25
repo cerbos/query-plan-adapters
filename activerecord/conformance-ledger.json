@@ -17,12 +17,24 @@
       "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division.",
       "status": "unsupported"
     },
+    "arithmetic/modulo/negated-double-operand": {
+      "reason": "CEL's % has no double overload, and every number in a request attribute is a double, so `aNumber % 2` errors on every row; SQL computes an integer remainder over the integer column instead, and the negation would return most rows. The adapter translates % only over int() results, size() and whole constants, and refuses it over a bare attribute",
+      "status": "unsupported"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "reason": "The self-division yields NaN on the zero row, and CEL carries it through `* 0.0 + aDouble`; SQL has no NaN, and the NULLIF divide-by-zero guard would turn the sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so the multiplication refuses its possibly-NaN operand rather than emit a filter",
+      "status": "unsupported"
+    },
     "cast/double/malformed-string": {
       "reason": "SQL CAST reads a string's leading digits where CEL double() rejects the whole string; double() over a string column is refused.",
       "status": "unsupported"
     },
     "cast/double/negated-malformed-string": {
       "reason": "SQL floating-point casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe.",
+      "status": "unsupported"
+    },
+    "cast/int/double-truncation-bounds": {
+      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused.",
       "status": "unsupported"
     },
     "cast/int/malformed-string": {
@@ -35,6 +47,14 @@
     },
     "cast/int/negative-fraction": {
       "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused.",
+      "status": "unsupported"
+    },
+    "cast/int/string-beyond-double-precision": {
+      "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused.",
+      "status": "unsupported"
+    },
+    "cast/string/from-negative-zero-double": {
+      "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused",
       "status": "unsupported"
     },
     "cast/timestamp/malformed-string": {
@@ -121,12 +141,12 @@
       "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
       "status": "unsupported"
     },
-    "comparison/not-equals/whole-list-literal": {
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
       "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
       "status": "unsupported"
     },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "reason": "An empty delimiter is refused when the hierarchy operand is parsed, before the descendant LIKE is built: the adapter emits `prefix + delimiter + '%'`, which with an empty delimiter is a bare string-prefix LIKE that also matches the path itself (a2, never its own descendant)",
+    "comparison/not-equals/whole-list-literal": {
+      "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
       "status": "unsupported"
     },
     "null/equals/null-literal-on-missing-attribute": {
@@ -165,6 +185,14 @@
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
     "regex/matches/case-insensitive-flag": {
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
@@ -178,6 +206,10 @@
       "status": "unsupported"
     },
     "regex/matches/dot-excludes-newline": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
     },
@@ -201,7 +233,15 @@
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
     "regex/matches/posix-character-class": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/posix-class-and-range-bounded": {
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
     },
@@ -214,6 +254,14 @@
       "status": "unsupported"
     },
     "regex/matches/unanchored": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
+      "status": "unsupported"
+    },
+    "regex/matches/whitespace-class": {
       "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
       "status": "unsupported"
     },

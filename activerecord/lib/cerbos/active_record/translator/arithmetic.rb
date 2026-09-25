@@ -24,11 +24,29 @@ module Cerbos
             return dialect.concat(left, right)
           end
 
+          if operator == "mod" && !(cel_int?(left) && cel_int?(right))
+            raise UnsupportedOperatorError,
+              "% has no double overload in CEL, and every number in a request attribute is a " \
+              "double, so % over an attribute that has not gone through int() is an error that " \
+              "denies the row. SQL computes a remainder instead. Wrap the operands in int()."
+          end
+
           if left.is_a?(Numeric) && right.is_a?(Numeric)
             return left.public_send(ARITHMETIC.fetch(operator), right)
           end
 
-          ArelSupport.infix(ARITHMETIC.fetch(operator), left, right)
+          result = ArelSupport.infix(ARITHMETIC.fetch(operator), left, right)
+          record_cel_type(result, (cel_int?(left) && cel_int?(right)) ? :int : :double)
+        end
+
+        # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole
+        # constant counts too, since the plan does not say whether a literal was `2` or `2.0`
+        # and CEL's type checker rejects an int mixed with a double.
+        def cel_int?(value)
+          return value.finite? && value == value.truncate if value.is_a?(Float)
+          return true if value.is_a?(Integer)
+
+          cel_type(value) == :int
         end
 
         # Divides as doubles, like CEL. Otherwise SQLite and PostgreSQL make `5 / 2` into `2`.
@@ -41,7 +59,7 @@ module Cerbos
 
           # A non-zero constant denominator is safe as a plain division.
           if denominator.is_a?(Numeric) && !denominator.to_f.zero?
-            return ArelSupport.infix("/", as_double(numerator), denominator.to_f)
+            return record_cel_type(ArelSupport.infix("/", as_double(numerator), denominator.to_f), :double)
           end
 
           divide_with_zero_denominator(numerator, denominator)

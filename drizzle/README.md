@@ -339,7 +339,7 @@ with the exact string predicates above:
 
 A top-level alternation (`^o|e$`) is the OR of its branches. `(?i)` folds case as RE2 does, including
 `k` to KELVIN SIGN and `s` to LONG S, and refuses a non-ASCII letter. A pattern RE2 rejects — a
-lookahead, `a**` — is an error in CEL, so it becomes an UNKNOWN condition. Anything else throws:
+lookahead, `a**`, a backreference `(a)\1` — is an error in CEL, so it becomes an UNKNOWN condition. Anything else throws:
 negated classes, `\b`, flags other than a leading `(?i)`, a pattern whose literal expansion passes 256
 strings, or a receiver that is not a mapped string column.
 
@@ -379,7 +379,7 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Drizzle
-queries over the corpus's 29 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+queries over the corpus's 38 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
 Passed cases on the current PDP, 0.55.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
@@ -387,7 +387,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 26 / 26 |
 | extended | 76 / 80 |
-| adversarial | 221 / 227 |
+| adversarial | 240 / 250 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -482,10 +482,23 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   an optional sign and ASCII digits, within int64 — and is NULL otherwise, where SQL's CAST would read
   a numeric prefix. A larger constant, or the result inside arithmetic, throws: PostgreSQL and MySQL
   compare a bigint with a double inexactly there, and a bigint can overflow.
-- **Breaking:** `%` translates only as `int(<integer column>) % <non-zero whole constant>`, and
-  throws otherwise. It used to be emitted for any operands, but CEL's `%` has no double overload —
-  `R.attr.aNumber % 2` is an error the PDP denies, which the old filter answered — and a zero
-  divisor raises on PostgreSQL.
+- **Breaking:** `%` translates only with `int(<integer column>)` as its dividend, by a non-zero
+  whole constant or by `int(<integer column>)` plus or minus a whole constant, and throws otherwise.
+  It used to be emitted for any operands, but CEL's `%` has no double overload, and a zero constant
+  divisor raises on PostgreSQL. A column divisor's zero is CEL's error, so it becomes NULL
+  (`nullif`) and the row is excluded under both polarities.
+- `%` straight over an attribute (`R.attr.aNumber % 2`) now translates to an UNKNOWN condition
+  instead of throwing: CEL reads every attribute number as a double, so it is always a no-overload
+  error, which denies the row under both polarities.
+- **Breaking:** a comparison over a division by a column that is not an integer column now throws
+  when a zero divisor's sign would decide it (`R.attr.aNumber / R.attr.aDouble > 0.0`). CEL divides
+  by -0.0 to the opposite infinity from 0.0; SQLite stores -0.0 as 0 and no dialect reads the sign
+  of a zero portably, so the old filter, which assumed a positive zero, allowed a row the PDP denies.
+- A string, number or boolean attribute compared with a list literal (`R.attr.aString == ["same"]`)
+  now translates as CEL's heterogeneous equality — `==` false and `!=` true for a present value —
+  instead of throwing.
+- `matches()` with an escape RE2 rejects (`\1` to `\7` not followed by an octal digit, `\8`, `\9`)
+  is now an RE2 error, an UNKNOWN condition, instead of throwing.
 - String `+` now translates instead of throwing: `||` on SQLite and PostgreSQL, `CONCAT()` on
   MySQL, where `||` is logical OR. As for `size()` and indexed storage, the dialect is read off the
   Drizzle class of a column among the operands, so a concatenation reaching no Drizzle column

@@ -180,10 +180,12 @@ describe("nullAttributeRepresentation", () => {
           : [];
       } catch (error) {
         // A positional read of a list compares an element, not an optionally absent field; the
-        // index operator has no Prisma filter form under either representation.
+        // index operator has no Prisma filter form under either representation. A null inside a
+        // whole-list literal is an element too, and comparing a list is refused under either.
         const message = String(error);
         return message.includes("missing-attribute error") ||
-          message.includes("Unsupported operator: index")
+          message.includes("Unsupported operator: index") ||
+          message.includes("Prisma cannot compare list or map elements")
           ? []
           : [`${golden.id} (${message})`];
       }
@@ -698,54 +700,5 @@ describe("plans the planner cannot produce", () => {
         mapper: MAPPER,
       })
     ).toEqual({ kind: PlanKind.ALWAYS_DENIED });
-  });
-});
-
-// -- KIND 3: corpus gaps --------------------------------------------------------------------------
-//
-// Policy-reachable shapes the corpus does not discriminate yet. Each is a bridge until a case with
-// a discriminating seed lands (https://github.com/cerbos/query-plan-adapters/issues/509), and is
-// deleted then.
-
-describe("corpus gaps", () => {
-  const chainAll = {
-    operator: "all",
-    operands: [
-      { name: "request.resource.attr.mainCategory.subCategories" },
-      {
-        operator: "lambda",
-        operands: [
-          { operator: "eq", operands: [{ name: "s.name" }, { value: "finance" }] },
-          { name: "s" },
-        ],
-      },
-    ],
-  };
-  const translateCondition = (condition: unknown) =>
-    queryPlanToPrisma({
-      queryPlan: {
-        kind: PlanKind.CONDITIONAL,
-        condition,
-        cerbosCallId: "",
-        requestId: "",
-        validationErrors: [],
-        metadata: undefined,
-      } as PlanResourcesResponse,
-      mapper: MAPPER,
-      model: MODEL,
-    });
-
-  test("Corpus gap. A negated all() over a chain needs its false witness at the end of the chain", () => {
-    // Every seeded category holds exactly one subcategory, so the corpus cannot tell this from
-    // `categories: { some: { NOT: { subCategories: { some: P } } } }` — which admits a category
-    // with NO subcategories, where CEL's all() is vacuously true and its negation false.
-    expect(translateCondition({ operator: "not", operands: [chainAll] })).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: {
-        categories: {
-          some: { subCategories: { some: { NOT: { name: { equals: "finance" } } } } },
-        },
-      },
-    });
   });
 });

@@ -193,14 +193,14 @@ field name.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
-metadata queries over the corpus's 29 seed records. Passed cases on the current PDP, 0.55.0, out of
+metadata queries over the corpus's 38 seed records. Passed cases on the current PDP, 0.55.0, out of
 every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 19 / 26 |
 | extended | 13 / 80 |
-| adversarial | 30 / 227 |
+| adversarial | 30 / 250 |
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

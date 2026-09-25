@@ -24,6 +24,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames == ["public"]'
+- id: 'comparison/equals/whole-list-literal-order-and-multiplicity'
+  tier: adversarial
+  intent: 'A list attribute compared with an empty, a null-element and two two-element list literals.'
+  trap: 'List equality is ordered and counts duplicates: a6 ["public", "private"] is not ["private", "public"], and a1 ["public"] is not ["public", "public"] (a3 is). Set semantics over-grants a6 and a1; NULL-unaware element comparison drops b5 and e1 ([null]).'
+  condition:
+    match:
+      expr: 'R.attr.tagNames == [] || R.attr.tagNames == [null] || R.attr.tagNames == ["private", "public"] || R.attr.tagNames == ["public", "public"]'
 - id: 'comparison/greater-or-equal/fractional-threshold'
   tier: adversarial
   intent: 'Numeric attribute compared >= a fractional literal (aNumber >= 1.5).'

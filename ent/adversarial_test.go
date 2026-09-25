@@ -576,9 +576,12 @@ func (s *store) seed(t *testing.T, corpus *Corpus) {
 			s.exec(t, boolElemTable, []string{"value", "resource_id"}, nullableBool(element), seed.ID)
 		}
 
-		for i, subName := range seed.SubCategoryNames {
-			catID, subID := categoryID(seed, i), subCategoryID(seed, i)
+		catID := categoryID(seed)
+		if len(seed.SubCategoryNames) > 0 {
 			s.exec(t, categoryTable, []string{"id", "name", "resource_id"}, catID, "business", seed.ID)
+		}
+		for i, subName := range seed.SubCategoryNames {
+			subID := subCategoryID(seed, i)
 			s.exec(t, subCategoryTable, []string{"id", "name", "category_id"}, subID, subName, catID)
 
 			for j, label := range derived.Labels {

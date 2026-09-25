@@ -1,0 +1,81 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h3",
+    "h4",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/dot-plus-excludes-empty-and-newline",
+  "intent": "matches(\"^.+$\"): one or more characters, none of them a newline.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^.+$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/dot-plus-excludes-empty-and-newline",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^.+$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The + needs a character, so a8 \"\" is denied; . never crosses a newline and $ is the absolute end, so h2 \"a\\nb\" and h5 \"ab\\n\" are denied. A lowering to \"non-empty\", or a dialect whose . or $ is newline-lenient, over-grants them."
+}

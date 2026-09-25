@@ -12,9 +12,8 @@ module Cerbos
         def hierarchy(value, delimiter)
           delimiter ||= "."
 
-          unless delimiter.is_a?(::String) && !delimiter.empty?
-            raise InvalidPlanError, "hierarchy() delimiter must be a non-empty string"
-          end
+          # An empty delimiter is valid: it splits one segment per character.
+          raise InvalidPlanError, "hierarchy() delimiter must be a string" unless delimiter.is_a?(::String)
 
           if value.is_a?(Array)
             return Values::Hierarchy.new(value: nil, segments: value, delimiter: delimiter)
@@ -40,10 +39,16 @@ module Cerbos
           !left.segments.nil? || !right.segments.nil?
         end
 
+        # Splits a path as Go's `strings.Split` does: the empty delimiter gives one segment
+        # per character, and no segment at all for the empty path.
+        def split_path(path, delimiter)
+          delimiter.empty? ? path.chars : path.split(delimiter, -1)
+        end
+
         # The segments of a hierarchy, known at translation time. SQL cannot split a column.
         def require_segments(hierarchy)
           return hierarchy.segments if hierarchy.segments
-          return hierarchy.value.split(hierarchy.delimiter, -1) if hierarchy.value.is_a?(::String)
+          return split_path(hierarchy.value, hierarchy.delimiter) if hierarchy.value.is_a?(::String)
 
           raise UnsupportedOperatorError,
             "A hierarchy built from a list can only be compared against another hierarchy " \
@@ -84,19 +89,25 @@ module Cerbos
           below = descendent.value
 
           if above.is_a?(::String) && below.is_a?(::String)
-            return below.start_with?(above + delimiter)
+            return below.start_with?(above + delimiter) && below.length > above.length
           end
 
           if below.is_a?(::String)
             # A constant descendant has a fixed set of ancestors: match them exactly rather
-            # than use LIKE, which would need escaping.
-            parts = below.split(delimiter, -1)
-            prefixes = (1...parts.length).map { |i| parts[0, i].join(delimiter) }
+            # than use LIKE, which would need escaping. Under the empty delimiter the empty
+            # path has no segment, so it is an ancestor too.
+            parts = split_path(below, delimiter)
+            first = delimiter.empty? ? 0 : 1
+            prefixes = (first...parts.length).map { |i| parts[0, i].join(delimiter) }
             return scalar_membership(above, prefixes)
           end
 
           if above.is_a?(::String)
-            return matcher.match(below, above + delimiter, prefix: false, suffix: true)
+            descendant = matcher.match(below, above + delimiter, prefix: false, suffix: true)
+            return descendant unless delimiter.empty?
+
+            # Without a delimiter the prefix LIKE also matches the path itself.
+            return ArelSupport.and_node([descendant, as_predicate(compare("ne", below, above))])
           end
 
           raise UnsupportedOperatorError,

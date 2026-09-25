@@ -11,7 +11,6 @@ import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
-import { formatCelDouble, parseCelDoubleString } from "./conversion";
 import { compileRegex } from "./regex";
 import type {
   Mapper,
@@ -561,107 +560,26 @@ describe("what the stores cannot show", () => {
   });
 });
 
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `string(R.attr.aDouble) == "1e+06"` is
-// policy-reachable, but the corpus's one `string()`-of-a-double case has a single witness, -0.6,
-// so no case proves the exponent layout or the refusal of a spelling CEL never produces. Delete
-// this block when cases carrying those spellings land.
-describe("CEL's string() of a double", () => {
-  // Every expected string is Go's own `fmt.Sprintf("%g", d)`, cel-go's spelling of the conversion.
-  test.each([
-    [-0.6, "-0.6"],
-    [2, "2"],
-    [123456, "123456"],
-    [1e6, "1e+06"],
-    [1234567, "1.234567e+06"],
-    [1e21, "1e+21"],
-    [0.0001, "0.0001"],
-    [0.00001, "1e-05"],
-    [1.5e-5, "1.5e-05"],
-    [0.1 + 0.2, "0.30000000000000004"],
-    [100000.5, "100000.5"],
-    [Number.MAX_VALUE, "1.7976931348623157e+308"],
-    [5e-324, "5e-324"],
-  ])("Corpus gap. %p is spelled %p", (value, spelling) => {
-    expect(formatCelDouble(value)).toBe(spelling);
-    expect(parseCelDoubleString(spelling)).toBe(value);
-  });
-
-  test.each(["2.0", "1e6", "1E+06", " 2", "+2", "0x10", "", ".5", "Infinity"])(
-    "Corpus gap. no double is spelled %p, so equality with it matches no row",
-    (spelling) => {
-      expect(parseCelDoubleString(spelling)).toBeUndefined();
-    },
-  );
-});
-
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). `R.attr.aString in {"one": 1}` is
-// policy-reachable, and no case asks it: CEL's `in` over a map tests its keys. Delete this block
-// when a case carrying a map literal as the collection of `in` lands.
-describe("membership in a map literal", () => {
-  test("Corpus gap. tests the map's keys, not its values", () => {
-    const queryPlan = {
-      kind: PlanKind.CONDITIONAL,
-      condition: {
-        operator: "in",
-        operands: [
-          { name: "request.resource.attr.aString" },
-          {
-            operator: "struct",
-            operands: [
-              { operator: "set-field", operands: [{ value: "one" }, { value: 1 }] },
-              { operator: "set-field", operands: [{ value: "two" }, { value: "three" }] },
-            ],
-          },
-        ],
-      } as unknown as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    } as PlanResourcesResponse;
-    const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql });
-    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
-    expect(render("postgresql", result.filter).params).toEqual(["one", "two"]);
-  });
-});
-
 // KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Every pattern here is policy-reachable, and
 // the corpus's regex cases witness only one pattern per rule. These pin the RE2 rules the
 // lowering relies on that no case exercises yet. Delete each when a case carrying it lands.
 describe("RE2 patterns lowered without a regex engine", () => {
   test.each([
-    ["a+b", [{ kind: "contains", literals: ["ab"] }]],
-    ["x*ab*", [{ kind: "contains", literals: ["a"] }]],
     ["^a.*", [{ kind: "startsWith", literals: ["a"] }]],
     ["^(?:a|b)c?$", [{ kind: "equals", literals: ["a", "ac", "b", "bc"] }]],
     ["^\\.$", [{ kind: "equals", literals: ["."] }]],
-    ["^[[:digit:]x-z]{2,}$", [{ kind: "allCharactersIn", characters: [..."0123456789xyz"], min: 2 }]],
-    ["^.+$", [{ kind: "noNewline", min: 1 }]],
     ["a|", [{ kind: "contains", literals: ["a"] }, { kind: "contains", literals: [""] }]],
   ])("Corpus gap. %p lowers to %p", (pattern, plans) => {
     expect(compileRegex(pattern)).toEqual(plans);
   });
 
-  test("Corpus gap. (?i) folds k and s the way RE2 does, through KELVIN SIGN and LONG S", () => {
-    expect(compileRegex("(?i)^ks$")).toEqual([
-      {
-        kind: "equals",
-        literals: ["ks", "kS", "k\u017F", "Ks", "KS", "K\u017F", "\u212As", "\u212AS", "\u212A\u017F"],
-      },
-    ]);
-  });
-
   // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches().
-  test.each(["a(?=b)", "a(?!b)", "(?<=a)b", "a**", "{2}a", "*a", "a{2,1}", "a{1001}", "(a", "[b-a]", "a\\"])(
+  test.each(["a(?=b)", "a(?!b)", "(?<=a)b", "*a", "a{2,1}", "(a", "a\\"])(
     "Corpus gap. %p is an RE2 error, so the condition is UNKNOWN",
     (pattern) => {
       expect(compileRegex(pattern)).toBe("error");
     },
   );
-
-  test("Corpus gap. a brace that opens no count is a literal", () => {
-    expect(compileRegex("^a{,2}$")).toEqual([{ kind: "equals", literals: ["a{,2}"] }]);
-  });
 
   test.each(["[^a]", "\\D", "a.b", "^a.*b.*c$", "(?i)^é$", "(?s)a", "\\bword", "^a$b"])(
     "Corpus gap. %p is refused",
@@ -669,46 +587,6 @@ describe("RE2 patterns lowered without a regex engine", () => {
       expect(() => compileRegex(pattern)).toThrow(UnsupportedQueryPlanError);
     },
   );
-});
-
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Only descendentOf is carried by a case for
-// a hierarchy split on an empty delimiter. Delete each test when a case carrying it lands.
-describe("a hierarchy split per character", () => {
-  const characterHierarchy = (operator: string): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: {
-        operator,
-        operands: [
-          {
-            operator: "hierarchy",
-            operands: [{ name: "request.resource.attr.scope" }, { value: "" }],
-          },
-          { operator: "hierarchy", operands: [{ value: "ab" }, { value: "" }] },
-        ],
-      } as unknown as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
-  const paramsOf = (operator: string): unknown[] => {
-    const result = queryPlanToDrizzle({
-      queryPlan: characterHierarchy(operator),
-      mapper: MAPPERS.postgresql,
-    });
-    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
-    return render("postgresql", result.filter).params;
-  };
-
-  // Go's strings.Split("", "") is zero segments, which is every longer path's ancestor.
-  test("Corpus gap. ancestorOf is one of the strict prefixes, the empty string included", () => {
-    expect(paramsOf("ancestorOf")).toEqual(["", "a"]);
-  });
-
-  test("Corpus gap. overlaps is any prefix, or an extension", () => {
-    expect(paramsOf("overlaps")).toEqual(["", "a", "ab", "ab", "ab"]);
-  });
 });
 
 // KIND 3 — corpus gap (cerbos/query-plan-adapters#509). int() over a string or double column is
@@ -724,15 +602,6 @@ describe("int() over a string or double column", () => {
       metadata: undefined,
     }) as PlanResourcesResponse;
   const intOf = { operator: "int", operands: [{ name: "request.resource.attr.aString" }] };
-
-  // PostgreSQL and MySQL compare a bigint with a double by converting the bigint, which is inexact
-  // at 2^53 and beyond: measured, int("9223372036854775807") == 2^63 is true on both.
-  test("Corpus gap. is refused against a constant at or beyond 2^53", () => {
-    const queryPlan = intPlan({ operator: "eq", operands: [intOf, { value: 2 ** 53 }] });
-    expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql })).toThrow(
-      UnsupportedQueryPlanError,
-    );
-  });
 
   // A result up to 2^63 - 1 would overflow a bigint and fail the whole query.
   test("Corpus gap. is refused inside arithmetic", () => {

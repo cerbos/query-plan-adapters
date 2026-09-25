@@ -187,13 +187,21 @@ def _reject_numeric_cast(operator: str) -> NoReturn:
 def _string_cast(c: Any) -> Any:
     """CEL's ``string()``.
 
-    Numbers use CAST, which formats the shortest round-trip decimal on SQLite,
-    PostgreSQL 12+ and MySQL. Booleans use a CASE because SQLite and MySQL cast
-    them to ``'1'``/``'0'`` (#376, #418). A NULL boolean must stay NULL, since CEL
-    denies it. On MySQL the literals use the connection collation, which must be
-    case-sensitive.
+    Numbers are refused: attribute numbers are doubles, which CEL prints in Go's
+    shortest ``%g`` form (``1e+06``, ``2``, ``-0``), where CAST prints ``1000000``
+    or ``2.0`` and SQL cannot keep the sign of a zero. Booleans use a CASE because
+    SQLite and MySQL cast them to ``'1'``/``'0'`` (#376, #418). A NULL boolean must
+    stay NULL, since CEL denies it. On MySQL the literals use the connection
+    collation, which must be case-sensitive.
     """
-    if isinstance(_base_type(getattr(c, "type", None)), Boolean):
+    type_ = _base_type(getattr(c, "type", None))
+    if isinstance(type_, (Integer, Numeric)) or _is_number(c):
+        raise UnsupportedPlanError(
+            "'string()' over a number cannot be lowered to SQL CAST: CEL formats a "
+            "double in Go's shortest %g form (1e+06, 2, -0), where CAST prints "
+            "1000000 or 2.0, and SQL does not keep the sign of a zero"
+        )
+    if isinstance(type_, Boolean):
         return case(
             (c.is_(None), null()),
             (c, literal_column("'true'", String)),
@@ -224,6 +232,16 @@ def _require_signed_zero(denominator: Any) -> None:
     )
 
 
+def _zero_divisor_is_nan(numerator: Any, denominator: Any) -> bool:
+    """True when a zero column divisor can only give NaN, which has no sign.
+
+    That holds when the numerator is the divisor itself or a constant zero.
+    """
+    if _is_number(numerator):
+        return numerator == 0.0
+    return isinstance(numerator, ColumnElement) and numerator.compare(denominator)
+
+
 def _float_div(c: Any, v: Any) -> Any:
     """Divide as doubles, as CEL does. SQLite and PostgreSQL would truncate integer ``/``."""
     if _is_number(c) and _is_number(v):
@@ -245,12 +263,18 @@ def _float_div(c: Any, v: Any) -> Any:
     # wrong (`NaN != 1.0` is TRUE), so keep these arms symbolic for the enclosing
     # comparison to fold. A NULL operand still makes the whole CASE NULL.
     # NULLIF stops dialects that evaluate CASE arms eagerly from failing on /0.
-    # A constant denominator's sign is applied. SQL cannot read a column's
-    # zero sign, so a column is assumed +0.0. See #312.
+    # A constant denominator's sign is applied. SQL cannot read a column's zero
+    # sign, so a column divisor is accepted only where zero gives NaN. See #312.
     denominator_sign = 1.0
     if _is_number(v):
         _require_signed_zero(v)
         denominator_sign = math.copysign(1.0, float(v))
+    elif not _zero_divisor_is_nan(numerator, denominator):
+        raise UnsupportedPlanError(
+            "division by a column cannot be lowered: a zero divisor makes CEL's "
+            "quotient an infinity whose sign is the zero's, and SQL compares -0.0 "
+            "equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read"
+        )
 
     return ConditionalValue(
         condition=denominator == 0.0,
@@ -301,6 +325,20 @@ def arith_over_conditional(op_fn: Callable[[Any, Any], Any], left: Any, right: A
     return op_fn(left, right)
 
 
+def _modulo(*_: Any) -> NoReturn:
+    """Fail closed on CEL's ``%``, which is defined only over integers.
+
+    Attribute numbers are doubles, where ``%`` is a no-such-overload error that
+    must stay denied under negation, and ``int()`` is refused, so no operand the
+    planner leaves unfolded has a faithful lowering.
+    """
+    raise UnsupportedPlanError(
+        "'%' cannot be lowered: CEL defines it only over integers, attribute numbers "
+        "are doubles (a no-such-overload error that must stay denied under negation), "
+        "and int() has no faithful SQL CAST"
+    )
+
+
 # -- comparisons -------------------------------------------------------------------------------
 
 
@@ -321,6 +359,12 @@ def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
 
 
 def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
+    if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
+        raise UnsupportedPlanError(
+            "comparison with a list or map literal cannot be lowered: a SQL column "
+            "holds one scalar, and binding the literal as a parameter would compare "
+            "it by the driver's coercion rather than CEL's typed equality"
+        )
     left_kind, right_kind = scalar_kind(left), scalar_kind(right)
     if left_kind and right_kind and left_kind != right_kind:
         result = literal(operator == "ne") if operator in ("eq", "ne") else null()
@@ -536,7 +580,7 @@ OPERATOR_FNS = MappingProxyType(
         "sub": lambda c, v: c - v,
         "mult": lambda c, v: c * v,
         "div": _float_div,
-        "mod": lambda c, v: c % v,
+        "mod": _modulo,
         # Receiver-style string matches. Operands arrive receiver first.
         "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
         "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),

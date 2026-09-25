@@ -388,15 +388,17 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 			require.NoError(t, err, "seeding aBoolList for %s", seed.ID)
 		}
 
-		for i, subName := range seed.SubCategoryNames {
-			catID, subID := categoryID(seed, i), subCategoryID(seed, i)
-
+		catID := categoryID(seed)
+		if len(seed.SubCategoryNames) > 0 {
 			_, err := pool.Exec(ctx,
 				`INSERT INTO adversarial_category (id, name, resource_id) VALUES ($1,$2,$3)`,
 				catID, "business", seed.ID)
 			require.NoError(t, err, "seeding category %s", catID)
+		}
+		for i, subName := range seed.SubCategoryNames {
+			subID := subCategoryID(seed, i)
 
-			_, err = pool.Exec(ctx,
+			_, err := pool.Exec(ctx,
 				`INSERT INTO adversarial_sub_category (id, name, category_id) VALUES ($1,$2,$3)`,
 				subID, subName, catID)
 			require.NoError(t, err, "seeding sub-category %s", subID)

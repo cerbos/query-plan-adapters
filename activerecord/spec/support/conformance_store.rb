@@ -154,8 +154,10 @@ module ConformanceStore
         AdvBoolListElement.create!(position: position, value: value, resource_id: id)
       end
 
-      seed.fetch("subCategoryNames").each_with_index do |sub_name, index|
-        category = AdvCategory.create!(id: "#{id}-cat#{index}", name: "business", resource_id: id)
+      # One category holding every subcategory name (conformance/README.md, "The dataset").
+      sub_names = seed.fetch("subCategoryNames")
+      category = AdvCategory.create!(id: "#{id}-cat", name: "business", resource_id: id) unless sub_names.empty?
+      sub_names.each_with_index do |sub_name, index|
         sub_category = AdvSubCategory.create!(
           id: "#{id}-sub#{index}", name: sub_name, category_id: category.id
         )

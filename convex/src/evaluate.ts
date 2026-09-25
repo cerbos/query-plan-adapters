@@ -234,14 +234,65 @@ const arithmetic = (call: Call): unknown => {
     case "mult":
       return left * right;
     case "div":
-      if (right === 0 && left !== 0) {
+      if (right === 0 && left !== 0 && !readsDocument(call, 1)) {
         // Backstop for zeros only computed at evaluation time; constant zero divisors are
-        // already rejected during translation by `validateDivision`.
+        // already rejected during translation by `validateDivision`. A zero READ from the
+        // document is exempt: Convex stores a float64 with its sign, so IEEE division by it
+        // yields the infinity CEL does.
         throw new UnsupportedQueryPlanError(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
       }
       return left / right;
     default:
-      return left % right;
+      return modulo(call, left, right);
+  }
+};
+
+/** Whether the operand at `index` is a document field, rather than a constant or lambda binding. */
+const readsDocument = ({ operands, scope }: Call, index: number): boolean => {
+  const operand = operands[index];
+  if (operand === undefined || !isVariable(operand)) return false;
+  const root = operand.name.split(".")[0] ?? operand.name;
+  return !(root in scope.bindings);
+};
+
+// CEL's `%` has int and uint overloads only. Every number an attribute carries is a double (a
+// resource or principal attribute reaches the PDP as a protobuf Value), so a field read as either
+// operand is a no-such-overload error on every row, and an int modulus by zero is an error too.
+// JavaScript's `%` would answer both, and a negation would turn that answer into a grant.
+const modulo = (call: Call, left: number, right: number): unknown => {
+  if (call.operands.some(isVariable) || right === 0) return EVALUATION_ERROR;
+  return left % right;
+};
+
+/**
+ * Whether the operand is certainly a CEL int: an integral constant (a policy literal: an int
+ * literal against a statically typed int operand is the only spelling that type-checks), `int()`,
+ * `size()`, or int arithmetic over those. A field read is certainly a double; anything else has a
+ * type the plan does not carry.
+ */
+const isIntOperand = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) return Number.isInteger(operand.value);
+  if (!isExpression(operand)) return false;
+  switch (operand.operator) {
+    case "int":
+    case "size":
+      return true;
+    case "add":
+    case "sub":
+    case "mult":
+    case "mod":
+      return operand.operands.every(isIntOperand);
+    default:
+      return false;
+  }
+};
+
+const validateModulo = ({ operands }: PlanExpression): void => {
+  if (!operands.every((op) => isVariable(op) || isIntOperand(op))) {
+    throw new UnsupportedQueryPlanError(
+      "modulo requires int operands, and the plan does not carry the numeric type of this one: " +
+        "CEL's % is a no-such-overload error on a double, which JavaScript's % would answer",
+    );
   }
 };
 
@@ -422,7 +473,7 @@ const OPERATORS: Record<string, Operator> = {
   sub: { evaluate: arithmetic },
   mult: { evaluate: arithmetic },
   div: { evaluate: arithmetic, validate: validateDivision },
-  mod: { evaluate: arithmetic },
+  mod: { evaluate: arithmetic, validate: validateModulo },
 
   index: {
     evaluate: (call) => {

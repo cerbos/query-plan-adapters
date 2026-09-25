@@ -268,7 +268,8 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
   `hasIntersection` value).
 - Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
   outer-document references inside a collection predicate, nested collection counts, correlated
-  variable-in-variable membership, unsafe division or non-finite arithmetic, negated collection
+  variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
+  non-zero integer constant, negated collection
   macros over nullable fields (including a negated string match against a nullable field needle),
   whole-list equality (including over a `map()` projection), list-valued membership needles, and
   `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
@@ -278,14 +279,14 @@ mapped as a `type: "many"` relation — stays a plain `Error`. The messages:
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 29 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 38 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
 0.55.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
 | extended | 52 / 80 |
-| adversarial | 148 / 227 |
+| adversarial | 153 / 250 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute` — the planner folds
@@ -348,6 +349,18 @@ asserts that, since five of the rows below depend on it.
 - **Breaking** — `+` between two field paths throws instead of reaching the server as `$add`
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - **Breaking** — a bare comparison of two `dateTime` fields throws.
+- **Breaking** — `%` throws unless its dividend is `size()` and its divisor a non-zero integer
+  constant. CEL's `%` has no double overload and every attribute number reaches CEL as a double, so
+  `R.attr.n % 2` is an error that denies every row; the old `$mod` computed a floating remainder,
+  which a negation turned into an over-grant.
+- `string()` of a number follows CEL's (Go's shortest `%g`) spelling: `1e+06`, `1.234567e+06`,
+  `+Inf` and `-Inf` where `$convert` wrote `1000000`, `1234567` and `Infinity` (under-grant fix).
+- `size()` of a `requiresParent` chain counts the children of the parent, not the parent elements:
+  `$parent.children` is one array per stored parent element, so a parent holding two children
+  counted 1.
+- A negated `&&`/`||` is pushed down to its operands (De Morgan), so each carries its own
+  absent-parent and evaluation guards: `!(!aBool && parent.x == "one")` now allows a parentless
+  document whose `aBool` is true, as CEL does (under-grant fix).
 - A `type: "one"` relation ANDs a non-null guard outside any negation, so a negation over it no
   longer matches documents where the subdocument is absent (over-grant fix); a bare boolean read
   through a to-one hop now translates instead of throwing "Bare collection variables are

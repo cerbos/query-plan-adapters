@@ -128,8 +128,9 @@ final class ArithmeticTranslator {
                 continue;
             }
             // `n / -0.0` is the opposite infinity from `n / 0.0`. A constant divisor keeps
-            // its sign bit. SQL cannot read the sign of a stored zero, so a column divisor is
-            // assumed positive (cerbos/query-plan-adapters#312).
+            // its sign bit. SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so
+            // a SQL divisor is taken as positive only where the sign cannot change the result
+            // (cerbos/query-plan-adapters#312).
             boolean negativeZeroDivisor = divisor instanceof NumericOperand.Constant zc
                     && Double.doubleToRawLongBits(zc.value()) != 0L;
             double positiveDividendResult = negativeZeroDivisor
@@ -141,6 +142,18 @@ final class ArithmeticTranslator {
 
             boolean divisionIsLeft = side == 0;
             Operand other = operands.get(divisionIsLeft ? 1 : 0);
+
+            if (divisor instanceof NumericOperand.Sql
+                    && !zeroDivisorSignIsMoot(division, scope)
+                    && signOfZeroDecides(op, candidate, divisionOperand, other,
+                            divisionIsLeft, scope)) {
+                throw Refusals.unsupported(
+                        "a comparison with a division by a floating-point expression that may "
+                                + "be zero is not supported here: CEL divides by a signed zero "
+                                + "into an infinity of either sign, and the comparison's "
+                                + "result depends on that sign, which SQL cannot read from a "
+                                + "stored zero (-0.0 = 0.0)");
+            }
 
             // A non-finite compares the same way against every present value, so against a
             // column the arm is folded in Java and only a NULL column makes it UNKNOWN. Around
@@ -187,6 +200,64 @@ final class ArithmeticTranslator {
                             () -> numericComparisonWithoutZeroGuard(op, operands, scope)));
         }
         return null;
+    }
+
+    /**
+     * Whether the sign of a zero divisor cannot matter: an integral column never holds -0.0,
+     * and in {@code a / a} a zero divisor makes the dividend zero too, so the result is NaN.
+     */
+    private boolean zeroDivisorSignIsMoot(PlanResourcesFilter.Expression division, Scope scope) {
+        Operand divisor = division.getOperands(1);
+        if (divisor.equals(division.getOperands(0))) {
+            return true;
+        }
+        if (divisor.getNodeCase() != Operand.NodeCase.VARIABLE) {
+            return false;
+        }
+        Class<?> type = scope.path(divisor.getVariable()).getJavaType();
+        return Integer.class.equals(type) || Long.class.equals(type)
+                || Short.class.equals(type) || Byte.class.equals(type);
+    }
+
+    /**
+     * Whether the comparison holds differently for a division result of {@code +Inf} and of
+     * {@code -Inf}, the two values dividing a non-zero dividend by a signed zero gives.
+     */
+    private boolean signOfZeroDecides(String op, Operand candidate, Operand divisionOperand,
+            Operand other, boolean divisionIsLeft, Scope scope) {
+        double pos = divisionOperand == candidate ? Double.POSITIVE_INFINITY
+                : foldAround(candidate, divisionOperand, Double.POSITIVE_INFINITY, scope);
+        double neg = divisionOperand == candidate ? Double.NEGATIVE_INFINITY
+                : foldAround(candidate, divisionOperand, Double.NEGATIVE_INFINITY, scope);
+        if (Double.isNaN(pos) && Double.isNaN(neg)) {
+            return false;
+        }
+        NumericOperand o = resolveNumericOperand(other, scope);
+        if (o instanceof NumericOperand.Constant oc) {
+            return ieeeHolds(op, pos, oc.value(), divisionIsLeft)
+                    != ieeeHolds(op, neg, oc.value(), divisionIsLeft);
+        }
+        if (Double.isInfinite(pos) && Double.isInfinite(neg)) {
+            // Folded against any present value, as the arm does.
+            return ieeeHolds(op, pos, 0.0, divisionIsLeft)
+                    != ieeeHolds(op, neg, 0.0, divisionIsLeft);
+        }
+        // Finite results are compared in SQL, where 0.0 and -0.0 are the same value.
+        return pos != neg;
+    }
+
+    private static boolean ieeeHolds(String op, double side, double other, boolean sideIsLeft) {
+        double l = sideIsLeft ? side : other;
+        double r = sideIsLeft ? other : side;
+        return switch (op) {
+            case "eq" -> l == r;
+            case "ne" -> l != r;
+            case "lt" -> l < r;
+            case "gt" -> l > r;
+            case "le" -> l <= r;
+            case "ge" -> l >= r;
+            default -> throw Refusals.internal("Unsupported comparison operator: " + op);
+        };
     }
 
     private Predicate withGuardedDivision(Operand division, Supplier<Predicate> body) {

@@ -4,7 +4,14 @@
     "a3",
     "b2",
     "f1",
-    "h4"
+    "h4",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i9"
   ],
   "degenerateReason": null,
   "id": "regex/matches/posix-character-class",

@@ -28,7 +28,7 @@ import {
   isValueOperand,
 } from "./plan";
 import type { OperatorOperand } from "./plan";
-import { negateRequiringHops, referencesChainedRelation } from "./relations";
+import { negateRequiringHops, referencesRequiredHop } from "./relations";
 import { containsCollectionOperator } from "./rewrite";
 import { handleMatchesOperator } from "./regex";
 import { handleStringOperator } from "./strings";
@@ -172,13 +172,13 @@ export function buildNegatedFilter(
   // `and`/`or` must be pushed through with De Morgan whenever a branch can be UNKNOWN, so
   // CEL's error absorption survives: `!(A && B)` with A erroring and B false is TRUE in CEL,
   // and `OR[!A, !B]` reproduces that where a single outer NOT over the conjunction — with the
-  // hop requirement ANDed outside it — would deny. A chained relation is the second source of
-  // UNKNOWN besides the collection macros, so it opens the same push-down. (A nested `not` was
-  // already unwrapped above.)
+  // hop requirement ANDed outside it — would deny. A to-one hop is the second source of UNKNOWN
+  // besides the collection macros, so it opens the same push-down, and each leaf requires only
+  // the hops it reads itself. (A nested `not` was already unwrapped above.)
   if (
     isOperatorOperand(operand) &&
     (containsCollectionOperator(operand) ||
-      referencesChainedRelation(operand, context))
+      referencesRequiredHop(operand, context))
   ) {
     switch (operand.operator) {
       case "and":

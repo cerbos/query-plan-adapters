@@ -156,12 +156,14 @@ def _seed(engine) -> None:
             rows[AdvTag].append(
                 {"tag_id": tag["id"], "name": tag["name"], "resource_id": seed["id"]}
             )
-        # One category per sub-name, per seed, so no two rows share a relation.
-        for i, sub_name in enumerate(sub_names):
-            category_id, sub_id = f"{seed['id']}-cat{i}", f"{seed['id']}-sub{i}"
+        # One category per seed, holding every sub-name, so no two rows share a relation.
+        category_id = f"{seed['id']}-cat"
+        if sub_names:
             rows[AdvCategory].append(
                 {"id": category_id, "name": "business", "resource_id": seed["id"]}
             )
+        for i, sub_name in enumerate(sub_names):
+            sub_id = f"{seed['id']}-sub{i}"
             rows[AdvSubCategory].append(
                 {"id": sub_id, "name": sub_name, "category_id": category_id}
             )

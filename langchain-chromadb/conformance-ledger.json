@@ -65,11 +65,23 @@
       "status": "unsupported",
       "reason": "Same flat-scalar-metadata limitation as `arithmetic/divide/self-division-greater-than`: the arithmetic operand cannot be translated at all, whatever the enclosing comparison"
     },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "Every Chroma comparison operand must be a bare metadata key or a literal. `int(aNumber) % (int(aNumber) - 5)` is a computed operand with a second computed operand as its divisor, so it is refused as a nested expression before the sign or zero-divisor semantics matter"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "Same computed-operand limitation as `arithmetic/modulo/negative-dividend`, under a negation: the modulo is refused as a nested expression, and a Where clause cannot keep the translatable aNumber == 5 disjunct without it"
+    },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "Every Chroma comparison operand must be a bare metadata key or a literal. `int(aNumber) % 2` is a computed operand, so it is refused as a nested expression before the modulo semantics matter"
     },
     "arithmetic/multiply/inexact-fraction-equals": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated"
     },
@@ -89,6 +101,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching."
     },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. int() over aDouble has no Where form, so the truncation bounds this action probes are never reached"
+    },
     "cast/int/malformed-string": {
       "status": "unsupported",
       "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
@@ -101,6 +117,10 @@
       "status": "unsupported",
       "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal."
     },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. The int() parse is refused before its precision matters, and the aNumber == 5 disjunct is refused with it"
+    },
     "cast/string/from-boolean": {
       "status": "unsupported",
       "reason": "Same missing computed operand as `cast/string/from-double`"
@@ -108,6 +128,14 @@
     "cast/string/from-double": {
       "status": "unsupported",
       "reason": "Every Chroma comparison operand must be a bare metadata field or a literal. string() wraps the field in an expression, and Chroma's Where model has no computed operand at all — there is no cast, and no place to put one"
+    },
+    "cast/string/from-double-spellings": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `cast/string/from-double`: Chroma has no cast, so the double-to-string spellings this action probes are never reached"
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `cast/string/from-double`, reached through the negative-zero spelling"
     },
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
@@ -309,6 +337,10 @@
       "status": "unsupported",
       "reason": "eq requires a finite number, string, or boolean literal."
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Same refusal as `comparison/equals/whole-list-literal`: Chroma $eq takes a scalar literal only, so a whole-list literal has no Where form, and list order and multiplicity are never compared"
+    },
     "comparison/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
       "reason": "Chroma distinguishes integer and floating-point metadata; a fractional threshold against this integer field is not faithful"
@@ -401,6 +433,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
     },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
     "hierarchy/ancestor-of/like-metacharacters-in-path": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
@@ -430,6 +466,10 @@
       "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
     },
     "hierarchy/overlaps/constant-path-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
+    },
+    "hierarchy/overlaps/empty-delimiter": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no path or prefix operator, and every comparison operand must be a bare field or literal, so the plan's hierarchy(...) operands cannot be translated"
     },
@@ -621,6 +661,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
     },
+    "principal/exists-one/duplicate-elements": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains; exists_one has no count-of-matches form, so the duplicate principal elements are never reached"
+    },
     "principal/exists-one/long-list": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
@@ -661,6 +705,14 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
@@ -674,6 +726,10 @@
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
     "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
@@ -697,7 +753,15 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator, so there is nothing to negate: `matches` is not in the adapter's negation table because it is not expressible positively either. The invalid patterns and the aNumber == 5 disjunct are refused with it"
+    },
     "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/posix-class-and-range-bounded": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
@@ -713,9 +777,25 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
     },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation."
+    },
+    "relation/all/negated-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Chroma has no negation of a collection predicate, and no relation model to reach the chained collection with in the first place — the same limitation as `relation/exists/negated-to-one-chain`, reached through all()"
+    },
     "relation/all/to-one-chain": {
       "status": "unsupported",
       "reason": "Chroma metadata is a flat scalar map with no relation or array-of-object model, so the chained collection lambda cannot be translated"
+    },
+    "relation/and/negated-conjunction-short-circuits-absent-parent": {
+      "status": "unsupported",
+      "reason": "The negation pushes down to `parent.aString != \"one\"`, which lowers to $ne, and a document with no parent carries no parent.aString key — a missing metadata key MATCHES $ne. The adapter refuses $ne over the optional chain key rather than return the parentless rows, the same limitation as `relation/equals/negated-one-hop`"
     },
     "relation/and/one-hop-and-root-attribute": {
       "status": "unsupported",
@@ -877,6 +957,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
     },
+    "string/concatenate/ordering": {
+      "status": "unsupported",
+      "reason": "The comparison's left operand is a concatenation of two metadata fields — a computed operand, which the Where model has no form for — so the string ordering this action probes is never reached, the same limitation as `string/concatenate/field-to-field`"
+    },
     "string/concatenate/unsatisfiable-not-equals": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains."
@@ -1005,9 +1089,17 @@
       "status": "unsupported",
       "reason": "Same missing positional access as `collection/index/first-element-of-boolean-list`, in the left disjunct. A Where clause cannot hold one disjunct without the other, so the translatable aNumber == 5 branch is refused with it, and the cross-type question the probe asks is never reached"
     },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "The negated equality lowers to $ne on aDouble, which is missing on a3, and Chroma $ne matches records whose metadata key is absent, unlike Cerbos missing-attribute error semantics. The second disjunct's string() cast has no Where form either"
+    },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "The mirror of `type-mismatch/equals/boolean-list-element-against-number-literal`: the index() into a number list in the left disjunct is refused as a nested expression, and the whole disjunction with it"
+    },
+    "type-mismatch/equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "Chroma $eq takes a finite number, string or boolean literal only, so a list literal operand is refused before the cross-type comparison is reached; a Where clause cannot keep the aNumber == 5 disjunct without it"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",

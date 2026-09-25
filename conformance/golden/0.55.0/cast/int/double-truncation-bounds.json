@@ -1,0 +1,109 @@
+{
+  "allowed": [
+    "a4",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i6",
+    "i7",
+    "i8",
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "cast/int/double-truncation-bounds",
+  "intent": "int() over a double attribute under > and < (int(aDouble) > 0 || int(aDouble) < -4).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "gt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": -4
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/int/double-truncation-bounds",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aDouble) > 0 || int(R.attr.aDouble) < -4"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "int() truncates toward zero, so 0.25/0.3 give 0 and -4.7 gives -4, all denied; solving to aDouble > 0 or aDouble < -4 over-grants a2, a5, a7 and h4. g1's -9.5e18 is out of int64 range, an error."
+}

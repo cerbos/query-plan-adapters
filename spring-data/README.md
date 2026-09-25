@@ -287,8 +287,11 @@ and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribu
 >
 > - MySQL: `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not enough.
 > - SQL Server: a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`).
-> - PostgreSQL, H2, Oracle: safe by default, unless you opt into case-insensitive behaviour
->   (nondeterministic ICU collations, `citext`).
+> - PostgreSQL: equality is exact by default, but string ordering (`<`, `>`, `<=`, `>=`) follows
+>   the column collation, and a linguistic default such as `en_US.utf8` does not order by code
+>   point (`'OneSet' < 'b'` is false). Use `"C"` for columns compared by ordering, and avoid
+>   case-insensitive behaviour (nondeterministic ICU collations, `citext`).
+> - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour.
 
 CEL string comparison is exact: `R.attr.department == "finance"` denies a row holding `"Finance"`.
 The adapter emits string predicates without collation control, so the column collation decides.
@@ -314,7 +317,8 @@ would use the **connection** collation, which MySQL Connector/J sets to `utf8mb4
 default.
 
 CI runs the conformance suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
-the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
+the PostgreSQL database is initialised with `--lc-collate=C` and the MySQL schema uses
+`utf8mb4_0900_bin`. Reproduce locally:
 
 ```bash
 ADAPTER_TEST_DB=postgres ./gradlew test --tests AdversarialConformanceTest   # passes
@@ -388,7 +392,7 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 29 seed rows on
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 38 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -398,10 +402,10 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 79 / 80 |
-| adversarial | 218 / 227 |
+| adversarial | 233 / 250 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 9 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 17 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
 is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
@@ -578,6 +582,12 @@ are constants (`a / a + 1.0 > 1.0`); arithmetic that also reads another column, 
 such division, throws `UnsupportedPlanShapeException`, since SQL has no value that carries NaN
 through it. Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
 
+A non-zero dividend over `-0.0` is `-Infinity`, over `0.0` `+Infinity`, and SQL cannot read the
+sign of a stored zero (`-0.0 = 0.0` holds). So when the divisor is a `Double` column or an
+expression, and the two infinities decide the comparison differently (`a / d > 0.0`), it throws
+`UnsupportedPlanShapeException`. An integral column divisor never holds `-0.0`, and `a / a` is NaN
+at zero whatever the sign, so both still translate.
+
 ### Ternary with a `NULL` condition column excludes the row
 
 The rewrite `(cond AND cmp(then, v)) OR (NOT cond AND cmp(else, v))` matches neither branch when
@@ -632,6 +642,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Breaking:** a comparison against a division by a `Double` column or an expression that may be
+  zero (`R.attr.a / R.attr.d > 0.0`) now throws `UnsupportedPlanShapeException` when the sign of
+  that zero decides the result, instead of assuming a positive zero and over-granting rows holding
+  `-0.0`. See [Division by a column](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities).
 - `int(R.attr.x) <op> c` over a `Double`, `Integer` or `String` column now translates instead of
   throwing.
 - `matches()` now translates without an override where `LIKE` spells the pattern's RE2 language

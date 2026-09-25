@@ -262,6 +262,18 @@ const translateNot = (
     0,
     "not operator requires at least one operand",
   );
+  // De Morgan, pushed down to the leaves. CEL's `&&`/`||` let a decided operand absorb an
+  // error in the other, so `!(!aBool && parent.x == "one")` is TRUE on a parentless document
+  // whose aBool is true. Guarding the whole negation for every parent it dots through denies
+  // that document; negating each operand instead gives every leaf its own guard. The rewrite
+  // is exact under CEL's error semantics: `!(a && b)` and `!a || !b` agree on every
+  // combination of true, false and error.
+  if (isExpression(operand) && (operand.operator === "and" || operand.operator === "or")) {
+    const dual = operand.operator === "and" ? "$or" : "$and";
+    return {
+      [dual]: operand.operands.map((child) => translateNot([child], ctx)),
+    };
+  }
   if (
     collectVariableNames(operand).some((name) =>
       isNullableReference(name, ctx.mapper),

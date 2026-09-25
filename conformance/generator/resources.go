@@ -162,22 +162,28 @@ func checkAttr(seed, derived map[string]any, parentOf func(map[string]any) (map[
 
 	labels, _ := derived["labels"].([]any)
 	subNames := seed["subCategoryNames"].([]any)
-	categories := make([]any, 0, len(subNames))
-	for _, sub := range subNames {
-		labelAttrs := make([]any, 0, len(labels))
-		for _, l := range labels {
-			if l == nil {
-				labelAttrs = append(labelAttrs, map[string]any{})
-			} else {
-				labelAttrs = append(labelAttrs, map[string]any{"name": l})
+	// A seed with subCategoryNames owns ONE category holding every name as a subcategory, so a
+	// category can hold several subcategories, some matching a predicate and some not.
+	categories := []any{}
+	if len(subNames) > 0 {
+		subAttrs := make([]any, 0, len(subNames))
+		for _, sub := range subNames {
+			labelAttrs := make([]any, 0, len(labels))
+			for _, l := range labels {
+				if l == nil {
+					labelAttrs = append(labelAttrs, map[string]any{})
+				} else {
+					labelAttrs = append(labelAttrs, map[string]any{"name": l})
+				}
 			}
-		}
-		categories = append(categories, map[string]any{
-			"name": "business",
-			"subCategories": []any{map[string]any{
+			subAttrs = append(subAttrs, map[string]any{
 				"name":   sub,
 				"labels": labelAttrs,
-			}},
+			})
+		}
+		categories = append(categories, map[string]any{
+			"name":          "business",
+			"subCategories": subAttrs,
 		})
 	}
 

@@ -28,7 +28,16 @@
     "h4",
     "h5",
     "h6",
-    "h7"
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9"
   ],
   "degenerateReason": "Every seed carries a non-null aString shorter than 2^32. An unguarded int narrowing that wraps the threshold to 0 would return nothing; the greater-than sibling is the other half.",
   "id": "size/less-than/huge-threshold",

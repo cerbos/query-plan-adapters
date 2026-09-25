@@ -41,13 +41,10 @@ cases:
 - id: 'size/greater-or-equal/fractional-threshold-on-relation'
   tier: adversarial
   intent: 'size() of a list reached through the mainCategory chain compared >= 1.5.'
-  trap: 'The threshold must round up to >= 2; truncating to >= 1 returns a1/a6/a8/c1. Empty by design: it tests rounding, not the absent-parent guard.'
+  trap: 'The threshold must round up to >= 2, which only i9 (two subCategories) meets; truncating to >= 1 also returns a1/a6/a8/c1.'
   condition:
     match:
       expr: 'size(R.attr.mainCategory.subCategories) >= 1.5'
-  degenerate:
-    oracle: empty
-    reason: 'No seed holds a mainCategory with two or more subCategories, so a count of 1.5 or more holds for none, and every seed without one is a missing-path error. The less-or-equal sibling carries the discriminating oracle for the same chain.'
 - id: 'size/greater-than/collection-above-one'
   tier: extended
   intent: 'Collection size compared with a non-zero threshold (size(tags) > 1).'
