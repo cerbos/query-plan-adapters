@@ -274,6 +274,10 @@ func buildMapper() cerbospgx.Mapper {
 		// is declared NullConventionOmitted.
 		// The two aBool hops are declared boolean, like the root aBool, because that is what they
 		// hold, so string() over one takes the vendored translator's CASE, as it does on ent.
+		// `parent` itself is the to-one hop, not a column: a CEL map whose keys are the joined
+		// row's non-NULL columns. Declared so a macro over it (`collection/exists/map-keys`) meets
+		// the translator's own refusal rather than a harness defect.
+		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
 		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},

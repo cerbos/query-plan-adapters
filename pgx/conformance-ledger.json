@@ -5,6 +5,18 @@
       "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign; PostgreSQL compares -0.0 equal to 0.0 and the shared translator reads no sign bit, so a comparison that sign decides is refused.",
       "status": "unsupported"
     },
+    "arithmetic/divide/int-truncates": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a PostgreSQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates, under negation.",
+      "status": "unsupported"
+    },
     "arithmetic/divide/nested-division-divisor": {
       "reason": "The divisor resolves to a conditional IEEE value; division requires a plain SQL expression and cannot bind the symbolic branches.",
       "status": "unsupported"
@@ -53,8 +65,20 @@
       "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed and rounds where CEL truncates.",
       "status": "unsupported"
     },
+    "cast/string/from-int-beyond-double-precision": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which rounds to nearest where CEL truncates toward zero, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
     "cast/string/from-negative-zero-double": {
       "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; PostgreSQL compares the two zeros equal and the shared translator reads no sign bit, so a string() comparison against a zero spelling is refused.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "reason": "Same int() refusal as cast/string/from-int-past-exponent-threshold, under negation.",
       "status": "unsupported"
     },
     "cast/timestamp/malformed-string": {
@@ -75,6 +99,14 @@
     },
     "collection/except/size-of-difference": {
       "reason": "The two-list except function has no list-difference lowering in this translator.",
+      "status": "unsupported"
+    },
+    "collection/exists/map-keys": {
+      "reason": "A macro over a map-valued attribute ranges over its keys, and `parent` is a to-one relation: one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so a macro over the hop is refused.",
+      "status": "unsupported"
+    },
+    "collection/exists/negated-map-keys": {
+      "reason": "Same refusal as collection/exists/map-keys, under negation.",
       "status": "unsupported"
     },
     "collection/filter/as-conjunct": {

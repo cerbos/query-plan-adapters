@@ -284,6 +284,14 @@ func requireRelation(m Mapper, reference string) (Entry, error) {
 	if !ok {
 		return Entry{}, fmt.Errorf("no mapping for collection attribute %q", reference)
 	}
+	if entry.Relation == nil && entry.ScalarRelation != nil {
+		return Entry{}, fmt.Errorf(
+			"attribute %q is a to-one relation, one joined row, but is used as a collection: "+
+				"a CEL macro over a map ranges over its keys, and SQL has no form for the set of "+
+				"a row's present columns",
+			reference,
+		)
+	}
 	if entry.Relation == nil {
 		return Entry{}, fmt.Errorf(
 			"attribute %q is mapped to a column but is used as a collection; map it as a relation",

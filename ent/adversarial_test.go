@@ -517,6 +517,10 @@ func buildMapper() cerbosent.Mapper {
 		// is declared NullConventionOmitted.
 		// The two aBool hops are declared boolean, like the root aBool, because that is what they
 		// hold, and an undeclared one keeps the plain CAST that SQLite and MySQL render as 1/0.
+		// `parent` itself is the to-one hop, not a column: a CEL map whose keys are the joined
+		// row's non-NULL columns. Declared so a macro over it (`collection/exists/map-keys`) meets
+		// the translator's own refusal rather than a harness defect.
+		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
 		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
