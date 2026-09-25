@@ -285,6 +285,10 @@
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
+    "relation/not-equals/one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "parent.aOptionalString is declared omitted in attribute_null_representation (a NULL column, like an absent parent, sends no attribute), so every null operand against it is refused, != null included: a NOT above the IS NOT NULL would flip it to IS NULL and return rows check() denies."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."

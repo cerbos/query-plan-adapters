@@ -124,8 +124,10 @@ export const MAPPER: Record<string, MapperConfig> = {
   // `identifier/*` cases). It is a mapping like any other here, which is the point: an adapter that resolves
   // references by stripping a `request.resource.attr.` prefix never sees this name.
   "request.resource.id": { field: "id", valueType: "string" },
-  // resources.json OMITS aBool, aString and aNumber on the row where the column is NULL (j3, j1,
-  // j2), so each follows the omitted convention like aOptionalString below.
+  // Every attribute resources.json OMITS when its column is NULL follows the omitted convention:
+  // aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope, createdAt,
+  // updatedAt, obj.inner and every `parent` field. A null literal against one is then a
+  // missing-attribute error the PDP denies, never an IS NULL match (#528).
   "request.resource.attr.aBool": {
     field: "aBool",
     valueType: "boolean",
@@ -144,7 +146,11 @@ export const MAPPER: Record<string, MapperConfig> = {
     nullable: true,
     nullAttributeRepresentation: "omitted",
   },
-  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
+  "request.resource.attr.aDouble": {
+    field: "aDouble",
+    valueType: "number",
+    nullAttributeRepresentation: "omitted",
+  },
   // resources.json OMITS aOptionalString when the column is NULL, so `== null` against it is a
   // missing-attribute error the PDP denies, never an IS NULL match.
   "request.resource.attr.aOptionalString": {
@@ -154,14 +160,21 @@ export const MAPPER: Record<string, MapperConfig> = {
     nullAttributeRepresentation: "omitted",
   },
   "request.resource.attr.createdBy": { field: "createdBy", valueType: "string" },
-  "request.resource.attr.scope": { field: "scope", valueType: "string", nullable: true },
+  "request.resource.attr.scope": {
+    field: "scope",
+    valueType: "string",
+    nullable: true,
+    nullAttributeRepresentation: "omitted",
+  },
   "request.resource.attr.createdAt": {
     field: "createdAt",
     valueType: "dateTime",
+    nullAttributeRepresentation: "omitted",
   },
   "request.resource.attr.updatedAt": {
     field: "updatedAt",
     valueType: "dateTime",
+    nullAttributeRepresentation: "omitted",
   },
   // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
   // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
@@ -192,7 +205,10 @@ export const MAPPER: Record<string, MapperConfig> = {
   // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
   // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests
   // the same declaration one level further out; two levels is where alias scoping breaks.
+  // A column reached through a relation takes the relation entry's null convention, so the one
+  // declaration here covers every `parent.*` and `parent.inner.*` field.
   "request.resource.attr.parent": {
+    nullAttributeRepresentation: "omitted",
     relation: {
       name: "parent",
       type: "one",

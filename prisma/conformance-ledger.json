@@ -221,6 +221,10 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
     },
+    "relation/not-equals/one-hop-null-literal": {
+      "status": "unsupported",
+      "reason": "parent.aOptionalString is declared nullAttributeRepresentation: \"omitted\" (a NULL column, like an absent parent, sends no attribute). The rewrite that answers a null comparison against an omitted root column does not reach a column read through a relation, and Prisma applies negation by wrapping in NOT, so a plain { not: null } could flip to IS NULL and return rows check() denies: the null operand is refused."
+    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"

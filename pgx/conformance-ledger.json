@@ -293,6 +293,10 @@
       "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
     },
+    "relation/not-equals/one-hop-null-literal": {
+      "reason": "parent.aOptionalString is mapped with NullConventionOmitted (a NULL column, like an absent parent, sends no attribute), so every null operand against it is refused, != null included: a NOT above the IS NOT NULL would flip it to IS NULL and return rows check() denies.",
+      "status": "unsupported"
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
       "status": "unsupported"

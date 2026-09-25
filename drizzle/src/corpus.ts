@@ -463,8 +463,10 @@ export function buildMapper(
     // cases). It is a mapping like any other here, which is the point: an adapter that resolves
     // references by stripping a `request.resource.attr.` prefix never sees this name.
     "request.resource.id": schema.resources.id,
-    // aBool, aString and aNumber are NULL on one seed each (j3, j1, j2) and, like aOptionalString
-    // below, a NULL column sends no attribute: the omitted convention.
+    // Every attribute resources.json omits when its column is NULL is declared on the omitted
+    // convention: aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope,
+    // createdAt, updatedAt, obj.inner and every `parent` field. A null literal against one is then a
+    // missing-attribute error CEL denies, so it is refused rather than rendered as IS NULL (#528).
     "request.resource.attr.aBool": {
       column: schema.resources.aBool,
       nullAttributeRepresentation: "omitted",
@@ -477,7 +479,10 @@ export function buildMapper(
       column: schema.resources.aNumber,
       nullAttributeRepresentation: "omitted",
     },
-    "request.resource.attr.aDouble": schema.resources.aDouble,
+    "request.resource.attr.aDouble": {
+      column: schema.resources.aDouble,
+      nullAttributeRepresentation: "omitted",
+    },
     // The corpus's default NULL convention: a NULL column sends no attribute (resources.json omits
     // it), so `== null` is a missing-attribute error in CEL, never true. Declaring it is what makes
     // the adapter read a NULL column here as UNKNOWN instead of emitting an over-granting IS NULL.
@@ -486,14 +491,19 @@ export function buildMapper(
       nullAttributeRepresentation: "omitted",
     },
     "request.resource.attr.createdBy": schema.resources.createdBy,
-    "request.resource.attr.scope": schema.resources.scope,
+    "request.resource.attr.scope": {
+      column: schema.resources.scope,
+      nullAttributeRepresentation: "omitted",
+    },
     "request.resource.attr.createdAt": {
       column: schema.resources.createdAt,
       valueType: "timestamp",
+      nullAttributeRepresentation: "omitted",
     },
     "request.resource.attr.updatedAt": {
       column: schema.resources.updatedAt,
       valueType: "timestamp",
+      nullAttributeRepresentation: "omitted",
     },
     // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
     // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
@@ -526,10 +536,10 @@ export function buildMapper(
         sourceColumn: schema.resources.id,
         targetColumn: schema.parents.resourceId,
         fields: {
-          aBool: schema.parents.aBool,
-          aString: schema.parents.aString,
-          aNumber: schema.parents.aNumber,
-          aOptionalString: schema.parents.aOptionalString,
+          aBool: { column: schema.parents.aBool, nullAttributeRepresentation: "omitted" },
+          aString: { column: schema.parents.aString, nullAttributeRepresentation: "omitted" },
+          aNumber: { column: schema.parents.aNumber, nullAttributeRepresentation: "omitted" },
+          aOptionalString: { column: schema.parents.aOptionalString, nullAttributeRepresentation: "omitted" },
           inner: {
             relation: {
               type: "one",
@@ -537,10 +547,10 @@ export function buildMapper(
               sourceColumn: schema.parents.id,
               targetColumn: schema.inners.parentId,
               fields: {
-                aBool: schema.inners.aBool,
-                aString: schema.inners.aString,
-                aNumber: schema.inners.aNumber,
-                aOptionalString: schema.inners.aOptionalString,
+                aBool: { column: schema.inners.aBool, nullAttributeRepresentation: "omitted" },
+                aString: { column: schema.inners.aString, nullAttributeRepresentation: "omitted" },
+                aNumber: { column: schema.inners.aNumber, nullAttributeRepresentation: "omitted" },
+                aOptionalString: { column: schema.inners.aOptionalString, nullAttributeRepresentation: "omitted" },
               },
             },
           },
