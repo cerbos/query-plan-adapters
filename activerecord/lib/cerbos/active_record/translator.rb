@@ -388,7 +388,9 @@ module Cerbos
         end
 
         result = branches(condition, then_value, else_value)
-        (boolean_arm?(then_value) || boolean_arm?(else_value)) ? record_boolean(result) : result
+        return record_boolean(result) if boolean_arm?(then_value) || boolean_arm?(else_value)
+
+        record_cel_type(result, branch_cel_type(then_value, else_value))
       end
 
       def boolean_arm?(value)
@@ -398,6 +400,24 @@ module Cerbos
       # Records that CEL holds a node as a boolean. See {Casts#boolean_value?}.
       def record_boolean(value)
         ArelSupport.arel_node?(value) ? record_cel_type(value, :bool) : value
+      end
+
+      # CEL gives both arms of a ternary one type, so an arm whose type is certain fixes the
+      # other's. A whole constant on its own is not certain: the plan ships `1000000` and
+      # `1000000.0` as the same number, and string() spells them "1000000" and "1e+06".
+      def branch_cel_type(*arms)
+        return :int if arms.any? { |arm| cel_type(arm) == :int }
+        return :double if arms.any? { |arm| arm.is_a?(Float) && arm.finite? && arm != arm.truncate }
+        return :ambiguous_number if arms.any? { |arm| ambiguous_number?(arm) }
+
+        nil
+      end
+
+      def ambiguous_number?(value)
+        return true if cel_type(value) == :ambiguous_number
+        return false unless value.is_a?(Numeric) && value.finite? && value == value.truncate
+
+        value.to_i.to_s != cel_double_spelling(value.to_f)
       end
 
       # `CASE WHEN c THEN a WHEN NOT c THEN b END`. No ELSE, so UNKNOWN gives NULL. See

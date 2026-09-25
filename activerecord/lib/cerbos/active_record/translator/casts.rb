@@ -60,6 +60,13 @@ module Cerbos
         def cast_to_string(value)
           return value.to_s if value == true || value == false
           return boolean_to_string(value) if boolean_value?(value)
+          if cel_type(value) == :ambiguous_number
+            raise UnsupportedOperatorError,
+              "string() over a ternary of whole-number constants: CEL spells the int 1000000 as " \
+              "\"1000000\" and the double 1000000.0 as \"1e+06\", and the query plan carries both " \
+              "as the same number, so the spelling cannot be known. Put int() or double() on one " \
+              "arm, or compare the ternary's value instead of its string."
+          end
           return Values::DoubleText.new(value) if cel_double?(value)
 
           cast(value, dialect.text_type)
