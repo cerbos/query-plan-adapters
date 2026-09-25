@@ -1,0 +1,82 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1",
+    "i1"
+  ],
+  "degenerateReason": null,
+  "id": "cast/string/from-ternary-with-int-branch",
+  "intent": "string() of a ternary whose one branch is int() and the other an int literal (string(aBool ? int(aDouble) : 1000000) == \"1000000\").",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aDouble"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      },
+                      {
+                        "value": 1000000
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                }
+              ],
+              "operator": "string"
+            }
+          },
+          {
+            "value": "1000000"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/string/from-ternary-with-int-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "string(R.attr.aBool ? int(R.attr.aDouble) : 1000000) == \"1000000\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL gives both branches one type, so the literal is an int as well: i1 and every aBool false row render \"1000000\". Rendering either branch as a double gives \"1e+06\" and under-grants them; refusing the literal as untyped refuses a shape whose type the other branch fixes."
+}

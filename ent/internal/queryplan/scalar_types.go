@@ -13,6 +13,8 @@ func scalarKind(v value) string {
 		return "bool"
 	case float64:
 		return "number"
+	case []any:
+		return "list"
 	case Subquery:
 		if typed.Kind == SubqueryScalar {
 			return scalarKind(typed.Select)

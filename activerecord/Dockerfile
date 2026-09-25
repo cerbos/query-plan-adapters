@@ -8,10 +8,14 @@ FROM ruby:${RUBY_VERSION}-slim-bookworm
 ARG ACTIVERECORD_VERSION=8.0
 ENV ACTIVERECORD_VERSION=${ACTIVERECORD_VERSION}
 
+# libpq-dev and default-libmysqlclient-dev build the pg and mysql2 gems, for the conformance
+# suite's PostgreSQL and MySQL legs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
+        libpq-dev \
+        default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV BUNDLE_PATH=/bundle \

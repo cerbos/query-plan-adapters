@@ -307,6 +307,16 @@ either convention. `null/equals/null-literal` and `null/equals/null-literal-on-m
 a document missing the field is never authorized by a `must_not` matching it — Cerbos treats a
 missing attribute as an evaluation error.
 
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
+> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
+> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
+> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
+> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
+
 ## Custom operator overrides
 
 Replace the default lowering of a plan operator with an `OperatorFunction`, which takes the field
@@ -448,9 +458,10 @@ These throw `UnsupportedPlanShapeException`. The adapter never generates Painles
 would change the security and performance profile of every filter.
 
 - field-to-field comparisons; a constant string receiver with a field argument
-- arithmetic over fields, `int()` / `double()` casts, conditional values (CEL ternary, as a
+- arithmetic over fields, `int()` / `double()` / `string()` casts, conditional values (CEL ternary, as a
   condition or an operand)
-- `except()`; `filter()` / `map()` used as a condition; `exists_one`
+- `except()`; `filter()` / `map()` used as a condition; `exists_one`; a macro over an object field
+  (a CEL map, whose keys the macro ranges over, which no query can enumerate)
 - counts other than emptiness; `size()` over an undeclared field; collection-empty checks
 - ordered array indexing (`R.attr.tagNames[0] == "public"`) — a `term` matches any position
 - positive `all` and negated `exists` over a document collection; negated membership in, or
@@ -464,24 +475,28 @@ would change the security and performance profile of every filter.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
-indexes the 29 seed documents in a real Elasticsearch, translates every plan recorded from the
+indexes the 41 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
 the current PDP (0.55.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 25 / 26 |
-| extended | 31 / 80 |
-| adversarial | 85 / 227 |
+| extended | 28 / 80 |
+| adversarial | 113 / 308 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is one extended case, `null/has/missing-attribute`: the planner folds
-`has()` on a missing attribute to `ALWAYS_ALLOWED` while `check()` denies those documents, so use
-`R.attr.x != null` for indexed attributes instead of `has(R.attr.x)`.
+pass them. On 0.55.0 that is four extended cases and three adversarial cases. In
+`null/has/missing-attribute` and `null/has/composed-with-comparison` the plan request leaves an
+omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
+the omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
+cases a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it excludes j2,
+while `check()` receives `aNumber` as absent and treats the erroring DENY as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 ## Mapping hazards
 
@@ -565,6 +580,10 @@ applies to every field, and quietly returns more rows.
   with `if (CEL ternary) cannot be expressed…` instead of `if requires exactly 2 operands, got 3`.
 - An integral double outside `[-2^63, 2^63)` is bound as a double instead of saturating to
   `Long.MAX_VALUE`.
+- `"k" in R.attr.obj`, where `obj` maps to an object field (the field map names a sub-field of
+  it), throws `UnsupportedPlanShapeException` instead of `UnmappedAttributeException`. CEL's `in`
+  over a map tests its keys, and Elasticsearch indexes no key whose value is null, so no query
+  answers it ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
 - Refusals are typed (`UnsupportedPlanShapeException`, `UnmappedAttributeException`,
   `MalformedPlanException`); all extend `IllegalArgumentException`, so existing catches still work.
 

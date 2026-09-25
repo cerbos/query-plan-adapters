@@ -1,0 +1,59 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "b6",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/negated-two-hops-null-literal",
+  "intent": "!(parent.inner.aOptionalString == null), two levels out.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aOptionalString"
+                },
+                {
+                  "value": null
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/negated-two-hops-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.parent.inner.aOptionalString == null)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b1's inner has a NULL leaf and 6 rows have a parent but no inner; each is an error that denies, which a plain NOT over the relation filter admits."
+}

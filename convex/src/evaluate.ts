@@ -13,6 +13,7 @@ import {
   convertToInt,
   convertToString,
   getNestedValue,
+  intArithmetic,
   isEvaluationError,
   isHierarchyValue,
   isRecord,
@@ -20,6 +21,7 @@ import {
   parseRfc3339Timestamp,
   valuesEqual,
 } from "./cel";
+import type { ArithmeticOperator } from "./cel";
 import type { Mapper } from "./index";
 import {
   isExpression,
@@ -48,6 +50,11 @@ interface Scope {
   mapper: Mapper;
   /** Lambda variables in scope, by name. */
   bindings: Bindings;
+  /**
+   * Whether a stored `null` reads as a missing attribute: the `"omitted"` convention, under which
+   * the caller sends no attribute for a NULL field and CEL raises a missing-attribute error.
+   */
+  nullIsMissing: boolean;
 }
 
 interface Call {
@@ -85,18 +92,28 @@ export const evaluate = (
   });
 };
 
-/** A lambda variable (or a path through one) first, then the mapped document field. */
-const lookUp = (name: string, { doc, mapper, bindings }: Scope): unknown => {
+/**
+ * A lambda variable (or a path through one) first, then the mapped document field. A bare lambda
+ * variable is a list element, which a caller cannot omit, so only a path reads a null as missing.
+ */
+const lookUp = (name: string, scope: Scope): unknown => {
+  const { doc, mapper, bindings } = scope;
   const dotIdx = name.indexOf(".");
   if (dotIdx !== -1) {
     const root = name.substring(0, dotIdx);
     if (root in bindings) {
-      return getNestedValue(bindings[root], name.substring(dotIdx + 1));
+      return readPath(
+        getNestedValue(bindings[root], name.substring(dotIdx + 1)),
+        scope,
+      );
     }
   }
   if (name in bindings) return bindings[name];
-  return getNestedValue(doc, resolveField(name, mapper));
+  return readPath(getNestedValue(doc, resolveField(name, mapper)), scope);
 };
+
+const readPath = (value: unknown, { nullIsMissing }: Scope): unknown =>
+  nullIsMissing && value === null ? EVALUATION_ERROR : value;
 
 /** Evaluates the operand at `index`, failing with `"<operator> <role>"` when it is missing. */
 const arg = (call: Call, index: number, role: string): unknown =>
@@ -172,10 +189,17 @@ const lambdaOf = (call: Call): ((element: unknown) => unknown) => {
     });
 };
 
+/** What a macro ranges over, and what `in` tests: a list's elements, or a map's keys. */
+const macroItems = (collection: unknown): unknown[] | undefined => {
+  if (Array.isArray(collection)) return collection;
+  if (isRecord(collection)) return Object.keys(collection);
+  return undefined;
+};
+
 /** `exists`, `exists_one` and `all`, with CEL's error absorption across elements. */
 const quantifier = (call: Call): unknown => {
-  const collection = arg(call, 0, "collection");
-  if (!Array.isArray(collection)) return EVALUATION_ERROR;
+  const collection = macroItems(arg(call, 0, "collection"));
+  if (collection === undefined) return EVALUATION_ERROR;
   const body = lambdaOf(call);
   let trueCount = 0;
   let sawError = false;
@@ -211,6 +235,19 @@ const arithmetic = (call: Call): unknown => {
   const { operator } = call;
   const left = arg(call, 0, "left");
   const right = arg(call, 1, "right");
+  // Over two int operands CEL does int arithmetic: `int(3) / 2` truncates to 1, where JavaScript
+  // divides to 1.5. The plan carries no numeric type, so the mode is chosen from the expression.
+  if (isIntExpression({ operator, operands: call.operands })) {
+    return intArithmetic(operator as ArithmeticOperator, left, right);
+  }
+  // CEL has no overload mixing int and double, so `int(x) + R.attr.aDouble` is an error, where
+  // JavaScript adds the two numbers and a negation would turn the sum into a grant.
+  if (
+    call.operands.some(isIntExpression) &&
+    call.operands.some((operand) => isDoubleOperand(operand, call.scope))
+  ) {
+    return EVALUATION_ERROR;
+  }
   // CEL overloads `+` on strings, and JavaScript's `+` concatenates identically. Only `add`
   // has the overload — `sub`/`mult`/`div`/`mod` over strings stay a CEL error, which is what
   // falling through to the numeric guard below already produces. Before this, a string `add`
@@ -234,14 +271,166 @@ const arithmetic = (call: Call): unknown => {
     case "mult":
       return left * right;
     case "div":
-      if (right === 0 && left !== 0) {
+      if (right === 0 && left !== 0 && !readsDocument(call, 1)) {
         // Backstop for zeros only computed at evaluation time; constant zero divisors are
-        // already rejected during translation by `validateDivision`.
+        // already rejected during translation by `validateDivision`. A zero READ from the
+        // document is exempt: Convex stores a float64 with its sign, so IEEE division by it
+        // yields the infinity CEL does.
         throw new UnsupportedQueryPlanError(INDETERMINATE_ZERO_DIVISOR_MESSAGE);
       }
       return left / right;
     default:
-      return left % right;
+      return modulo(call, left, right);
+  }
+};
+
+/** Whether the operand at `index` is a document field, rather than a constant or lambda binding. */
+const readsDocument = ({ operands, scope }: Call, index: number): boolean => {
+  const operand = operands[index];
+  return operand !== undefined && isDocumentField(operand, scope);
+};
+
+const isDocumentField = (
+  operand: PlanExpressionOperand,
+  scope: Scope,
+): boolean => {
+  if (!isVariable(operand)) return false;
+  const root = operand.name.split(".")[0] ?? operand.name;
+  return !(root in scope.bindings);
+};
+
+/**
+ * Whether the operand is certainly not a CEL int, so that beside a certain int it is a
+ * no-such-overload error: a document field (every number an attribute carries is a double, and
+ * any other type is no number at all), a fractional constant, or `double()`.
+ */
+const isDoubleOperand = (
+  operand: PlanExpressionOperand,
+  scope: Scope,
+): boolean => {
+  if (isValue(operand)) {
+    return (
+      typeof operand.value === "number" && !Number.isInteger(operand.value)
+    );
+  }
+  if (isVariable(operand)) return isDocumentField(operand, scope);
+  return isExpression(operand) && operand.operator === "double";
+};
+
+// CEL's `%` has int and uint overloads only. Every number an attribute carries is a double (a
+// resource or principal attribute reaches the PDP as a protobuf Value), so a field read as either
+// operand is a no-such-overload error on every row, and an int modulus by zero is an error too.
+// JavaScript's `%` would answer both, and a negation would turn that answer into a grant.
+const modulo = (call: Call, left: number, right: number): unknown => {
+  if (call.operands.some(isVariable) || right === 0) return EVALUATION_ERROR;
+  return left % right;
+};
+
+/**
+ * Whether the operand is certainly a CEL int: an integral constant (a policy literal: an int
+ * literal against a statically typed int operand is the only spelling that type-checks), `int()`,
+ * `size()`, or int arithmetic over those. A field read is certainly a double; anything else has a
+ * type the plan does not carry.
+ */
+const isIntOperand = (operand: PlanExpressionOperand): boolean =>
+  isValue(operand) ? Number.isInteger(operand.value) : isIntExpression(operand);
+
+/**
+ * Whether the operand is an expression whose result is certainly a CEL int: `int()`, `size()`, or
+ * arithmetic over ints of which at least one is such an expression. Arithmetic over integral
+ * constants alone is not: the planner keeps `0.0 / 0.0` unfolded beside `now()`, and ships it as
+ * `0 / 0`.
+ */
+const isIntExpression = (operand: PlanExpressionOperand): boolean => {
+  if (!isExpression(operand)) return false;
+  switch (operand.operator) {
+    case "int":
+    case "size":
+      return true;
+    case "add":
+    case "sub":
+    case "mult":
+    case "div":
+    case "mod":
+      return (
+        operand.operands.every(isIntOperand) &&
+        operand.operands.some(isIntExpression)
+      );
+    default:
+      return false;
+  }
+};
+
+type NumericType = "int" | "double";
+
+/**
+ * The CEL numeric type the plan says the operand certainly has: `int` for a certain int (see
+ * `isIntExpression`), `double` for `double()` or a fractional constant, and for a ternary whatever
+ * one of its branches fixes, since CEL gives both branches one type. Undefined when the plan does
+ * not say: a document field, or an integral constant, which the plan ships as a bare number
+ * whether the policy wrote `1000000` or `1000000.0`.
+ */
+const numericTypeOf = (
+  operand: PlanExpressionOperand,
+): NumericType | undefined => {
+  if (isValue(operand)) {
+    return typeof operand.value === "number" && !Number.isInteger(operand.value)
+      ? "double"
+      : undefined;
+  }
+  if (isIntExpression(operand)) return "int";
+  if (!isExpression(operand)) return undefined;
+  if (operand.operator === "double") return "double";
+  if (operand.operator !== "if") return undefined;
+  const [, whenTrue, whenFalse] = operand.operands;
+  return (
+    (whenTrue && numericTypeOf(whenTrue)) ??
+    (whenFalse && numericTypeOf(whenFalse))
+  );
+};
+
+/**
+ * Whether `string()` over the operand could render an integral constant whose type the plan
+ * dropped, where the int and double renderings differ ("1000000" and "1e+06"). `type` is the
+ * type an enclosing ternary fixes for its branches.
+ */
+const rendersUntypedConstant = (
+  operand: PlanExpressionOperand,
+  type: NumericType | undefined,
+): boolean => {
+  if (isValue(operand)) {
+    const { value } = operand;
+    return (
+      type === undefined &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      convertToString(value, true) !== convertToString(value, false)
+    );
+  }
+  if (!isExpression(operand) || operand.operator !== "if") return false;
+  const branchType = type ?? numericTypeOf(operand);
+  return operand.operands
+    .slice(1)
+    .some((branch) => rendersUntypedConstant(branch, branchType));
+};
+
+const validateStringConversion = ({ operands }: PlanExpression): void => {
+  const operand = operands[0];
+  if (operand !== undefined && rendersUntypedConstant(operand, undefined)) {
+    throw new UnsupportedQueryPlanError(
+      "string() over an integral constant whose int or double type the plan does not carry: " +
+        'CEL renders the int 1000000 as "1000000" and the double as "1e+06", and the plan ' +
+        "ships both as the same bare number",
+    );
+  }
+};
+
+const validateModulo = ({ operands }: PlanExpression): void => {
+  if (!operands.every((op) => isVariable(op) || isIntOperand(op))) {
+    throw new UnsupportedQueryPlanError(
+      "modulo requires int operands, and the plan does not carry the numeric type of this one: " +
+        "CEL's % is a no-such-overload error on a double, which JavaScript's % would answer",
+    );
   }
 };
 
@@ -331,8 +520,11 @@ const OPERATORS: Record<string, Operator> = {
       if (isEvaluationError(needle) || isEvaluationError(haystack)) {
         return EVALUATION_ERROR;
       }
-      if (!Array.isArray(haystack)) return EVALUATION_ERROR;
-      return haystack.some((value) => valuesEqual(value, needle));
+      // CEL's `in` over a map tests its keys. Only a map-valued attribute reaches here as a map:
+      // the planner rewrites a map literal, or a principal map, into its key list first.
+      const members = macroItems(haystack);
+      if (members === undefined) return EVALUATION_ERROR;
+      return members.some((value) => valuesEqual(value, needle));
     },
   },
 
@@ -384,8 +576,8 @@ const OPERATORS: Record<string, Operator> = {
   all: { evaluate: quantifier },
   filter: {
     evaluate: (call) => {
-      const collection = arg(call, 0, "collection");
-      if (!Array.isArray(collection)) return EVALUATION_ERROR;
+      const collection = macroItems(arg(call, 0, "collection"));
+      if (collection === undefined) return EVALUATION_ERROR;
       const body = lambdaOf(call);
       const filtered: unknown[] = [];
       for (const item of collection) {
@@ -398,8 +590,8 @@ const OPERATORS: Record<string, Operator> = {
   },
   map: {
     evaluate: (call) => {
-      const collection = arg(call, 0, "collection");
-      if (!Array.isArray(collection)) return EVALUATION_ERROR;
+      const collection = macroItems(arg(call, 0, "collection"));
+      if (collection === undefined) return EVALUATION_ERROR;
       const body = lambdaOf(call);
       const mapped: unknown[] = [];
       for (const item of collection) {
@@ -422,7 +614,7 @@ const OPERATORS: Record<string, Operator> = {
   sub: { evaluate: arithmetic },
   mult: { evaluate: arithmetic },
   div: { evaluate: arithmetic, validate: validateDivision },
-  mod: { evaluate: arithmetic },
+  mod: { evaluate: arithmetic, validate: validateModulo },
 
   index: {
     evaluate: (call) => {
@@ -449,7 +641,9 @@ const OPERATORS: Record<string, Operator> = {
         : isValue(fieldOperand) && typeof fieldOperand.value === "string"
           ? fieldOperand.value
           : undefined;
-      return field ? getNestedValue(target, field) : EVALUATION_ERROR;
+      return field
+        ? readPath(getNestedValue(target, field), call.scope)
+        : EVALUATION_ERROR;
     },
   },
   size: {
@@ -463,7 +657,15 @@ const OPERATORS: Record<string, Operator> = {
   },
 
   // Each conversion maps an evaluation error to itself, so an error operand needs no special case.
-  string: { evaluate: (call) => convertToString(arg(call, 0, "operand")) },
+  string: {
+    // An int renders "1000000" where a double of the same value renders "1e+06".
+    evaluate: (call) =>
+      convertToString(
+        arg(call, 0, "operand"),
+        numericTypeOf(operandAt(call.operands, 0, "string operand")) === "int",
+      ),
+    validate: validateStringConversion,
+  },
   double: { evaluate: (call) => convertToDouble(arg(call, 0, "operand")) },
   int: { evaluate: (call) => convertToInt(arg(call, 0, "operand")) },
   timestamp: {

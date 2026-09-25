@@ -180,6 +180,9 @@ final class Corpus {
             Map.entry("request.resource.attr.mainCategory.subNames", "mainCategory.subNames"),
             // The corpus's to-one relation, indexed as plain objects because
             // Elasticsearch has no join.
+            // The whole parent, an object in the index: only the `collection/exists/*map-keys`
+            // cases read it, as a CEL map whose keys a macro ranges over.
+            Map.entry("request.resource.attr.parent", "parent"),
             Map.entry("request.resource.attr.parent.aBool", "parent.aBool"),
             Map.entry("request.resource.attr.parent.aString", "parent.aString"),
             Map.entry("request.resource.attr.parent.aNumber", "parent.aNumber"),

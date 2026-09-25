@@ -110,11 +110,17 @@ tasks.test {
 
     inputs.property("adapterTestOrm", adapterTestOrm)
 
-    // AdversarialConformanceTest's database: h2 (default), postgres or mysql. The MySQL collation
-    // can be overridden to reproduce the over-grant; see README.md "Database collation requirements".
+    // AdversarialConformanceTest's database: h2 (default), postgres or mysql. The PostgreSQL
+    // initdb arguments and the MySQL collation can be overridden to reproduce the over-grant; see
+    // README.md "Database collation requirements".
     val adapterTestDb = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
     if (adapterTestDb != null) {
         systemProperty("adapter.test.db", adapterTestDb)
+    }
+    val postgresInitdbArgs = System.getProperty("adapter.test.postgres.initdbArgs")
+        ?: System.getenv("ADAPTER_TEST_POSTGRES_INITDB_ARGS")
+    if (postgresInitdbArgs != null) {
+        systemProperty("adapter.test.postgres.initdbArgs", postgresInitdbArgs)
     }
     val mysqlCollation = System.getProperty("adapter.test.mysql.collation")
         ?: System.getenv("ADAPTER_TEST_MYSQL_COLLATION")

@@ -41,6 +41,13 @@ module Cerbos
         ArelSupport.function(mysql? ? "CHAR_LENGTH" : "LENGTH", [expression])
       end
 
+      # Integer division truncating toward zero, as CEL's `int / int` does. SQLite's and
+      # PostgreSQL's `/` over two integers already truncates; MySQL's `/` gives a decimal, and
+      # its `DIV` truncates.
+      def int_divide(left, right)
+        ArelSupport.infix(mysql? ? "DIV" : "/", left, right)
+      end
+
       # The CAST type for an IEEE-754 double. Not PostgreSQL `numeric`: it is exact decimal, so
       # fractional arithmetic would not match CEL doubles.
       def double_type
@@ -51,9 +58,10 @@ module Cerbos
         end
       end
 
-      # The CAST type for a string. MySQL cannot CAST to `TEXT`.
+      # The CAST type for a string. MySQL casts only to `CHAR`: `TEXT` and `VARCHAR` are
+      # syntax errors there.
       def text_type
-        mysql? ? "VARCHAR" : "TEXT"
+        mysql? ? "CHAR" : "TEXT"
       end
     end
   end

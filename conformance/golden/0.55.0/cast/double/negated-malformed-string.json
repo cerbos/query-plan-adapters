@@ -1,6 +1,7 @@
 {
   "allowed": [
-    "h4"
+    "h4",
+    "i5"
   ],
   "degenerateReason": null,
   "id": "cast/double/negated-malformed-string",

@@ -29,6 +29,29 @@ const MYSQL_IMAGE =
   "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
 
 /**
+ * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
+ *
+ * CEL orders strings by code point, and `<`, `<=`, `>` and `>=` on a text column follow the
+ * column's collation. PostgreSQL collations are deterministic, so `=` is byte-exact under any of
+ * them, but a linguistic one orders case, accents and punctuation below the letter: under glibc's
+ * `en_US.utf8` `'One' > 'a'` is TRUE, which over-grants
+ * `comparison/greater-than/string-code-point-order` (cerbos/query-plan-adapters#489). `"C"` orders
+ * by byte, which for UTF-8 is code point order. Prisma's migration engine emits no `COLLATE` on
+ * PostgreSQL, so every column inherits the database's.
+ *
+ * Stated rather than inherited: the Alpine image reports `en_US.utf8` without it, and orders by
+ * byte only because musl's `strcoll` does. The same database on a glibc image, or on a managed
+ * service, orders linguistically.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust:
+ * `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US"
+ * npm run test:adversarial:postgres:v7` gives the pinned image ICU's linguistic order, which musl
+ * cannot, and fails both `string-code-point-order` cases. A measurement escape hatch, not a CI leg.
+ */
+const POSTGRES_INITDB_ARGS =
+  process.env.ADAPTER_TEST_POSTGRES_INITDB_ARGS ?? "--lc-collate=C";
+
+/**
  * The collation the MySQL leg runs the whole corpus under.
  *
  * CEL string equality is byte-exact. MySQL's own default `utf8mb4_0900_ai_ci` is case- AND
@@ -114,7 +137,9 @@ const CONTAINER_STORES = {
   postgres: {
     async start() {
       const { PostgreSqlContainer } = require("@testcontainers/postgresql");
-      return new PostgreSqlContainer(POSTGRES_IMAGE).start();
+      return new PostgreSqlContainer(POSTGRES_IMAGE)
+        .withEnvironment({ POSTGRES_INITDB_ARGS })
+        .start();
     },
     schemas: {
       6: "prisma/schema.adversarial.pg.v6.prisma",

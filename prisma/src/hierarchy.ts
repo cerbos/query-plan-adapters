@@ -59,22 +59,10 @@ function resolveHierarchy(
       throw new UnsupportedQueryPlanError("hierarchy delimiter must be a value");
     }
     const delimiter = String(delimOperand.value);
-    if (delimiter === "") {
-      // Cerbos splits a path on an empty delimiter into one segment per CHARACTER, so the
-      // relation becomes a strict string-prefix test. The descendant lowering here is
-      // `startsWith(prefix + delimiter)`, which with an empty delimiter matches the path
-      // ITSELF (never its own descendant) as well as every string extension of it — the
-      // corpus's hierarchy/descendent-of/empty-delimiter case over-granted a2 that way — so the
-      // shape is refused rather than emitted with the wrong boundary.
-      throw new UnsupportedQueryPlanError(
-        "hierarchy delimiter must be a non-empty string: an empty delimiter splits the path per character, and the startsWith prefix this adapter emits would also match the path itself"
-      );
-    }
-
     if (isValueOperand(strOperand)) {
       return {
         type: "constant",
-        segments: String(strOperand.value).split(delimiter),
+        segments: splitPath(String(strOperand.value), delimiter),
       };
     }
     if (isNamedOperand(strOperand)) {
@@ -117,6 +105,14 @@ function resolveHierarchy(
   }
 
   throw new UnsupportedQueryPlanError("hierarchy requires 1 or 2 operands");
+}
+
+/**
+ * Cerbos splits a path with Go's `strings.Split`: an empty delimiter yields one segment per code
+ * point, and an empty path then has no segments at all.
+ */
+function splitPath(path: string, delimiter: string): string[] {
+  return delimiter === "" ? Array.from(path) : path.split(delimiter);
 }
 
 function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
@@ -313,6 +309,10 @@ function extractHierarchyOperands(
 }
 
 function getStrictPrefixes(segments: string[], delimiter: string): string[] {
+  if (delimiter === "") {
+    // Per code point, the empty path is itself a (zero-segment) strict prefix.
+    return segments.map((_, length) => segments.slice(0, length).join(""));
+  }
   if (segments.length <= 1) return [];
   const prefixes: string[] = [];
   let current = segments[0]!;
@@ -342,6 +342,13 @@ export function handleAncestorDescendantOperator(
     assertStringField(descendant.fieldRef, operatorName);
 
   if (ancestor.type === "constant" && descendant.type === "field") {
+    if (descendant.delimiter === "") {
+      // Per code point, a descendant is the ancestor followed by at least one more character:
+      // LIKE's `_`, which Prisma leaves unescaped, says exactly that.
+      const path = ancestor.segments.join("");
+      assertLikeSafePrefix(path);
+      return buildFieldFilter(descendant.fieldRef, "startsWith", `${path}_`);
+    }
     const prefix =
       ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
     assertLikeSafePrefix(prefix);

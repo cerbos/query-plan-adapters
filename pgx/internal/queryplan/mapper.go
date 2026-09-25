@@ -160,9 +160,10 @@ const (
 	NullConventionExplicit
 	// NullConventionOmitted means a NULL column sends no attribute, so CEL raises a
 	// missing-attribute error and check() denies. UNKNOWN already excludes the row under both
-	// polarities, so the rendering is unchanged; what the declaration adds is the same
-	// null-operand rejection Options.NullRepresentation = NullOmitted performs, scoped to this
-	// attribute.
+	// polarities, so the rendering is unchanged. A null operand compared with `==` or `!=`
+	// renders as UNKNOWN for a NULL column and a definite answer otherwise (see
+	// omittedNullComparison); every other null operand is rejected, as
+	// Options.NullRepresentation = NullOmitted rejects them, scoped to this attribute.
 	NullConventionOmitted
 )
 
@@ -282,6 +283,14 @@ func requireRelation(m Mapper, reference string) (Entry, error) {
 	entry, ok := m.Resolve(reference)
 	if !ok {
 		return Entry{}, fmt.Errorf("no mapping for collection attribute %q", reference)
+	}
+	if entry.Relation == nil && entry.ScalarRelation != nil {
+		return Entry{}, fmt.Errorf(
+			"attribute %q is a to-one relation, one joined row, but is used as a collection: "+
+				"a CEL macro over a map ranges over its keys, and SQL has no form for the set of "+
+				"a row's present columns",
+			reference,
+		)
 	}
 	if entry.Relation == nil {
 		return Entry{}, fmt.Errorf(

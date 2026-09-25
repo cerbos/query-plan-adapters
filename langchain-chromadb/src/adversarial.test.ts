@@ -41,9 +41,9 @@ const BASE_EMBEDDING = [0.1, 0.2, 0.3, 0.4];
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
@@ -53,6 +53,8 @@ interface DerivedEntry {
   aDouble: number | null;
   createdAt: string | null;
   updatedAt: string | null;
+  createdBy: string | null;
+  scope: string | null;
 }
 
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
@@ -77,8 +79,10 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 //
 // Chroma metadata holds only finite numbers, strings and booleans. A NULL column therefore writes
 // no key at all, which is the missing-attribute convention `resources.json` records for it. List
-// and object attributes (`tags`, `aNumberList`, `categories`, …) are not stored: every shape that
-// reads one is refused during translation, so no filter could name them.
+// and object attributes (`tags`, `aNumberList`, `categories`, …) are not stored (#475), and neither
+// are `owner` and `coOwner`, which `resources.json` sends as an explicit null on some rows — a null
+// Chroma cannot hold. The mapping names none of them, so every shape that reads one is refused
+// during translation: by the pushdown, and by the post-filter, which reads declared keys only.
 
 function metadataFor(seed: Seed): Metadata {
   const derived = DERIVED[seed.id];
@@ -88,16 +92,26 @@ function metadataFor(seed: Seed): Metadata {
   const metadata: Metadata = {
     // Chroma's `where` filters metadata only, so the id is mirrored into a key for `R.id`.
     id: seed.id,
-    aBool: seed.aBool,
-    aString: seed.aString,
-    aNumber: seed.aNumber,
-    // `obj.inner` mirrors aString in the corpus resource.
-    "obj.inner": seed.aString,
   };
-  if (seed.aOptionalString !== null) {
-    metadata["aOptionalString"] = seed.aOptionalString;
+  // `obj.inner` mirrors aString in the corpus resource. Every scalar can be NULL (seeds j1, j2 and
+  // j3 each leave one of the first three out), and a NULL column writes no key.
+  const scalars: [string, string | number | boolean | null][] = [
+    ["aBool", seed.aBool],
+    ["aString", seed.aString],
+    ["aNumber", seed.aNumber],
+    ["obj.inner", seed.aString],
+    ["aOptionalString", seed.aOptionalString],
+  ];
+  for (const [key, value] of scalars) {
+    if (value !== null) metadata[key] = value;
   }
-  for (const key of ["aDouble", "createdAt", "updatedAt"] as const) {
+  for (const key of [
+    "aDouble",
+    "createdAt",
+    "updatedAt",
+    "createdBy",
+    "scope",
+  ] as const) {
     const value = derived[key];
     if (value !== null) metadata[key] = value;
   }
@@ -110,11 +124,14 @@ function metadataFor(seed: Seed): Metadata {
   ];
   for (const [prefix, level] of levels) {
     if (level === undefined) continue;
-    metadata[`${prefix}.aBool`] = level.aBool;
-    metadata[`${prefix}.aString`] = level.aString;
-    metadata[`${prefix}.aNumber`] = level.aNumber;
-    if (level.aOptionalString !== null) {
-      metadata[`${prefix}.aOptionalString`] = level.aOptionalString;
+    for (const key of [
+      "aBool",
+      "aString",
+      "aNumber",
+      "aOptionalString",
+    ] as const) {
+      const value = level[key];
+      if (value !== null) metadata[`${prefix}.${key}`] = value;
     }
   }
   return metadata;
@@ -149,16 +166,33 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 let collection: Collection | undefined;
 
-async function selectAllowed(golden: Golden): Promise<string[]> {
-  const result = queryPlanToChromaDB({
+/**
+ * Every case is translated with `allowPostFilter: true`, as the convex harness does: the harness
+ * uses one call for every case, and the opted-in call is the one that can answer the most of them.
+ * The default-off behaviour is a caller-supplied argument the corpus cannot vary, so it is pinned
+ * in `translator.test.ts` instead.
+ */
+function translate(golden: Golden) {
+  return queryPlanToChromaDB({
     queryPlan: planOf(golden),
     fieldNameMapper: FIELD_NAME_MAPPER,
+    allowPostFilter: true,
   });
+}
+
+async function selectAllowed(golden: Golden): Promise<string[]> {
+  const result = translate(golden);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   const rows = await collection!.get({
     where: result.kind === PlanKind.CONDITIONAL ? result.filters : undefined,
+    include: ["metadatas"],
   });
-  return [...rows.ids].sort();
+  const { postFilter } = result;
+  // The post-filter is part of the authorization predicate: it is applied to every record the
+  // `where` returned, exactly as a caller must.
+  return rows.ids
+    .filter((_id, index) => !postFilter || postFilter(rows.metadatas[index]))
+    .sort();
 }
 
 const TAGS = pdpTags();
@@ -251,12 +285,7 @@ describe("conformance (chromadb)", () => {
       async (_id, golden) => {
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
-          expect(() =>
-            queryPlanToChromaDB({
-              queryPlan: planOf(golden),
-              fieldNameMapper: FIELD_NAME_MAPPER,
-            }),
-          ).toThrow(UnsupportedOperatorError);
+          expect(() => translate(golden)).toThrow(UnsupportedOperatorError);
           return;
         }
         const ids = await selectAllowed(golden);

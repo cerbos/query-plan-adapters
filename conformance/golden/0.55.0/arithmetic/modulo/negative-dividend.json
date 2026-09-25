@@ -11,7 +11,13 @@
     "g1",
     "h2",
     "h5",
-    "h7"
+    "h7",
+    "i2",
+    "i4",
+    "i6",
+    "i8",
+    "j1",
+    "j3"
   ],
   "degenerateReason": null,
   "id": "arithmetic/modulo/negative-dividend",

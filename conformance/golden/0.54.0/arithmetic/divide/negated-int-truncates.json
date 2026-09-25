@@ -1,0 +1,107 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "a5",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j3"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/divide/negated-int-truncates",
+  "intent": "Negated int division (!(int(aNumber) / 2 == 1)).",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      },
+                      {
+                        "value": 2
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/divide/negated-int-truncates",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(int(R.attr.aNumber) / 2 == 1)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Dividing as doubles makes int(3) / 2 equal 1.5, so the negation over-grants a6, which CEL denies; a missing aNumber (j2) stays denied."
+}

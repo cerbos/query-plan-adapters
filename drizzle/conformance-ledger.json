@@ -1,13 +1,17 @@
 {
   "adapter": "drizzle",
   "cases": {
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "A division by a double column that may hold -0.0: CEL divides a positive number by -0.0 to -Infinity and by 0.0 to +Infinity, and `> 0.0` tells them apart, but SQLite stores -0.0 as 0 and no SQL dialect has a portable way to read the sign of a zero. The adapter refuses a zero-capable column denominator whenever the two infinities answer the comparison differently."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards."
     },
-    "arithmetic/modulo/negative-dividend": {
+    "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
-      "reason": "int() is required to give `%` an integer operand and has no faithful SQL lowering — CAST rounds where CEL truncates toward zero. The cast is refused before the modulo operator is reached, exactly as for cast/int/negative-fraction."
+      "reason": "Cannot translate arithmetic over a division whose denominator may be zero when the surrounding expression adds a column: CEL carries NaN through `* 0.0 + aDouble`, but SQL has no NaN or Infinity to carry it through (SQLite answers a zero division NULL, PostgreSQL raises), so the non-finite arms can only be folded against constants."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -17,29 +21,49 @@
       "status": "unsupported",
       "reason": "Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
-    "cast/int/malformed-string": {
+    "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
-      "reason": "int() cast over a string column — CEL reads a whole string or raises, SQL reads the leading digits: Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+      "reason": "int() over a string column compared with a constant at or beyond 2^53: PostgreSQL and MySQL compare a bigint with a double by converting the bigint, so 2^53 + 1 would equal 2^53. The adapter lowers the checked int() only against a constant below 2^53 in magnitude and refuses the rest."
     },
-    "cast/int/negated-malformed-string": {
+    "cast/string/from-int-beyond-double-precision": {
       "status": "unsupported",
-      "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+      "reason": "string() over int(): string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. A CAST would render the number in the store's own format, and no cast target is shared by SQLite, PostgreSQL and MySQL (TEXT is a syntax error on MySQL, CHAR is character(1) on PostgreSQL), so string() of an int() conversion is refused."
     },
-    "cast/int/negative-fraction": {
+    "cast/string/from-int-past-exponent-threshold": {
       "status": "unsupported",
-      "reason": "int() cast over a numeric column — CEL truncates toward zero, PostgreSQL and MySQL CAST round to nearest: Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+      "reason": "Same refusal as `cast/string/from-int-beyond-double-precision`: string() of an int() conversion has no CAST-free lowering, and CEL renders an int in plain decimal (\"1000000\") where it renders the double it came from as \"1e+06\", so the number-column inversion does not apply."
     },
-    "cast/string/from-double": {
+    "cast/string/from-integral-ternary": {
       "status": "unsupported",
-      "reason": "No SQL CAST TARGET spells string() on every store this adapter is executed against. TEXT and VARCHAR are both syntax errors on MySQL (ERROR 1064 on MySQL 8.4), which spells the conversion CHAR; CHAR is character(1) on PostgreSQL, where CAST(a_double AS CHAR) is '-' for -0.6 and the filter silently matches nothing. The adapter does not know its dialect by design — it renders through whichever Drizzle dialect the caller hands the query to, which is what lets one translation serve all three stores — so it cannot pick per store the way ent's WithDialect-driven render.go does. Reclassified from oracle-compared when the MySQL leg first executed the emitted cast (cerbos/query-plan-adapters#340): it was proved on SQLite and PostgreSQL only, and the numeric rendering claim had been measured against two of the three pinned images."
+      "reason": "string() over a ternary: string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. The ternary's int literals reach the plan as bare numbers, and CEL renders the int 1000000 as \"1000000\" where the double renders \"1e+06\", so there is no column to invert and no CAST that spells either rendering on SQLite, PostgreSQL and MySQL."
     },
-    "cast/string/negated-explicit-null": {
+    "cast/string/from-negative-zero-double": {
       "status": "unsupported",
-      "reason": "Cannot translate string(): no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where the cast would silently match nothing. The adapter does not know its dialect by design, so it rejects the shape instead of emitting a filter that is correct on one store only."
+      "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
     },
-    "cast/string/negated-missing-attribute": {
+    "cast/string/from-ternary-with-int-branch": {
       "status": "unsupported",
-      "reason": "Cannot translate string(): no SQL CAST target spells it on every store this adapter supports — TEXT and VARCHAR are syntax errors on MySQL, which spells it CHAR, and CHAR is character(1) on PostgreSQL, where the cast would silently match nothing. The adapter does not know its dialect by design, so it rejects the shape instead of emitting a filter that is correct on one store only."
+      "reason": "Same refusal as `cast/string/from-integral-ternary`: string() over a ternary, here of an int() conversion and an int literal, has no CAST-free lowering."
+    },
+    "cast/string/negated-from-boolean-expression": {
+      "status": "unsupported",
+      "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A boolean-valued comparison is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the comparison renders 1/0 on SQLite and MySQL, where CEL says \"true\"."
+    },
+    "cast/string/negated-from-boolean-ternary": {
+      "status": "unsupported",
+      "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A ternary is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the CASE renders a boolean arm as 1/0 on SQLite and MySQL, where CEL says \"true\"."
+    },
+    "cast/string/negated-from-boolean-through-relation": {
+      "status": "unsupported",
+      "reason": "The to-one parent is a relation, which this adapter reads only as a relation filter (an EXISTS over the related row), never as a scalar value expression, so string() over parent.aBool has no operand to convert."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-integral-ternary`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -49,213 +73,37 @@
       "status": "unsupported",
       "reason": "'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "'except' lambda operand must be a lambda expression."
-    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Unsupported value-expression operator: except."
     },
-    "collection/except/size-of-difference": {
+    "collection/exists/map-keys": {
       "status": "unsupported",
-      "reason": "'size' operator requires a field reference or filter expression."
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
     },
-    "collection/filter/as-conjunct": {
+    "collection/exists/negated-map-keys": {
       "status": "unsupported",
-      "reason": "filter() as a CONJUNCT rather than the whole condition — the same non-boolean, one level down: Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. Only size(filter(...)) has a boolean meaning."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() used as the whole condition — it returns a list, not a boolean: Cannot translate 'filter' as a condition: filter() returns a list, not a boolean. Only size(filter(...)) has a boolean meaning."
+      "reason": "Same refusal as `collection/exists/map-keys`: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate."
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
       "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
     },
-    "collection/index/fractional-position": {
-      "status": "unsupported",
-      "reason": "Declared indexed storage only accepts constant non-negative 32-bit integer positions; this position is invalid and must not be coerced into a valid array access."
-    },
-    "collection/index/negative-position": {
-      "status": "unsupported",
-      "reason": "Declared indexed storage only accepts constant non-negative 32-bit integer positions; this position is invalid and must not be coerced into a valid array access."
-    },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() used as the whole condition — it returns a list, not a boolean: Unsupported operator: map."
-    },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "map() translates only inside hasIntersection, where the projection becomes the inner column of an EXISTS. Comparing the ordered projection itself to a literal list has no SQL form the adapter builds."
     },
-    "comparison/equals/whole-list-literal": {
+    "membership/in/map-attribute-keys": {
       "status": "unsupported",
-      "reason": "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value."
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A comparison against the related row's columns tests values, not attribute names, so `in` over a to-one relation is refused."
     },
-    "comparison/not-equals/whole-list-literal": {
+    "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
-      "reason": "Whole-list comparison is not supported: a relation mapping exposes element rows, not an ordered list value."
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Cerbos splits a path on an empty delimiter into one segment per character, so the relation is a strict string-prefix test; the adapter lowers descendentOf as `LIKE prefix || delimiter || '%'`, which with an empty delimiter also matches the path itself (a2, never its own descendant). The empty delimiter is refused when the hierarchy operand is parsed, before that LIKE is built."
-    },
-    "hierarchy/overlaps/path-built-from-identifier": {
-      "status": "unsupported",
-      "reason": "The descendant path is CONSTRUCTED by list() from a constant segment and the primary key rather than read from a column, and the adapter's hierarchy support resolves a segmented path only from a mapped column or a plan constant."
-    },
-    "hierarchy/overlaps/path-built-from-list-value-first": {
-      "status": "unsupported",
-      "reason": "Segmented hierarchy expressions are not supported by the Drizzle adapter."
-    },
-    "identifier/equals/concatenation": {
-      "status": "unsupported",
-      "reason": "CEL's + over strings has no dialect-independent SQL spelling: || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT(). The numeric + the adapter emits for arithmetic is silently wrong rather than a syntax error — SQLite and MySQL coerce 'prefix:' to 0, so the comparison matched nothing."
-    },
-    "identifier/equals/concatenation-value-first": {
-      "status": "unsupported",
-      "reason": "Same missing dialect-independent concatenation as identifier/equals/concatenation, in value-first form."
-    },
-    "null/equals/null-literal-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "aOptionalString is declared nullAttributeRepresentation \"omitted\": a NULL column sends no attribute, so CEL denies `== null` with a missing-attribute error while an IS NULL filter would return those rows. The adapter refuses the null operand."
-    },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "status": "unsupported",
-      "reason": "One side of the field-to-field comparison is declared explicit-null (coOwner) and the other follows the omitted convention: the declared side needs a definite answer for its NULL, the omitted side needs UNKNOWN, and no single SQL predicate is both, so the adapter refuses mixed conventions across one comparison."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "'size' operator requires a field reference or filter expression."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "'exists_one' over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Collection operand must be a field reference."
-    },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "Comparison operator missing value operand."
-    },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "matches() regex: 'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: matches."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "matches() with an anchored top-level alternation (^o|e$): 'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "'matches' is not supported because SQL regex dialects do not guarantee CEL/RE2 semantics."
-    },
-    "string/concatenate/field-to-field": {
-      "status": "unsupported",
-      "reason": "Same missing dialect-independent concatenation, between two columns rather than against a constant. This adapter refuses every string `+`, so the two-column case needs no extra type information to be rejected."
-    },
-    "string/concatenate/negated-unsatisfiable-equals": {
-      "status": "unsupported",
-      "reason": "Cannot translate string concatenation: CEL's + over strings has no dialect-independent SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would coerce the operands to 0 rather than fail."
-    },
-    "string/concatenate/unsatisfiable-not-equals": {
-      "status": "unsupported",
-      "reason": "Cannot translate string concatenation: CEL's + over strings has no dialect-independent SQL spelling — || concatenates on SQLite and PostgreSQL but is logical OR on MySQL, which spells it CONCAT() — and the numeric + this adapter emits for arithmetic would coerce the operands to 0 rather than fail."
+      "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."
-    },
-    "timestamp/greater-than/relative-window-value-first": {
-      "status": "unsupported",
-      "reason": "Same sub-millisecond now() limitation in value-first form."
-    },
-    "timestamp/less-than/relative-window": {
-      "status": "unsupported",
-      "reason": "The planner emits a sub-millisecond now() literal that the documented Drizzle timestamp contract cannot represent without changing the CEL instant."
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "'hasIntersection' requires a literal list as one of its operands."
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "status": "unsupported",
-      "reason": "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "Comparison operator missing value operand."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: struct."
     }
   }
 }

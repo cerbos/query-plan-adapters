@@ -39,14 +39,19 @@ final class Refusals {
         return new IllegalStateException(message);
     }
 
-    /** Cerbos {@code except(list, list)} is a list difference, which JPA Criteria cannot express. */
+    /**
+     * Cerbos {@code except(list, list)} is a list difference, which has a Criteria meaning only
+     * under {@code size()} or compared with a list of at most one element.
+     */
     static UnsupportedPlanShapeException exceptUnsupported() {
         return unsupported(
-                "except is not supported: Cerbos except(list, list) computes a list "
-                        + "difference, which has no JPA Criteria translation. Rewrite the "
-                        + "policy with a collection macro instead — e.g. "
-                        + "size(R.attr.tags.except([\"x\"])) > 0 is equivalent to "
-                        + "R.attr.tags.exists(t, !(t in [\"x\"])).");
+                "except is not supported here: Cerbos except(list, list) computes a list "
+                        + "difference, which translates only as size(a.except(b)) with b a literal "
+                        + "list or a one-element [expr], or compared with a list of at most one "
+                        + "element. Rewrite the policy with a collection macro instead — e.g. "
+                        + "R.attr.tags.except([\"x\"]) in boolean position has no meaning, and "
+                        + "R.attr.tags.exists(t, !(t in [\"x\"])) is what a non-empty "
+                        + "difference means.");
     }
 
     /** A plan variable the mapping does not name, or names only behind a relation chain. */

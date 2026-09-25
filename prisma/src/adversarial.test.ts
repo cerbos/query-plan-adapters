@@ -45,9 +45,9 @@ interface Tag {
 
 interface Seed {
   id: string;
-  aBool: boolean;
-  aString: string;
-  aNumber: number;
+  aBool: boolean | null;
+  aString: string | null;
+  aNumber: number | null;
   aOptionalString: string | null;
   aNumberList: (number | null)[];
   aBoolList: (boolean | null)[];
@@ -151,18 +151,22 @@ async function seedStore(): Promise<void> {
                 },
               },
             }),
+        // One category holding every subcategory name (conformance/README.md, "The dataset").
         categories: {
-          create: seed.subCategoryNames.map((subName) => ({
-            name: "business",
-            subCategories: {
-              create: [
-                {
-                  name: subName,
-                  labels: { create: derived.labels.map((name) => ({ name })) },
-                },
-              ],
-            },
-          })),
+          create:
+            seed.subCategoryNames.length === 0
+              ? []
+              : [
+                  {
+                    name: "business",
+                    subCategories: {
+                      create: seed.subCategoryNames.map((subName) => ({
+                        name: subName,
+                        labels: { create: derived.labels.map((name) => ({ name })) },
+                      })),
+                    },
+                  },
+                ],
         },
       },
     });
@@ -465,7 +469,7 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
 
     // A conjunction condition needs De Morgan: CEL's `&&` absorbs an erroring operand when the
     // other is FALSE, so a parentless row with aBool=false DOES select the else-branch.
-    const aBoolFalse = SEEDS.filter((seed) => !seed.aBool).map((seed) => seed.id);
+    const aBoolFalse = SEEDS.filter((seed) => seed.aBool === false).map((seed) => seed.id);
     expect(aBoolFalse.length).toBeGreaterThan(0);
     expect(
       await synthetic(

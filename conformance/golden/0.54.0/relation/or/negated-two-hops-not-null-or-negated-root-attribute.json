@@ -1,0 +1,78 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/or/negated-two-hops-not-null-or-negated-root-attribute",
+  "intent": "!(parent.inner.aOptionalString != null) || !aBool, two levels out.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.inner.aOptionalString"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/or/negated-two-hops-not-null-or-negated-root-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.parent.inner.aOptionalString != null) || !R.attr.aBool"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only the aBool-false rows are allowed; b1 (NULL inner leaf), the aBool-true rows with no inner and the parentless ones are errors, and a two-valued IS NULL admits them."
+}

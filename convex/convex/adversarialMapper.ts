@@ -29,9 +29,10 @@ export const MAPPER: Record<string, MapperConfig> = {
   // never sees this name. It maps to the corpus id field rather than Convex's own `_id`, which
   // holds a generated document handle unrelated to the corpus.
   "request.resource.id": { field: "id" },
-  "request.resource.attr.aBool": { field: "aBool" },
-  "request.resource.attr.aString": { field: "aString" },
-  "request.resource.attr.aNumber": { field: "aNumber" },
+  // Seeds j1, j2 and j3 each leave one of these three absent (the omitted convention).
+  "request.resource.attr.aBool": { field: "aBool", nullable: true },
+  "request.resource.attr.aString": { field: "aString", nullable: true },
+  "request.resource.attr.aNumber": { field: "aNumber", nullable: true },
   "request.resource.attr.aDouble": { field: "aDouble", nullable: true },
   "request.resource.attr.aOptionalString": {
     field: "aOptionalString",
@@ -50,7 +51,10 @@ export const MAPPER: Record<string, MapperConfig> = {
   // Every seed carries both lists, most of them empty, so neither path is ever absent.
   "request.resource.attr.aNumberList": { field: "aNumberList" },
   "request.resource.attr.aBoolList": { field: "aBoolList" },
-  "request.resource.attr.obj.inner": { field: "obj.inner" },
+  "request.resource.attr.obj.inner": {
+    field: "obj.inner",
+    nullable: true,
+  },
   "request.resource.attr.tags": { field: "tags" },
   "request.resource.attr.categories": { field: "categories" },
   "request.resource.attr.mainCategory": {

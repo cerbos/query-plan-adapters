@@ -1,3 +1,6 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 import importlib.metadata
 
 from cerbos_sqlalchemy.collection_storage import CollectionColumn, CollectionStorage

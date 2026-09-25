@@ -1,0 +1,45 @@
+{
+  "allowed": [],
+  "degenerateReason": "aOptionalString is omitted when NULL, so a parent leaf is either a set string (== null is false) or missing (an error), and a missing parent is an error too: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/one-hop-null-literal-or-root-attribute carries the discriminating oracle.",
+  "id": "relation/equals/one-hop-null-literal",
+  "intent": "parent.aOptionalString == null through the to-one parent.",
+  "oracle": "empty",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aOptionalString"
+          },
+          {
+            "value": null
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/one-hop-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aOptionalString == null"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A two-valued IS NULL over a LEFT JOIN returns a4/a7/c1 (NULL leaf) and every parentless row, all of which CEL denies as a missing attribute."
+}

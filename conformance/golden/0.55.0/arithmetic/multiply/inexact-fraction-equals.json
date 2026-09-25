@@ -1,8 +1,8 @@
 {
   "allowed": [],
-  "degenerateReason": "3 * 0.1 is not 0.3 in IEEE double, so the equation holds for no seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds.",
+  "degenerateReason": "Neither product is exact in IEEE double, so neither equation holds for any seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds, and an algebraic solve a4.",
   "id": "arithmetic/multiply/inexact-fraction-equals",
-  "intent": "Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3).",
+  "intent": "Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3 || aDouble * 3.0 == 3.9).",
   "oracle": "empty",
   "pdp": "0.55.0",
   "plan": {
@@ -13,20 +13,50 @@
             "expression": {
               "operands": [
                 {
-                  "variable": "request.resource.attr.aNumber"
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 0.1
+                      }
+                    ],
+                    "operator": "mult"
+                  }
                 },
                 {
-                  "value": 0.1
+                  "value": 0.3
                 }
               ],
-              "operator": "mult"
+              "operator": "eq"
             }
           },
           {
-            "value": 0.3
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      },
+                      {
+                        "value": 3
+                      }
+                    ],
+                    "operator": "mult"
+                  }
+                },
+                {
+                  "value": 3.9
+                }
+              ],
+              "operator": "eq"
+            }
           }
         ],
-        "operator": "eq"
+        "operator": "or"
       }
     },
     "kind": "KIND_CONDITIONAL"
@@ -41,7 +71,7 @@
     {
       "condition": {
         "match": {
-          "expr": "R.attr.aNumber * 0.1 == 0.3"
+          "expr": "R.attr.aNumber * 0.1 == 0.3 || R.attr.aDouble * 3.0 == 3.9"
         }
       },
       "effect": "EFFECT_ALLOW",
@@ -51,5 +81,5 @@
     }
   ],
   "tier": "adversarial",
-  "trap": "3 * 0.1 is not 0.3 in IEEE doubles; exact-decimal store arithmetic (MySQL) or an algebraic solve returns the aNumber = 3 seeds."
+  "trap": "3 * 0.1 is not 0.3 and 1.3 * 3.0 is 3.9000000000000004 in IEEE doubles; exact-decimal store arithmetic (MySQL) returns the aNumber = 3 seeds, and solving to aDouble == 3.9 / 3.0, which is exactly 1.3, returns a4."
 }

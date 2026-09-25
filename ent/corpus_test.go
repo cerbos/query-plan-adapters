@@ -47,13 +47,13 @@ type Seed struct {
 	// row with no parent. See conformance/README.md, "The dataset".
 	ParentSeedID     *string    `json:"parentSeedId"` //nolint:tagliatelle // The corpus spells it parentSeedId; Go's ID suffix is not the JSON name.
 	ID               string     `json:"id"`
-	AString          string     `json:"aString"`
+	AString          *string    `json:"aString"`
 	Tags             []Tag      `json:"tags"`
 	SubCategoryNames []string   `json:"subCategoryNames"`
 	ANumberList      []*float64 `json:"aNumberList"`
 	ABoolList        []*bool    `json:"aBoolList"`
-	ANumber          int        `json:"aNumber"`
-	ABool            bool       `json:"aBool"`
+	ANumber          *int       `json:"aNumber"`
+	ABool            *bool      `json:"aBool"`
 }
 
 // Derived is one seed's entry in conformance/derived-fields.json. A nil value is a NULL column; a nil
@@ -259,7 +259,8 @@ func (c *Corpus) parentSeedOf(s *Seed) *Seed {
 
 // Each seed owns its own category graph and its own parent chain rows, so no filter can match
 // through another row's data.
-func categoryID(s Seed, i int) string    { return fmt.Sprintf("%s-cat%d", s.ID, i) }
+// A seed owns one category, holding every subcategory name.
+func categoryID(s Seed) string           { return s.ID + "-cat" }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
 func parentID(s Seed) string             { return s.ID + "-parent" }
 func innerID(s Seed) string              { return s.ID + "-parent-inner" }

@@ -68,8 +68,11 @@ final class SizeTranslator {
         }
     }
 
-    /** The variable {@code size()} is taken of, plus the lambda for {@code size(filter(...))}. */
-    private record SizeArgument(String variable, ParsedLambda filter) {
+    /**
+     * The variable {@code size()} is taken of, plus the lambda for {@code size(filter(...))};
+     * for a filter over a literal list, the list in place of the variable.
+     */
+    private record SizeArgument(String variable, ParsedLambda filter, Value literal) {
 
         static SizeArgument parse(PlanResourcesFilter.Expression sizeExpr) {
             List<Operand> sizeOps = sizeExpr.getOperandsList();
@@ -80,7 +83,7 @@ final class SizeTranslator {
             }
             Operand arg = sizeOps.get(0);
             if (arg.getNodeCase() == Operand.NodeCase.VARIABLE) {
-                return new SizeArgument(arg.getVariable(), null);
+                return new SizeArgument(arg.getVariable(), null, null);
             }
             String argOperator = arg.getNodeCase() == Operand.NodeCase.EXPRESSION
                     ? arg.getExpression().getOperator() : null;
@@ -89,25 +92,77 @@ final class SizeTranslator {
                 if (filterOps.size() != 2) {
                     throw Refusals.malformed("Unsupported size(filter(...)) expression");
                 }
-                if (filterOps.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+                Operand collection = filterOps.get(0);
+                boolean literal = collection.getNodeCase() == Operand.NodeCase.VALUE;
+                if (!literal && collection.getNodeCase() != Operand.NodeCase.VARIABLE) {
                     // filter() over a computed collection: legal CEL with no join chain.
                     throw Refusals.unsupported("Unsupported size(filter(...)) expression");
                 }
-                return new SizeArgument(filterOps.get(0).getVariable(),
+                return new SizeArgument(literal ? null : collection.getVariable(),
                         ParsedLambda.parse(filterOps.get(1),
                                 "Unsupported size(filter(...)) expression",
                                 "lambda requires exactly 2 operands",
-                                "lambda requires exactly 2 operands"));
+                                "lambda requires exactly 2 operands"),
+                        literal ? collection.getValue() : null);
             }
             if ("except".equals(argOperator)) {
-                // size(coll.except([...])): list difference has no JPA translation.
-                throw Refusals.exceptUnsupported();
+                return exceptAsFilter(arg.getExpression());
             }
             // A computed collection, e.g. a map() projection or a literal list.
             throw Refusals.unsupported(
                     "Unsupported size() expression: size() argument must be a collection "
                             + "attribute or filter(...), got " + Refusals.describeOperand(arg));
         }
+    }
+
+    /** A lambda variable no plan names, for the element of a rewritten {@code except}. */
+    private static final String EXCEPT_ELEMENT = "__cerbos_except_element";
+
+    /**
+     * {@code a.except(b)} as {@code a.filter(x, !(x in b))}: Cerbos keeps each element of
+     * {@code a} that {@code b} does not contain, in order and with duplicates. {@code b} is a
+     * literal list, or a one-element {@code [expr]}, whose membership is {@code x == expr}; a
+     * longer computed list is refused, since one erroring element must fail the whole list.
+     */
+    private static SizeArgument exceptAsFilter(PlanResourcesFilter.Expression except) {
+        ParsedLambda keep = exceptKeeps(except);
+        Operand collection = except.getOperands(0);
+        return switch (collection.getNodeCase()) {
+            case VARIABLE -> new SizeArgument(collection.getVariable(), keep, null);
+            case VALUE -> new SizeArgument(null, keep, collection.getValue());
+            default -> throw Refusals.exceptUnsupported();
+        };
+    }
+
+    /** The filter lambda keeping the elements {@code a.except(b)} keeps. */
+    static ParsedLambda exceptKeeps(PlanResourcesFilter.Expression except) {
+        List<Operand> ops = except.getOperandsList();
+        if (ops.size() != 2) {
+            throw Refusals.malformed("except requires exactly 2 operands");
+        }
+        Operand removed = ops.get(1);
+        Operand element = Operand.newBuilder().setVariable(EXCEPT_ELEMENT).build();
+        Operand membership;
+        if (removed.getNodeCase() == Operand.NodeCase.VALUE
+                && removed.getValue().getKindCase() == Value.KindCase.LIST_VALUE) {
+            membership = expression("in", element, removed);
+        } else if (removed.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "list".equals(removed.getExpression().getOperator())
+                && removed.getExpression().getOperandsCount() == 1) {
+            membership = expression("eq", element, removed.getExpression().getOperands(0));
+        } else {
+            throw Refusals.exceptUnsupported();
+        }
+        return new ParsedLambda(expression("not", membership), EXCEPT_ELEMENT);
+    }
+
+    private static Operand expression(String operator, Operand... operands) {
+        PlanResourcesFilter.Expression.Builder e =
+                PlanResourcesFilter.Expression.newBuilder().setOperator(operator);
+        for (Operand operand : operands) {
+            e.addOperands(operand);
+        }
+        return Operand.newBuilder().setExpression(e).build();
     }
 
     /**
@@ -134,6 +189,9 @@ final class SizeTranslator {
 
         Threshold threshold = Threshold.of(op, constant);
         SizeArgument arg = SizeArgument.parse(sizeExpr);
+        if (arg.literal() != null) {
+            return literalMatchCount(arg, threshold, scope);
+        }
         Scope.Resolution resolved = scope.resolve(arg.variable());
         if (!(resolved instanceof Scope.ResolvedRelation ref)) {
             return stringLength(arg, (Scope.ResolvedScalar) resolved, threshold, scope);
@@ -261,6 +319,24 @@ final class SizeTranslator {
             }
             return compareCount(subqueries.strictMatchCountSubquery(scope, ref, bodyBuilder),
                     threshold.op(), threshold.value());
+        });
+    }
+
+    /**
+     * {@code size(filter(list, pred))} over a literal list, the planner's form for a list too
+     * long to unroll: the strict count of {@link CollectionTranslator#literalStrictCount}, NULL
+     * when any body is UNKNOWN. A decided threshold multiplies the count by zero, so it is
+     * still UNKNOWN when poisoned.
+     */
+    private Predicate literalMatchCount(SizeArgument arg, Threshold threshold, Scope scope) {
+        return walker.enterMacro("size(filter(...))", () -> {
+            Expression<Long> count = CollectionTranslator.literalStrictCount(
+                    cb, walker, arg.literal(), arg.filter(), scope);
+            if (threshold.decided() != null) {
+                Expression<Long> poison = cb.prod(count, 0L);
+                return threshold.decided() ? cb.equal(poison, 0L) : cb.notEqual(poison, 0L);
+            }
+            return compareCount(count, threshold.op(), threshold.value());
         });
     }
 

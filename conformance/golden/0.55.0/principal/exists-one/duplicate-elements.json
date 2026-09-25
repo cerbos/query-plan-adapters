@@ -1,0 +1,71 @@
+{
+  "allowed": [
+    "a9"
+  ],
+  "degenerateReason": null,
+  "id": "principal/exists-one/duplicate-elements",
+  "intent": "exists_one over a principal list that repeats an element (duplicateTeams, \"set\" twice).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "set",
+              "set",
+              "same"
+            ]
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t"
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists_one"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists-one/duplicate-elements",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.duplicateTeams.exists_one(t, t == R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "\"set\" matches twice, so exists_one is false for a1 and every other \"set\" row; only a9 \"same\" is allowed. Reading exists_one as membership over the distinct values over-grants them."
+}

@@ -35,6 +35,10 @@ public class NumberListElementEntity {
     @JoinColumn(name = "resource_id")
     private ResourceEntity resource;
 
+    /** The element's index in the list the corpus sends to check(). */
+    @Column(name = "list_position")
+    private Integer position;
+
     public NumberListElementEntity() {}
 
     public NumberListElementEntity(Double element, ResourceEntity resource) {
@@ -46,5 +50,7 @@ public class NumberListElementEntity {
     public Double getElement() { return element; }
     public void setElement(Double element) { this.element = element; }
     public ResourceEntity getResource() { return resource; }
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
     public void setResource(ResourceEntity resource) { this.resource = resource; }
 }

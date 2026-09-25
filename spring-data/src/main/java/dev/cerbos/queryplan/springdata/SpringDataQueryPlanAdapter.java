@@ -339,9 +339,10 @@ public final class SpringDataQueryPlanAdapter {
      * on another {@code Root}. The OMITTED scan always runs, because an attribute can declare
      * OMITTED when the call does not.
      */
-    private static <T> Specification<T> conditional(Operand condition, Options options) {
-        assertNoNullComparisonOperands(
-                condition, options.mapping(), options.nullAttributeRepresentation());
+    private static <T> Specification<T> conditional(Operand planned, Options options) {
+        Operand condition = PlanLiterals.fold(planned);
+        assertNoNullComparisonOperands(condition, options.mapping(),
+                options.operatorOverrides(), options.nullAttributeRepresentation());
         return (root, query, cb) ->
                 new PlanWalker(cb, options, isSelectInvocation(root, query))
                         .traverse(condition, Scope.root(root, query, options.mapping()));
@@ -357,7 +358,7 @@ public final class SpringDataQueryPlanAdapter {
      */
     private static void assertNoNullComparisonOperands(
             Operand operand, Map<String, AttributeMapping> mapper,
-            NullAttributeRepresentation fallback) {
+            Map<String, OperatorFunction> overrides, NullAttributeRepresentation fallback) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return;
         }
@@ -369,12 +370,22 @@ public final class SpringDataQueryPlanAdapter {
         NullAttributeRepresentation declared =
                 declaredForComparedAttribute(expression.getOperator(), operands, mapper);
         NullAttributeRepresentation governing = declared != null ? declared : fallback;
+        // eq/ne of an attribute declared OMITTED against a bare null is translated three-valued
+        // (never true for eq, never false for ne); an override would receive the null instead.
+        if (declared == NullAttributeRepresentation.OMITTED
+                && ("eq".equals(expression.getOperator()) || "ne".equals(expression.getOperator()))
+                && overrides.get(expression.getOperator()) == null
+                && operands.stream().anyMatch(o -> o.getNodeCase() == Operand.NodeCase.VALUE
+                        && o.getValue().getKindCase() == Value.KindCase.NULL_VALUE)) {
+            return;
+        }
         if (governing == NullAttributeRepresentation.OMITTED
                 && operands.stream().anyMatch(SpringDataQueryPlanAdapter::carriesNull)) {
             throw Refusals.nullOperandUnderOmitted(expression.getOperator());
         }
         if (declared == null) {
-            operands.forEach(child -> assertNoNullComparisonOperands(child, mapper, fallback));
+            operands.forEach(child ->
+                    assertNoNullComparisonOperands(child, mapper, overrides, fallback));
         }
     }
 

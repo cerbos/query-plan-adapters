@@ -1,67 +1,32 @@
-"""Declared collection storage: CEL ``size()``, constant indexing and literal membership.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-A collection attribute has no portable translation until the caller says how it is stored. The
-plan names ``R.attr.tags`` and nothing else, and the right SQL for ``size(R.attr.tags)`` differs
-for a JSON document, a PostgreSQL array and a related table -- so the adapter never infers it. A
-relation in particular has no positional order at all, which is why ``R.attr.tags[0]`` cannot be
-read from one. ``CollectionColumn`` is the declaration, and it is read only where a collection's
-own storage decides the answer: the operand of ``size()``, the collection an ``index`` reads, and
--- for an attribute ``attr_map`` does not map -- the collection a literal ``in`` or
-``hasIntersection`` searches. Every other operator keeps resolving the attribute through
-``attr_map``, so a caller can keep a relation marker there for its collection macros and membership
-and declare the ordered column beside it.
+"""Declared collection storage for CEL ``size()``, constant indexing and literal membership.
 
-The semantics are the drizzle adapter's (cerbos/query-plan-adapters#225), which is what makes the
-two storage names the same strings in both:
-
-- An absent element, an SQL NULL collection and a JSON value that is not an array all yield SQL
-  UNKNOWN. CEL raises an evaluation error for each, and Cerbos denies, so the row must stay
-  excluded under negation too.
-- A null ELEMENT is a value: ``[null][0] == null`` is true and ``[null][0] != "x"`` is true.
-- Comparisons keep JSON's types, as CEL's heterogeneous equality does: a string literal equals
-  only a JSON string, a number only a JSON number (compared as doubles), and a boolean only a
-  JSON boolean. SQLite and MySQL store a JSON true as 1, so reading the element back as SQL and
-  comparing it with the literal would make ``[true][0] == 1`` true; the element's JSON type is
-  checked first (the corpus's
-  ``type-mismatch/equals/boolean-list-element-against-number-literal`` and
-  ``type-mismatch/equals/number-list-element-against-boolean-literal``).
-  Membership keeps them the same way: ``"2" in [2]`` and ``"true" in [true]`` are false, and a
-  ``hasIntersection`` literal list may mix types, each element matching only its own
-  (``type-mismatch/in/string-literal-in-resource-number-list``,
-  ``type-mismatch/has-intersection/resource-number-list-against-mixed-literal-list`` and their
-  boolean mirrors).
-- ``size()`` of an empty collection is 0 and of an absent one is UNKNOWN, so ``size(x) == 0``
-  selects the empty rows and never the missing ones.
-
-The SQL is dialect-specific and ``get_query`` is never told the dialect, so each construct below
-renders itself per dialect at compile time. SQLite (JSON1) and PostgreSQL are the two it renders
-on; any other dialect raises ``CompileError`` rather than guessing. Every piece of state lives in
-a construct's clause arguments, never in a Python attribute, which is what makes
-``inherit_cache = True`` safe: the statement cache keys on exactly what the SQL depends on.
+Semantics match the drizzle adapter (#225). The SQL renders per dialect at compile time.
 """
-
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from sqlalchemy import Boolean, Integer, literal, literal_column
 from sqlalchemy import types as sqltypes
 from sqlalchemy.exc import CompileError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement
 
+from cerbos_sqlalchemy.errors import UnsupportedPlanError
+
 __all__ = ["CollectionColumn", "CollectionStorage"]
 
-#: How a declared collection is stored: a JSON array document, or a PostgreSQL native array.
+#: How a declared collection is stored: a JSON array, or a PostgreSQL native array.
 CollectionStorage = Literal["json", "pgArray"]
 
 _STORAGES = ("json", "pgArray")
 _MAX_INDEX = 2**31 - 1
 
-#: The refusal for every use of a declared element other than ``== literal`` / ``!= literal``.
+#: Refusal for any use of a declared element other than ``==``/``!=`` a literal.
 INDEXED_VALUE_REFUSAL = (
     "Indexed values support only direct eq/ne comparisons with scalar literals"
 )
@@ -69,12 +34,20 @@ INDEXED_VALUE_REFUSAL = (
 
 @dataclass(frozen=True)
 class CollectionColumn:
-    """One attribute's ordered collection, stored in one column.
+    """Declares how one collection attribute is stored, for ``size()``, index and membership.
 
-    ``storage`` is ``"json"`` for a JSON array (a PostgreSQL ``JSON``/``JSONB`` column, or a
-    SQLite JSON text column) or ``"pgArray"`` for a PostgreSQL array of text, varchar, boolean,
-    integer or smallint. The column must hold exactly the list the application sends to Cerbos,
-    null elements included: that invariant is the caller's, as it is for every mapping.
+    The adapter never infers storage, since the SQL differs for JSON, arrays and
+    relations. Other operators still resolve the attribute through ``attr_map``.
+    Supported on SQLite, PostgreSQL and MySQL 8.0.17+ (``"json"`` only).
+
+    Args:
+        column: The column holding exactly the list sent to Cerbos, nulls included.
+        storage: ``"json"`` for a JSON array (PostgreSQL ``JSON``/``JSONB``, a
+            MySQL ``JSON`` column, or a SQLite JSON text column), or ``"pgArray"`` for
+            a PostgreSQL array of text, varchar, boolean, integer or smallint.
+
+    Raises:
+        ValueError: If ``storage`` is not ``"json"`` or ``"pgArray"``.
     """
 
     column: Any
@@ -88,16 +61,15 @@ class CollectionColumn:
 
 
 def collection_size(declared: CollectionColumn) -> Any:
-    """CEL ``size()`` of a declared collection: an integer, or NULL when it is absent."""
+    """Return CEL ``size()`` of a declared collection, or NULL when it is absent."""
     return _CollectionSize(_document(declared))
 
 
 def require_index_position(position: Any) -> int:
-    """The constant position an ``index`` reads, or a refusal.
+    """Return a valid constant index position, or raise.
 
-    CEL raises for a negative or fractional index, so neither may be coerced into a valid read:
-    ``-1`` is not "the last element" and ``0.5`` is not ``0``. An integral double is accepted,
-    because the gRPC transport delivers every plan number as one.
+    CEL errors on a negative or fractional index, so neither is coerced. An integral
+    double is accepted because gRPC sends every number as one.
     """
     if (
         isinstance(position, bool)
@@ -112,12 +84,12 @@ def require_index_position(position: Any) -> int:
 
 
 def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> Any:
-    """``collection[position] == value`` for a scalar literal, keeping JSON's types.
+    """Translate ``collection[position] == value`` for a scalar literal.
 
-    The position is rendered inline, not bound. It is an integer ``require_index_position``
-    has already checked, so there is nothing to inject, and a SQL literal is part of the
-    statement cache key where a bound value is not. It is also read more than once per
-    statement, and SQLAlchemy 1.4 does not repeat a positional bind rendered twice.
+    The element's JSON type is checked first, as in CEL: ``[true][0] == 1`` is false
+    even though SQLite and MySQL store true as 1. An absent element is UNKNOWN; a
+    null element is a value. The position is inlined, not bound: it is a validated
+    int, it belongs in the cache key, and SQLAlchemy 1.4 cannot repeat a positional bind.
     """
     document = _document(declared)
     index = literal_column(str(require_index_position(position)), Integer)
@@ -136,19 +108,17 @@ def indexed_equality(declared: CollectionColumn, position: int, value: Any) -> A
     raise UnsupportedPlanError(INDEXED_VALUE_REFUSAL)
 
 
-#: The refusal for a membership in a declared collection whose other side is not a scalar literal.
+#: Refusal for membership in a declared collection against a non-scalar-literal.
 MEMBERSHIP_REFUSAL = (
     "Membership in a declared collection supports only scalar literal elements"
 )
 
 
 def collection_membership(declared: CollectionColumn, values: Any) -> Any:
-    """Whether a declared collection holds any of ``values``, keeping JSON's types.
+    """Test whether a declared collection holds any of ``values``, keeping JSON types.
 
-    ``x in collection`` is one value and ``hasIntersection(collection, [...])`` a list of them.
-    An SQL NULL collection, or a JSON value that is not an array, is UNKNOWN, as it is for
-    ``size()``: CEL raises for a missing attribute, so a negated membership must deny it too.
-    An empty ``values`` list is FALSE for every present collection.
+    ``"2" in [2]`` is false. A NULL or non-array collection is UNKNOWN, so negation
+    still denies it. An empty ``values`` is FALSE for a present collection.
     """
     matches = []
     for value in values:
@@ -188,8 +158,7 @@ class _JsonDocument(FunctionElement):
 class _PgArrayDocument(FunctionElement):
     """A column declared ``"pgArray"``, read as a JSON document.
 
-    ``to_jsonb`` rather than ``array[i + 1]``: it keeps null elements as JSON nulls and addresses
-    POSITIONS, so an array whose lower bound is not 1 reads the same element CEL does.
+    ``to_jsonb`` keeps null elements and indexes by position, so a non-1 lower bound works.
     """
 
     name = "cerbos_pg_array_document"
@@ -227,15 +196,14 @@ class _ElementEqualsString(FunctionElement):
 
 
 class _CollectionContains(FunctionElement):
-    """Whether any element satisfies one of the ``_Member*`` tests that follow the document."""
+    """True if any element passes one of the ``_Member*`` tests after the document."""
 
     name = "cerbos_collection_contains"
     type = Boolean()
     inherit_cache = True
 
 
-# The per-value tests `_CollectionContains` ORs together. Each reads the one element the
-# enclosing EXISTS is iterating, under the alias below, so it renders only inside that construct.
+# Alias of the element `_CollectionContains` iterates. `_Member*` tests render only inside it.
 _ELEMENT = "cerbos_element"
 
 
@@ -263,6 +231,7 @@ class _MemberEqualsString(FunctionElement):
     inherit_cache = True
 
 
+# All state lives in clause arguments, never Python attributes, so inherit_cache is safe.
 _CONSTRUCTS = (
     _CollectionContains,
     _MemberIsNull,
@@ -284,8 +253,7 @@ def _args(element, compiler, **kw):
 
 
 def _declared_column(element, compiler):
-    """A document construct's column, and the type the dialect actually stores for it, with
-    variants and decorators unwrapped."""
+    """Return a document's column and its dialect storage type, decorators unwrapped."""
     column = element.clauses.clauses[0]
     stored = column.type.dialect_impl(compiler.dialect)
     while isinstance(stored, sqltypes.TypeDecorator):
@@ -293,14 +261,13 @@ def _declared_column(element, compiler):
     return column, stored
 
 
-# `str(query)` compiles under SQLAlchemy's string dialect, named "default". That is a debugging
-# aid rather than a database, so it gets a readable placeholder instead of an error; every real
-# dialect other than the two below is refused.
+# `str(query)` uses the "default" dialect, so render a readable placeholder there.
+# Every other dialect without a renderer below is refused.
 def _unsupported(element, compiler, **kw):
     if compiler.dialect.name == "default":
         return f"{element.name}({', '.join(_args(element, compiler, **kw))})"
     raise CompileError(
-        "collection_columns storage renders only on SQLite and PostgreSQL, not "
+        "collection_columns storage renders only on SQLite, PostgreSQL and MySQL, not "
         f"{compiler.dialect.name}"
     )
 
@@ -332,7 +299,7 @@ def _sqlite_pg_array_document(element, compiler, **kw):
 @compiles(_CollectionSize, "sqlite")
 def _sqlite_size(element, compiler, **kw):
     (document,) = _args(element, compiler, **kw)
-    # json_array_length() is 0 for a JSON value that is not an array, which is not CEL's answer.
+    # json_array_length() is 0 for a non-array, but CEL errors.
     return (
         f"CASE WHEN json_type({document}) = 'array' "
         f"THEN json_array_length({document}) END"
@@ -344,8 +311,7 @@ def _sqlite_element(element, compiler, equality, **kw):
     path = f"'$[{index}]'"
     kind = f"json_type({document}, {path})"
     extracted = f"json_extract({document}, {path})"
-    # json_type() is the STRING 'null' for a null element and SQL NULL for a missing one, which is
-    # the whole distinction between a null value and an index error.
+    # json_type() is 'null' for a null element and SQL NULL for a missing one.
     return (
         f"CASE WHEN json_type({document}) = 'array' AND {kind} IS NOT NULL "
         f"THEN {equality(kind, extracted, *value)} END"
@@ -361,8 +327,7 @@ def _sqlite_is_null(element, compiler, **kw):
 
 @compiles(_ElementEqualsBool, "sqlite")
 def _sqlite_equals_bool(element, compiler, **kw):
-    # json_extract() gives a JSON true as 1 and a JSON 1 as 1 too, so the type is what tells
-    # them apart; the bound boolean is 1 or 0.
+    # json_extract() returns 1 for both true and 1, so check the type.
     return _sqlite_element(
         element,
         compiler,
@@ -375,8 +340,7 @@ def _sqlite_equals_bool(element, compiler, **kw):
 
 @compiles(_ElementEqualsNumber, "sqlite")
 def _sqlite_equals_number(element, compiler, **kw):
-    # CEL numbers are doubles on the wire, so an integer element and a double literal compare as
-    # the same number.
+    # CEL numbers are doubles, so compare as REAL.
     return _sqlite_element(
         element,
         compiler,
@@ -401,8 +365,7 @@ def _sqlite_equals_string(element, compiler, **kw):
 @compiles(_CollectionContains, "sqlite")
 def _sqlite_contains(element, compiler, **kw):
     document, *matches = _args(element, compiler, **kw)
-    # json_each() over a correlated column; its `type` column tells a JSON true from a JSON 1
-    # and a JSON "2" from a JSON 2, which its `value` column (1, 1, '2', 2) cannot.
+    # json_each().type tells true from 1 and "2" from 2, which `value` cannot.
     condition = " OR ".join(f"({match})" for match in matches) or "0"
     return (
         f"CASE WHEN json_type({document}) = 'array' THEN EXISTS "
@@ -438,9 +401,9 @@ def _sqlite_member_equals_string(element, compiler, **kw):
 
 # -- PostgreSQL ------------------------------------------------------------------------------
 
-# Element types whose SQL value is the value the application sends to Cerbos. Floating-point
-# arrays admit NaN and infinities, which to_jsonb turns into STRINGS; numeric and bigint can
-# differ from the double Cerbos carries; an enum is a named type, not text.
+# Element types whose SQL value matches what Cerbos sees. Floats are excluded because
+# to_jsonb turns NaN and infinities into strings; numeric and bigint may not fit a double;
+# an enum is not text.
 _PG_ARRAY_ELEMENT_TYPES = (sqltypes.String, sqltypes.Boolean, sqltypes.Integer)
 _PG_ARRAY_REFUSED_ELEMENT_TYPES = (sqltypes.Enum, sqltypes.BigInteger)
 
@@ -483,7 +446,7 @@ def _postgresql_size(element, compiler, **kw):
 def _postgresql_element(element, compiler, equality, **kw):
     document, index, *value = _args(element, compiler, **kw)
     item = f"({document} -> {index})"
-    # `->` is SQL NULL for a position past the end and the JSON null for a null element.
+    # `->` is SQL NULL past the end and JSON null for a null element.
     return (
         f"CASE WHEN jsonb_typeof({document}) = 'array' AND {item} IS NOT NULL "
         f"THEN {equality(item, *value)} END"
@@ -509,9 +472,8 @@ def _postgresql_equals_bool(element, compiler, **kw):
 
 @compiles(_ElementEqualsNumber, "postgresql")
 def _postgresql_equals_number(element, compiler, **kw):
-    # A CASE rather than AND: PostgreSQL does not promise to evaluate an AND left to right, and
-    # casting a string element to a float raises. jsonb equality would compare `2` and `2.0` as
-    # numerics, which is right, but the double cast keeps it CEL's double equality.
+    # CASE, not AND: PostgreSQL may evaluate AND in any order, and casting a string
+    # element raises. The cast to double matches CEL's double equality.
     return _postgresql_element(
         element,
         compiler,
@@ -558,7 +520,7 @@ def _postgresql_member_equals_bool(element, compiler, **kw):
 
 @compiles(_MemberEqualsNumber, "postgresql")
 def _postgresql_member_equals_number(element, compiler, **kw):
-    # A CASE for the reason `_postgresql_equals_number` gives: casting a string element raises.
+    # CASE for the same reason as `_postgresql_equals_number`.
     (value,) = _args(element, compiler, **kw)
     return (
         f"CASE WHEN jsonb_typeof({_ELEMENT}.value) = 'number' "
@@ -571,3 +533,149 @@ def _postgresql_member_equals_number(element, compiler, **kw):
 def _postgresql_member_equals_string(element, compiler, **kw):
     (value,) = _args(element, compiler, **kw)
     return f"{_ELEMENT}.value = to_jsonb(CAST({value} AS TEXT))"
+
+
+# -- MySQL -----------------------------------------------------------------------------------
+# MySQL 8.0.17+, for CAST(... AS DOUBLE) and the utf8mb4_0900_bin collation. JSON_TYPE() names
+# the type of a JSON value, so `true` is never `1` and `"2"` is never `2`.
+#
+# Every string this SQL compares carries its own character set and collation, so it runs under
+# any connection collation. A bare literal would take the connection's, which MySQL refuses to
+# mix with the `utf8mb4_bin` of JSON_TYPE() and JSON_UNQUOTE().
+
+# JSON_UNQUOTE() returns utf8mb4_bin, which is PAD SPACE (`'a' = 'a '`), so element text is
+# compared in the byte-exact, NO PAD collation instead.
+_MYSQL_EXACT_COLLATION = "utf8mb4_0900_bin"
+
+
+def _mysql_text(text: str) -> str:
+    return f"_utf8mb4'{text}' COLLATE {_MYSQL_EXACT_COLLATION}"
+
+
+def _mysql_is(item: str, *json_types: str) -> str:
+    names = ", ".join(_mysql_text(json_type) for json_type in json_types)
+    return f"JSON_TYPE({item}) COLLATE {_MYSQL_EXACT_COLLATION} IN ({names})"
+
+
+@compiles(_JsonDocument, "mysql")
+def _mysql_json_document(element, compiler, **kw):
+    column, stored = _declared_column(element, compiler)
+    if not isinstance(stored, sqltypes.JSON):
+        raise CompileError(
+            'collection_columns storage "json" requires a MySQL JSON column'
+        )
+    return compiler.process(column, **kw)
+
+
+@compiles(_PgArrayDocument, "mysql")
+def _mysql_pg_array_document(element, compiler, **kw):
+    raise CompileError(
+        'collection_columns storage "pgArray" requires a PostgreSQL array column'
+    )
+
+
+@compiles(_CollectionSize, "mysql")
+def _mysql_size(element, compiler, **kw):
+    (document,) = _args(element, compiler, **kw)
+    return f"CASE WHEN {_mysql_is(document, 'ARRAY')} THEN JSON_LENGTH({document}) END"
+
+
+def _mysql_is_null(item: str) -> str:
+    return _mysql_is(item, "NULL")
+
+
+def _mysql_equals_bool(item: str, value: str) -> str:
+    # A bound boolean arrives as 1 or 0, so spell the JSON literal out.
+    return (
+        f"({_mysql_is(item, 'BOOLEAN')} AND "
+        f"JSON_UNQUOTE({item}) COLLATE {_MYSQL_EXACT_COLLATION} = "
+        f"CASE WHEN {value} THEN {_mysql_text('true')} ELSE {_mysql_text('false')} END)"
+    )
+
+
+def _mysql_equals_number(item: str, value: str) -> str:
+    # CEL numbers are doubles, so compare as DOUBLE.
+    number = _mysql_is(item, "INTEGER", "UNSIGNED INTEGER", "DOUBLE", "DECIMAL")
+    return (
+        f"CASE WHEN {number} "
+        f"THEN CAST(JSON_UNQUOTE({item}) AS DOUBLE) = CAST({value} AS DOUBLE) "
+        "ELSE false END"
+    )
+
+
+def _mysql_equals_string(item: str, value: str) -> str:
+    return (
+        f"({_mysql_is(item, 'STRING')} AND "
+        f"JSON_UNQUOTE({item}) COLLATE {_MYSQL_EXACT_COLLATION} = "
+        f"CONVERT({value} USING utf8mb4) COLLATE {_MYSQL_EXACT_COLLATION})"
+    )
+
+
+def _mysql_element(element, compiler, equality, **kw):
+    document, index, *value = _args(element, compiler, **kw)
+    item = f"JSON_EXTRACT({document}, '$[{index}]')"
+    # JSON_EXTRACT() is SQL NULL past the end and the JSON null for a null element.
+    return (
+        f"CASE WHEN {_mysql_is(document, 'ARRAY')} AND {item} IS NOT NULL "
+        f"THEN {equality(item, *value)} END"
+    )
+
+
+@compiles(_ElementIsNull, "mysql")
+def _mysql_element_is_null(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_is_null, **kw)
+
+
+@compiles(_ElementEqualsBool, "mysql")
+def _mysql_element_equals_bool(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_bool, **kw)
+
+
+@compiles(_ElementEqualsNumber, "mysql")
+def _mysql_element_equals_number(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_number, **kw)
+
+
+@compiles(_ElementEqualsString, "mysql")
+def _mysql_element_equals_string(element, compiler, **kw):
+    return _mysql_element(element, compiler, _mysql_equals_string, **kw)
+
+
+@compiles(_CollectionContains, "mysql")
+def _mysql_contains(element, compiler, **kw):
+    document, *matches = _args(element, compiler, **kw)
+    condition = " OR ".join(f"({match})" for match in matches) or "false"
+    # A JSON column keeps a null element as the JSON null, not SQL NULL.
+    return (
+        f"CASE WHEN {_mysql_is(document, 'ARRAY')} THEN EXISTS "
+        f"(SELECT 1 FROM JSON_TABLE({document}, '$[*]' COLUMNS "
+        f"(value JSON PATH '$')) AS {_ELEMENT} WHERE {condition}) END"
+    )
+
+
+_MYSQL_MEMBER = f"{_ELEMENT}.value"
+
+
+@compiles(_MemberIsNull, "mysql")
+def _mysql_member_is_null(element, compiler, **kw):
+    # JSON_TABLE() turns a JSON null element into SQL NULL. Every element exists, so that
+    # NULL can only be a null element.
+    return f"({_MYSQL_MEMBER} IS NULL OR {_mysql_is_null(_MYSQL_MEMBER)})"
+
+
+@compiles(_MemberEqualsBool, "mysql")
+def _mysql_member_equals_bool(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_bool(_MYSQL_MEMBER, value)
+
+
+@compiles(_MemberEqualsNumber, "mysql")
+def _mysql_member_equals_number(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_number(_MYSQL_MEMBER, value)
+
+
+@compiles(_MemberEqualsString, "mysql")
+def _mysql_member_equals_string(element, compiler, **kw):
+    (value,) = _args(element, compiler, **kw)
+    return _mysql_equals_string(_MYSQL_MEMBER, value)

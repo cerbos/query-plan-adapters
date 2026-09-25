@@ -23,7 +23,7 @@ import jakarta.persistence.criteria.Predicate;
  *   <li>arithmetic compared with a constant, where {@code field} is the arithmetic expression
  *       and {@code value} a {@link Double};</li>
  *   <li>{@code string(boolColumn) == "true"} or {@code "false"}, as {@code eq}/{@code ne} with
- *       a {@link Boolean};</li>
+ *       a {@link Boolean}, and {@code string(stringColumn) == "text"} with the {@link String};</li>
  *   <li>{@code matches}, and a {@code timestamp()} comparison over a column type the default
  *       translation rejects (with a {@link java.time.Instant} value), before the adapter
  *       refuses them.</li>

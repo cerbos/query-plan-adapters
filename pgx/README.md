@@ -171,7 +171,13 @@ bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
   ([#391](https://github.com/cerbos/query-plan-adapters/issues/391)).
 - `ValueNumber`, `ValueString` and `ValueBool` prevent database coercion in heterogeneous
   comparisons and string operations. Undeclared columns keep the historical rendering.
-- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`.
+- `ValueBool` lets `string(R.attr.flag)` translate to CEL's `"true"`/`"false"`. The same spelling
+  covers a `ValueBool` column read through a to-one `ScalarRelation` (`string(R.attr.parent.flag)`),
+  a boolean-valued expression (`string(R.attr.n > 3)`) and a ternary whose arms are all boolean
+  (`string(R.attr.n > 3 ? R.attr.flag : false)`). An undeclared column, through a hop or
+  not, keeps the plain text `CAST`: the plan carries no types, so declaring `ValueBool` is what
+  tells the adapter the column holds a boolean. PostgreSQL's own `CAST` of a `boolean` column already
+  says `"true"`/`"false"`, so an undeclared boolean column is right here too.
 
 ## NULL representation
 
@@ -211,10 +217,24 @@ mapper := cerbospgx.MapperMap{
   `null`. The equality family (`eq`, `ne`, `in`) then never renders SQL UNKNOWN, so
   `null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
   receiver is a CEL error, which denies like UNKNOWN).
+- `NullConventionOmitted` renders `== null` as `CASE WHEN col IS NULL THEN NULL ELSE FALSE END`
+  and `!= null` with `ELSE TRUE`: a NULL column is CEL's missing-attribute error, so it stays
+  UNKNOWN under any `NOT`, and a true sibling in an `||` still absorbs it. A column read through
+  a to-one hop is NULL for an absent parent too, and renders the same way. Every other null
+  operand against it (a null in an `in` list, say) is rejected.
 - Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
   the NULL rows.
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
   of the same or undeclared scalar type is rejected.
+
+> [!WARNING]
+> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
+> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
+> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
+> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
+> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
+> with `check()` whether `x` is missing, null or present.
 
 ## Collation
 
@@ -222,6 +242,20 @@ CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow th
 collation. A case-insensitive collation is an **over-grant the adapter cannot detect**, so treat
 collation as part of your policy contract: use a deterministic collation (the PostgreSQL default)
 on every column policies compare. Nondeterministic ICU collations and `citext` are not safe.
+
+**String ordering needs more.** CEL orders strings by code point, and `<`, `<=`, `>` and `>=`
+follow the column's collation. A linguistic collation such as glibc's `en_US.UTF-8` (the usual
+default on Debian images and managed services) or ICU's `en-US` is deterministic, yet sorts
+`"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use a byte-order collation,
+`"C"`, on every column a policy orders: create the database with `LC_COLLATE 'C'`, or declare
+`COLLATE "C"` on the column.
+
+The conformance harness initialises its database with `--lc-collate=C` rather than trusting the
+Alpine image, whose musl libc orders by byte only by accident.
+`ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
+TestAdversarialConformance ./...` replays the corpus under a linguistic order and fails both
+`comparison/*/string-code-point-order` cases.
 
 ## Conformance contract
 
@@ -233,17 +267,20 @@ PDP's goldens (0.54.0) are replayed too.
 | Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 59 / 80 |
-| adversarial | 183 / 227 |
+| extended | 56 / 80 |
+| adversarial | 229 / 308 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. The one case
-no adapter can pass is `null/has/missing-attribute`: the Cerbos planner folds `has()` on a missing
-attribute to `ALWAYS_ALLOWED` while `check()` denies those rows, so use `R.attr.x != null` for
-database-backed attributes instead of `has(R.attr.x)`.
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the
+skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the two
+calls answering different questions: the plan request leaves an omitted attribute unknown, so the
+planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
+the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
+while `check()` has no double + int overload and denies every row, so write `1.0`.
 
 ### Known gaps
 
@@ -252,7 +289,6 @@ Real but unfixed; each needs a corpus case first. Treat them as constraints on y
 | Gap | Effect |
 | --- | --- |
 | A NaN stored in a floating-point column | Ordered comparisons follow the database's NaN ordering, not CEL's IEEE semantics. Only NaNs the adapter folds itself are exact. |
-| Division by a stored negative zero | The sign of the resulting infinity comes from the numerator alone, so `1.0 / -0.0` classifies as `+Inf` where CEL gives `-Inf`. |
 | Timestamp literals finer than a microsecond | PostgreSQL stores microseconds, so a sub-microsecond bound is truncated and a boundary comparison can flip. Keep policy timestamps at microsecond precision or coarser. |
 | `!=` / `not in` against an explicit null, on an attribute not declared `NullConventionExplicit` | CEL says `null != "x"` is true; SQL leaves it UNKNOWN and excludes the row. Under-grants (fails closed). See cerbos/query-plan-adapters#308. |
 
@@ -329,6 +365,30 @@ tags := &cerbospgx.Relation{
   column translates (it used to fail closed), via
   `CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END` cast to text. A NULL
   column stays NULL and the row is excluded.
+- [#470](https://github.com/cerbos/query-plan-adapters/issues/470): `string()` over a boolean-valued
+  expression (`string(R.attr.n > 3)`), or over a `ValueBool` column read through a to-one
+  `ScalarRelation`, is spelled through the same `CASE` as a plain `ValueBool` column, instead of a
+  plain `CAST`. PostgreSQL's `CAST` already said `"true"`/`"false"`, so results do not change;
+  the vendored translator is shared with the ent module, where SQLite and MySQL said `"1"`/`"0"`.
+- [#538](https://github.com/cerbos/query-plan-adapters/issues/538): `string()` over a ternary whose
+  arms are all boolean (`string(R.attr.n > 3 ? R.attr.flag : false)`) is spelled through the same
+  `CASE`. PostgreSQL's `CAST` was already right, so results do not change
+  (`cast/string/negated-from-boolean-ternary`).
+- **Breaking:** three shapes that used to emit a filter now fail closed, because the filter
+  disagreed with CEL. `%` over an attribute (`R.attr.n % 2`) is a CEL no-overload error — every
+  attribute number is a double — so the PDP denies every row
+  (`arithmetic/modulo/negated-double-operand`). A comparison decided by the sign of an infinity
+  from a zero column denominator (`R.attr.a / R.attr.b > 0.0`) is refused, since CEL's `x / -0.0` is
+  the opposite infinity from `x / 0.0` and the sign of a stored zero cannot be read
+  (`arithmetic/divide/field-by-field`); a self-division, and a comparison both signs answer alike,
+  still translate. `string()` over a `ValueNumber` column translates only as `==`/`!=` against a
+  string constant, lowered to a numeric comparison with the double CEL spells that way (Go's `%g`:
+  `"1e+06"`, `"2"`), and a zero spelling is refused (`cast/string/from-double-spellings`,
+  `cast/string/from-negative-zero-double`).
+- A list literal compared with a column declared `ValueString`, `ValueNumber` or `ValueBool` is
+  unequal wherever the column is present (`type-mismatch/equals/string-field-against-list-literal`);
+  against an undeclared column it fails closed. It used to bind the list as a parameter, which the
+  driver rejected at execution.
 - Cerbos 0.55: folded NaN ordered comparisons return false (so their negation returns true),
   matching the updated CEL evaluator; this differs from Cerbos 0.54. Missing attributes still
   propagate errors.

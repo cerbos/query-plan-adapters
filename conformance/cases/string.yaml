@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aOptionalString + "!") == "nope")'
+- id: 'string/concatenate/ordering'
+  tier: adversarial
+  intent: 'A concatenation of two attributes ordered against a literal (aString + aOptionalString < "b").'
+  trap: 'CEL orders strings by code point, so c1 "OneSet" sorts before "b"; a case-insensitive collation sorts it after and under-grants, and a missing aOptionalString is an error that must deny.'
+  condition:
+    match:
+      expr: 'R.attr.aString + R.attr.aOptionalString < "b"'
 - id: 'string/concatenate/unsatisfiable-not-equals'
   tier: adversarial
   intent: 'Inequality of a concatenated optional string with a literal it can never equal ((aOptionalString + "!") != "nope").'

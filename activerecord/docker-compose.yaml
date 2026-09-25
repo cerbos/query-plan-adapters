@@ -2,9 +2,12 @@
 #
 #   ./scripts/test.sh                 # all the suites
 #   ./scripts/test.sh spec/conformance_spec.rb
+#   ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb
 #
 # `tests` mounts the repository root because the suites read ../conformance/. No suite needs a
-# PDP, and SQLite runs in memory, so there is no other service.
+# PDP. SQLite runs in memory; the conformance suite can run on `postgres` or `mysql` instead
+# (ADAPTER_TEST_DB), which scripts/test.sh starts. Their images are pinned in POSTGRES_IMAGE and
+# MYSQL_IMAGE, which scripts/test.sh exports, so each pin lives in one file.
 
 services:
   tests:
@@ -13,8 +16,46 @@ services:
       args:
         RUBY_VERSION: ${RUBY_VERSION:-4.0}
         ACTIVERECORD_VERSION: ${ACTIVERECORD_VERSION:-8.0}
+    environment:
+      ADAPTER_TEST_DB: ${ADAPTER_TEST_DB:-sqlite}
     volumes:
       # Don't mount a volume at /bundle: it would hide the gems installed in the image.
       - ..:/repo
     working_dir: /repo/activerecord
     command: ["bundle", "exec", "rspec"]
+
+  postgres:
+    profiles: ["postgres"]
+    image: ${POSTGRES_IMAGE:-}
+    environment:
+      POSTGRES_PASSWORD: conformance
+      POSTGRES_DB: conformance
+      # A byte-order collation, stated rather than inherited. CEL orders strings by code point,
+      # and <, <=, > and >= on a text column follow the column's collation: under glibc's
+      # en_US.utf8 'One' > 'a' is TRUE (#489). The Alpine image reports en_US.utf8 and orders by
+      # byte only because musl's strcoll does. ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it to
+      # reproduce the over-grant, for example "--locale-provider=icu --icu-locale=en-US"; a
+      # measurement, not a CI leg.
+      POSTGRES_INITDB_ARGS: ${ADAPTER_TEST_POSTGRES_INITDB_ARGS:---lc-collate=C}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "conformance"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mysql:
+    profiles: ["mysql"]
+    image: ${MYSQL_IMAGE:-}
+    # Byte-exact and NO PAD. MySQL's default collation makes `=` case-insensitive, and
+    # utf8mb4_0900_as_cs still ignores a soft hyphen (#474). The connection sets it too
+    # (spec/support/database.rb): a literal takes the connection's collation, not the column's.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin"]
+    environment:
+      MYSQL_ROOT_PASSWORD: conformance
+      MYSQL_DATABASE: conformance
+    healthcheck:
+      # Over TCP: during initialisation a temporary server answers on the socket only.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pconformance"]
+      interval: 2s
+      timeout: 5s
+      retries: 60

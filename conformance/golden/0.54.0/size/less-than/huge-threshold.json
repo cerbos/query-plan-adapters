@@ -28,12 +28,23 @@
     "h4",
     "h5",
     "h6",
-    "h7"
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j2",
+    "j3"
   ],
-  "degenerateReason": "Every seed carries a non-null aString shorter than 2^32. An unguarded int narrowing that wraps the threshold to 0 would return nothing; the greater-than sibling is the other half.",
+  "degenerateReason": null,
   "id": "size/less-than/huge-threshold",
   "intent": "size() of a string compared < 4294967296 (2^32), outside 32-bit int range.",
-  "oracle": "total",
+  "oracle": "discriminating",
   "pdp": "0.54.0",
   "plan": {
     "condition": {
@@ -78,5 +89,5 @@
     }
   ],
   "tier": "adversarial",
-  "trap": "A narrowing int cast wraps 2^32 to 0 and returns nothing; the comparison is true for every present string, the empty one included."
+  "trap": "A narrowing int cast wraps 2^32 to 0 and returns nothing; the comparison is true for every present string, the empty one included, and errors on the missing one (j1), which a guard folded to TRUE readmits."
 }

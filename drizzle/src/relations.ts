@@ -8,7 +8,7 @@ import {
 } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
 
-import { TRUE_CONDITION } from "./predicates";
+import { FALSE_CONDITION, TRUE_CONDITION } from "./predicates";
 import type { BuildFilterOptions, RelationMapping } from "./types";
 
 /**
@@ -175,13 +175,44 @@ export const wrapRelationChain = (
   filter: SQL,
   reference: string,
   options: BuildFilterOptions,
-): SQL =>
-  requireLeadingHops(
+): SQL => {
+  const wrapped = relations.filter((relation) => !options.skipRelations?.has(relation));
+  if (wrapped.length > 0 && wrapped.every((relation) => relation.type === "one")) {
+    return wrapToOneChain(relations, filter, reference, options);
+  }
+  return requireLeadingHops(
     requiredRelationHops(relations),
     wrapWithRelations(relations, filter, reference, options),
     reference,
     options,
   );
+};
+
+/**
+ * `filter` read through a chain of to-ONE hops, keeping all three of its values.
+ *
+ * `EXISTS (… WHERE filter)` is two-valued: a related row whose filter is UNKNOWN is simply not
+ * selected, so the EXISTS is FALSE and a `NOT` over it is TRUE. That is wrong exactly where the
+ * leaf is UNKNOWN on a present row — a NULL leaf column on the omitted convention, which CEL
+ * reads as a missing attribute and denies under both polarities. `!(parent.aOptionalString ==
+ * null)` returned every row whose parent had a NULL `aOptionalString`
+ * (cerbos/query-plan-adapters#553).
+ *
+ * So the chain asks twice: TRUE when a related row satisfies `filter`, FALSE when one refutes it,
+ * and otherwise NULL. The otherwise covers both a missing hop at any depth (no related row, so
+ * neither EXISTS holds) and a present row whose leaf is UNKNOWN, which is the missing-path error
+ * CEL raises in either case. That subsumes the leading-hop guard of `requireLeadingHops`.
+ */
+const wrapToOneChain = (
+  relations: RelationMapping[],
+  filter: SQL,
+  reference: string,
+  options: BuildFilterOptions,
+): SQL => {
+  const holds = wrapWithRelations(relations, filter, reference, options);
+  const refuted = wrapWithRelations(relations, sql`not (${filter})`, reference, options);
+  return sql`(case when ${holds} then ${TRUE_CONDITION} when ${refuted} then ${FALSE_CONDITION} end)`;
+};
 
 /**
  * Wrap a filter with two operands' relation chains (deduplicated by identity) so both
