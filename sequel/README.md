@@ -54,7 +54,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 69 / 80 |
-| adversarial | 271 / 308 |
+| adversarial | 274 / 308 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -100,6 +100,11 @@ newline (`^a.*b$`). A top-level alternation is the OR of its branches; `(?i)` fo
 does, including `k` to KELVIN SIGN and `s` to LONG S. A pattern RE2 rejects (a lookahead, `a**`,
 a backreference) is an error in CEL, so it is UNKNOWN. The lowering is drizzle's.
 
+`+`, `-` and `*` over one division that may be NaN or an Infinity move into the branches the
+division leaves: a finite branch computes in SQL, a non-finite constant in Ruby with IEEE-754,
+and NaN beside a number column is NaN wherever the column is present and UNKNOWN where it is
+missing. The comparison around the result then resolves each branch.
+
 `int()` over a double column truncates toward zero on every dialect (SQLite's `CAST` to
 `INTEGER`, `TRUNC` on PostgreSQL, `TRUNCATE` on MySQL, then an exact `CAST`), inside a `CASE`
 that is NULL outside CEL's range `(-2^63, 2^63)` and for a NaN, where CEL raises.
@@ -110,7 +115,7 @@ The refusals fall into a few mechanisms:
 | --- | --- |
 | `timestamp(...)` against `now() - duration(...)` | The planner folds `now()` into a literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds at best, so the query would compare with a different instant from the one in the policy. |
 | A division whose denominator is a second column | IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`. A division of a value by itself stays safe, and so does a constant denominator. |
-| More arithmetic on a division that can give NaN or Infinity | SQL has no NaN and no signed Infinity, so the adapter resolves such a division only where it is the comparison operand. |
+| Arithmetic between two divisions that can give NaN or Infinity, or an Infinity beside a column | SQL has no NaN and no signed Infinity to carry, and a column's stored value might be the opposite Infinity. |
 | `int()` beside, or `%` over, an operand whose CEL type the plan does not settle (a ternary of whole constants) | The plan carries `2` and `2.0` as the same number, so whether CEL raises cannot be known. |
 | `matches()` with a pattern outside the lowered forms below (a negated class, `\b`, a flag other than a leading `(?i)`, more than 256 literals), or over anything but a string column | No store's regex dialect is RE2, so a pattern is never handed to the store. |
 | `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |

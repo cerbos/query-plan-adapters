@@ -705,12 +705,14 @@ RSpec.describe Cerbos::Sequel do
       }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /sign of the Infinity/)
     end
 
-    it "raises for more arithmetic on a value that may not be finite" do
+    # Arithmetic on ONE value that may not be finite is carried into its branches, which the
+    # corpus proves; two such values would need every pairing of their branches.
+    it "raises for arithmetic between two values that may not be finite" do
+      self_division = expression("div", variable("n"), variable("n"))
       expect {
         described_class.query_plan_to_dataset(
           plan: conditional(expression("gt",
-            expression("add", expression("div", variable("n"), variable("n")), value(1.0)),
-            value(0.0))),
+            expression("add", self_division, self_division), value(0.0))),
           model: EdgeDocument,
           attributes: {"n" => field("n")}
         )

@@ -1,14 +1,6 @@
 {
   "adapter": "sequel",
   "cases": {
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "status": "unsupported",
-      "reason": "CEL carries a NaN or a signed Infinity out of the division and through the arithmetic composed on top of it; SQL has no value that does, because the NULLIF divide-by-zero guard turns the whole sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so a division nested under further arithmetic fails closed instead of emitting the under-granting filter"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "status": "unsupported",
-      "reason": "The same nested-division limitation as `arithmetic/add/self-division-plus-constant-greater-than`, and the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it"
-    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable"
@@ -16,10 +8,6 @@
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division."
-    },
-    "arithmetic/multiply/nan-times-zero-plus-column": {
-      "status": "unsupported",
-      "reason": "The self-division yields NaN on the zero row, and CEL carries it through `* 0.0 + aDouble`; SQL has no NaN, and the NULLIF divide-by-zero guard would turn the sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so the multiplication refuses its possibly-NaN operand rather than emit a filter"
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
