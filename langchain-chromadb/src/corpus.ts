@@ -148,8 +148,10 @@ export function planOf(
  * seed — a missing attribute in `resources.json`, and no metadata key here — so each stays
  * optional. An inequality over one is refused unless the key's declared type (`valueType:
  * "boolean"`, `numericType: "integer"`) spells it without `$ne`, as it does for the booleans and
- * the integers. Attributes the mapping does not name (`createdBy`, `scope`, `owner`,
- * `coOwner`, the lists and relations) are read by no case this adapter translates.
+ * the integers. Attributes the mapping does not name (`owner`,
+ * `coOwner`, the lists and relations) are not stored by the harness, so no case this adapter
+ * translates reads them: the pushdown refuses every such shape, and the post-filter refuses any
+ * reference the mapping does not declare.
  */
 export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
   {
@@ -178,6 +180,14 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     },
     // NULL for some seeds (no metadata key), so `required: false`.
     "request.resource.attr.aDouble": { field: "aDouble", required: false },
+    // RFC 3339 strings from derived-fields.json, NULL for some seeds (no metadata key). No `Where`
+    // clause reads them — Chroma's `$lt`/`$gt` reject a string — but the post-filter compares them
+    // through `timestamp()` and as strings.
+    "request.resource.attr.createdAt": { field: "createdAt" },
+    "request.resource.attr.updatedAt": { field: "updatedAt" },
+    // Strings from derived-fields.json: createdBy on every seed, scope NULL (no key) on some.
+    "request.resource.attr.createdBy": { field: "createdBy" },
+    "request.resource.attr.scope": { field: "scope" },
     // `obj.inner` mirrors aString in the corpus resource, so it is missing where aString is.
     "request.resource.attr.obj.inner": { field: "obj.inner", required: false },
     // The corpus's one REAL to-one chain (the `relation/*` cases), flattened onto dotted metadata keys

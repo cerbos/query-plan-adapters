@@ -11,7 +11,11 @@ import type {
 import type { Where } from "chromadb";
 
 import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from ".";
-import type { FieldMapper, FieldNameMapperConfig } from ".";
+import type {
+  FieldMapper,
+  FieldNameMapperConfig,
+  QueryPlanToChromaDBResult,
+} from ".";
 import {
   FIELD_NAME_MAPPER,
   mappedMetadataKeys,
@@ -518,6 +522,216 @@ describe("mapper forms", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { aNumber: { $gte: 1.5 } },
     });
+  });
+});
+
+/**
+ * `allowPostFilter` is a caller-supplied argument the corpus cannot vary: the harness translates
+ * every case with it on, so what the default does, and what the option changes about a result, is
+ * pinned here. Which records a post-filter admits is the harness's job, never this file's.
+ */
+describe("allowPostFilter", () => {
+  type Attempt = { result?: QueryPlanToChromaDBResult<boolean>; error?: unknown };
+
+  const attempt = (run: () => QueryPlanToChromaDBResult<boolean>): Attempt => {
+    try {
+      return { result: run() };
+    } catch (error) {
+      return { error };
+    }
+  };
+
+  const conditionalPlan = (
+    condition: PlanExpressionOperand,
+  ): PlanResourcesResponse =>
+    ({
+      kind: PlanKind.CONDITIONAL,
+      condition,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    }) as PlanResourcesResponse;
+
+  const allowing = (
+    id: string,
+    fieldNameMapper: FieldMapper = FIELD_NAME_MAPPER,
+  ): QueryPlanToChromaDBResult<boolean> =>
+    queryPlanToChromaDB({
+      queryPlan: planOf(readGolden(CURRENT, id)),
+      fieldNameMapper,
+      allowPostFilter: true,
+    });
+
+  const OUTCOMES = readGoldens(CURRENT).map((golden) => ({
+    golden,
+    omitted: attempt(() =>
+      queryPlanToChromaDB({
+        queryPlan: planOf(golden),
+        fieldNameMapper: FIELD_NAME_MAPPER,
+      }),
+    ),
+    off: attempt(() =>
+      queryPlanToChromaDB({
+        queryPlan: planOf(golden),
+        fieldNameMapper: FIELD_NAME_MAPPER,
+        allowPostFilter: false,
+      }),
+    ),
+    on: attempt(() => allowing(golden.id)),
+  }));
+  const POST_FILTERED = OUTCOMES.filter(({ on }) => on.result?.postFilter);
+
+  const describeError = (error: unknown): string =>
+    error instanceof UnsupportedOperatorError
+      ? `UnsupportedOperatorError(${error.operator}): ${error.message}`
+      : String(error);
+
+  test("left off, every plan that needs a post-filter still throws UnsupportedOperatorError", () => {
+    expect(POST_FILTERED.length).toBeGreaterThan(0);
+    for (const { omitted, off } of POST_FILTERED) {
+      expect(omitted.error).toBeInstanceOf(UnsupportedOperatorError);
+      expect(off.error).toBeInstanceOf(UnsupportedOperatorError);
+    }
+  });
+
+  test("left off, no result carries a postFilter, and false is the same as omitting it", () => {
+    for (const { omitted, off } of OUTCOMES) {
+      expect(omitted.result?.postFilter).toBeUndefined();
+      expect(off.result).toEqual(omitted.result);
+      expect(describeError(off.error)).toBe(describeError(omitted.error));
+    }
+  });
+
+  test("turned on, a plan Chroma can express whole is answered by filters alone, as without it", () => {
+    const translated = OUTCOMES.filter(({ omitted }) => omitted.result);
+    expect(translated.length).toBeGreaterThan(0);
+    for (const { omitted, on } of translated) {
+      expect(on.result).toEqual(omitted.result);
+    }
+  });
+
+  // Chroma narrows the candidates before the post-filter sees them, so whatever it can express
+  // stays with it: a conjunct of a root `and` that translates alone is never post-filtered. Any
+  // other root goes to the post-filter whole — pushing half of an `or` would drop the records only
+  // the other half admits.
+  test("turned on, a root and keeps every conjunct Chroma can express in filters", () => {
+    let split = 0;
+    for (const { golden, on } of POST_FILTERED) {
+      const condition = (
+        planOf(golden) as PlanResourcesResponse & {
+          condition: PlanExpressionOperand;
+        }
+      ).condition;
+      const pushable =
+        "operator" in condition && condition.operator === "and"
+          ? condition.operands.filter(
+              (conjunct) =>
+                attempt(() =>
+                  queryPlanToChromaDB({
+                    queryPlan: conditionalPlan(conjunct),
+                    fieldNameMapper: FIELD_NAME_MAPPER,
+                  }),
+                ).result !== undefined,
+            )
+          : [];
+      if (pushable.length === 0) {
+        expect(on.result?.filters).toBeUndefined();
+        continue;
+      }
+      split += 1;
+      const expected = pushable.map(
+        (conjunct) =>
+          queryPlanToChromaDB({
+            queryPlan: conditionalPlan(conjunct),
+            fieldNameMapper: FIELD_NAME_MAPPER,
+          }).filters,
+      );
+      expect(on.result?.filters).toEqual(
+        expected.length === 1 ? expected[0] : { $and: expected },
+      );
+    }
+    expect(split).toBeGreaterThan(0);
+  });
+
+  // The predicate is compiled before it is returned, so every refusal happens at translation and
+  // the predicate itself only ever answers. A caller applies it inside a `.filter()`; a throw there
+  // would fail the whole search on one odd record.
+  test("the predicate answers a boolean for any metadata a record can carry, and never throws", () => {
+    const keys = [
+      ...new Set(
+        Object.values(FIELD_NAME_MAPPER).map((entry) =>
+          typeof entry === "string" ? entry : entry.field,
+        ),
+      ),
+    ];
+    const shapes: (Record<string, unknown> | null | undefined)[] = [
+      null,
+      undefined,
+      {},
+      Object.fromEntries(keys.map((key) => [key, ["a", "list"]])),
+      Object.fromEntries(keys.map((key) => [key, 0])),
+      Object.fromEntries(keys.map((key) => [key, ""])),
+      Object.fromEntries(keys.map((key) => [key, true])),
+      Object.fromEntries(keys.map((key) => [key, { sparse: [1] }])),
+    ];
+    for (const { on } of POST_FILTERED) {
+      for (const metadata of shapes) {
+        expect(typeof on.result!.postFilter!(metadata)).toBe("boolean");
+      }
+    }
+  });
+
+  // The harness stores no list (#475), so what a stored list does is caller data no case can vary.
+  // It reads as a missing attribute, which CEL denies under a negation as well: a list is never
+  // compared as though it were whatever the PDP was sent.
+  test("a key holding a list reads as missing, which denies under negation too", () => {
+    const { postFilter } = allowing("string/starts-with/negated-field-to-field");
+    expect(postFilter?.({ aString: "one", aOptionalString: "x" })).toBe(true);
+    expect(postFilter?.({ aString: ["one"], aOptionalString: "x" })).toBe(false);
+    expect(postFilter?.({ aOptionalString: "x" })).toBe(false);
+  });
+
+  // The pushdown's fallback — an unmapped path used verbatim as a key — is not the post-filter's:
+  // a key no record carries is a missing attribute, which would deny records the PDP allows rather
+  // than refuse the shape.
+  test.each([
+    [
+      "a record mapper without the entry",
+      Object.fromEntries(
+        Object.entries(FIELD_NAME_MAPPER).filter(
+          ([reference]) => reference !== "request.resource.attr.parent.aString",
+        ),
+      ),
+    ],
+    [
+      "a function mapper that returns nothing for it",
+      ((reference: string) =>
+        reference === "request.resource.attr.parent.aString"
+          ? undefined
+          : FIELD_NAME_MAPPER[reference]) as FieldMapper,
+    ],
+  ])("the post-filter refuses a reference the mapping does not declare: %s", (_label, mapper) => {
+    const id = "relation/contains/one-hop";
+    expect(allowing(id).postFilter).toBeDefined();
+    const raised = thrownBy(() => allowing(id, mapper));
+    expect(raised).toBeInstanceOf(UnsupportedOperatorError);
+    expect((raised as UnsupportedOperatorError).operator).toBe("contains");
+  });
+
+  // A stored -0.0 reads back as 0 (the client writes metadata as JSON), so `string()` over a stored
+  // number is refused. A key declared boolean never holds a number, which is what lets the corpus
+  // mapping's `valueType: "boolean"` admit it.
+  test("valueType boolean is what lets string() read a boolean key", () => {
+    const id = "cast/string/from-boolean";
+    expect(allowing(id).postFilter).toBeDefined();
+    const undeclared = {
+      ...FIELD_NAME_MAPPER,
+      "request.resource.attr.aBool": "aBool",
+    };
+    const raised = thrownBy(() => allowing(id, undeclared));
+    expect(raised).toBeInstanceOf(UnsupportedOperatorError);
+    expect((raised as UnsupportedOperatorError).operator).toBe("string");
   });
 });
 
