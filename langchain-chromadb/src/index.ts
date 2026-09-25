@@ -8,6 +8,12 @@ import {
 } from "@cerbos/core";
 import type { Where } from "chromadb";
 
+import { UnsupportedOperatorError } from "./errors";
+import { compilePostFilter } from "./postFilter";
+import type { PostFilter, PostFilterFields } from "./postFilter";
+
+export { UnsupportedOperatorError };
+
 export type PlanKind = PK;
 export const PlanKind = PK;
 
@@ -28,7 +34,15 @@ export type FieldMapper =
 export interface QueryPlanToChromaDBArgs {
   queryPlan: PlanResourcesResponse;
   fieldNameMapper: FieldMapper;
+  /**
+   * Opt in to a `postFilter` for the parts of a plan Chroma's `Where` grammar cannot express.
+   * Off by default: without it, such a plan throws `UnsupportedOperatorError` exactly as it would
+   * if the option did not exist. See the README, "Post-filtering".
+   */
+  allowPostFilter?: boolean;
 }
+
+export type { PostFilter };
 
 // Exported so a consumer can name what it is handed, as prisma and drizzle already do for theirs.
 // A caller that passes the result to a function of its own — which is what composing the clause
@@ -36,49 +50,142 @@ export interface QueryPlanToChromaDBArgs {
 // `ReturnType<typeof queryPlanToChromaDB>`. Found by `example/`, which is the only thing here that
 // resolves this package through its published surface
 // (docs/adr/0002-examples-install-the-packed-artifact.md).
-export type QueryPlanToChromaDBResult =
-  | { kind: PK.ALWAYS_ALLOWED; filters: Record<string, never> }
-  | { kind: PK.ALWAYS_DENIED; filters?: undefined }
-  | { kind: PK.CONDITIONAL; filters: Where };
+//
+// `AllowPostFilter` is `false` unless the call passes `allowPostFilter`, so a caller that has not
+// opted in keeps a conditional variant whose `filters` is always a `Where`. Only an opted-in call's
+// result can carry a `postFilter`, and only then can `filters` be absent: a plan with no conjunct
+// Chroma can express is answered by the `postFilter` alone.
+export type QueryPlanToChromaDBResult<AllowPostFilter extends boolean = false> =
+  | {
+      kind: PK.ALWAYS_ALLOWED;
+      filters: Record<string, never>;
+      postFilter?: undefined;
+    }
+  | { kind: PK.ALWAYS_DENIED; filters?: undefined; postFilter?: undefined }
+  | { kind: PK.CONDITIONAL; filters: Where; postFilter?: undefined }
+  | (AllowPostFilter extends true
+      ?
+          | { kind: PK.CONDITIONAL; filters: Where; postFilter: PostFilter }
+          | { kind: PK.CONDITIONAL; filters?: undefined; postFilter: PostFilter }
+      : never);
 
-/**
- * A well-formed plan asks for something a Chroma metadata filter cannot express. Thrown so a caller
- * can route that case — a broader search, a per-document `check()`, a deny — without matching on
- * the message, which is not a stable contract
- * (cerbos/query-plan-adapters#228). A malformed plan or a mapper misconfiguration is a plain `Error`.
- *
- * `operator` is the plan operator the refusal is about: the one the message names, after mirroring
- * and negation (`not(eq)` over an optional key reports `ne`); a computed operand's own inside a
- * comparison (`add`, `size`), and the enclosing operator anywhere else (`exists`, not its lambda);
- * the comparison itself for two keys or two literals; `if` for a ternary.
- */
-export class UnsupportedOperatorError extends Error {
-  readonly operator: string;
-
-  constructor(operator: string, message: string) {
-    super(message);
-    this.name = "UnsupportedOperatorError";
-    this.operator = operator;
-  }
-}
-
+export function queryPlanToChromaDB(
+  args: QueryPlanToChromaDBArgs & { allowPostFilter?: false },
+): QueryPlanToChromaDBResult;
+export function queryPlanToChromaDB(
+  args: QueryPlanToChromaDBArgs,
+): QueryPlanToChromaDBResult<boolean>;
 export function queryPlanToChromaDB({
   queryPlan,
   fieldNameMapper,
-}: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult {
+  allowPostFilter = false,
+}: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult<boolean> {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED, filters: {} };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
-    case PlanKind.CONDITIONAL:
-      return {
-        kind: PlanKind.CONDITIONAL,
-        filters: mapOperand(queryPlan.condition, fieldResolver(fieldNameMapper)),
-      };
+    case PlanKind.CONDITIONAL: {
+      const resolveField = fieldResolver(fieldNameMapper);
+      if (!allowPostFilter) {
+        return {
+          kind: PlanKind.CONDITIONAL,
+          filters: mapOperand(queryPlan.condition, resolveField),
+        };
+      }
+      return splitCondition(queryPlan.condition, fieldNameMapper, resolveField);
+    }
     default:
       throw Error("Invalid query plan.");
   }
+}
+
+// -- the post-filter split -------------------------------------------------------------------------
+
+/** The `Where` for `operand`, or `undefined` when Chroma cannot express it. */
+function tryPushdown(
+  operand: PlanExpressionOperand,
+  resolveField: FieldResolver,
+): Where | undefined {
+  try {
+    return mapOperand(operand, resolveField);
+  } catch (error) {
+    if (error instanceof UnsupportedOperatorError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * An opted-in condition, split between Chroma and the post-filter. Whatever Chroma can express
+ * stays in `filters`, so the similarity search still narrows the candidates:
+ *
+ * - the whole condition, when it translates, is `filters` alone, as without the option;
+ * - a root `and` keeps its expressible conjuncts in `filters` and post-filters the rest, which is
+ *   exact because a record satisfies the conjunction exactly when it satisfies every conjunct;
+ * - anything else — an `or` with any inexpressible child included, since pushing half a
+ *   disjunction drops the records only the other half admits — is post-filtered whole.
+ *
+ * The post-filtered part compiles before anything is returned, so a shape it cannot evaluate
+ * exactly throws `UnsupportedOperatorError` here, never from the predicate.
+ */
+function splitCondition(
+  condition: PlanExpressionOperand,
+  fieldNameMapper: FieldMapper,
+  resolveField: FieldResolver,
+): QueryPlanToChromaDBResult<true> {
+  const whole = tryPushdown(condition, resolveField);
+  if (whole !== undefined) return { kind: PlanKind.CONDITIONAL, filters: whole };
+
+  const fields = postFilterFields(fieldNameMapper, resolveField);
+  if (
+    isExpression(condition) &&
+    condition.operator === "and" &&
+    condition.operands.length >= 2
+  ) {
+    const pushed: Where[] = [];
+    const rest: PlanExpressionOperand[] = [];
+    for (const conjunct of condition.operands) {
+      const where = tryPushdown(conjunct, resolveField);
+      if (where === undefined) rest.push(conjunct);
+      else pushed.push(where);
+    }
+    const postFilter = compilePostFilter(
+      rest.length === 1 ? rest[0]! : new PlanExpression("and", rest),
+      fields,
+    );
+    if (pushed.length === 0) {
+      return { kind: PlanKind.CONDITIONAL, postFilter };
+    }
+    return {
+      kind: PlanKind.CONDITIONAL,
+      filters: pushed.length === 1 ? pushed[0]! : { $and: pushed },
+      postFilter,
+    };
+  }
+  return {
+    kind: PlanKind.CONDITIONAL,
+    postFilter: compilePostFilter(condition, fields),
+  };
+}
+
+/**
+ * The mapper as the post-filter reads it. A reference is declared when the mapper has an entry for
+ * it; the fallback that uses an unmapped path verbatim as a key is the pushdown's alone, because a
+ * key no record carries is a missing attribute to the post-filter, and that denies records the
+ * PDP allows instead of refusing the shape.
+ */
+function postFilterFields(
+  fieldNameMapper: FieldMapper,
+  resolveField: FieldResolver,
+): PostFilterFields {
+  return {
+    isMapped: (reference) =>
+      typeof fieldNameMapper === "function"
+        ? Boolean(fieldNameMapper(reference))
+        : Object.prototype.hasOwnProperty.call(fieldNameMapper, reference),
+    metadataKey: (reference) => resolveField(reference).name,
+    isBoolean: (reference) => resolveField(reference).valueType === "boolean",
+  };
 }
 
 // -- the comparisons Chroma can express ------------------------------------------------------------

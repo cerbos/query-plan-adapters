@@ -61,8 +61,11 @@ async function search(principalId: string, query: string) {
 `ALWAYS_ALLOWED` carries `filters: {}`, `ALWAYS_DENIED` carries none. **Do not pass the empty `{}`
 to Chroma** — its validator rejects it ("Expected 'where' to have exactly one operator, but got 0");
 omit `where` instead, and do not wrap `{}` in an `$and` with your own clause either. `PlanKind`,
-`QueryPlanToChromaDBArgs`, `QueryPlanToChromaDBResult`, `FieldMapper`, `FieldNameMapperConfig` and
-`UnsupportedOperatorError` are exported.
+`QueryPlanToChromaDBArgs`, `QueryPlanToChromaDBResult`, `PostFilter`, `FieldMapper`,
+`FieldNameMapperConfig` and `UnsupportedOperatorError` are exported.
+
+A call that passes `allowPostFilter: true` can also get a `postFilter` back, and then `filters` may
+be absent; see [Post-filtering](#post-filtering).
 
 ## Field name mapper
 
@@ -110,7 +113,9 @@ queryPlanToChromaDB({
 
 A plain string entry, a string from a function, and an unmapped path are all treated as optional
 (no `required`). An unmapped path is used as-is as the metadata key — which no record normally
-carries, so the filter silently selects nothing; map every attribute your policies reference.
+carries, so the filter silently selects nothing; map every attribute your policies reference. The
+post-filter does not share that fallback: it refuses a reference the mapper has no entry for (a
+function mapper declares one by returning a value).
 
 ## NULL attribute representation
 
@@ -138,10 +143,12 @@ principal with 10 teams and fails for one with 11. `all` is worse: its unrolled 
 `required: true` on the field. The `in` spelling has no threshold, needs no `required`, and an empty
 list folds to `ALWAYS_DENIED`.
 
-The corpus pins both sides: `principal/exists/short-list` (3 elements) translates and
-`principal/exists/long-list` (11) throws; `principal/all/short-list` and `principal/all/long-list`
-both throw; `principal/in/long-list` (11) and `principal/in/short-list` (3) both emit
-`in(key, [literals])` and pass, including records missing the key.
+Without `allowPostFilter`, the corpus pins both sides: `principal/exists/short-list` (3 elements)
+translates and `principal/exists/long-list` (11) throws; `principal/all/short-list` and
+`principal/all/long-list` both throw; `principal/in/long-list` (11) and `principal/in/short-list`
+(3) both emit `in(key, [literals])` and pass, including records missing the key. With it, the
+post-filter answers the lambda and the `ne` chain, so every one of them passes, but a long list is
+then evaluated in memory rather than narrowing the search: `in` stays the better spelling.
 
 ## Supported operators
 
@@ -159,7 +166,8 @@ Resulting `$ne`/`$nin` still need `required: true`, except where a `valueType: "
 `numericType: "integer"` declaration spells the inequality without `$ne` (see the mapper table). Value-first comparisons (`3 <= R.attr.n`) are
 mirrored.
 
-A `Where` clause compares one metadata key with a literal, so these throw:
+A `Where` clause compares one metadata key with a literal, so these throw unless
+[`allowPostFilter`](#post-filtering) is set, in which case the post-filter answers many of them:
 
 - string helpers (`contains`, `startsWith`, `endsWith`): Chroma has no prefix, substring or pattern
   operator on a string value, and its `$contains` tests list membership, not a substring;
@@ -174,6 +182,84 @@ A `Where` clause compares one metadata key with a literal, so these throw:
 - collections reached through a relation, and lists of objects: Chroma metadata has no relation or array-of-object model;
 - field-to-field comparisons, arithmetic, casts, ternaries, hierarchy and timestamp operations: an
   operand must be a bare key or a literal, never a computed value or a second key.
+
+## Post-filtering
+
+Chroma's `Where` grammar compares one metadata key with a literal, so most of CEL has no filter form.
+Setting `allowPostFilter: true` lets the adapter answer those parts itself: the result carries a
+`postFilter`, a predicate over one record's metadata that evaluates the rest of the plan in memory.
+It is off by default, and without it a plan that would need one throws `UnsupportedOperatorError`
+exactly as before.
+
+```ts
+const result = queryPlanToChromaDB({ queryPlan, fieldNameMapper, allowPostFilter: true });
+
+switch (result.kind) {
+  case PlanKind.ALWAYS_DENIED:
+    return [];
+  case PlanKind.ALWAYS_ALLOWED:
+    return collection.query({ queryTexts: [query], nResults: k });
+  case PlanKind.CONDITIONAL: {
+    // Over-fetch: the post-filter drops records after Chroma has already ranked and cut them.
+    const rows = await collection.query({
+      queryTexts: [query],
+      nResults: result.postFilter ? k * 4 : k,
+      where: result.filters, // absent when nothing in the plan has a `Where` form
+      include: ["metadatas", "documents"],
+    });
+    const metadatas = rows.metadatas[0] ?? [];
+    return rows.ids[0]!
+      .map((id, i) => ({ id, metadata: metadatas[i] }))
+      .filter(({ metadata }) => !result.postFilter || result.postFilter(metadata))
+      .slice(0, k);
+  }
+}
+```
+
+- **`postFilter` is part of the authorization predicate.** A record is allowed only when it
+  matches `filters` **and** `postFilter` returns `true`. Apply it to every candidate before the
+  record is used, returned or passed to a model, and ask Chroma for `metadatas` so it has something
+  to read.
+- **A top-k search can return fewer than k results.** Chroma ranks and truncates before the
+  post-filter runs, so records it drops are not replaced. Over-fetch (a larger `nResults` or
+  `limit`) and cut back to k afterwards, or page with `collection.get` until you have enough.
+- **Whatever Chroma can express stays in `filters`.** A plan Chroma can express whole returns
+  `filters` alone, exactly as without the option. A root `and` keeps its expressible conjuncts in
+  `filters` and post-filters the rest, so the vector search still narrows the candidates. Anything
+  else, including an `or` with any inexpressible child, goes to `postFilter` whole, with no
+  `filters`: pushing half of a disjunction would drop the records only the other half admits.
+- **Post-filtered conditions do not narrow the search.** They cost a read of every candidate
+  Chroma returns.
+
+The predicate evaluates CEL, not an approximation of it. A key the record does not carry is a
+missing-attribute error; an error propagates through `!`, and through `&&` and `||` unless another
+operand decides them; and a result that is not `true` denies. Equality is CEL's heterogeneous
+equality (`1 == 1.0`, `"1" != 1`), ordering across types is an error, and strings compare by code
+point. It evaluates arithmetic, string helpers (`contains`, `startsWith`, `endsWith`, `+`), casts
+(`int`, `double`, `string`, `timestamp`), field-to-field comparisons, ternaries, `size`,
+hierarchies, and the collection macros over a literal list (a principal attribute's list, which the
+planner inlines). `matches` is answered for a literal pattern with optional anchors and a trailing
+`.*` only.
+
+It reads only the metadata the mapper declares, and only scalars: a key holding a list or anything
+else that is not a string, finite number or boolean reads as missing, which denies. Everything it
+cannot evaluate exactly is still refused with `UnsupportedOperatorError`, at translation, never from
+the predicate:
+
+- a reference the mapper has no entry for: an undeclared attribute is one the record may not
+  store (a list, a relation), and reading it as missing would deny records the PDP allows;
+- a null literal: Chroma metadata has no null, so a record cannot tell an explicit null attribute
+  from a missing one;
+- arithmetic between a stored number and an integral literal, or between two integral literals.
+  A plan carries `1` whether the policy wrote `1` or `1.0`, and CEL arithmetic has no int/double
+  overload: `R.attr.x + 1` is an error on every record, so `!(R.attr.x + 1 > 2)` denies every
+  record, while `R.attr.x + 1.0` is not. Write a fractional literal, or cast the attribute;
+- a divisor that reads metadata, and `string()` over a stored number (a key not declared
+  `valueType: "boolean"`): the chromadb client stores metadata through JSON, which writes -0.0 as
+  0, so the sign of a stored zero is lost, and it decides both the infinity a division by zero
+  gives and `string()`'s `"-0"`;
+- any other `matches` pattern, `filter` or `map` used as a condition, and the operators it has no
+  evaluation for (`except`, list and map literals built by the plan).
 
 ## Error handling
 
@@ -204,7 +290,9 @@ try {
 - a literal is null, nested, non-finite or otherwise invalid metadata;
 - `$ne`/`$nin` targets a field not declared `required: true`, and no type declaration spells it
   another way;
-- a fractional ordered comparison targets a field without `numericType: "float"`.
+- a fractional ordered comparison targets a field without `numericType: "float"`;
+- under `allowPostFilter`, the post-filter cannot evaluate the rest exactly
+  ([Post-filtering](#post-filtering) lists why).
 
 A malformed plan or mapper misconfiguration is a plain `Error`, so a fallback keyed on
 `UnsupportedOperatorError` does not swallow it: an invalid plan kind, a non-`PlanExpression`
@@ -215,14 +303,19 @@ field name.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
-metadata queries over the corpus's 41 seed records. Passed cases on the current PDP, 0.55.0, out of
-every golden case in the tier:
+metadata queries over the corpus's 41 seed records. The harness translates every case with
+`allowPostFilter: true` and applies the `postFilter` to every record the `where` returns, as a
+caller must. Passed cases on the current PDP, 0.55.0, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 18 / 26 |
-| extended | 10 / 80 |
-| adversarial | 30 / 250 |
+| core | 20 / 26 |
+| extended | 39 / 80 |
+| adversarial | 118 / 250 |
+
+Without `allowPostFilter`, the 119 cases the post-filter answers throw `UnsupportedOperatorError`
+instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 58
+passing: 18, 10 and 30 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -234,13 +327,19 @@ cases whose DENY condition reads a missing attribute: the plan negates the deny 
 same `not` as CEL's `!`, while `checkResource` treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
-Every scalar attribute in the corpus is missing on some seed, so the harness mapping declares no
-metadata key but the id `required: true`. It declares the boolean keys `valueType: "boolean"` and
-the integer keys `numericType: "integer"`, so their inequalities are spelled without `$ne` and
-proved by the corpus (`logic/not/bare-boolean-attribute`,
-`type-mismatch/not-equals/number-field-against-string-literal`). An inequality over a string key is
-refused. The corpus therefore proves no `$ne`/`$nin` filter; `src/translator.test.ts` pins that
-`required` gates them, and that the type declarations are what spell the others.
+The harness mapping declares no metadata key but the id `required: true`: every other scalar the
+corpus reads through a filter is missing on some seed. It declares the boolean keys
+`valueType: "boolean"` and the integer keys `numericType: "integer"`, so their inequalities are
+spelled without `$ne` and proved by the corpus (`logic/not/bare-boolean-attribute`,
+`type-mismatch/not-equals/number-field-against-string-literal`). An inequality over a string key has
+no `Where` form, so the post-filter answers it. The corpus therefore proves no `$ne`/`$nin` filter;
+`src/translator.test.ts` pins that `required` gates them, and that the type declarations are what
+spell the others.
+
+The harness stores every scalar the dataset has, `createdBy` and `scope` included, and maps each. It
+stores no list (#475), and not `owner` or `coOwner`, which reach `check()` as an explicit null on
+some rows, a value Chroma metadata cannot hold; the mapping declares none of them, so every case
+reading one is refused.
 
 ## Mapping hazards
 
@@ -256,9 +355,16 @@ flat metadata on the record being matched, and every shape that would reach a se
 | Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter never sees the collection, so it cannot check that it is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
 | To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Rejected** — `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained shapes are `unsupported` in the ledger and throw | None — Chroma metadata has no relation or nested-object model, so a chain has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Handled** for a scalar reached through the parent, **rejected** for a collection — `relation/contains/one-hop`, `relation/and/negated-conjunction-short-circuits-absent-parent` and the other scalar hops pass; `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained collections are `unsupported` in the ledger and throw | A scalar hop is stored flattened onto a dotted key (`parent.aString`) that an absent parent leaves out, which the post-filter reads as CEL's missing-attribute error. The dotted key must be written exactly when the parent exists. Chroma metadata has no relation or nested-object model, so a collection behind a relation has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Behaviour changes
+
+- **Widening, opt-in:** `allowPostFilter: true` answers in memory, with CEL's semantics, the parts
+  of a plan Chroma's `Where` cannot express, and returns them as a `postFilter`
+  ([#228](https://github.com/cerbos/query-plan-adapters/issues/228)). See
+  [Post-filtering](#post-filtering). Without the option nothing changes: the same plans throw
+  `UnsupportedOperatorError`, and `QueryPlanToChromaDBResult`'s default type argument keeps
+  `filters` a `Where` on every conditional result.
 
 - **Widening:** an inequality over a key declared `valueType: "boolean"` (new) or
   `numericType: "integer"` is spelled without `$ne`, so it no longer needs `required: true`
@@ -292,7 +398,7 @@ demo/scripts/run-example.sh langchain-chromadb
 
 | Command | What it does | Needs |
 | --- | --- | --- |
-| `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, `$ne`/`$nin` only on `required` fields and never on a boolean or integer key, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, `valueType`, the unmapped fallback) and malformed input | Node only |
+| `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, `$ne`/`$nin` only on `required` fields and never on a boolean or integer key, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, `valueType`, the unmapped fallback), what `allowPostFilter` changes and what it leaves alone, and malformed input | Node only |
 | `npm run typecheck` | Type-checks `src/` and the tests | Node only |
 | `npm run chroma` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 | Docker |
 | `npm run test:adversarial` | Replays the recorded conformance goldens (`../conformance/golden/`) against the ChromaDB on `CHROMA_URL` (default `http://127.0.0.1:8234`); no PDP | A running ChromaDB |
