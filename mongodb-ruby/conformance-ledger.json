@@ -61,66 +61,6 @@
       "status": "unsupported",
       "reason": "map() over a literal list whose projection reads a resource attribute: the plan's list is built per document, and the adapter has no aggregation form for map(), which a lambda over a constant list would need; membership in it is refused."
     },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/brace-without-count-is-literal": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (a brace RE2 reads literally, PCRE2 as a quantifier)."
-    },
-    "regex/matches/case-fold-kelvin-and-long-s": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (an inline (?i) flag, whose Unicode folding orbits RE2 and PCRE2 do not share)."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "Lookahead is outside RE2; the translator rejects patterns outside the common RE2/PCRE2 subset."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/negated-invalid-patterns-from-principal": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. PCRE2 accepts patterns RE2 rejects ((a)\\1, a literal {2}a), so a pattern outside the subset cannot be sent to $regex and is refused."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/posix-class-and-range-bounded": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset (bracket expressions and counted repetition)."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "matches() with an anchored top-level alternation (^o|e$): the pattern is outside the RE2/PCRE2 subset the adapter proves MongoDB's $regex reads identically, so it is refused."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "This adapter refuses this planner shape at its lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
-    },
-    "regex/matches/whitespace-class": {
-      "status": "unsupported",
-      "reason": "The adapter refuses this planner shape at its existing lowering boundary: matches supports only literal escapes in the common RE2/PCRE2 subset, and PCRE2's \\s also matches a vertical tab that RE2's does not."
-    },
     "string/concatenate/field-to-field": {
       "status": "unsupported",
       "reason": "a CONSTANT is what tells CEL's two `+` overloads apart, and between two field paths there is none. MongoDB spells the two differently — $add accepts numeric and date types only, $concat strings — and the mapper carries no field types, so neither can be chosen. Sending $add anyway is what the server aborts the whole query on, so the shape is refused at translation instead."

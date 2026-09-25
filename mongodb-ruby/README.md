@@ -195,8 +195,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 67 / 80 |
-| adversarial | 279 / 308 |
+| extended | 72 / 80 |
+| adversarial | 289 / 308 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.55.0 that is four extended cases and three adversarial cases.
@@ -217,7 +217,9 @@ anywhere but in boolean position (where any list is a runtime type error, and de
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
 carry, `+` between two fields (nothing tells `$add` from `$concat`), a bare comparison of two
 date fields (a stored date has lost the string CEL compares), an empty hierarchy separator or a
-constructed hierarchy path, regular expressions outside the common subset, and a comparison with
+constructed hierarchy path, a regular expression using a case-insensitive non-ASCII character, a
+group flag or named group, `\p`/`\Q` and other escapes RE2 has and PCRE2 reads otherwise, or a counted
+repetition nested in another, and a comparison with
 a map constant or with a list holding a list, a map or NaN (MongoDB compares embedded documents in
 stored field order and NaN equal to NaN).
 
@@ -240,11 +242,16 @@ NaN below every number and equal to itself; an ordering between two types CEL ca
 error. A list constant is compared whole inside `$expr` with a field, a to-many relation's
 projection or a `map()` over one, element by element and in order, as CEL does; `filter()` keeps
 the elements whose condition is true and raises if any raises; and exists_one()
-over a literal list of up to 32 elements expands to "this one and no other".
+over a literal list of up to 32 elements expands to "this one and no other". A `matches()`
+pattern is parsed as RE2 and written as the PCRE2 pattern that matches the same strings: `$` as
+`\z`, `.` as `[^\n]`, `\s` as RE2's `[\t\n\f\r ]` (PCRE2's also holds the vertical tab), a POSIX
+class as its ASCII set, a class member as a code point, and a brace that is not a repetition as a
+literal; a pattern that is not valid RE2 (a lookahead, a backreference, a nested or oversized
+repetition, a reversed range) raises in CEL and is denied under either polarity.
 
 It started from the [Mongoose adapter](../mongoose/)'s MongoDB semantics, and its ledger is now a
 strict subset of Mongoose's: the three-valued evaluation, IEEE 754 division, CEL int arithmetic,
-`int()`/`double()`, whole-list comparisons and `exists_one()` above have no Mongoose counterpart
+`int()`/`double()`, whole-list comparisons, `exists_one()` and the RE2-to-PCRE2 translation above have no Mongoose counterpart
 yet.
 
 The harness uses the `nullable: true` mapper flag for the attributes whose NULL the corpus sends

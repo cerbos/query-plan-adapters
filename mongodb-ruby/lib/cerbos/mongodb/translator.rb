@@ -567,7 +567,17 @@ module Cerbos
           raise UnsupportedError, "matches operator requires a string regex pattern"
         end
 
-        leaf(mapper, scope, field.name, {"$regex" => Regex.normalise_re2(pattern.value)}, nullable: false, require_exists: false)
+        translated = Regex.translate_or_invalid(pattern.value)
+        # An invalid RE2 pattern raises in CEL on every document, so it matches none, and the
+        # guard below keeps a negation from matching them either.
+        return {"$expr" => false} if translated.nil?
+
+        filter = leaf(mapper, scope, field.name, {"$regex" => translated}, nullable: false, require_exists: false)
+        return filter if scope.collection?
+
+        # $regex also matches an array holding a matching string, where CEL raises on anything
+        # but a string: the input must be one.
+        Guards.with_evaluation(filter, [Plan::Expression.new("matches", operands)], mapper)
       end
 
       # contains/startsWith/endsWith: a $regex on a string field, $expr otherwise.

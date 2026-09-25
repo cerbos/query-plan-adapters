@@ -54,7 +54,7 @@ RSpec.describe "adapter contract" do
     # The harness passes an `unsupported` ledger entry on any Cerbos::MongoDB::Error except a
     # MapperError. These pin both sides of that line.
     it "refuses a shape it cannot express with an Error that is not a MapperError" do
-      golden = ConformanceCorpus.golden("regex/matches/lookahead-from-principal")
+      golden = ConformanceCorpus.golden("string/concatenate/field-to-field")
       expect { Cerbos::MongoDB.query_plan_to_filter(plan: golden.fetch("plan"), mapper: CorpusMapper::MAPPER) }
         .to raise_error(Cerbos::MongoDB::UnsupportedError) { |error| expect(error).not_to be_a(Cerbos::MongoDB::MapperError) }
     end

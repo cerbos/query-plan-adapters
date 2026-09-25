@@ -209,6 +209,10 @@ module Cerbos
           }}}
         when "matches"
           input = operand_at(operands, 0, "matches operator requires an input operand")
+          pattern = operands[1]
+          # An invalid RE2 pattern raises whatever the document holds.
+          return {"$expr" => false} if value?(pattern) && string?(pattern.value) && Regex.translate_or_invalid(pattern.value).nil?
+
           {"$expr" => {"$eq" => [{"$type" => build(input, mapper)}, "string"]}}
         end
       end
@@ -607,7 +611,11 @@ module Cerbos
           raise InvalidPlanError, "matches operator requires two operands"
         end
 
-        {"$regexMatch" => {"input" => build(input, mapper), "regex" => constant(Regex.normalise_re2(pattern.value))}}
+        translated = Regex.translate_or_invalid(pattern.value)
+        # An invalid RE2 pattern raises in CEL; its guard (guard_for) keeps every document out.
+        return nil if translated.nil?
+
+        {"$regexMatch" => {"input" => build(input, mapper), "regex" => constant(translated)}}
       end
 
       # contains/startsWith/endsWith over two strings; null (an error to CEL) otherwise.
