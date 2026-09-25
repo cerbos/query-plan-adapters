@@ -661,6 +661,14 @@
       "status": "unsupported",
       "reason": "The exists() over the tags collection arrives as a lambda operand, which a Chroma `Where` clause has no form for: tags are not stored as metadata at all, and there is no per-element predicate to fold the lambda into. The cross-type question the probe asks (a string name against 0) is never reached, and a disjunction with one untranslatable branch is refused whole, so the aNumber == 5 branch goes with it. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "Chroma's $lt/$lte/$gt/$gte compare numeric metadata only, so an ordering of the owner key against a string literal is refused; Chroma cannot order strings at all"
+    },
+    "type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first": {
+      "status": "unsupported",
+      "reason": "Chroma's $lt/$lte/$gt/$gte compare numeric metadata only, so an ordering of the owner key against a string literal is refused; Chroma cannot order strings at all"
+    },
     "type-mismatch/has-intersection/mapped-names-against-mixed-literal-list": {
       "status": "unsupported",
       "reason": "The map() projection of tag names is a nested expression in an operand position, refused before the mixed literal list [\"public\", 0] is examined; Chroma has no relation to project from and no list-valued field for a set intersection to test. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -692,6 +700,10 @@
     "type-mismatch/in/string-literal-in-resource-number-list": {
       "status": "unsupported",
       "reason": "Same value-first membership refusal as `membership/in/literal-in-resource-number-list`, in the left disjunct; the whole disjunction is refused with it, so the aNumber == 5 branch is not emitted either. The cross-type hazard is not what stops it: the pinned server's $contains is type-exact (\"2\" does not match a stored [2]), so a lowering would not coerce, but the seeds' empty lists and null elements still cannot be stored. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "type-mismatch/less-than/explicit-null-field-against-string-literal": {
+      "status": "unsupported",
+      "reason": "Chroma's $lt/$lte/$gt/$gte compare numeric metadata only, so an ordering of the owner key against a string literal is refused; Chroma cannot order strings at all"
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",

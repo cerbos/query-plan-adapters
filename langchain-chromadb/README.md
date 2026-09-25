@@ -311,11 +311,11 @@ caller must. Passed cases on the current PDP, 0.55.0, out of every golden case i
 | --- | --- |
 | core | 20 / 26 |
 | extended | 39 / 80 |
-| adversarial | 122 / 254 |
+| adversarial | 132 / 267 |
 
-Without `allowPostFilter`, the 123 cases the post-filter answers throw `UnsupportedOperatorError`
-instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 58
-passing: 18, 10 and 30 in the three tiers.
+Without `allowPostFilter`, the 127 cases the post-filter answers throw `UnsupportedOperatorError`
+instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 64
+passing: 18, 10 and 36 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
