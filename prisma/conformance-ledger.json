@@ -1,6 +1,14 @@
 {
   "adapter": "prisma",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator, so int() is refused wherever it appears; the int + double sum over it (a no-such-overload error in CEL, which denies) is never reached."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/add/int-beside-double-field`, under negation."
+    },
     "arithmetic/add/on-both-sides": {
       "status": "unsupported",
       "reason": "Arithmetic on both sides of a comparison cannot be solved to a plain column filter; Prisma filters cannot express column arithmetic"
@@ -73,6 +81,14 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string() over int() has no column to solve for, and CEL renders the int as \"1000000\" where the double it came from would be \"1e+06\", so it cannot be solved as a string() over the number column."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator, and string() of a ternary over the boolean column has no column to solve a where-filter against; the plan also ships the int literals as bare numbers, so CEL's \"1000000\" cannot be told from the double's \"1e+06\"."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator: string() of a ternary whose one branch is int() has no column to solve a where-filter against."
+    },
     "cast/string/negated-from-boolean-expression": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a boolean-valued comparison has no column to solve for."
@@ -88,6 +104,10 @@
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
       "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-integral-ternary`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -225,9 +245,17 @@
       "status": "unsupported",
       "reason": "Comparing a related element column with an outer scalar column is cross-model, while Prisma field references are same-model only"
     },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so `in` over a to-one relation is refused."
+    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Same cross-model correlated comparison limitation as membership/in/field-in-resource-list, under negation"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",

@@ -123,6 +123,28 @@ function lookupElementFields(
   return undefined;
 }
 
+/**
+ * Whether `reference` names a to-one relation itself, rather than a column reached through it.
+ * CEL reads such a relation as a map whose keys are the attribute names present on the related
+ * row, and no Prisma filter enumerates those.
+ */
+export function namesToOneRelation(mapper: Mapper, reference: string): boolean {
+  const direct = lookupMapping(mapper, reference)?.relation;
+  if (direct) return direct.type === "one" && direct.field === undefined;
+  const parts = reference.split(".");
+  for (let i = parts.length - 1; i > 0; i--) {
+    let relation = lookupMapping(mapper, parts.slice(0, i).join("."))?.relation;
+    if (!relation) {
+      continue;
+    }
+    for (const part of parts.slice(i)) {
+      relation = relation?.fields?.[part]?.relation;
+    }
+    return relation?.type === "one" && relation.field === undefined;
+  }
+  return false;
+}
+
 function toRelationConfig(
   relation: NonNullable<MapperConfig["relation"]>
 ): RelationConfig {
