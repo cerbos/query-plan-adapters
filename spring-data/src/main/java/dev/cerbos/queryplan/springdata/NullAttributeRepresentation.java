@@ -21,8 +21,10 @@ public enum NullAttributeRepresentation {
 
     /**
      * A NULL column is sent as no attribute at all, which Cerbos denies as a missing-attribute
-     * error. Null comparison operands are then rejected rather than translated to
-     * {@code IS NULL}.
+     * error. Declared on an attribute, {@code eq}/{@code ne} against a bare null is UNKNOWN for
+     * a NULL column under both polarities; every other null operand, and every one against an
+     * undeclared attribute under this call-level convention, is rejected rather than translated
+     * to {@code IS NULL}.
      */
     OMITTED
 }

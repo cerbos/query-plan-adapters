@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "h3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/posix-class-and-range-bounded",
+  "intent": "matches(\"^[[:digit:]a-c]{1,2}$\"): a class mixing a POSIX class and a range, under a bounded count.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^[[:digit:]a-c]{1,2}$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/posix-class-and-range-bounded",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^[[:digit:]a-c]{1,2}$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "h4 \"0\" and h3 \"ab\" match; a8 \"\" is below the count and the all-digit i4/i6 are above it. Reading [[:digit:]] as the characters :digt, or dropping the upper bound, gets them wrong."
+}

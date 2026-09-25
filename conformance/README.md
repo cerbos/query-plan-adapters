@@ -26,7 +26,7 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 29 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 41 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |
@@ -101,8 +101,10 @@ the seed ids that `check()` allowed, one call per seed, using that seed's resour
   the case declares `degenerate` with the reason, for example a planner fold or a type error that
   denies every row. The generator fails on an undeclared degenerate oracle, which usually means a
   discriminating seed is missing. A declaration can be limited to some PDP tags with `pdp: [...]`.
-- **`plannerDivergence`** marks a planner bug: the plan and `check()` disagree, so no adapter can
-  pass. Harnesses skip the comparison for that PDP tag. It is declared once, on the case.
+- **`plannerDivergence`** marks a case where the plan and `check()` disagree, so no adapter can
+  pass: either a planner bug, or the two calls answering different questions (an attribute the
+  request omits is unknown to the planner but absent to `check()`). Harnesses skip the comparison
+  for that PDP tag. It is declared once, on the case.
 - **Time.** The literal a plan folds `now() - duration("24h")` into is recorded as
   `"__NOW_MINUS_24H__"`. A harness substitutes the real value before translating. Seed timestamps are
   absolute and far from today, so the recorded decisions stay valid.
@@ -156,25 +158,51 @@ a vacuous pass.
 ## The dataset
 
 - `seeds.json` holds the rows: scalars, a `tags` to-many relation, `subCategoryNames` for the
-  `mainCategory` chain, and `parentSeedId`. `derived-fields.json` adds six more columns per seed.
+  `mainCategory` chain, and `parentSeedId`. A seed with `subCategoryNames` owns **one** category
+  holding every name as a subcategory, so a category can be partly matched by a predicate (i9). `derived-fields.json` adds six more columns per seed.
 - **Two NULL conventions, one per attribute.** A NULL column is a *missing attribute*, which CEL
   denies under both polarities. The exceptions are `owner` (which aliases `aOptionalString`),
   `coOwner` (which aliases `scope`), `tagNames`, `aNumberList` and `aBoolList`, which send an
   *explicit null value*. Under CEL, `null != "x"` is true. `resources.json` shows each attribute's
   convention per row. See
   [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+- **Every scalar a case reads can be missing.** Seeds `j1`, `j2` and `j3` each leave exactly one of
+  `aString` (and `obj.inner`, its alias), `aNumber` and `aBool` NULL, with every other attribute
+  present, so each negated case over those attributes meets a missing-attribute row, and a failure
+  names the column. A harness maps all three as nullable, on the omitted convention.
 - **The real to-one relation.** `parentSeedId` names the seed whose `aBool`, `aNumber`, `aString`
   and `aOptionalString` form this row's `parent`. That seed's own parent forms `parent.inner`, and the
   chain stops there.
   - Materialise a *separate* parent row per resource.
   - An absent level is a missing attribute, so it is UNKNOWN under negation, never false. See
     [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
-- **Store configuration is part of conformance.** CEL string comparison is byte-exact:
+- **Store configuration is part of conformance.** CEL string comparison is byte-exact, and CEL
+  orders strings by code point:
   - MySQL must use `utf8mb4_0900_bin`.
   - SQLite needs `PRAGMA case_sensitive_like = ON`, or string matching lowered to something other than
     `LIKE`.
+  - PostgreSQL must order by byte: every PostgreSQL leg initialises its database with
+    `--lc-collate=C` rather than inheriting the image's libc order, and
+    `ADAPTER_TEST_POSTGRES_INITDB_ARGS` overrides it to reproduce a linguistic collation's
+    over-grant ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)).
 
-  The `string/*/case-sensitive` and soft-hyphen cases witness this.
+  The `string/*/case-sensitive`, soft-hyphen and `comparison/*/string-code-point-order` cases
+  witness this.
+
+## Mapping hazards
+
+A harness maps each attribute so that the row, read back, is the resource in `resources.json`. Some
+mappings can only hold that if the store keeps what the attribute says, and no translation can repair
+a value the store has already lost:
+
+- **Precision finer than the column's.** a5's `createdAt` is `2020-03-15T10:30:00.123456Z`. A
+  millisecond column (Prisma's `DateTime(3)`, MySQL `DATETIME(3)`) stores `.123`, so
+  `timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.123Z")` over-grants a5 and `>`
+  under-grants it, whatever the literal's precision. The attribute must be the value the store
+  returns: map a column at least as precise as the values an application writes to it, or send the
+  PDP the stored (truncated) value. The corpus carries no case for this, because the fault is in the
+  mapping, not the translation, and every millisecond store would ledger it
+  ([#519](https://github.com/cerbos/query-plan-adapters/issues/519)).
 
 ## Changing the corpus
 

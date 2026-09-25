@@ -73,7 +73,8 @@ func (d *Degenerate) covers(tag string) bool {
 	return false
 }
 
-// Divergence declares a planner bug: the plan and check() disagree on the listed PDP tags.
+// Divergence declares that the plan and check() disagree on the listed PDP tags, whether through a
+// planner bug or because the two calls answer different questions about an omitted attribute.
 type Divergence struct {
 	Issue  string   `yaml:"issue" json:"issue"`
 	PDP    []string `yaml:"pdp" json:"pdp"`

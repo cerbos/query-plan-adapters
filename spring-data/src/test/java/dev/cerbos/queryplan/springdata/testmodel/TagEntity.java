@@ -33,6 +33,10 @@ public class TagEntity {
     @JoinColumn(name = "resource_id")
     private ResourceEntity resource;
 
+    /** The element's index in the list the corpus sends to check(). */
+    @Column(name = "list_position")
+    private Integer position;
+
     public TagEntity() {}
 
     public TagEntity(String id, String name, ResourceEntity resource) {
@@ -47,5 +51,7 @@ public class TagEntity {
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public ResourceEntity getResource() { return resource; }
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
     public void setResource(ResourceEntity resource) { this.resource = resource; }
 }

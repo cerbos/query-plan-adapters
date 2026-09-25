@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -90,9 +91,9 @@ const sqliteDSN = "file:adversarial?mode=memory&cache=shared" +
 const sqliteDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_double           real,
 	a_optional_string  text,
 	created_by         text    NOT NULL,
@@ -123,17 +124,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_optional_string  text,
 	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 text PRIMARY KEY,
-	a_bool             integer NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           integer NOT NULL,
+	a_bool             integer,
+	a_string           text,
+	a_number           integer,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -155,9 +156,9 @@ CREATE TABLE adversarial_bool_elem (
 const postgresDDL = `
 CREATE TABLE adversarial_resource (
 	id                 text PRIMARY KEY,
-	a_bool             boolean          NOT NULL,
-	a_string           text             NOT NULL,
-	a_number           bigint           NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_double           double precision,
 	a_optional_string  text,
 	created_by         text             NOT NULL,
@@ -188,17 +189,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 text   PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 text   PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           text    NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           text,
+	a_number           bigint,
 	a_optional_string  text,
 	parent_id          text    NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -240,9 +241,9 @@ func openSQLite(t *testing.T) *sql.DB {
 const mysqlDDL = `
 CREATE TABLE adversarial_resource (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean          NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint           NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_double           double,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	created_by         varchar(64) COLLATE utf8mb4_0900_bin NOT NULL,
@@ -273,17 +274,17 @@ CREATE TABLE adversarial_label (
 );
 CREATE TABLE adversarial_parent (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	resource_id        varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
 	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	a_bool             boolean NOT NULL,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	a_number           bigint  NOT NULL,
+	a_bool             boolean,
+	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_number           bigint,
 	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
 	parent_id          varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
@@ -332,6 +333,29 @@ func openMySQL(t *testing.T) *sql.DB {
 	return db
 }
 
+// postgresInitdbArgs is how the PostgreSQL leg's database is initialised: --lc-collate=C, a
+// byte-order collation. CEL orders strings by code point, and <, <=, > and >= on a text column
+// follow the column's collation. PostgreSQL collations are deterministic, so = is byte-exact under
+// any of them, but a linguistic one orders case, accents and punctuation below the letter: under
+// glibc's en_US.utf8 'One' > 'a' is TRUE, which over-grants
+// comparison/greater-than/string-code-point-order (cerbos/query-plan-adapters#489). "C" orders by
+// byte, which for UTF-8 is code point order.
+//
+// Stated rather than inherited: the Alpine image reports en_US.utf8 without it, and orders by byte
+// only because musl's strcoll does. The same database on a glibc image, or on a managed service,
+// orders linguistically.
+//
+// ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it, so the over-grant can be reproduced rather than
+// taken on trust: "--locale-provider=icu --icu-locale=en-US" gives the pinned image ICU's
+// linguistic order, which musl cannot, and fails both string-code-point-order cases. A measurement
+// escape hatch, not a CI leg.
+func postgresInitdbArgs() string {
+	if args, ok := os.LookupEnv("ADAPTER_TEST_POSTGRES_INITDB_ARGS"); ok {
+		return args
+	}
+	return "--lc-collate=C"
+}
+
 func openPostgres(t *testing.T) *sql.DB {
 	t.Helper()
 
@@ -340,6 +364,7 @@ func openPostgres(t *testing.T) *sql.DB {
 		postgres.WithDatabase("conformance"),
 		postgres.WithUsername("conformance"),
 		postgres.WithPassword("conformance"),
+		testcontainers.WithEnv(map[string]string{"POSTGRES_INITDB_ARGS": postgresInitdbArgs()}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(2*time.Minute),
@@ -440,13 +465,19 @@ func buildMapper() cerbosent.Mapper {
 		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
 		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
 		// and PostgreSQL render "true", and nothing in the plan names a column's type.
-		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool},
+		//
+		// Every attribute resources.json omits when its column is NULL is declared
+		// NullConventionOmitted: aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString,
+		// aDouble, scope, createdAt, updatedAt, obj.inner and every parent.* hop. A null literal
+		// against one is then a missing-attribute error CEL denies, so it is refused rather than
+		// rendered as IS NULL (#528).
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
 		// Declared string so CEL's `+` between two columns resolves to concatenation:
 		// the operator is overloaded and the plan carries no operand types, so an
 		// undeclared pair fails closed rather than emitting a numeric `+`.
-		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString},
-		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber},
-		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber},
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.createdBy":       {Column: "created_by"},
 		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
@@ -455,12 +486,12 @@ func buildMapper() cerbosent.Mapper {
 		// two attributes and leaves it untouched for every other mapping.
 		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbosent.NullConventionExplicit},
 		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
-		"request.resource.attr.scope":     {Column: "scope"},
-		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp},
-		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp},
+		"request.resource.attr.scope":     {Column: "scope", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
-		"request.resource.attr.obj.inner": {Column: "a_string"},
+		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
 
 		"request.resource.attr.tags":       {Relation: tags},
 		"request.resource.attr.tagNames":   {Relation: &tagNames},
@@ -482,14 +513,22 @@ func buildMapper() cerbosent.Mapper {
 		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
 		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
 		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
-		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool"},
-		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string"},
-		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number"},
-		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string"},
-		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool"},
-		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string"},
-		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number"},
-		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string"},
+		// A hop's NULL column, like an absent level, is omitted from the resource, so every hop
+		// is declared NullConventionOmitted.
+		// The two aBool hops are declared boolean, like the root aBool, because that is what they
+		// hold, and an undeclared one keeps the plain CAST that SQLite and MySQL render as 1/0.
+		// `parent` itself is the to-one hop, not a column: a CEL map whose keys are the joined
+		// row's non-NULL columns. Declared so a macro over it (`collection/exists/map-keys`) meets
+		// the translator's own refusal rather than a harness defect.
+		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
 	}
 }
 
@@ -576,9 +615,12 @@ func (s *store) seed(t *testing.T, corpus *Corpus) {
 			s.exec(t, boolElemTable, []string{"value", "resource_id"}, nullableBool(element), seed.ID)
 		}
 
-		for i, subName := range seed.SubCategoryNames {
-			catID, subID := categoryID(seed, i), subCategoryID(seed, i)
+		catID := categoryID(seed)
+		if len(seed.SubCategoryNames) > 0 {
 			s.exec(t, categoryTable, []string{"id", "name", "resource_id"}, catID, "business", seed.ID)
+		}
+		for i, subName := range seed.SubCategoryNames {
+			subID := subCategoryID(seed, i)
 			s.exec(t, subCategoryTable, []string{"id", "name", "category_id"}, subID, subName, catID)
 
 			for j, label := range derived.Labels {

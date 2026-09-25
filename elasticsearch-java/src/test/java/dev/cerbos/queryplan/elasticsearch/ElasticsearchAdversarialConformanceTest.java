@@ -59,9 +59,9 @@ class ElasticsearchAdversarialConformanceTest {
 
     private record Tag(String id, String name) {}
 
-    /** One seed row. List elements are boxed so a null element survives. */
+    /** One seed row. Scalars and list elements are boxed so a null survives. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record Seed(String id, boolean aBool, String aString, int aNumber,
+    private record Seed(String id, Boolean aBool, String aString, Integer aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
                         List<Tag> tags, List<String> subCategoryNames, String parentSeedId) {}
 
@@ -244,9 +244,10 @@ class ElasticsearchAdversarialConformanceTest {
         for (Seed seed : SEEDS) {
             Map<String, Object> document = new LinkedHashMap<>();
             document.put("id", seed.id());
-            document.put("aBool", seed.aBool());
-            document.put("aString", seed.aString());
-            document.put("aNumber", seed.aNumber());
+            // A NULL scalar is a missing attribute, so the field is left out of the document.
+            putUnlessNull(document, "aBool", seed.aBool());
+            putUnlessNull(document, "aString", seed.aString());
+            putUnlessNull(document, "aNumber", seed.aNumber());
             if (derivedFor(seed).aDouble() != null) document.put("aDouble", derivedFor(seed).aDouble());
             if (seed.aOptionalString() != null) {
                 document.put("aOptionalString", seed.aOptionalString());
@@ -264,7 +265,9 @@ class ElasticsearchAdversarialConformanceTest {
             if (derivedFor(seed).createdAt() != null) document.put("createdAt", derivedFor(seed).createdAt());
             if (derivedFor(seed).updatedAt() != null) document.put("updatedAt", derivedFor(seed).updatedAt());
             if (derivedFor(seed).scope() != null) document.put("scope", derivedFor(seed).scope());
-            document.put("obj", Map.of("inner", seed.aString()));
+            Map<String, Object> obj = new LinkedHashMap<>();
+            putUnlessNull(obj, "inner", seed.aString());
+            document.put("obj", obj);
             document.put("tags", seed.tags().stream().map(tag -> {
                 Map<String, Object> value = new LinkedHashMap<>();
                 value.put("id", tag.id());
@@ -292,19 +295,19 @@ class ElasticsearchAdversarialConformanceTest {
         }
     }
 
+    // One category holding every subcategory name (conformance/README.md, "The dataset").
     private static List<Map<String, Object>> categoriesFor(Seed seed) {
-        List<Map<String, Object>> categories = new ArrayList<>();
+        if (seed.subCategoryNames().isEmpty()) return List.of();
+        List<Map<String, Object>> subCategories = new ArrayList<>();
         for (String subName : seed.subCategoryNames()) {
             List<Map<String, Object>> labels = derivedFor(seed).labels().stream().map(name -> {
                 Map<String, Object> label = new LinkedHashMap<>();
                 label.put("name", name);
                 return label;
             }).toList();
-            categories.add(Map.of(
-                    "name", "business",
-                    "subCategories", List.of(Map.of("name", subName, "labels", labels))));
+            subCategories.add(Map.of("name", subName, "labels", labels));
         }
-        return categories;
+        return List.of(Map.of("name", "business", "subCategories", subCategories));
     }
 
     // -- the real to-one relation (conformance/README.md, "The dataset") --------------------------
@@ -326,11 +329,15 @@ class ElasticsearchAdversarialConformanceTest {
     /** One level of the chain as an indexed object. A NULL column is an absent field. */
     private static Map<String, Object> relationDocument(Seed seed) {
         Map<String, Object> level = new LinkedHashMap<>();
-        level.put("aBool", seed.aBool());
-        level.put("aString", seed.aString());
-        level.put("aNumber", seed.aNumber());
-        if (seed.aOptionalString() != null) level.put("aOptionalString", seed.aOptionalString());
+        putUnlessNull(level, "aBool", seed.aBool());
+        putUnlessNull(level, "aString", seed.aString());
+        putUnlessNull(level, "aNumber", seed.aNumber());
+        putUnlessNull(level, "aOptionalString", seed.aOptionalString());
         return level;
+    }
+
+    private static void putUnlessNull(Map<String, Object> document, String field, Object value) {
+        if (value != null) document.put(field, value);
     }
 
     private static DerivedEntry derivedFor(Seed seed) {

@@ -7,6 +7,7 @@ import type {
 // The mapper the Convex backend translates every conformance case with.
 import { MAPPER } from "../convex/adversarialMapper";
 import { PlanKind, queryPlanToConvex, UnsupportedQueryPlanError } from ".";
+import { evaluate } from "./evaluate";
 import type {
   Mapper,
   MapperConfig,
@@ -372,6 +373,252 @@ describe("nullAttributeRepresentation", () => {
     );
     expect(rejected.length).toBeLessThan(TRANSLATED.length);
   });
+});
+
+/**
+ * Under "omitted" a NULL field sends no attribute, so CEL denies every comparison against it, while
+ * the pushed-down `q.neq(...)` and a negated comparison match a document the path is absent from.
+ * An entry that declares no `nullable` therefore takes the call-level convention as its default,
+ * exactly as if it declared `nullable: true`, and the post-filter reads a stored null as missing
+ * (#493). A caller-supplied argument no corpus case can vary: the harness runs one mapping, under
+ * "explicit".
+ */
+describe("omitted: an undeclared entry is nullable", () => {
+  const omitted = (id: string, options: TranslateOptions = {}) =>
+    translate(id, { ...options, nullAttributeRepresentation: "omitted" });
+
+  // The corpus mapping declares `aString` and `aNumber` nullable, so each case strips the
+  // declaration from the field it reads, leaving the entry for the call-level default to decide.
+  const undeclared = (field: string): Mapper =>
+    Object.fromEntries(
+      Object.entries(MAPPER).map(([key, config]) => {
+        if (key !== `request.resource.attr.${field}`) return [key, config];
+        const { nullable: _nullable, ...rest } = config;
+        return [key, rest];
+      }),
+    );
+
+  // `ne`, a negated ordering, and a negated `in` over an undeclared entry, each of which Convex's
+  // engine answers as a match on an absent path.
+  const CASES = [
+    ["string/equals/case-sensitive", "aString", "one", "two"],
+    ["comparison/not-equals/value-first", "aString", "two", "one"],
+    ["logic/not/greater-than", "aNumber", 0, 2],
+    ["null/in/negated-explicit-null-in-literal-list", "owner", "y", "x"],
+  ] as const;
+
+  test.each(CASES)(
+    "%s stays off Convex's engine, and needs the post-filter opt-in",
+    (id, field, _allowed, _denied) => {
+      const mapper = undeclared(field);
+      expect(translate(id, { mapper }).path).toBe("db");
+      expect(omitted(id, { mapper }).path).toBe("post");
+      expect(() => omitted(id, { mapper, allowPostFilter: false })).toThrow(
+        "allowPostFilter",
+      );
+    },
+  );
+
+  test.each(CASES)(
+    "%s denies a document %s is missing or null in",
+    (id, field, allowed, denied) => {
+      const { postFilter } = omitted(id, { mapper: undeclared(field) });
+      expect(postFilter!({ [field]: allowed })).toBe(true);
+      expect(postFilter!({ [field]: denied })).toBe(false);
+      expect(postFilter!({})).toBe(false);
+      expect(postFilter!({ [field]: null })).toBe(false);
+    },
+  );
+
+  test("a function mapper takes the default too", () => {
+    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const asFunction: Mapper = (reference) => mapper[reference]!;
+    expect(
+      omitted("string/equals/case-sensitive", { mapper: asFunction }).path,
+    ).toBe("post");
+  });
+
+  // `nullable: false` is the per-entry opt-out: it asserts the field is always stored and never
+  // null. With every entry declaring its own `nullable`, nothing is left for the default to decide,
+  // so every null-free plan asks Convex's engine for exactly what it does under "explicit".
+  test("declaring nullable: false keeps the explicit translation", () => {
+    const declared: Mapper = Object.fromEntries(
+      Object.entries(MAPPER).map(([key, config]) => [
+        key,
+        { ...config, nullable: config.nullable ?? false },
+      ]),
+    );
+    const pushedDown = (result: QueryPlanToConvexResult<Recorder, unknown>) =>
+      result.filter ? recordFilter("filter", result.filter) : undefined;
+    const differing = TRANSLATED.filter(
+      ({ id }) => !/\bnull\b/.test(JSON.stringify(golden(id).plan)),
+    )
+      .filter(({ id, result }) => {
+        const declaredResult = omitted(id, { mapper: declared });
+        return (
+          declaredResult.path !== result.path ||
+          JSON.stringify(pushedDown(declaredResult)) !==
+            JSON.stringify(pushedDown(result))
+        );
+      })
+      .map(({ id }) => id);
+    expect(differing).toEqual([]);
+  });
+});
+
+// -- a non-nullable declaration puts orderings in Convex's engine ----------------------------------
+
+/**
+ * Convex orders values across types (null < number < boolean < string < …), so a bare
+ * `q.lt(field, "5")` is true for every number, where CEL's `5 < "5"` is an error that denies. The
+ * corpus cannot drive this: its mapping declares `aNumber`, `aBool` and `aString` nullable (seeds
+ * j1–j3 omit them), which keeps every comparison over them on the post-filter. A caller whose
+ * fields are always present declares them non-nullable, and then the ordering reaches Convex's
+ * engine (cerbos/query-plan-adapters#516).
+ *
+ * The rule: the filter Convex is handed decides every document exactly as the adapter's own CEL
+ * evaluator does, for a field holding a value of each type. `convexEvaluate` is Convex's
+ * documented cross-type order, applied to the recorded builder calls.
+ */
+describe("an ordering against a value of another type, on a non-nullable field", () => {
+  const NON_NULLABLE: Mapper = Object.fromEntries(
+    Object.entries(MAPPER).map(([reference, config]) => [
+      reference,
+      [
+        "request.resource.attr.aNumber",
+        "request.resource.attr.aBool",
+        "request.resource.attr.aString",
+      ].includes(reference)
+        ? { field: config.field }
+        : config,
+    ]),
+  );
+
+  const CONVEX_TYPE_ORDER = [
+    "null",
+    "bigint",
+    "number",
+    "boolean",
+    "string",
+    "bytes",
+    "array",
+    "object",
+  ];
+  const convexType = (value: unknown): string => {
+    if (value === null) return "null";
+    if (value instanceof ArrayBuffer) return "bytes";
+    if (Array.isArray(value)) return "array";
+    return typeof value;
+  };
+  const convexCompare = (a: unknown, b: unknown): number => {
+    const byType =
+      CONVEX_TYPE_ORDER.indexOf(convexType(a)) -
+      CONVEX_TYPE_ORDER.indexOf(convexType(b));
+    if (byType !== 0) return byType;
+    if (convexType(a) === "bytes") {
+      return (a as ArrayBuffer).byteLength - (b as ArrayBuffer).byteLength;
+    }
+    const [x, y] = [a, b] as [number, number];
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
+  const convexEvaluate = (
+    node: unknown,
+    doc: Record<string, unknown>,
+  ): unknown => {
+    if (!isRecordedNode(node)) return node;
+    const [a, b] = node.args.map((arg) => convexEvaluate(arg, doc));
+    switch (node.op) {
+      case "field":
+        return doc[String(node.args[0])];
+      case "eq":
+        return convexCompare(a, b) === 0;
+      case "neq":
+        return convexCompare(a, b) !== 0;
+      case "lt":
+        return convexCompare(a, b) < 0;
+      case "lte":
+        return convexCompare(a, b) <= 0;
+      case "gt":
+        return convexCompare(a, b) > 0;
+      case "gte":
+        return convexCompare(a, b) >= 0;
+      case "and":
+        return node.args.every((arg) => convexEvaluate(arg, doc) === true);
+      case "or":
+        return node.args.some((arg) => convexEvaluate(arg, doc) === true);
+      case "not":
+        return convexEvaluate(node.args[0], doc) !== true;
+      default:
+        throw new Error(`the recorder has no ${node.op}`);
+    }
+  };
+
+  const ORDERING = new Set(["lt", "le", "gt", "ge"]);
+  const ordersSomething = (node: unknown): boolean => {
+    if (Array.isArray(node)) return node.some(ordersSomething);
+    if (typeof node !== "object" || node === null) return false;
+    const { operator } = node as { operator?: unknown };
+    return (
+      (typeof operator === "string" && ORDERING.has(operator)) ||
+      Object.values(node).some(ordersSomething)
+    );
+  };
+
+  const PUSHED_ORDERINGS = GOLDENS.filter((g) =>
+    ordersSomething(g.plan.condition ?? null),
+  ).flatMap((g) => {
+    const result = translated(g.id, { mapper: NON_NULLABLE });
+    const queryPlan = planOf(g);
+    return result !== "refused" &&
+      result.path === "db" &&
+      queryPlan.kind === PlanKind.CONDITIONAL
+      ? [{ id: g.id, condition: queryPlan.condition, filter: result.filter }]
+      : [];
+  });
+
+  // Every field value a document could hold for an attribute CEL reads as a scalar.
+  const VALUES = [null, -1, 2, 5, true, false, "", "5", "m", "zzz"];
+  const FIELDS = ["aNumber", "aBool", "aString", "owner"];
+
+  // Anti-vacuity: the cross-type orderings are among what reaches the engine.
+  test("cross-type orderings reach Convex's engine under this mapping", () => {
+    expect(PUSHED_ORDERINGS.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([
+        "type-mismatch/less-than/number-field-against-string-literal",
+        "type-mismatch/greater-or-equal/negated-number-field-against-string-literal",
+        "type-mismatch/greater-than/boolean-field-against-number-literal",
+        "type-mismatch/less-than/negated-string-field-against-number-literal",
+      ]),
+    );
+  });
+
+  test.each(PUSHED_ORDERINGS.map((pushed) => [pushed.id, pushed] as const))(
+    "%s: Convex's answer is CEL's for a field of every type",
+    (id, { condition, filter }) => {
+      const emitted = recordFilter(id, filter);
+      const disagreements = FIELDS.flatMap((field) =>
+        VALUES.flatMap((value) => {
+          const doc: Record<string, unknown> = {
+            aNumber: 3,
+            aBool: true,
+            aString: "s",
+            owner: "o",
+            [field]: value,
+          };
+          const cel =
+            evaluate(condition, {
+              doc,
+              mapper: NON_NULLABLE,
+              bindings: {},
+              nullIsMissing: false,
+            }) === true;
+          const convex = convexEvaluate(emitted, doc) === true;
+          return cel === convex ? [] : [{ field, value, cel, convex }];
+        }),
+      );
+      expect(disagreements).toEqual([]);
+    },
+  );
 });
 
 // -- hand-built plans ------------------------------------------------------------------------------

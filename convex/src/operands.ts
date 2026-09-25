@@ -51,6 +51,37 @@ export const isMappedReference = (reference: string, mapper: Mapper): boolean =>
 export const resolveField = (reference: string, mapper: Mapper): string =>
   mapperConfig(reference, mapper)?.field ?? reference;
 
+/**
+ * The mapper as the `"omitted"` convention reads it: every entry that does not declare `nullable`
+ * is `nullable: true`, and `nullable: false` still opts an entry out.
+ *
+ * The call-level convention is the default for an attribute that declares nothing (ADR 0004).
+ * Under `"omitted"`, a NULL field sends no attribute and CEL denies the document on a
+ * missing-attribute error, while the pushed-down `q.neq(...)` and a negated comparison match a
+ * document the path is absent from. Refusing null operands alone left `R.attr.x != "a"` returning
+ * those documents on every field that did not declare `nullable`
+ * (cerbos/query-plan-adapters#493). A nullable field stays with the post-filter, whose evaluator
+ * has the missing-attribute error.
+ */
+export const withOmittedNullDefault = (mapper: Mapper): Mapper => {
+  const nullableByDefault = (config: MapperConfig): MapperConfig => ({
+    ...config,
+    nullable: config.nullable ?? true,
+  });
+  if (typeof mapper === "function") {
+    return (key) => {
+      const config = mapper(key);
+      return config && nullableByDefault(config);
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(mapper).map(([key, config]) => [
+      key,
+      nullableByDefault(config),
+    ]),
+  );
+};
+
 /** Whether the mapped path may be absent from a document — CEL's missing-attribute case. */
 export const isNullableField = (reference: string, mapper: Mapper): boolean =>
   mapperConfig(reference, mapper)?.nullable ?? false;

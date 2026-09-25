@@ -275,6 +275,18 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		cmpOp = cmpOp.Mirror()
 	}
 
+	if comparison && omittedNullOperand(cmpOp, left, right, m) {
+		lv, err := b.value(left, m)
+		if err != nil {
+			return nil, err
+		}
+		x, err := asExpr(lv)
+		if err != nil {
+			return nil, err
+		}
+		return negate(omittedNullComparison(cmpOp, x), negated), nil
+	}
+
 	lv, err := b.value(left, m)
 	if err != nil {
 		return nil, err
@@ -864,6 +876,14 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 		if len(n.operands) != unaryOperands {
 			return nil, fmt.Errorf("'%s' requires exactly one operand", n.operator)
 		}
+		if rendersNumericConstant(n.operands[0]) {
+			return nil, fmt.Errorf(
+				"string() over a numeric constant cannot be lowered: the plan ships an int and a " +
+					"double constant as the same number, which CEL renders differently " +
+					"(\"1000000\" and \"1e+06\"), and a SQL CAST of the bound parameter spells " +
+					"neither reliably (SQLite says \"1000000.0\")",
+			)
+		}
 		v, err := b.value(n.operands[0], m)
 		if err != nil {
 			return nil, err
@@ -1035,6 +1055,13 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		}
 	}
 
+	if op == OpMod && (isAttribute(lv) || isAttribute(rv)) {
+		return nil, errors.New(
+			"modulus over an attribute is a CEL no-overload error: Cerbos sends every attribute " +
+				"number as a double and CEL's % is integer-only, so the PDP denies every row",
+		)
+	}
+
 	lExpr, err := asExpr(lv)
 	if err != nil {
 		return nil, err
@@ -1044,6 +1071,18 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		return nil, err
 	}
 	return Arith{Op: op, L: lExpr, R: rExpr}, nil
+}
+
+// isAttribute reports whether an operand is an attribute read straight from storage — a column or a
+// scalar read through a to-one hop — as opposed to a computed value such as size().
+func isAttribute(v value) bool {
+	switch t := v.(type) {
+	case Column:
+		return true
+	case Subquery:
+		return t.Kind == SubqueryScalar
+	}
+	return false
 }
 
 // foldArithmetic evaluates a binary operation over two constants, returning nil when the operator
@@ -1134,50 +1173,116 @@ func addValue(lv, rv value) (value, error) {
 	return numericArith(OpAdd, lv, rv)
 }
 
+// rendersNumericConstant reports whether string() over n could render a numeric constant: n is
+// one, or is a ternary with one in a branch. The plan does not say whether the policy wrote an int
+// or a double, and CEL spells the two differently.
+func rendersNumericConstant(n *node) bool {
+	if n.isValue() {
+		_, number := n.value.(float64)
+		return number
+	}
+	if !n.isExpr() || n.operator != "if" || len(n.operands) != ternaryOperands {
+		return false
+	}
+	return rendersNumericConstant(n.operands[1]) || rendersNumericConstant(n.operands[2])
+}
+
 // castValue lowers CEL's string() conversion. int() and double() are rejected before they reach
 // here — SQL CAST does not reproduce their semantics (#311) — so string() is the only survivor.
 //
-// A numeric or text operand is cast as it stands: every engine this module targets formats the
-// shortest decimal that round-trips, as CEL does. A BOOLEAN column cannot be — SQLite and MySQL
-// have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL and PostgreSQL say
-// 'true' (#376). Nothing in the plan names the operand's type, so the caller declares it with
-// ValueBool, and the column is spelled through boolText before it is cast.
+// A text operand is cast as it stands. A column declared ValueNumber is not: CEL spells a double
+// with Go's %g, which no engine's CAST prints, so it is held as numberText for the comparison that
+// consumes it. A constant or undeclared operand is cast as it stands. A BOOLEAN operand cannot be —
+// SQLite and MySQL have no boolean type and store 1/0, so `CAST(a_bool AS TEXT)` is '1' where CEL
+// and PostgreSQL say 'true' (#376) — so boolOperand picks out every operand known to be boolean and
+// it is spelled through boolText before it is cast.
 func castValue(v value) (value, error) {
 	e, err := asExpr(v)
 	if err != nil {
 		return nil, err
 	}
-	if c, ok := v.(Column); ok && c.Type == ValueBool {
-		e = boolText(c)
+	if _, constant := v.(float64); !constant && scalarKind(v) == "number" {
+		return numberText{x: e}, nil
+	}
+	if boolOperand(e) {
+		e = boolText(e)
 	}
 	return Cast{X: e, To: CastText}, nil
 }
 
-// boolText spells a boolean column the way CEL's string() does:
+// boolOperand reports whether string()'s operand is known to be boolean. That is three shapes:
 //
-//	CASE WHEN col IS NULL THEN NULL WHEN col THEN 'true' ELSE 'false' END
+//   - a column declared ValueBool;
+//   - a column declared ValueBool and read through a to-one hop, which is a scalar subquery
+//     projecting it (cast/string/negated-from-boolean-through-relation);
+//   - a predicate node, the lowering of a boolean-valued expression such as
+//     `string(R.attr.n > 3)` (cast/string/negated-from-boolean-expression);
+//   - a Case whose every arm is one of these or a boolean constant, the lowering of a ternary
+//     with boolean arms such as `string(R.attr.n > 3 ? R.attr.flag : false)`
+//     (cast/string/negated-from-boolean-ternary). A Case with no ELSE is still boolean: its
+//     missing ELSE is SQL NULL, which boolText keeps NULL (#538).
 //
-// A bare boolean column is read as a condition by SQLite, MySQL and PostgreSQL alike — it is how a
-// bare boolean conjunct already renders — so this one tree gives CEL's two words on every engine,
-// where a CAST gives them on one (cerbos/query-plan-adapters#418).
+// Nothing in the plan names an attribute's type, so an undeclared column is not known to be
+// boolean, through a hop or not, and keeps the plain CAST: declaring ValueBool is what tells the
+// adapter a column holds a boolean (#470).
+func boolOperand(e Expr) bool {
+	switch t := e.(type) {
+	case Column:
+		return t.Type == ValueBool
+	case Subquery:
+		if t.Kind == SubqueryExists {
+			return true
+		}
+		c, ok := t.Select.(Column)
+		return t.Kind == SubqueryScalar && ok && c.Type == ValueBool
+	case Case:
+		for _, w := range t.Whens {
+			if !boolArm(w.Then) {
+				return false
+			}
+		}
+		return t.Else == nil || boolArm(t.Else)
+	case Cmp, Logic, Not, IsNull, TruthTest, Like, NotDistinct, InList, BoolConst:
+		return true
+	}
+	return false
+}
+
+// boolArm reports whether one arm of a Case is boolean-valued: a boolOperand, or a boolean
+// constant such as the `false` of `n > 3 ? flag : false`, which reaches the Case as a literal.
+func boolArm(e Expr) bool {
+	if l, ok := e.(Lit); ok {
+		_, isBool := l.V.(bool)
+		return isBool
+	}
+	return boolOperand(e)
+}
+
+// boolText spells a boolean operand the way CEL's string() does:
 //
-// The IS NULL arm is load-bearing. A NULL boolean is a missing attribute or a null value, and CEL
-// has no string() for either: it raises, and the PDP denies. `WHEN col` is UNKNOWN for a NULL
-// column, so without the arm the CASE would fall through to its ELSE and say 'false', and
-// `string(x) != "true"` would return a row the PDP denies. With it the result is NULL, and the row
-// stays out under both polarities.
+//	CASE WHEN x IS NULL THEN NULL WHEN x THEN 'true' ELSE 'false' END
+//
+// A boolean column, a scalar subquery projecting one, and a predicate are all read as a condition
+// by SQLite, MySQL and PostgreSQL alike — it is how a bare boolean conjunct already renders — so
+// this one tree gives CEL's two words on every engine, where a CAST gives them on one
+// (cerbos/query-plan-adapters#418, #470).
+//
+// The IS NULL arm is load-bearing. A NULL operand is a missing attribute, an absent hop or a null
+// value, and CEL has no string() for any of them: it raises, and the PDP denies. `WHEN x` is
+// UNKNOWN for a NULL operand, so without the arm the CASE would fall through to its ELSE and say
+// 'false', and `string(x) != "true"` would return a row the PDP denies. With it the result is
+// NULL, and the row stays out under both polarities.
 //
 // castValue still casts the result to text, so the renderer treats it exactly as it treats any
 // other string(). On MySQL that cast is what gives the two words a byte-exact collation. A bare
-// CASE compares in the connection's collation once the driver interpolates its parameters into the
-// statement, and that collation ignores case and trailing spaces by default: `string(x) == "TRUE"`
-// and `== "true "` would both match a true row CEL rejects. Server-side prepared parameters happen
-// to compare as bytes, so a harness that never interpolates cannot see the difference.
-func boolText(c Column) Expr {
+// CASE compares in the connection's collation, which ignores case and trailing spaces by default:
+// `string(x) == "TRUE"` and `== "true "` would both match a true row CEL rejects. The corpus case
+// cast/string/from-boolean-case-changed-literal fails on MySQL without it.
+func boolText(x Expr) Expr {
 	return Case{
 		Whens: []When{
-			{Cond: IsNull{X: c}, Then: Lit{V: nil}},
-			{Cond: c, Then: Lit{V: "true"}},
+			{Cond: IsNull{X: x}, Then: Lit{V: nil}},
+			{Cond: x, Then: Lit{V: "true"}},
 		},
 		Else: Lit{V: "false"},
 	}
@@ -1193,6 +1298,14 @@ func (b *builder) resolveVariable(reference string, m Mapper) (value, error) {
 	if entry.Relation != nil {
 		return nil, fmt.Errorf(
 			"attribute %q maps to a collection and cannot be used as a scalar value", reference,
+		)
+	}
+	if entry.ScalarRelation != nil && entry.Column == "" {
+		return nil, fmt.Errorf(
+			"attribute %q is a to-one relation, one joined row, but is used as a value: a CEL "+
+				"map's keys are the row's present columns (`\"k\" in m` tests them), and SQL has "+
+				"no form for the set of a row's present columns",
+			reference,
 		)
 	}
 	if entry.ScalarRelation != nil {
@@ -1301,7 +1414,8 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 	return out, nil
 }
 
-// assertNoNullOperands rejects every null literal operand under the omitted representation.
+// assertNoNullOperands rejects every null literal operand under the omitted representation, except
+// the one shape omittedNullComparison renders.
 //
 // The scan matches on the OPERAND, never on an allowlist of operators: a null constant reaches a
 // NULL-selecting predicate through more shapes than the obvious eq/ne/in — hasIntersection carries
@@ -1311,7 +1425,9 @@ func substituteLambdaVariable(n *node, variable string, element any) (*node, err
 // The rejection is deliberately wider than the over-granting shapes. `ne(x, null)` on its own is
 // aligned, but a leaf cannot tell whether an enclosing `not` will flip IS NOT NULL back into a
 // NULL-selecting predicate, so rejecting every null operand is what stays correct under any
-// nesting. Narrowing it would require negation-parity tracking.
+// nesting. The exception is a bare null compared with eq/ne against an attribute that itself
+// declares NullConventionOmitted: omittedNullComparison renders that as UNKNOWN for a NULL column,
+// which no enclosing `not` can flip.
 func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error {
 	if n.isValue() {
 		if carriesNull(n.value) && fallback == NullOmitted {
@@ -1325,7 +1441,8 @@ func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error 
 	// nothing here can say which column it will land against, so those keep using the fallback.
 	if variable, literal, ok := comparedAttributeAndLiteral(n); ok {
 		if entry, found := m.Resolve(variable); found && entry.NullConvention != NullConventionUnset {
-			if carriesNull(literal.value) && entry.NullConvention == NullConventionOmitted {
+			rendersUnknown := literal.value == nil && (n.operator == "eq" || n.operator == "ne")
+			if carriesNull(literal.value) && entry.NullConvention == NullConventionOmitted && !rendersUnknown {
 				return errNullOperandUnderOmitted()
 			}
 			return nil
@@ -1337,6 +1454,17 @@ func assertNoNullOperands(n *node, m Mapper, fallback NullRepresentation) error 
 		}
 	}
 	return nil
+}
+
+// omittedNullOperand reports whether a column-first comparison is `x == null` or `x != null` over
+// an attribute declaring NullConventionOmitted: the shape assertNoNullOperands lets through for
+// omittedNullComparison to render.
+func omittedNullOperand(op CmpOp, left, right *node, m Mapper) bool {
+	if (op != OpEq && op != OpNe) || !left.isVariable() || !right.isValue() || right.value != nil {
+		return false
+	}
+	entry, ok := m.Resolve(left.variable)
+	return ok && entry.NullConvention == NullConventionOmitted
 }
 
 func errNullOperandUnderOmitted() error {

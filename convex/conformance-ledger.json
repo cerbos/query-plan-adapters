@@ -9,6 +9,14 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity."
     },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare JSON number and neither branch fixes the type, so the post-filter cannot tell \"1000000\" from \"1e+06\" and refuses the string() conversion"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`"
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
@@ -61,6 +69,14 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "`{,2}` is a literal in RE2 but a quantifier-shaped token to other dialects; Convex has no regex operator in its filter engine and the post-filter answers only the literal, anchor and trailing `.*` subset with plain string comparisons, so a brace is refused rather than handed to JavaScript's regex engine, which is not RE2"
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "The `(?i)` flag needs RE2's Unicode simple case folding (k to KELVIN SIGN, s to LONG S); the post-filter answers only the literal, anchor and trailing `.*` subset without a regex engine, and JavaScript's `i` flag folds differently from RE2, so the pattern is refused"
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
@@ -72,6 +88,10 @@
     "regex/matches/dot-excludes-newline": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
+      "status": "unsupported",
+      "reason": "`.+` is a quantified wildcard, outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons; Convex's filter engine has no regex operator to hand it to, so the pattern is refused"
     },
     "regex/matches/grouped-alternation": {
       "status": "unsupported",
@@ -89,9 +109,17 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "The patterns are invalid RE2 (a backreference, a bare repetition, a nested quantifier, a repeat count over 1000, a reversed range), and CEL errors on them; the post-filter parses only the literal, anchor and trailing `.*` subset, so it refuses every one of them at translation rather than guess which are errors"
+    },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "status": "unsupported",
+      "reason": "A bracketed POSIX class and a `{1,2}` bound are outside the literal, anchor and trailing `.*` subset the post-filter answers without a regex engine, and JavaScript's regex dialect has no `[[:digit:]]`, so the pattern is refused"
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
       "status": "unsupported",
@@ -100,6 +128,14 @@
     "regex/matches/top-level-alternation-single-characters": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "`*` and `+` on a single character are outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons; Convex's filter engine has no regex operator, so the pattern is refused"
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "`\\s` is a character class, outside the literal, anchor and trailing `.*` subset the post-filter answers without a regex engine, and JavaScript's `\\s` matches the Unicode spaces RE2's ASCII-only `\\s` does not, so the pattern is refused"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",

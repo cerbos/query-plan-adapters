@@ -1,0 +1,182 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-invalid-patterns-from-principal",
+  "intent": "Five patterns RE2 cannot compile, each chosen by a principal-attribute ternary and negated, OR'd with aNumber == 5: a backreference, a count with no operand, a nested repetition, a count above 1000 and a reversed range.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "(a)\\1"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "{2}a"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": "a**"
+                            }
+                          ],
+                          "operator": "matches"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "a{1001}"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "[b-a]"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-invalid-patterns-from-principal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"(a)\\\\1\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"{2}a\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"a**\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"a{1001}\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"[b-a]\" : \"^h\") || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Each matches() is an evaluation error in CEL, so every disjunct but aNumber == 5 is an error and only a1 is allowed. An engine that accepts any of the patterns (PCRE and POSIX take (a)\\1 and some take {2}a literally) makes that negated disjunct true and over-grants every row; the pattern must be refused."
+}

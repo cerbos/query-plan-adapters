@@ -3,7 +3,8 @@
     "a1",
     "a6",
     "b2",
-    "h4"
+    "h4",
+    "j2"
   ],
   "degenerateReason": null,
   "id": "composition/variable/allow-and-deny-through-variables",
@@ -58,7 +59,14 @@
     "kind": "KIND_CONDITIONAL"
   },
   "planError": null,
-  "plannerDivergence": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/530",
+    "pdp": [
+      "0.54.0",
+      "0.55.0"
+    ],
+    "reason": "j2 has no aNumber, and the two calls answer different questions about it. The plan request leaves aNumber unknown, so the plan carries the DENY as not(gt(aNumber, 10)), which over a NULL column denies j2: the expected answer for a column-backed store. The per-row check() call sends aNumber as absent, so V.compose_large errors and check() treats the DENY as not matching (known PDP behaviour): the ALLOW grants j2. No adapter can match the recorded decision."
+  },
   "request": {
     "action": "composition/variable/allow-and-deny-through-variables",
     "resourceKind": "conformance"

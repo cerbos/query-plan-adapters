@@ -140,6 +140,7 @@ Map each `request.resource.attr.<name>` to a JPA path or an association:
 | `AttributeMapping.relation("tags", "name")` | `@OneToMany<Tag>` where `name` stands in for the element in `in` / `hasIntersection` |
 | `AttributeMapping.relation("tags", Map.of("name", field("name")))` | `@OneToMany<Tag>` with member fields for lambda bodies (`t.name`); nested values may be `relation(...)` for multi-hop chains |
 | `AttributeMapping.relation("tags", "name", Map.of(...))` | Both a default member field and nested member fields |
+| `AttributeMapping.relation(...).withPositionField("position")` | Any relation, declaring the member field that holds each element's zero-based index in the list sent to `check()`, so positional reads (`R.attr.tags[0]`) translate |
 
 `relation(...)` names a JPA association, so the correlated subquery is a criteria association join
 and Hibernate applies that association's own `@SQLRestriction` and discriminator (see
@@ -183,8 +184,8 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — regex, casts, list index, `mod`, `except()`, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
-| `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant, mixed NULL conventions in one comparison | Change the mapping |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — a regex `LIKE` cannot spell, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
 A conditional plan is translated when the Specification is first evaluated, so that is where these
@@ -213,7 +214,7 @@ is consulted only where the adapter has resolved a `(field, value)` pair for a t
 
 - **Reached:** `eq`/`ne`/`lt`/`gt`/`le`/`ge` (value-first forms under the mirrored name; `add`-folded,
   null-RHS and arithmetic-vs-constant forms included), `string()` over a boolean column (receives the
-  column and a `Boolean`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
+  column and a `Boolean`) or a string column (the column and the `String`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
   `in`, a bare boolean attribute (as `eq`), unknown leaf operators such as `matches`, and timestamp
   comparisons (value is the parsed `java.time.Instant`, including for column types the default
   rejects). `not` wraps the built predicate, so an override applies under both polarities.
@@ -235,10 +236,12 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
 The default, `EXPLICIT`, translates to `IS NULL`. If you omit attributes for NULL columns, pass
-`OMITTED`: every null comparison operand then throws `UnsupportedPlanShapeException` instead of
-emitting a filter that returns denied rows. This check is eager (in `toSpecification`), and it
-rejects every null operand, including aligned ones like `x != null`, because a leaf can't tell
-whether an enclosing `not` will flip it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
+`OMITTED`: every null comparison operand against an undeclared attribute then throws
+`UnsupportedPlanShapeException` instead of emitting a filter that returns denied rows. This check is
+eager (in `toSpecification`), and it rejects every such null operand, including aligned ones like
+`x != null`, because a leaf can't tell whether an enclosing `not` will flip it
+([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). Declare `OMITTED` on the
+attribute itself (below) and `eq`/`ne` against a bare null translate instead.
 
 ```java
 SpringDataQueryPlanAdapter.toSpecification(plan,
@@ -267,8 +270,14 @@ null. The equality family (`eq`, `ne`, `in`) over it then never renders as SQL U
 receiver is a CEL error, which denies like UNKNOWN). Undeclared attributes keep the old rendering,
 where `!=` against a constant under-grants NULL rows.
 
-**Declare both sides of a field-to-field comparison, or neither** — mixing conventions throws
-`UnmappedAttributeException`. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308)
+Declaring `OMITTED` asserts a NULL reaches `check()` as a missing attribute. `x == null` and
+`x != null` against it then translate three-valued: a NULL column is UNKNOWN under both polarities,
+as CEL's missing-attribute error denies under both, so `x == null` selects no row and `x != null`
+selects exactly the non-NULL ones. Other null operands (a null in an `in` list, say) still throw, as
+does a registered override for `eq`/`ne`, which would receive the null.
+
+A field-to-field `==`/`!=` between an `EXPLICIT` attribute and an undeclared or `OMITTED` one is
+definite for a NULL on the explicit side and UNKNOWN for a NULL on the other. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308)
 and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 ## Database collation requirements
@@ -278,8 +287,15 @@ and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribu
 >
 > - MySQL: `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not enough.
 > - SQL Server: a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`).
-> - PostgreSQL, H2, Oracle: safe by default, unless you opt into case-insensitive behaviour
->   (nondeterministic ICU collations, `citext`).
+> - PostgreSQL: equality is exact by default, but string ordering (`<`, `>`, `<=`, `>=`) follows
+>   the column collation, and a linguistic default such as `en_US.utf8` does not order by code
+>   point (`'OneSet' < 'b'` is false, `'One' > 'a'` is true). Use `"C"` for columns compared by ordering, and avoid
+>   case-insensitive behaviour (nondeterministic ICU collations, `citext`).
+> - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour. H2 orders strings
+>   by UTF-16 code unit (Java's `String.compareTo`), not by code point as CEL does, so on every
+>   store the adapter refuses an ordering against a literal holding a character at or above
+>   U+D800 (an astral character, or U+E000–U+FFFF): only such a literal can be ordered
+>   differently by the two.
 
 CEL string comparison is exact: `R.attr.department == "finance"` denies a row holding `"Finance"`.
 The adapter emits string predicates without collation control, so the column collation decides.
@@ -295,15 +311,18 @@ byte-exact but PAD SPACE (`'a' = 'a '` is TRUE). `utf8mb4_0900_bin` is both byte
 
 Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWith`/`endsWith`
 (including constant-receiver and field-to-field forms), `in`, `hasIntersection` (direct and
-`map(...)`), and `hierarchy(...)`. `OperatorFunction` overrides can't cover all of them (for example
-`hasIntersection` over a plain field never consults one), so fix the collation in the schema.
+`map(...)`), `hierarchy(...)`, `matches(...)`, and `string()` and `+` comparisons.
+`OperatorFunction` overrides can't cover all of them (for example `hasIntersection` over a plain
+field never consults one), so fix the collation in the schema.
 
-`string()` over a boolean column is the one conversion with no string predicate in SQL — the
-constant is compared in Java — because a literal-vs-literal comparison would use the **connection**
-collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by default.
+`string()` over a boolean or numeric column has no string predicate in SQL — the constant is
+inverted in Java and the column compared with the result — because a literal-vs-literal comparison
+would use the **connection** collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by
+default.
 
 CI runs the conformance suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
-the MySQL schema uses `utf8mb4_0900_bin`. Reproduce locally:
+the PostgreSQL database is initialised with `--lc-collate=C` and the MySQL schema uses
+`utf8mb4_0900_bin`. Reproduce locally:
 
 ```bash
 ADAPTER_TEST_DB=postgres ./gradlew test --tests AdversarialConformanceTest   # passes
@@ -314,6 +333,9 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
   ./gradlew test --tests AdversarialConformanceTest
 # Case-sensitive but not byte-exact — FAILS on seed h6
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
+  ./gradlew test --tests AdversarialConformanceTest
+# PostgreSQL's linguistic glibc default — FAILS both comparison/*/string-code-point-order cases (#489)
+ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.utf8 \
   ./gradlew test --tests AdversarialConformanceTest
 ```
 
@@ -326,49 +348,61 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | `lt` / `gt` / `le` / `ge` | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | Value-first (`5 < R.attr.x`) | Normalized field-first with the operator mirrored |
 | `in` | `path.in(values)`, or correlated `EXISTS` over a relation |
+| `R.attr.x in list.map(t, body)` over a literal list | `size(list.filter(t, R.attr.x == body)) > 0` as a strict count, UNKNOWN when any element's body errors, as CEL's `map` does |
 | `in(R.attr.x, R.attr.coll)` | Correlated `EXISTS` comparing member to scalar; a `NULL` scalar matches a `NULL` member (CEL `null in [..., null]` is true) |
 | `contains` / `startsWith` / `endsWith` | `cb.like` with `\`, `%`, `_`, `[` escaped; also the constant-receiver form (`"a,b".contains(R.attr.x)`) |
 | Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
 | Field-to-field comparisons | `cb.equal(pathA, pathB)` and friends, including inside lambdas |
+| `R.attr.coll == ["x"]`, `== []`, and `!=`, over a relation or its `map(t, t.f)` projection | `size(coll) == 1 && coll.exists(e, e == "x")` (`size(coll) == 0`): a list of at most one element has no order to compare. Longer lists need `withPositionField`, and are `size(coll) == n && coll[0] == v0 && ...` |
+| `size(a.except(b))`, `a.except(b) == []` / `== [v]` | `size(a.filter(x, !(x in b)))`, as Cerbos keeps each element of `a` that `b` does not contain; equality with `[v]` is a difference of one element that equals `v` |
+| `R.attr.list[i] <op> v`, `R.attr.list[i].f <op> v` (relation with `withPositionField`) | `list.exists(e, e.position = i && e <op> v)` as a three-valued score subquery; UNKNOWN when no element sits at `i` or `i` is not a non-negative integer, as CEL errors |
 | `hasIntersection(coll, [...])`, `hasIntersection(coll.map(x, x.f), [...])` | Correlated `EXISTS` with `IN` (projected for `map`) |
 | `size(coll) > 0` / `>= 1`; `== 0` / `<= 0` / `< 1`; `<op> N` | `EXISTS`; `NOT EXISTS`; correlated `COUNT` |
-| `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined |
+| `size(coll.filter(x, pred)) <op> N` | Correlated strict count, NULL-poisoned when any element body is undetermined; over a literal list, the same per-element `CASE` sum as `exists_one` |
 | `size(string)` | `cb.length(column)` (see [Gotchas](#sizestring-counts-differently-for-astral-characters)) |
 | `exists` / `all` / `filter` | One correlated aggregate scoring subquery with CEL's three-valued truth table |
-| `exists_one` | Correlated strict count `= 1`, NULL-poisoned |
+| `exists_one` | Correlated strict count `= 1`, NULL-poisoned; over a literal list (a principal attribute the planner cannot unroll), a sum of per-element `CASE` terms, NULL when any element's body is UNKNOWN |
 | Multi-hop relation chains (`R.attr.categories.subCategories`) | Correlated subquery through every hop; the chain is the flattened union of tail elements |
 | Ternary (`cond ? a : b`) | `(cond AND cmp(a, v)) OR (NOT cond AND cmp(b, v))`, UNKNOWN when `cond` is NULL |
-| Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; division guarded with `NULLIF` |
+| `int(R.attr.d) <op> c` (`d` a `Double` or `Integer` column) | Solved for the column, since CEL truncates toward zero where SQL `CAST` rounds: `int(d) == 0` is `-1 < d < 1`; UNKNOWN for a NULL or out-of-int64-range column, as CEL errors |
+| `int(R.attr.s) <op> c` (`s` a `String` column) | No `CAST`: `s` must be Go's base-10 integer (`[+-]?[0-9]+`, checked by `REPLACE`-ing the digits away), and its value is compared by sign, then by the length and lexical order of its digits with leading zeros trimmed; UNKNOWN for a malformed, out-of-int64-range or NULL string, as CEL errors |
+| `int(R.attr.n) % k` (`n` an `Integer` column) | `MOD(n, k)`, which truncates toward zero as CEL does (`-5 % 2` is `-1`); a zero divisor is UNKNOWN |
+| Arithmetic (`add`/`sub`/`mult`/`div`) in comparisons | `cb.sum`/`diff`/`prod`/`quot` in double space; a zero column divisor split out and compared as CEL's NaN / ±Infinity (see [Gotchas](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities)) |
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
+| String `+` in comparisons (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`) | `cb.concat` when a string constant or `String` column sits under the `add`, any other leaf refused; UNKNOWN when a concatenated column is NULL |
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
-| `string(R.attr.flag) == "true"` / `!=` (boolean column only) | Decided in Java: `col = true`, `col = false`, or no row for any other constant; NULL excluded under both polarities |
-| `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants |
+| `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
+| `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
+| A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
+| `R.attr.s.matches("re")` (and `== true` / `== false`) | Where the pattern's language is exact in `LIKE`: each top-level alternative a finite set of strings (literals, escapes, classes, `\d \w \s`, POSIX classes, groups, `|`, bounded repetition, a leading `(?i)` over ASCII) anchored or not, as `=` / `IN` / `LIKE 's%'` / `'%s'` / `'%s%'`; `^...$` with `.*` / `.+` between finite parts, as `LIKE` plus `NOT LIKE '%\n%'` (RE2's `.` excludes a newline); `^[set]*$` / `^[set]+$` as `REPLACE` of every member leaving `''`. A pattern RE2 rejects (lookaround, backreference) is UNKNOWN, as CEL errors. A registered `matches` override takes precedence |
 | Bare boolean variable | `cb.equal(path, true)` |
 
 ## Not yet supported
 
 These throw `UnsupportedPlanShapeException` naming the operator — except the ambiguous-column
-timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it.
+timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it, and the
+map-valued attribute row, which names an attribute no mapping can declare.
 **Overridable: no** means the refusal happens while resolving an operand, before any override is
 consulted.
 
 | Construct | Example CEL | Overridable | Notes |
 |---|---|---|---|
-| `mod` | `R.attr.aNumber % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so `check()` denies every row; SQL `MOD` would fabricate matches |
-| Arithmetic on non-numeric operands | `R.attr.aString + "x" < "y"` | no | String-concat `add` folding is `eq`/`ne`-only |
-| Regex match | `R.attr.aString.matches("^foo.*")` | yes (`matches`) | No portable regex; override per dialect (`regexp_like`, `~`, `REGEXP`) |
-| List indexing | `R.attr.tags[0] == "x"` | no | JPA collections are unordered |
-| Type casts (`int()`, `double()`, `string()` except over a boolean column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria |
+| `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
+| Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
+| Ordering a string against a literal holding a character at or above U+D800 | `R.attr.s < "h\u00e9llo\uFFFD"` | yes | CEL orders strings by code point; H2 compares UTF-16 code units, which put a surrogate pair before U+E000–U+FFFF |
+| A macro over a map-valued attribute (a to-one relation or embedded object as a whole) | `R.attr.parent.exists(k, k == "inner")` | no | CEL ranges over the map's keys, and a JPA row has no key set; the whole object is not a mappable attribute, so this is `UnmappedAttributeException` |
+| List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
+| Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
-| `eq`/`ne` against a list constant | `R.attr.tags == ["a", "b"]` | no | Map as a relation and use `in`/`hasIntersection` |
-| `except` | `size(R.attr.tags.except(["archived"])) > 0` | no | Rewrite as `R.attr.tags.exists(x, !(x in ["archived"]))` |
+| `eq`/`ne` between a relation without a declared position field and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; declare `withPositionField(...)`, or use `in`/`hasIntersection` |
+| `except` in boolean position, compared with a list of two or more elements, or removing a computed list of two or more | `R.attr.tags.except(["a"]) == ["b", "c"]` | no | A list difference in SQL has no order to compare; `size(...)` of one and equality with at most one element translate |
 
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 29 seed rows on
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 41 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -377,15 +411,23 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 58 / 80 |
-| adversarial | 180 / 227 |
+| extended | 76 / 80 |
+| adversarial | 269 / 308 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 68 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 36 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the fix is a mapping change) rather than emit a filter, and one (`null/has/missing-attribute`)
-is a planner divergence the corpus skips — the planner folds `has()` to always-allowed (see
-[Gotchas](#has-over-grants-at-the-planner-level--write--null-instead)).
+when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
+extended cases and three adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
+`null/has/composed-with-comparison`, where the planner folds `has()` to true by design while
+`check()` receives the omitted attribute as absent (see
+[Gotchas](#has-does-not-filter-a-null-column--write--null-instead)),
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
+planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
+overload and denies every row (write `1.0`), and
+three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
+`not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
+DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Other guarantees:
 
@@ -395,10 +437,10 @@ Other guarantees:
   true (in 0.54 it was an error and stayed denied under negation).
 - Bare comparisons between temporal columns throw: the database compares instants while CEL compares
   the attribute strings. Use `timestamp()` for instant comparison.
-- A null comparison against an attribute declared
-  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` throws; declared `EXPLICIT`,
-  `eq`, `ne` and `in` include NULL rows where CEL's null value says they should
-  (cerbos/query-plan-adapters#302, #308).
+- An `eq`/`ne` null comparison against an attribute declared
+  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` is UNKNOWN for a NULL column
+  under both polarities; declared `EXPLICIT`, `eq`, `ne` and `in` include NULL rows where CEL's null
+  value says they should (cerbos/query-plan-adapters#302, #308).
 
 ## Mapping hazards
 
@@ -422,6 +464,11 @@ drop rows the PDP permits. **Do not re-declare them.**
 | To-one relation used as a collection | **Caller-owned** | A `@OneToOne(mappedBy = …)` whose foreign key has no unique constraint. Add the constraint |
 | Composite association key | **Reproduced by JPA** | The mapping names the association, never its columns; Hibernate resolves `@JoinColumns` |
 | Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/or/two-hops-or-collection-exists` and siblings) | None — a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)); a dotted to-one `jpaPath` is a LEFT join so a disjunction's other branch still holds |
+
+One more is this adapter's own. `withPositionField` asserts that the member field holds exactly the
+element's index in the list sent to `check()`: `0` first, no gaps or duplicates. A column that
+drifts from that order silently reads the wrong element, so derive the attribute list and the column
+from one ordering.
 
 The "Reproduced by Hibernate" rows are claims about Hibernate — see the
 [Hibernate user guide](https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#pc-where)
@@ -497,13 +544,17 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 - A ternary with a NULL condition column is UNKNOWN, so `!(ternary)` can't include the row.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
-### `has(...)` over-grants at the planner level — write `!= null` instead
+### `has(...)` does not filter a NULL column — write `!= null` instead
 
-An **upstream Cerbos planner issue that affects every adapter**: the planner folds
-`has(R.attr.aOptionalString)` to `KIND_ALWAYS_ALLOWED`, but `check()` denies resources missing the
-attribute. Translating the plan faithfully returns rows with a NULL column that `check()` would deny.
-The corpus records it as a planner divergence on `null/has/missing-attribute`, and the conformance
-suite skips that case for the PDP versions it names.
+An attribute the plan request omits is unknown to the planner, which assumes the data layer supplies
+it: for a mapped column, the column exists and only its value is open. So the planner reads
+`has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to true by design.
+Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
+`has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter,
+so a row whose column is NULL is not excluded. The corpus's per-row `check()` calls send the same
+omission as absent, where `has()` is false, so the two calls answer different questions: the corpus
+declares both forms, `null/has/missing-attribute` and `null/has/composed-with-comparison`, as
+planner divergences, and the conformance suite skips them for the PDP versions they name.
 
 **Workaround (PDP-verified):**
 
@@ -513,7 +564,8 @@ R.attr.aOptionalString != null
 
 This plans as `ne(variable, null)` → `a_optional_string IS NOT NULL`, and `check()` agrees in every
 case (missing → deny, explicit `null` → deny, present → allow). `has(R.attr.x) && R.attr.x != null`
-produces the same plan, so it is a safe drop-in edit.
+produces the same plan, so it is a safe drop-in edit. The planner cannot make this rewrite for you:
+`has()` is true for an attribute explicitly set to `null`, where `!= null` is false.
 
 ### Nested collection macros multiply correlated subqueries — depth is bounded
 
@@ -543,11 +595,21 @@ Options.of(MAPPING).withMaxMacroDepth(8)
 `Options` wins over the property, which wins over the default. The property is read per translation
 and must be a positive integer (otherwise a plain `IllegalArgumentException`).
 
-### Division by a column is guarded with `NULLIF` — zero divisors deny
+### Division by a column: zero divisors compare as CEL's NaN and infinities
 
-CEL `x / 0` is ±Infinity; SQL errors. The adapter divides by `NULLIF(divisor, 0)`, so zero-divisor
-rows are UNKNOWN and excluded — under-inclusive where a policy relies on `x / 0 == Infinity`.
-Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
+CEL `x / 0` is ±Infinity and `0 / 0` is NaN; SQL errors. A comparison against a division by a
+column is split on the divisor: where it is zero, the NaN or infinity is compared in Java (so
+`a / a != 2.0` allows a zero row, as CEL does), and elsewhere the division runs in SQL over
+`NULLIF(divisor, 0)`. Arithmetic around the division is folded the same way when its other leaves
+are constants (`a / a + 1.0 > 1.0`); arithmetic that also reads another column, or holds a second
+such division, throws `UnsupportedPlanShapeException`, since SQL has no value that carries NaN
+through it. Constant arithmetic (including `0/0 → NaN`) is folded in Java with IEEE semantics.
+
+A non-zero dividend over `-0.0` is `-Infinity`, over `0.0` `+Infinity`, and SQL cannot read the
+sign of a stored zero (`-0.0 = 0.0` holds). So when the divisor is a `Double` column or an
+expression, and the two infinities decide the comparison differently (`a / d > 0.0`), it throws
+`UnsupportedPlanShapeException`. An integral column divisor never holds `-0.0`, and `a / a` is NaN
+at zero whatever the sign, so both still translate.
 
 ### Ternary with a `NULL` condition column excludes the row
 
@@ -603,6 +665,44 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Breaking:** a comparison against a division by a `Double` column or an expression that may be
+  zero (`R.attr.a / R.attr.d > 0.0`) now throws `UnsupportedPlanShapeException` when the sign of
+  that zero decides the result, instead of assuming a positive zero and over-granting rows holding
+  `-0.0`. See [Division by a column](#division-by-a-column-zero-divisors-compare-as-cels-nan-and-infinities).
+- `int(R.attr.x) <op> c` over a `Double`, `Integer` or `String` column now translates instead of
+  throwing.
+- `matches()` now translates without an override where `LIKE` spells the pattern's RE2 language
+  exactly (see [Supported operators](#supported-operators)); a pattern RE2 rejects is UNKNOWN, as
+  CEL errors. Other patterns still throw unless a `matches` override is registered, which still
+  takes precedence.
+- `size(...)` of an `except()` difference, and its equality with a list of at most one element,
+  now translate instead of throwing, as does list equality of any length over a relation that
+  declares `withPositionField` (and over its `map(t, t.f)` projection).
+- The planner's `list(...)` and `struct(...)` literal expressions (lists of lists, maps, lists of
+  maps) are folded to constants, and a scalar compared with a list or map literal is decided
+  (false for `==`, true for `!=`) instead of throwing. Macros over a literal list of maps
+  (`P.attr.items.exists(t, t.name == R.attr.x)`) now translate.
+- `AttributeMapping.Relation#withPositionField` declares a relation's element order, and positional
+  reads over such a relation (`R.attr.tags[0] == "x"`, `R.attr.tags[0].name == "x"`) now
+  translate. `Relation` gains a `positionField` record component; the three-argument constructor
+  is kept.
+- `exists_one` and `size(filter(...))` over a literal list (a principal attribute longer than the
+  planner unrolls), and membership in a `map()` over one, now translate instead of throwing.
+- `==`/`!=` between a relation and a list constant of at most one element now translates instead of
+  throwing.
+- `int(R.attr.n) % k` over an `Integer` column now translates to `MOD` instead of throwing.
+- Arithmetic composed on a division by a column (`a / a + 1.0 != 2.0`) now translates when its
+  other leaves are constants, instead of throwing: a zero divisor gives CEL's NaN or infinity.
+- String concatenation with a column (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`,
+  under any comparison operator) now translates to `CONCAT` instead of throwing.
+- `string()` over a string or numeric column compared with a string constant (`==`/`!=`) now
+  translates instead of throwing.
+- A field-to-field `==`/`!=` between an `EXPLICIT` attribute and an undeclared or `OMITTED` one now
+  translates instead of throwing `UnmappedAttributeException`.
+- `==`/`!=` against a bare null on an attribute declared
+  `AttributeMapping.field(path, NullAttributeRepresentation.OMITTED)` now translates instead of
+  throwing: `x == null` selects no row and `x != null` exactly the non-NULL rows, and a NULL row
+  stays out under negation. A call-level `OMITTED` still refuses them on undeclared attributes.
 - [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
   the relation an enclosing lambda iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
   ranges its subquery over a fresh root pinned to the outer row by identity instead of joining off
@@ -637,8 +737,10 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 - **Breaking** — macro-depth bound now counts literal-list folds; a plan past the limit throws
   instead of emitting a filter. Default still 5
   ([#457](https://github.com/cerbos/query-plan-adapters/issues/457)).
-- **Breaking** — `hierarchy(R.attr.scope, "")` (empty delimiter) throws. The old `LIKE` also matched
-  the path itself (`hierarchy/descendent-of/empty-delimiter` returned a row the PDP denies).
+- `hierarchy(R.attr.scope, "")` (empty delimiter) between a column and a constant is a
+  per-character string prefix: `descendentOf` is `LIKE prefix || '_%'`, so the path itself no
+  longer matches as the old `LIKE` did (`hierarchy/descendent-of/empty-delimiter` returned a row the
+  PDP denies). Any other empty-delimiter shape throws.
 - **Breaking** — bare comparisons between temporal columns throw; use `timestamp()`.
 - A negated column-needle match (`!R.attr.a.contains(R.attr.b)`) no longer returns rows whose needle
   is NULL — an over-grant fix, fewer rows
@@ -677,7 +779,8 @@ checkout of the **whole repository**; the conformance suite needs Docker on Post
 | `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
 
-Hibernate 7 / Spring Data JPA 4 needs no translation change. Spring Data JPA 4 removed
+Hibernate 7 / Spring Data JPA 4 needs no translation change, and CI runs the conformance suite on
+H2, PostgreSQL and MySQL under both ORM sets. Spring Data JPA 4 removed
 `JpaSpecificationExecutor.delete(Specification)`, so the bulk-delete hazard can't be reached through
 that overload there; the guard still fires on any `CriteriaDelete`.
 

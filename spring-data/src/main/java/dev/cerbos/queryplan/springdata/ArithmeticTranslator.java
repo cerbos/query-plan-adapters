@@ -14,6 +14,7 @@ import jakarta.persistence.criteria.Predicate;
 
 import com.google.protobuf.Value;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
@@ -37,6 +38,12 @@ final class ArithmeticTranslator {
     private final LeafTranslator leaf;
     private final ComparisonTranslator comparisons;
 
+    /**
+     * The division the enclosing rewrite has already split on a zero divisor, while its non-zero
+     * arm is built. Its {@code NULLIF} guard never fires there, so arithmetic around it lowers.
+     */
+    private Operand guardedDivision;
+
     ArithmeticTranslator(CriteriaBuilder cb, TriPredicate tri, LeafTranslator leaf,
                          ComparisonTranslator comparisons) {
         this.cb = cb;
@@ -52,8 +59,9 @@ final class ArithmeticTranslator {
      * <p>Everything is computed in double space because attribute values are always CEL
      * doubles at check time, and the wire plan does not distinguish int from double.
      *
-     * <p>{@code mod} is refused: a bare {@code attr % n} is a CEL error, and
-     * {@code int(attr) % n} needs {@code int()}, which has no faithful SQL lowering.
+     * <p>{@code mod} lowers only over {@code int()} of an Integer column and integral constants
+     * ({@link #modulo}): a bare {@code attr % n} is a CEL error, and {@code int()} over any other
+     * column has no faithful SQL lowering.
      *
      * <p>An {@link OperatorFunction} override is consulted when one side is a constant; it
      * receives the arithmetic expression and the constant as a {@link Double}. Expression
@@ -88,8 +96,8 @@ final class ArithmeticTranslator {
      */
     private Predicate tryDivisionByZeroComparison(
             String op, List<Operand> operands, Scope scope) {
-        if (isZeroCapableDivisionOperand(operands.get(0), scope)
-                && isZeroCapableDivisionOperand(operands.get(1), scope)) {
+        if (hasZeroCapableDivision(operands.get(0), scope)
+                && hasZeroCapableDivision(operands.get(1), scope)) {
             // Only one side can be rewritten; the other would still lower to NULL.
             throw Refusals.unsupported(
                     "a comparison with a zero-capable division on BOTH sides is not "
@@ -98,14 +106,14 @@ final class ArithmeticTranslator {
         }
         for (int side = 0; side < 2; side++) {
             Operand candidate = operands.get(side);
-            if (candidate.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            // The division is the operand itself, or nested in arithmetic whose other leaves are
+            // constants, e.g. `a / a + 1.0`.
+            Operand divisionOperand = isZeroCapableDivisionOperand(candidate, scope)
+                    ? candidate : nestedZeroCapableDivision(candidate, scope);
+            if (divisionOperand == null) {
                 continue;
             }
-            PlanResourcesFilter.Expression division = candidate.getExpression();
-            if (!"div".equals(division.getOperator())
-                    || division.getOperandsCount() != 2) {
-                continue;
-            }
+            PlanResourcesFilter.Expression division = divisionOperand.getExpression();
             // A non-zero constant divisor cannot divide by zero. A zero constant still needs
             // the rewrite.
             NumericOperand divisor = resolveNumericOperand(division.getOperands(1), scope);
@@ -120,8 +128,9 @@ final class ArithmeticTranslator {
                 continue;
             }
             // `n / -0.0` is the opposite infinity from `n / 0.0`. A constant divisor keeps
-            // its sign bit. SQL cannot read the sign of a stored zero, so a column divisor is
-            // assumed positive (cerbos/query-plan-adapters#312).
+            // its sign bit. SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so
+            // a SQL divisor is taken as positive only where the sign cannot change the result
+            // (cerbos/query-plan-adapters#312).
             boolean negativeZeroDivisor = divisor instanceof NumericOperand.Constant zc
                     && Double.doubleToRawLongBits(zc.value()) != 0L;
             double positiveDividendResult = negativeZeroDivisor
@@ -134,14 +143,37 @@ final class ArithmeticTranslator {
             boolean divisionIsLeft = side == 0;
             Operand other = operands.get(divisionIsLeft ? 1 : 0);
 
+            if (divisor instanceof NumericOperand.Sql
+                    && !zeroDivisorSignIsMoot(division, scope)
+                    && signOfZeroDecides(op, candidate, divisionOperand, other,
+                            divisionIsLeft, scope)) {
+                throw Refusals.unsupported(
+                        "a comparison with a division by a floating-point expression that may "
+                                + "be zero is not supported here: CEL divides by a signed zero "
+                                + "into an infinity of either sign, and the comparison's "
+                                + "result depends on that sign, which SQL cannot read from a "
+                                + "stored zero (-0.0 = 0.0)");
+            }
+
             // A non-finite compares the same way against every present value, so against a
-            // column the arm is folded in Java and only a NULL column makes it UNKNOWN.
-            Function<Double, Predicate> arm = nonFinite -> {
+            // column the arm is folded in Java and only a NULL column makes it UNKNOWN. Around
+            // a nested division the arm is the whole side folded with the non-finite in place,
+            // which IEEE arithmetic in Java carries as CEL does.
+            Function<Double, Predicate> arm = divisionResult -> {
+                double nonFinite = divisionOperand == candidate ? divisionResult
+                        : foldAround(candidate, divisionOperand, divisionResult, scope);
                 NumericOperand o = resolveNumericOperand(other, scope);
                 if (o instanceof NumericOperand.Constant oc) {
                     return divisionIsLeft
                             ? comparisons.constantComparison(op, nonFinite, oc.value())
                             : comparisons.constantComparison(op, oc.value(), nonFinite);
+                }
+                if (Double.isFinite(nonFinite)) {
+                    // e.g. `1.0 / (1.0 / a)`: finite, so compared in SQL like any constant.
+                    List<Operand> substituted = divisionIsLeft
+                            ? List.of(numberOperand(nonFinite), other)
+                            : List.of(other, numberOperand(nonFinite));
+                    return numericComparisonWithoutZeroGuard(op, substituted, scope);
                 }
                 Predicate folded = divisionIsLeft
                         ? comparisons.constantComparison(op, nonFinite, 0.0)
@@ -164,9 +196,151 @@ final class ArithmeticTranslator {
                                     positiveDividend,
                                     () -> arm.apply(positiveDividendResult),
                                     () -> arm.apply(negativeDividendResult))),
-                    () -> numericComparisonWithoutZeroGuard(op, operands, scope));
+                    () -> withGuardedDivision(divisionOperand,
+                            () -> numericComparisonWithoutZeroGuard(op, operands, scope)));
         }
         return null;
+    }
+
+    /**
+     * Whether the sign of a zero divisor cannot matter: an integral column never holds -0.0,
+     * and in {@code a / a} a zero divisor makes the dividend zero too, so the result is NaN.
+     */
+    private boolean zeroDivisorSignIsMoot(PlanResourcesFilter.Expression division, Scope scope) {
+        Operand divisor = division.getOperands(1);
+        if (divisor.equals(division.getOperands(0))) {
+            return true;
+        }
+        if (divisor.getNodeCase() != Operand.NodeCase.VARIABLE) {
+            return false;
+        }
+        Class<?> type = scope.path(divisor.getVariable()).getJavaType();
+        return Integer.class.equals(type) || Long.class.equals(type)
+                || Short.class.equals(type) || Byte.class.equals(type);
+    }
+
+    /**
+     * Whether the comparison holds differently for a division result of {@code +Inf} and of
+     * {@code -Inf}, the two values dividing a non-zero dividend by a signed zero gives.
+     */
+    private boolean signOfZeroDecides(String op, Operand candidate, Operand divisionOperand,
+            Operand other, boolean divisionIsLeft, Scope scope) {
+        double pos = divisionOperand == candidate ? Double.POSITIVE_INFINITY
+                : foldAround(candidate, divisionOperand, Double.POSITIVE_INFINITY, scope);
+        double neg = divisionOperand == candidate ? Double.NEGATIVE_INFINITY
+                : foldAround(candidate, divisionOperand, Double.NEGATIVE_INFINITY, scope);
+        if (Double.isNaN(pos) && Double.isNaN(neg)) {
+            return false;
+        }
+        NumericOperand o = resolveNumericOperand(other, scope);
+        if (o instanceof NumericOperand.Constant oc) {
+            return ieeeHolds(op, pos, oc.value(), divisionIsLeft)
+                    != ieeeHolds(op, neg, oc.value(), divisionIsLeft);
+        }
+        if (Double.isInfinite(pos) && Double.isInfinite(neg)) {
+            // Folded against any present value, as the arm does.
+            return ieeeHolds(op, pos, 0.0, divisionIsLeft)
+                    != ieeeHolds(op, neg, 0.0, divisionIsLeft);
+        }
+        // Finite results are compared in SQL, where 0.0 and -0.0 are the same value.
+        return pos != neg;
+    }
+
+    private static boolean ieeeHolds(String op, double side, double other, boolean sideIsLeft) {
+        double l = sideIsLeft ? side : other;
+        double r = sideIsLeft ? other : side;
+        return switch (op) {
+            case "eq" -> l == r;
+            case "ne" -> l != r;
+            case "lt" -> l < r;
+            case "gt" -> l > r;
+            case "le" -> l <= r;
+            case "ge" -> l >= r;
+            default -> throw Refusals.internal("Unsupported comparison operator: " + op);
+        };
+    }
+
+    private Predicate withGuardedDivision(Operand division, Supplier<Predicate> body) {
+        Operand previous = guardedDivision;
+        guardedDivision = division;
+        try {
+            return body.get();
+        } finally {
+            guardedDivision = previous;
+        }
+    }
+
+    /** Whether {@code operand} is, or has nested in its arithmetic, a zero-capable division. */
+    private boolean hasZeroCapableDivision(Operand operand, Scope scope) {
+        return isZeroCapableDivisionOperand(operand, scope)
+                || operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && ARITHMETIC_OPS.contains(operand.getExpression().getOperator())
+                && containsZeroCapableDivision(operand.getExpression(), scope);
+    }
+
+    /**
+     * The one zero-capable division nested under the arithmetic {@code operand}, or
+     * {@code null} when there is none. More than one cannot be split into arms and is refused
+     * when the operand is lowered.
+     */
+    private Operand nestedZeroCapableDivision(Operand operand, Scope scope) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !ARITHMETIC_OPS.contains(operand.getExpression().getOperator())) {
+            return null;
+        }
+        List<Operand> found = new ArrayList<>();
+        collectZeroCapableDivisions(operand.getExpression(), scope, found);
+        return found.size() == 1 ? found.get(0) : null;
+    }
+
+    private void collectZeroCapableDivisions(PlanResourcesFilter.Expression expr, Scope scope,
+                                             List<Operand> found) {
+        for (Operand child : expr.getOperandsList()) {
+            if (isZeroCapableDivisionOperand(child, scope)) {
+                found.add(child);
+            } else if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && ARITHMETIC_OPS.contains(child.getExpression().getOperator())) {
+                collectZeroCapableDivisions(child.getExpression(), scope, found);
+            }
+        }
+    }
+
+    /**
+     * {@code side} evaluated in Java with {@code division} replaced by {@code value}. Only a
+     * side whose other leaves are constants folds; one that still reads a column is refused,
+     * since SQL has no NaN or infinity to carry through it.
+     */
+    private double foldAround(Operand side, Operand division, double value, Scope scope) {
+        if (resolveNumericOperand(substitute(side, division, numberOperand(value)), scope)
+                instanceof NumericOperand.Constant c) {
+            return c.value();
+        }
+        throw nestedDivisionUnsupported();
+    }
+
+    private static Operand substitute(Operand node, Operand target, Operand replacement) {
+        if (node == target) {
+            return replacement;
+        }
+        if (node.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return node;
+        }
+        PlanResourcesFilter.Expression.Builder e = node.getExpression().toBuilder().clearOperands();
+        node.getExpression().getOperandsList()
+                .forEach(child -> e.addOperands(substitute(child, target, replacement)));
+        return Operand.newBuilder().setExpression(e).build();
+    }
+
+    private static Operand numberOperand(double value) {
+        return Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(value)).build();
+    }
+
+    private static UnsupportedPlanShapeException nestedDivisionUnsupported() {
+        return Refusals.unsupported(
+                "arithmetic composed on a division whose denominator may be "
+                        + "zero is not supported: CEL carries the resulting NaN "
+                        + "or infinity through the surrounding arithmetic and "
+                        + "SQL has no value that does");
     }
 
     private Predicate numericComparisonWithoutZeroGuard(
@@ -249,7 +423,7 @@ final class ArithmeticTranslator {
             return false;
         }
         for (Operand child : expr.getOperandsList()) {
-            if (isZeroCapableDivisionOperand(child, scope)) {
+            if (child != guardedDivision && isZeroCapableDivisionOperand(child, scope)) {
                 return true;
             }
             if (child.getNodeCase() == Operand.NodeCase.EXPRESSION
@@ -302,25 +476,15 @@ final class ArithmeticTranslator {
                 PlanResourcesFilter.Expression expr = operand.getExpression();
                 String op = expr.getOperator();
                 if ("mod".equals(op)) {
-                    // A bare `attr % n` is a CEL error; `int(attr) % n` needs int(), which
-                    // has no faithful SQL lowering.
-                    throw Refusals.unsupported(
-                            "mod is not supported in comparisons: CEL % is integer-only "
-                                    + "while attribute values are always doubles at check "
-                                    + "time, so a satisfiable policy must cast with int() "
-                                    + "first — and int() has no faithful SQL lowering, "
-                                    + "because CAST rounds where CEL truncates toward zero");
+                    return modulo(expr, scope);
                 }
                 if (ARITHMETIC_OPS.contains(op) && !"div".equals(op)
                         && containsZeroCapableDivision(expr, scope)) {
                     // CEL carries NaN or infinity through the surrounding arithmetic, while
                     // NULLIF makes it NULL, so `NaN + 1.0 != 2.0` would drop a row the PDP
-                    // allows. The rewrite only handles a division that is the operand itself.
-                    throw Refusals.unsupported(
-                            "arithmetic composed on a division whose denominator may be "
-                                    + "zero is not supported: CEL carries the resulting NaN "
-                                    + "or infinity through the surrounding arithmetic and "
-                                    + "SQL has no value that does");
+                    // allows. The rewrite folds such arithmetic only when its other leaves are
+                    // constants, and lowers it only in the arm where the divisor is non-zero.
+                    throw nestedDivisionUnsupported();
                 }
                 if (!ARITHMETIC_OPS.contains(op)) {
                     // A cast or a size() inside arithmetic: legal CEL, no lowering.
@@ -350,6 +514,69 @@ final class ArithmeticTranslator {
                     "Unexpected operand type in arithmetic comparison: "
                             + operand.getNodeCase());
         }
+    }
+
+    /**
+     * {@code int(a) % int(b)}. CEL {@code %} is integer-only while attribute values are doubles,
+     * so a satisfiable policy casts with {@code int()} first. That cast has no faithful SQL
+     * lowering in general (CAST rounds where CEL truncates toward zero), but over an
+     * {@link Integer} column it is the identity, and SQL {@code MOD} truncates as CEL does, so
+     * {@code -5 % 2} is {@code -1} in both. Each operand must be {@code int()} of an Integer
+     * column or an integral constant. A zero divisor is a CEL error: a constant one makes the
+     * comparison UNKNOWN, and a column one goes through {@code NULLIF}.
+     */
+    @SuppressWarnings("unchecked")
+    private NumericOperand modulo(PlanResourcesFilter.Expression expr, Scope scope) {
+        if (expr.getOperandsCount() != 2) {
+            throw Refusals.malformed("mod requires exactly 2 operands");
+        }
+        Object dividend = intOperand(expr.getOperands(0), scope);
+        Object divisor = intOperand(expr.getOperands(1), scope);
+        if (dividend instanceof Integer n && divisor instanceof Integer d) {
+            // The planner folds this itself; a zero divisor stays a CEL error.
+            return d == 0 ? new NumericOperand.Sql(cb.nullLiteral(Double.class))
+                    : new NumericOperand.Constant(n % d);
+        }
+        if (divisor instanceof Integer d && d == 0) {
+            return new NumericOperand.Sql(cb.nullLiteral(Double.class));
+        }
+        Expression<Integer> mod = divisor instanceof Integer d
+                ? cb.mod((Expression<Integer>) dividend, d)
+                : dividend instanceof Integer n
+                        ? cb.mod(n, cb.nullif((Expression<Integer>) divisor, 0))
+                        : cb.mod((Expression<Integer>) dividend,
+                                cb.nullif((Expression<Integer>) divisor, 0));
+        return new NumericOperand.Sql(toIeeeDouble(mod));
+    }
+
+    /** An {@code Integer} constant, or the {@code Integer} column under {@code int()}. */
+    private Object intOperand(Operand operand, Scope scope) {
+        if (operand.getNodeCase() == Operand.NodeCase.VALUE
+                && operand.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
+            double v = operand.getValue().getNumberValue();
+            if (v == Math.rint(v) && v >= Integer.MIN_VALUE && v <= Integer.MAX_VALUE) {
+                return (int) v;
+            }
+        }
+        if (operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "int".equals(operand.getExpression().getOperator())
+                && operand.getExpression().getOperandsCount() == 1
+                && operand.getExpression().getOperands(0).getNodeCase()
+                        == Operand.NodeCase.VARIABLE) {
+            Expression<?> path = scope.path(operand.getExpression().getOperands(0).getVariable());
+            if (Integer.class.equals(path.getJavaType())) {
+                return path;
+            }
+        }
+        // A bare `attr % n` is a CEL error; `int(attr) % n` over any other column needs an
+        // int() SQL cannot reproduce.
+        throw Refusals.unsupported(
+                "mod is not supported in comparisons unless each operand is int() of an Integer"
+                        + " column or an integral constant: CEL % is integer-only while"
+                        + " attribute values are always doubles at check time, so a"
+                        + " satisfiable policy must cast with int() first — and int() over"
+                        + " any other column has no faithful SQL lowering, because CAST"
+                        + " rounds where CEL truncates toward zero");
     }
 
     /**

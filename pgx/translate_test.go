@@ -71,7 +71,6 @@ func testMapper() cerbospgx.Mapper {
 		"request.resource.attr.name":  {Column: "name"},
 		"request.resource.attr.count": {Column: "count"},
 		"request.resource.attr.owner": {Column: "owner"},
-		"request.resource.attr.flag":  {Column: "flag", ValueType: cerbospgx.ValueBool},
 		"request.resource.attr.tags":  {Relation: tagRelation()},
 	}
 }
@@ -273,14 +272,22 @@ func TestOperatorSymbols(t *testing.T) {
 	t.Run("arithmetic", func(t *testing.T) {
 		t.Parallel()
 
-		// A column dividend keeps `div` and `mod` from folding to a constant, and the division
+		// A non-constant dividend keeps `div` and `mod` from folding to a constant, and the division
 		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
-		// assert the operator appears rather than pinning the whole surrounding CASE.
+		// assert the operator appears rather than pinning the whole surrounding CASE. `mod` takes
+		// size(), CEL's one integer an attribute yields: `%` over the double attribute itself is a
+		// no-overload error and refused.
+		dividend := func(operator string) *operand {
+			if operator == "mod" {
+				return expr("size", variable("request.resource.attr.name"))
+			}
+			return variable("request.resource.attr.count")
+		}
 		for operator, symbol := range map[string]string{
 			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
 		} {
 			result, err := translate(t, expr("gt",
-				expr(operator, variable("request.resource.attr.count"), val(t, 2)), val(t, 1)))
+				expr(operator, dividend(operator), val(t, 2)), val(t, 1)))
 			require.NoError(t, err, operator)
 			require.Contains(t, result.Where, " "+symbol+" ", operator+": "+result.Where)
 		}
@@ -518,26 +525,6 @@ func TestNumericCastsAreRejected(t *testing.T) {
 		require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 		require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
 	}
-}
-
-// TestStringOverABooleanSpellsCELsWords pins string() over a column declared ValueBool
-// (cerbos/query-plan-adapters#418). PostgreSQL's own CAST(bool AS text) already says "true", but
-// the vendored translator serves SQLite and MySQL too, where the same CAST says "1", so the column
-// is spelled through a CASE first on every engine. The corpus case cast/string/from-boolean proves
-// the two words against the recorded check() decisions.
-//
-// Corpus gap. The IS NULL arm ahead of the column's own test is policy-reachable, and no corpus
-// case reaches it because the corpus's aBool is never null, so this test is a bridge tracked by
-// #469 rather than its home. Without the arm a NULL column falls through to 'false', and
-// `string(x) != "true"` returns a row the PDP denies.
-func TestStringOverABooleanSpellsCELsWords(t *testing.T) {
-	t.Parallel()
-
-	result, err := translate(t, expr("eq", expr("string", variable("request.resource.attr.flag")), val(t, "true")))
-	require.NoError(t, err)
-	require.Contains(t, result.Where,
-		`CAST((CASE WHEN ("resource"."flag" IS NULL) THEN NULL WHEN "resource"."flag" THEN $1::text ELSE $2::text END) AS text) = $3::text`)
-	require.Equal(t, []any{"true", "false", "true"}, result.Args)
 }
 
 // TestMapperQualifierCannotShadowGeneratedAliases covers the other half of the alias guard: the
@@ -787,10 +774,17 @@ func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
 	require.NoError(t, err,
 		"an attribute declaring NullConventionExplicit is not the call-level option's business")
 
+	// Under the call-level default, an omitted entry still does not render the explicit
+	// convention's IS NULL: its `== null` is UNKNOWN for a NULL column, and a null operand it
+	// cannot render that way is refused.
 	omitted := cerbospgx.MapperMap{
 		"request.resource.attr.owner": {Column: "owner", NullConvention: cerbospgx.NullConventionOmitted},
 	}
-	_, err = cerbospgx.Translate(conditional(nullEq), "resource", omitted)
+	unset := cerbospgx.MapperMap{"request.resource.attr.owner": {Column: "owner"}}
+	require.NotEqual(t, translateWith(t, unset, nullEq).Where, translateWith(t, omitted, nullEq).Where)
+
+	nullIn := expr("in", variable("request.resource.attr.owner"), val(t, []any{"a", nil}))
+	_, err = cerbospgx.Translate(conditional(nullIn), "resource", omitted)
 	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
 	require.Contains(t, err.Error(), "null operand")
 }

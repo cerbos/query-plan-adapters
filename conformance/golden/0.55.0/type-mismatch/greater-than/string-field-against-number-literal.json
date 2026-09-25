@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a3",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/greater-than/string-field-against-number-literal",
+  "intent": "aString > 0 OR aNumber == 2: a string attribute ordered against a number.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "gt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/greater-than/string-field-against-number-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString > 0 || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ordering is a CEL error, so only a3/a8 are allowed; a store that orders strings above numbers returns every row, and a coercing store adds the numeric-looking strings."
+}

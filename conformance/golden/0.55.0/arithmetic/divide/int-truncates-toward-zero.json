@@ -1,0 +1,65 @@
+{
+  "allowed": [
+    "a5",
+    "b3"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/divide/int-truncates-toward-zero",
+  "intent": "Int division of a negative int() conversion (int(aNumber) / 2 == -2).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "div"
+            }
+          },
+          {
+            "value": -2
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/divide/int-truncates-toward-zero",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aNumber) / 2 == -2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL int division truncates toward zero, so int(-5) / 2 is -2 and a5 is allowed with b3; double division gives -2.5 and floor division -3, and both drop a5."
+}

@@ -1,0 +1,63 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/negated-one-hop-null-literal",
+  "intent": "!(parent.aOptionalString == null) through the to-one parent.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aOptionalString"
+                },
+                {
+                  "value": null
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/negated-one-hop-null-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.parent.aOptionalString == null)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only rows whose parent holds a set aOptionalString are allowed; a plain NOT over the relation filter also admits a4/a7/c1, whose parent has a NULL leaf, and the parentless rows."
+}

@@ -1,0 +1,58 @@
+{
+  "allowed": [
+    "a6",
+    "b2",
+    "b3",
+    "c1",
+    "d1"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal",
+  "intent": "!(owner >= \"m\"): a negated ordering over an attribute that is an explicit null on some rows.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.owner"
+                },
+                {
+                  "value": "m"
+                }
+              ],
+              "operator": "ge"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.owner >= \"m\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Ordering a null is a CEL error under either polarity, so the null-owner rows are denied; a store that orders null below every string answers false and the negation returns them."
+}

@@ -17,6 +17,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^(ab){1,2}$")'
+- id: 'regex/matches/brace-without-count-is-literal'
+  tier: adversarial
+  intent: 'matches("^a{,2}$"), where {,2} opens no count and is therefore literal text.'
+  trap: 'RE2 reads a brace that does not start a valid {n}, {n,} or {n,m} as a literal, so only i9 "a{,2}" matches; reading it as {0,2} (PCRE-style) matches "", "a" or "aa" and under-grants i9.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^a{,2}$")'
+- id: 'regex/matches/case-fold-kelvin-and-long-s'
+  tier: adversarial
+  intent: 'matches("(?i)^ks$"), where RE2 folds k to KELVIN SIGN (U+212A) and s to LONG S (U+017F).'
+  trap: 'RE2 case folding follows Unicode simple folding orbits, so i7 (KELVIN SIGN + LONG S) matches; lower()/upper() or a store''s case-insensitive collation leaves LONG S alone and under-grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(?i)^ks$")'
 - id: 'regex/matches/case-insensitive-flag'
   tier: extended
   intent: 'matches() with RE2''s inline (?i) flag on an anchored literal.'
@@ -45,6 +59,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^a.*b$")'
+- id: 'regex/matches/dot-plus-excludes-empty-and-newline'
+  tier: adversarial
+  intent: 'matches("^.+$"): one or more characters, none of them a newline.'
+  trap: 'The + needs a character, so a8 "" is denied; . never crosses a newline and $ is the absolute end, so h2 "a\nb" and h5 "ab\n" are denied. A lowering to "non-empty", or a dialect whose . or $ is newline-lenient, over-grants them.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^.+$")'
 - id: 'regex/matches/end-anchor-before-final-newline'
   tier: adversarial
   intent: 'An anchored regex over a string attribute (aString.matches("^ab$")).'
@@ -80,6 +101,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^[ab@#&~<>]+$")'
+- id: 'regex/matches/negated-invalid-patterns-from-principal'
+  tier: adversarial
+  intent: 'Five patterns RE2 cannot compile, each chosen by a principal-attribute ternary and negated, OR''d with aNumber == 5: a backreference, a count with no operand, a nested repetition, a count above 1000 and a reversed range.'
+  trap: 'Each matches() is an evaluation error in CEL, so every disjunct but aNumber == 5 is an error and only a1 is allowed. An engine that accepts any of the patterns (PCRE and POSIX take (a)\1 and some take {2}a literally) makes that negated disjunct true and over-grants every row; the pattern must be refused.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a)\\1" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "{2}a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a**" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{1001}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "[b-a]" : "^h") || R.attr.aNumber == 5'
 - id: 'regex/matches/posix-character-class'
   tier: extended
   intent: 'matches() with a POSIX bracket class [[:digit:]].'
@@ -87,6 +115,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("[[:digit:]]")'
+- id: 'regex/matches/posix-class-and-range-bounded'
+  tier: adversarial
+  intent: 'matches("^[[:digit:]a-c]{1,2}$"): a class mixing a POSIX class and a range, under a bounded count.'
+  trap: 'h4 "0" and h3 "ab" match; a8 "" is below the count and the all-digit i4/i6 are above it. Reading [[:digit:]] as the characters :digt, or dropping the upper bound, gets them wrong.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^[[:digit:]a-c]{1,2}$")'
 - id: 'regex/matches/top-level-alternation-prefix-or-suffix'
   tier: adversarial
   intent: 'matches("^o|e$"): an unparenthesised alternation of an anchored prefix and an anchored suffix.'
@@ -108,3 +143,17 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("ne")'
+- id: 'regex/matches/unanchored-quantifiers'
+  tier: adversarial
+  intent: 'matches("x*a+b"), unanchored: an optional x run and a one-or-more a run before b.'
+  trap: 'Unanchored, x* can match nothing, so this is "contains ab" (h3, h5); reading + or * as literals, or requiring the x, under-grants.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("x*a+b")'
+- id: 'regex/matches/whitespace-class'
+  tier: adversarial
+  intent: 'matches("^\\s*$"): a string of RE2 whitespace, the empty string included.'
+  trap: 'RE2''s \s is [\t\n\f\r ], so a8 "" and i8 (a tab and a space) match; dropping \s, or lowering it to a space alone, under-grants i8.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^\\s*$")'

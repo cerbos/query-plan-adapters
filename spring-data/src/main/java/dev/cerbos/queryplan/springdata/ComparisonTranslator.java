@@ -13,11 +13,14 @@ import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
+import com.google.protobuf.Value;
+
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.Temporal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,6 +43,18 @@ final class ComparisonTranslator {
 
     static final Set<String> COMPARISON_OPS =
             Set.of("eq", "ne", "lt", "gt", "le", "ge");
+
+    private static final Set<String> ORDERING_OPS = Set.of("lt", "gt", "le", "ge");
+
+    /** Whether {@code text} holds a UTF-16 code unit at or above 0xD800. */
+    private static boolean hasCodeUnitFromSurrogates(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) >= '\uD800') {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private final CriteriaBuilder cb;
     private final TriPredicate tri;
@@ -152,10 +167,16 @@ final class ComparisonTranslator {
         }
 
         /**
-         * {@code string(variable)}. Only a {@link Boolean} column is translated
-         * ({@link #booleanStringComparison}).
+         * {@code string(variable)}. String, Boolean and numeric columns are translated
+         * ({@link #stringOfFieldComparison}).
          */
         record StringOfField(String variable) implements Resolved {}
+
+        /**
+         * {@code int(variable)}. Only a Double or Integer column compared with a number is
+         * translated ({@link #intOfFieldComparison}).
+         */
+        record IntOfField(String variable) implements Resolved {}
 
         /** An operand no leaf case handles, reported by {@link #leafOperandError}. */
         record Opaque() implements Resolved {}
@@ -183,6 +204,10 @@ final class ComparisonTranslator {
                 if ("string".equals(exprOp) && e.getOperandsCount() == 1
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
                     yield new Resolved.StringOfField(e.getOperands(0).getVariable());
+                }
+                if ("int".equals(exprOp) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    yield new Resolved.IntOfField(e.getOperands(0).getVariable());
                 }
                 if (!ArithmeticTranslator.ARITHMETIC_OPS.contains(exprOp)) {
                     yield new Resolved.Opaque();
@@ -278,7 +303,12 @@ final class ComparisonTranslator {
                     && left instanceof Resolved.StringOfField sf
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
-                return booleanStringComparison(op, sf, text, operands, scope);
+                return stringOfFieldComparison(op, sf, text, operands, scope);
+            }
+            if (left instanceof Resolved.IntOfField intField
+                    && right instanceof Resolved.Constant c
+                    && c.value() instanceof Number n) {
+                return intOfFieldComparison(op, intField, n.doubleValue(), operands, scope);
             }
             // `field op add(value, value)`: strings concatenate, as in CEL.
             if (left instanceof Resolved.Field f && right instanceof Resolved.ConstantAdd ca) {
@@ -294,6 +324,12 @@ final class ComparisonTranslator {
                             other.value(),
                             PlanValues.protoValueToJava(fpc.constant().getValue()))) {
                 return solveAddComparison(op, fpc, other, scope);
+            }
+            if (isAddRooted(left) || isAddRooted(right)) {
+                Predicate concat = tryConcatComparison(op, operands, scope);
+                if (concat != null) {
+                    return concat;
+                }
             }
             if (isArithmeticRooted(left) || isArithmeticRooted(right)) {
                 return arithmetic.numericComparison(op, operands, scope);
@@ -326,6 +362,10 @@ final class ComparisonTranslator {
         // A list or map constant has no scalar-column comparison, and Hibernate would fail
         // with a raw coercion error. Checked before path resolution so a Relation-mapped
         // attribute gets this message too. The message never includes element values.
+        if ((value instanceof List<?> || value instanceof Map<?, ?>)
+                && holdsScalars(field.variable(), scope)) {
+            return scalarAgainstAggregate(op, field, scope);
+        }
         if (value instanceof List<?> || value instanceof Map<?, ?>) {
             throw Refusals.unsupported(
                     op + " comparison against a " + constantShape(value)
@@ -339,6 +379,14 @@ final class ComparisonTranslator {
         Path<?> path = scope.path(field.variable());
 
         if (value == null) {
+            // A NULL column sends no attribute, so `x == null` is never true: a present value is
+            // unequal and a missing one is a CEL error, which denies. The upfront OMITTED scan
+            // lets this shape through only without an override for op.
+            if (("eq".equals(op) || "ne".equals(op)) && !leaf.overridden(op)
+                    && leaf.isDeclaredOmitted(field.variable(), scope)) {
+                return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
+                        () -> cb.isNull(path));
+            }
             return leaf.withOverride(op, path, null, () -> switch (op) {
                 case "eq" -> cb.isNull(path);
                 case "ne" -> cb.isNotNull(path);
@@ -356,7 +404,55 @@ final class ComparisonTranslator {
             return leaf.definiteEquality(op, path, cb.literal(value), true, false);
         }
 
+        // CEL orders strings by code point. A JPA store may compare by UTF-16 code unit instead
+        // (H2 uses Java's String.compareTo), which puts an astral character's high surrogate
+        // (from 0xD800) before U+E000–U+FFFF. The two orders can only disagree at a position
+        // where one side holds a code unit at or above 0xD800, so a literal holding none cannot
+        // be ordered differently; one that does is refused.
+        if (ORDERING_OPS.contains(op) && !leaf.overridden(op)
+                && value instanceof String text && hasCodeUnitFromSurrogates(text)) {
+            throw Refusals.unsupported(op + " orders a string attribute against a literal holding"
+                    + " a character at or above U+D800 (an astral character or U+E000–U+FFFF):"
+                    + " CEL orders strings by code point, and a store that compares UTF-16 code"
+                    + " units (H2, Java's String.compareTo) puts a surrogate pair before"
+                    + " U+E000–U+FFFF");
+        }
+
         return leaf.applyLeaf(op, path, value);
+    }
+
+    /**
+     * Whether {@code variable} holds a scalar: a Field, or the bare element of a relation whose
+     * elements are values rather than objects. An unmapped variable answers false and is
+     * refused by the caller.
+     */
+    private static boolean holdsScalars(String variable, Scope scope) {
+        Scope.Resolution resolved;
+        try {
+            resolved = scope.resolve(variable);
+        } catch (IllegalArgumentException unmapped) {
+            return false;
+        }
+        return resolved instanceof Scope.ResolvedScalar scalar
+                && (scalar.mapping() instanceof AttributeMapping.Field
+                        || scalar.mapping() instanceof AttributeMapping.Relation r
+                                && (r.defaultMemberField() != null || r.fields().isEmpty()));
+    }
+
+    /**
+     * A scalar against a list or map literal. CEL equality across types is false, not an error,
+     * so {@code ==} matches nothing and {@code !=} everything, a NULL column staying UNKNOWN
+     * unless it is sent as an explicit null; any other operator has no overload and errors.
+     */
+    private Predicate scalarAgainstAggregate(String op, Resolved.Field field, Scope scope) {
+        if (!"eq".equals(op) && !"ne".equals(op)) {
+            return tri.unknown();
+        }
+        if (leaf.isExplicitNull(field.variable(), scope)) {
+            return constant("ne".equals(op));
+        }
+        Path<?> path = scope.path(field.variable());
+        return matchesNothing(op, path);
     }
 
     /**
@@ -399,26 +495,201 @@ final class ComparisonTranslator {
         return constant(holds(op, left.compareTo(right)));
     }
 
+    /** {@code 2^63}: CEL's int() errors at or beyond it in either direction. */
+    private static final double INT64_LIMIT = 0x1p63;
+
     /**
-     * {@code string(boolColumn) eq/ne "text"}. CEL renders a bool as exactly {@code "true"} or
-     * {@code "false"}, so the constant is matched here and only the boolean column reaches SQL.
-     * SQL has no portable spelling of the conversion: {@code CAST} gives {@code '1'} on MySQL,
-     * and a text-producing {@code CASE} compares in the connection collation, which is
-     * case-insensitive under MySQL Connector/J.
-     *
-     * <p>Any other constant matches nothing. A NULL column stays UNKNOWN, because CEL's
-     * {@code string()} errors on it and the PDP denies. Only {@link Boolean} columns qualify:
-     * a primitive {@code boolean} path fails the leaf's type check and folds to a constant.
+     * {@code int(column) op c}, over a Double or Integer column. CEL's {@code int()} truncates a
+     * double toward zero, which PostgreSQL and MySQL {@code CAST} do not (they round), so the
+     * comparison is solved for the column instead: {@code int(d) >= m} is {@code d >= m} for a
+     * positive {@code m} and {@code d > m - 1} otherwise, and {@code int(d) <= m} is
+     * {@code d <= m} for a negative {@code m} and {@code d < m + 1} otherwise. A NULL column, or
+     * one outside the int64 range (where CEL errors, NaN included), is UNKNOWN under both
+     * polarities.
      */
-    private Predicate booleanStringComparison(String op, Resolved.StringOfField field,
-                                              String value, List<Operand> operands, Scope scope) {
+    private Predicate intOfFieldComparison(String op, Resolved.IntOfField field, double c,
+                                           List<Operand> operands, Scope scope) {
         Path<?> path = scope.path(field.variable());
-        if (!Boolean.class.equals(path.getJavaType())) {
+        Class<?> type = path.getJavaType();
+        if (!Double.class.equals(type) && !Integer.class.equals(type)
+                && !String.class.equals(type)) {
             throw leafOperandError(op, operands);
         }
-        if ("true".equals(value) || "false".equals(value)) {
-            return leaf.applyLeaf(op, path, Boolean.valueOf(value));
+        if (Double.isNaN(c) || Math.abs(c) >= 0x1p53) {
+            throw Refusals.unsupported("int() compared with " + c + " is not supported: the"
+                    + " bound is not an exactly representable integer");
         }
+        if (String.class.equals(type)) {
+            @SuppressWarnings("unchecked")
+            IntText text = new IntText((Expression<String>) path);
+            return tri.baseUnlessUnknown(intBounds(op, c, text::atLeast, text::atMost),
+                    text::unparsable);
+        }
+        Expression<Double> d = path.as(Double.class);
+        return tri.baseUnlessUnknown(
+                intBounds(op, c, m -> atLeast(d, m), m -> atMost(d, m)),
+                () -> cb.or(cb.isNull(path), cb.le(d, -INT64_LIMIT), cb.ge(d, INT64_LIMIT)));
+    }
+
+    /** {@code int(x) op c} from the integral bounds {@code int(x) >= m} and {@code <= m}. */
+    private Predicate intBounds(String op, double c,
+                                java.util.function.DoubleFunction<Predicate> atLeast,
+                                java.util.function.DoubleFunction<Predicate> atMost) {
+        boolean integral = c == Math.rint(c);
+        return switch (op) {
+            case "gt" -> atLeast.apply(Math.floor(c) + 1);
+            case "ge" -> atLeast.apply(Math.ceil(c));
+            case "lt" -> atMost.apply(Math.ceil(c) - 1);
+            case "le" -> atMost.apply(Math.floor(c));
+            case "eq" -> integral ? cb.and(atLeast.apply(c), atMost.apply(c)) : cb.disjunction();
+            case "ne" -> integral ? tri.not(cb.and(atLeast.apply(c), atMost.apply(c)))
+                    : cb.conjunction();
+            default -> throw Refusals.internal("Unsupported int() comparison operator: " + op);
+        };
+    }
+
+    /**
+     * {@code int(s)} over a String column, which CEL parses with Go's
+     * {@code strconv.ParseInt(s, 10, 64)}: an optional {@code +} or {@code -}, then one or more
+     * ASCII digits, within int64. SQL {@code CAST} accepts other spellings or fails the query,
+     * so the value is compared without one: its sign, then its digits with leading zeros
+     * trimmed, which order by length and then lexicographically. Every expression is built
+     * fresh, so none is shared between polarities.
+     */
+    private final class IntText {
+        private static final String INT64_MAX = "9223372036854775807";
+        private static final String INT64_MIN_MAGNITUDE = "9223372036854775808";
+
+        private final Expression<String> s;
+
+        IntText(Expression<String> s) {
+            this.s = s;
+        }
+
+        private Predicate negative() {
+            return cb.like(s, "-%");
+        }
+
+        /** The string without its sign. */
+        private Expression<String> body() {
+            return cb.<String>selectCase()
+                    .when(cb.or(cb.like(s, "+%"), cb.like(s, "-%")), cb.substring(s, 2))
+                    .otherwise(s);
+        }
+
+        /** The magnitude's digits, without leading zeros: {@code ''} for zero. */
+        private Expression<String> digits() {
+            return cb.trim(CriteriaBuilder.Trimspec.LEADING, '0', body());
+        }
+
+        /** {@code |value| op k} for a magnitude {@code k} spelled without leading zeros. */
+        private Predicate magnitude(String op, String k) {
+            Expression<Integer> length = cb.length(digits());
+            Predicate longer = "ge".equals(op) || "gt".equals(op)
+                    ? cb.gt(length, k.length()) : cb.lt(length, k.length());
+            Predicate sameLength = cb.equal(cb.length(digits()), k.length());
+            Predicate lexical = switch (op) {
+                case "ge" -> cb.greaterThanOrEqualTo(digits(), k);
+                case "gt" -> cb.greaterThan(digits(), k);
+                case "le" -> cb.lessThanOrEqualTo(digits(), k);
+                default -> throw Refusals.internal("Unsupported magnitude comparison: " + op);
+            };
+            return cb.or(longer, cb.and(sameLength, lexical));
+        }
+
+        private static String spelled(double magnitude) {
+            long m = (long) Math.abs(magnitude);
+            return m == 0 ? "" : Long.toString(m);
+        }
+
+        /** {@code int(s) >= m}. */
+        Predicate atLeast(double m) {
+            if (m <= 0) {
+                return cb.or(tri.not(negative()), magnitude("le", spelled(m)));
+            }
+            return cb.and(tri.not(negative()), magnitude("ge", spelled(m)));
+        }
+
+        /** {@code int(s) <= m}. */
+        Predicate atMost(double m) {
+            if (m >= 0) {
+                return cb.or(negative(), magnitude("le", spelled(m)));
+            }
+            return cb.and(negative(), magnitude("ge", spelled(m)));
+        }
+
+        /** NULL, not a base-10 integer, or outside int64: CEL's int() errors. */
+        Predicate unparsable() {
+            Expression<String> rest = body();
+            for (char digit = '0'; digit <= '9'; digit++) {
+                rest = cb.function("replace", String.class, rest,
+                        cb.literal(String.valueOf(digit)), cb.literal(""));
+            }
+            Predicate malformed = cb.or(cb.equal(body(), ""), cb.notEqual(rest, ""));
+            Predicate outOfRange = cb.or(
+                    cb.and(tri.not(negative()), magnitude("gt", INT64_MAX)),
+                    cb.and(negative(), magnitude("gt", INT64_MIN_MAGNITUDE)));
+            return cb.or(cb.isNull(s), malformed, outOfRange);
+        }
+    }
+
+    /** {@code trunc(d) >= m} for an integral {@code m}. */
+    private Predicate atLeast(Expression<Double> d, double m) {
+        return m > 0 ? cb.ge(d, m) : cb.gt(d, m - 1);
+    }
+
+    /** {@code trunc(d) <= m} for an integral {@code m}. */
+    private Predicate atMost(Expression<Double> d, double m) {
+        return m < 0 ? cb.le(d, m) : cb.lt(d, m + 1);
+    }
+
+    /** The numeric column types whose values CEL receives as doubles, rendered by %g. */
+    private static final Set<Class<?>> DOUBLE_RENDERED =
+            Set.of(Double.class, Integer.class, Long.class);
+
+    /**
+     * {@code string(column) eq/ne "text"}, decided per column type. SQL has no portable spelling
+     * of CEL's conversion ({@code CAST} gives {@code '1'} for a MySQL boolean and its own number
+     * format everywhere), so the constant is inverted in Java and only the column reaches SQL:
+     *
+     * <ul>
+     *   <li>{@link String}: {@code string()} is the identity, so the column is compared as it
+     *       stands, through any override for {@code op}.</li>
+     *   <li>{@link Boolean}: CEL renders exactly {@code "true"} or {@code "false"}. A
+     *       text-producing {@code CASE} would compare in the connection collation, which is
+     *       case-insensitive under MySQL Connector/J.</li>
+     *   <li>{@link Double}, {@link Integer}, {@link Long}: the one double CEL renders as the
+     *       constant ({@link CelDoubleText}), compared as a double.</li>
+     * </ul>
+     *
+     * <p>A constant no value renders as matches nothing. A NULL column stays UNKNOWN under both
+     * polarities, even one declared EXPLICIT, because CEL's {@code string()} errors on null and
+     * the PDP denies. Other column types, primitive ones included, are refused.
+     */
+    private Predicate stringOfFieldComparison(String op, Resolved.StringOfField field,
+                                              String value, List<Operand> operands, Scope scope) {
+        Path<?> path = scope.path(field.variable());
+        Class<?> type = path.getJavaType();
+        if (String.class.equals(type)) {
+            return leaf.applyLeaf(op, path, value);
+        }
+        if (Boolean.class.equals(type)) {
+            if ("true".equals(value) || "false".equals(value)) {
+                return leaf.applyLeaf(op, path, Boolean.valueOf(value));
+            }
+            return matchesNothing(op, path);
+        }
+        if (DOUBLE_RENDERED.contains(type)) {
+            if (CelDoubleText.solve(value) instanceof CelDoubleText.Solution.Exactly exactly) {
+                return leaf.defaultLeaf(op, path, exactly.value());
+            }
+            return matchesNothing(op, path);
+        }
+        throw leafOperandError(op, operands);
+    }
+
+    /** eq FALSE and ne TRUE, UNKNOWN for a NULL column. */
+    private Predicate matchesNothing(String op, Path<?> path) {
         return tri.baseUnlessUnknown("ne".equals(op) ? cb.conjunction() : cb.disjunction(),
                 () -> cb.isNull(path));
     }
@@ -434,6 +705,107 @@ final class ComparisonTranslator {
 
     private static String kindWord(Object value) {
         return value instanceof List<?> ? "list" : "map";
+    }
+
+    /**
+     * A comparison whose {@code add} is CEL string concatenation, or {@code null} when no string
+     * is involved and the comparison is numeric. The plan does not say which {@code +} it is, so
+     * the operand types decide: a string constant or a {@link String} column anywhere under the
+     * {@code add} makes it concatenation, and every other leaf must then be a string too.
+     *
+     * <p>{@code "a" + null} is a CEL error, so a NULL column under the concatenation keeps the
+     * comparison UNKNOWN under both polarities; {@code CONCAT} alone would not, since some
+     * dialects skip NULL arguments. A column compared with the concatenation keeps its own null
+     * convention: declared EXPLICIT, {@code ==} and {@code !=} are definite on a NULL.
+     */
+    private Predicate tryConcatComparison(String op, List<Operand> operands, Scope scope) {
+        if (!isStringTyped(operands.get(0), scope) && !isStringTyped(operands.get(1), scope)) {
+            return null;
+        }
+        List<Path<?>> nullable = new ArrayList<>();
+        // At most one side is a bare column; the other holds the add.
+        int explicitSide = -1;
+        for (int side = 0; side < 2; side++) {
+            Operand o = operands.get(side);
+            if (("eq".equals(op) || "ne".equals(op))
+                    && o.getNodeCase() == Operand.NodeCase.VARIABLE
+                    && leaf.isExplicitNull(o.getVariable(), scope)) {
+                explicitSide = side;
+            }
+        }
+        List<Expression<String>> sides = new ArrayList<>(2);
+        for (int side = 0; side < 2; side++) {
+            Operand o = operands.get(side);
+            sides.add(side == explicitSide
+                    ? stringPath(o.getVariable(), op, operands, scope)
+                    : concatOperand(o, op, operands, scope, nullable));
+        }
+        Predicate base = explicitSide >= 0
+                ? leaf.definiteEquality(op, sides.get(0), sides.get(1),
+                        explicitSide == 0, explicitSide == 1)
+                : comparePredicate(op, sides.get(0), sides.get(1));
+        return nullable.isEmpty() ? base : tri.baseUnlessUnknown(base,
+                () -> cb.or(nullable.stream().map(cb::isNull).toArray(Predicate[]::new)));
+    }
+
+    /** Whether a string constant or {@link String} column is anywhere under {@code o}. */
+    private boolean isStringTyped(Operand o, Scope scope) {
+        return switch (o.getNodeCase()) {
+            case VALUE -> o.getValue().getKindCase() == Value.KindCase.STRING_VALUE;
+            case VARIABLE -> String.class.equals(scope.path(o.getVariable()).getJavaType());
+            case EXPRESSION -> "add".equals(o.getExpression().getOperator())
+                    && o.getExpression().getOperandsList().stream()
+                            .anyMatch(child -> isStringTyped(child, scope));
+            default -> false;
+        };
+    }
+
+    /**
+     * Lowers {@code o} to a string expression, adding each column it reads to {@code nullable}.
+     * A leaf that is not a string makes the {@code +} a type error CEL has no overload for; it is
+     * refused rather than guessed.
+     */
+    private Expression<String> concatOperand(Operand o, String op, List<Operand> operands,
+                                             Scope scope, List<Path<?>> nullable) {
+        switch (o.getNodeCase()) {
+            case VALUE -> {
+                if (PlanValues.protoValueToJava(o.getValue()) instanceof String text) {
+                    return cb.literal(text);
+                }
+            }
+            case VARIABLE -> {
+                Expression<String> path = stringPath(o.getVariable(), op, operands, scope);
+                nullable.add((Path<?>) path);
+                return path;
+            }
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression e = o.getExpression();
+                if ("add".equals(e.getOperator()) && e.getOperandsCount() == 2) {
+                    return cb.concat(
+                            concatOperand(e.getOperands(0), op, operands, scope, nullable),
+                            concatOperand(e.getOperands(1), op, operands, scope, nullable));
+                }
+            }
+            default -> { }
+        }
+        throw Refusals.unsupported("String concatenation under " + op + " requires every operand"
+                + " to be a string constant or a String column: got "
+                + Refusals.describeOperand(operands.get(0)) + " and "
+                + Refusals.describeOperand(operands.get(1)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Expression<String> stringPath(String variable, String op, List<Operand> operands,
+                                          Scope scope) {
+        Path<?> path = scope.path(variable);
+        if (!String.class.equals(path.getJavaType())) {
+            throw Refusals.unsupported("String concatenation under " + op + " requires every"
+                    + " operand to be a string constant or a String column: '" + variable
+                    + "' is " + path.getJavaType().getSimpleName() + " (operands "
+                    + Refusals.describeOperand(operands.get(0)) + " and "
+                    + Refusals.describeOperand(operands.get(1)) + ")");
+        }
+        return (Path<String>) path;
     }
 
     /**
@@ -613,17 +985,14 @@ final class ComparisonTranslator {
                     : tri.unknown();
         }
         // A NULL on the explicit-null side needs a definite answer and a NULL on the other
-        // side needs UNKNOWN. No single predicate does both, so refuse. It is unmapped because
-        // the caller fixes it by declaring the convention on both attributes or neither.
+        // side needs UNKNOWN: the definite equality, made UNKNOWN wherever the omitted side is
+        // NULL, whatever the explicit side holds.
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit != rightExplicit) {
-            throw Refusals.unmapped(
-                    "Cannot translate `" + op + "` between two columns under mixed null"
-                            + " conventions: cannot compare an attribute declared"
-                            + " explicit-null with one on the omitted convention: the"
-                            + " omitted side is UNKNOWN for a NULL column while the"
-                            + " declared side is definite, and no single predicate is"
-                            + " both. Declare the convention on both mappings, or on"
-                            + " neither.");
+            Expression<?> omitted = leftExplicit ? right : left;
+            Predicate equality = tri.baseUnlessUnknown(
+                    leaf.definiteEquality("eq", left, right, leftExplicit, rightExplicit),
+                    () -> cb.isNull(omitted));
+            return "ne".equals(op) ? tri.not(equality) : equality;
         }
         if (("eq".equals(op) || "ne".equals(op)) && leftExplicit && rightExplicit) {
             return leaf.definiteEquality(op, left, right, leftExplicit, rightExplicit);

@@ -31,6 +31,18 @@
     "h4": {"createdBy": "2026-06-01T00:00:00Z", "aDouble": 0.3, "createdAt": "2021-05-05T05:05:05Z", "updatedAt": null, "scope": null, "labels": []},
     "h5": {"createdBy": "not-a-timestamp", "aDouble": 21.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "h6": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 22.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
-    "h7": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 23.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
+    "h7": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 23.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 1000000, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 2, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 26.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i4": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 27.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i5": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": -0.0, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i6": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 29.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i7": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 30.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i8": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 31.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "i9": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 32.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "j1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 33.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "j2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 34.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "j3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 35.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
   }
 }

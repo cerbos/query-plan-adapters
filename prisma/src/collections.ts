@@ -133,6 +133,8 @@ type CollectionLambdaParts = {
   restRelations: RelationConfig[];
   /** Element predicate, already wrapped through any relations beyond the first. */
   filterValue: PrismaFilter;
+  /** Element predicate on the elements at the end of the chain, unwrapped. */
+  elementFilter: PrismaFilter;
   /** Nullable element columns referenced by the lambda body (for 3VL guards). */
   nullableFields: Set<string>;
   /** Element-level predicates under which a nested collection expression is UNKNOWN. */
@@ -181,6 +183,15 @@ function buildCollectionLambdaParts(
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError(`${operator} operator requires a relation mapping`);
   }
+  if (relations[relations.length - 1]!.type === "one") {
+    // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
+    // attribute names present on the related row — which no Prisma relation filter enumerates.
+    throw new UnsupportedQueryPlanError(
+      `${operator} over ${collection.name}: it is a to-one relation, which CEL reads as a map ` +
+        "whose keys (the attribute names present on the related row) the macro ranges over, " +
+        "and a Prisma relation filter tests rows, not attribute names"
+    );
+  }
   const head = relations[0]!;
   const restRelations = relations.slice(1);
 
@@ -201,6 +212,7 @@ function buildCollectionLambdaParts(
     // Chained collection reference (e.g. R.attr.a.b): the lambda's elements live at the END
     // of the chain, so the element predicate must join through every intermediate hop.
     filterValue: wrapInRelations(restRelations, lambdaCondition),
+    elementFilter: lambdaCondition,
     nullableFields: scope.nullableFields,
     unknownFilters: scope.unknownFilters,
   };
@@ -229,6 +241,33 @@ function wrapCollectionElementFilter(
     "some",
     wrapInRelations(parts.restRelations, elementFilter)
   );
+}
+
+/**
+ * all() over a chain (`R.attr.a.b`): the elements are the flattened tail, so the predicate must
+ * hold at the end of every path (`every` through each to-many hop, `is` through a to-one one),
+ * and the hops must exist — an absent parent is a missing-path error, never a vacuous TRUE.
+ */
+function positiveChainAllFilter(parts: CollectionLambdaParts): PrismaFilter {
+  let universal = parts.elementFilter;
+  for (const relation of [...parts.restRelations].reverse()) {
+    universal = relationFilter(
+      relation,
+      relation.type === "one" ? "is" : "every",
+      universal
+    );
+  }
+  const filters = [
+    buildLeadingHopsExistFilter(parts.head, parts.restRelations)!,
+    relationFilter(parts.head, "every", universal),
+  ];
+  if (parts.nullableFields.size > 0) {
+    // As for a direct relation: an element whose referenced column is NULL errors in CEL.
+    filters.push({
+      NOT: wrapCollectionElementFilter(parts, buildNullWitnessFilter(parts.nullableFields)),
+    });
+  }
+  return { AND: filters };
 }
 
 /** `relation: { none: <a nullable element column is NULL> }`, ANDed onto `base` when needed. */
@@ -274,9 +313,7 @@ function positiveCollectionFilter(
       return relationFilter(head, "some", negateFilter(filterValue));
     case "all":
       if (parts.restRelations.length > 0) {
-        throw new UnsupportedQueryPlanError(
-          "all() over a multi-hop relation chain is not supported"
-        );
+        return positiveChainAllFilter(parts);
       }
       // CEL all() errors when any element evaluation errors without a false witness; SQL
       // `every` would treat those elements as vacuously passing. Exclude rows holding any
@@ -325,8 +362,10 @@ function negatedCollectionFilter(
     }
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
-      // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN).
-      return relationFilter(head, "some", negateFilter(filterValue));
+      // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN). Over a chain
+      // the witness is an element at the END of it, so the negation sits inside every hop:
+      // negating the some-wrapped chain instead would admit a hop with no elements at all.
+      return wrapCollectionElementFilter(parts, negateFilter(parts.elementFilter));
     case "except":
       // !except(c,P) = every element definitively matches P.
       return excludeNullElements(

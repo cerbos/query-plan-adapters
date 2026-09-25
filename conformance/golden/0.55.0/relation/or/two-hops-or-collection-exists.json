@@ -5,7 +5,8 @@
     "a6",
     "a8",
     "c1",
-    "e1"
+    "e1",
+    "i9"
   ],
   "degenerateReason": null,
   "id": "relation/or/two-hops-or-collection-exists",

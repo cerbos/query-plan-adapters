@@ -45,6 +45,42 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble + 0.7 != 0.1
+    # arithmetic/add/int-beside-double-field
+    - actions:
+        - arithmetic/add/int-beside-double-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5
+    # arithmetic/add/int-literal-negated
+    - actions:
+        - arithmetic/add/int-literal-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aNumber + 1 > 2.0)'
+    # arithmetic/add/int-literal-plus-constant
+    - actions:
+        - arithmetic/add/int-literal-plus-constant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber + 1 > 2.0
+    # arithmetic/add/negated-int-beside-double-field
+    - actions:
+        - arithmetic/add/negated-int-beside-double-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) + R.attr.aDouble > 0.0) || R.attr.aNumber == 5'
     # arithmetic/add/on-both-sides
     - actions:
         - arithmetic/add/on-both-sides
@@ -108,6 +144,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / 2.0 >= 1.5
+    # arithmetic/divide/int-truncates
+    - actions:
+        - arithmetic/divide/int-truncates
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) / 2 == 1
+    # arithmetic/divide/int-truncates-toward-zero
+    - actions:
+        - arithmetic/divide/int-truncates-toward-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) / 2 == -2
+    # arithmetic/divide/negated-int-truncates
+    - actions:
+        - arithmetic/divide/negated-int-truncates
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) / 2 == 1)'
     # arithmetic/divide/negated-self-division-equals
     - actions:
         - arithmetic/divide/negated-self-division-equals
@@ -153,6 +216,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / R.attr.aNumber != 1.0
+    # arithmetic/modulo/column-divisor-negative-and-zero
+    - actions:
+        - arithmetic/modulo/column-divisor-negative-and-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1
+    # arithmetic/modulo/negated-double-operand
+    - actions:
+        - arithmetic/modulo/negated-double-operand
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aNumber % 2 == 1) || R.attr.aNumber == 5'
     # arithmetic/modulo/negative-dividend
     - actions:
         - arithmetic/modulo/negative-dividend
@@ -170,7 +251,16 @@ resourcePolicy:
         - USER
       condition:
         match:
-          expr: R.attr.aNumber * 0.1 == 0.3
+          expr: R.attr.aNumber * 0.1 == 0.3 || R.attr.aDouble * 3.0 == 3.9
+    # arithmetic/multiply/nan-times-zero-plus-column
+    - actions:
+        - arithmetic/multiply/nan-times-zero-plus-column
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber / R.attr.aNumber * 0.0 + R.attr.aDouble > 0.2
     # arithmetic/multiply/negative-multiplier
     - actions:
         - arithmetic/multiply/negative-multiplier
@@ -207,6 +297,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(double(R.attr.aString) > 50.0)'
+    # cast/int/double-truncation-bounds
+    - actions:
+        - cast/int/double-truncation-bounds
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aDouble) > 0 || int(R.attr.aDouble) < -4
     # cast/int/malformed-string
     - actions:
         - cast/int/malformed-string
@@ -234,6 +333,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aDouble) == 0
+    # cast/int/string-beyond-double-precision
+    - actions:
+        - cast/int/string-beyond-double-precision
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aString) == 9007199254740992 || R.attr.aNumber == 5
     # cast/string/from-boolean
     - actions:
         - cast/string/from-boolean
@@ -243,6 +351,51 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aBool) == "true"
+    # cast/string/from-boolean-case-changed-literal
+    - actions:
+        - cast/string/from-boolean-case-changed-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aBool) == "TRUE" || R.attr.aNumber == 5
+    # cast/string/negated-from-boolean
+    - actions:
+        - cast/string/negated-from-boolean
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aBool) == "true")'
+    # cast/string/negated-from-boolean-expression
+    - actions:
+        - cast/string/negated-from-boolean-expression
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aNumber > 3) == "true")'
+    # cast/string/negated-from-boolean-through-relation
+    - actions:
+        - cast/string/negated-from-boolean-through-relation
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.parent.aBool) == "true")'
+    # cast/string/negated-from-boolean-ternary
+    - actions:
+        - cast/string/negated-from-boolean-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aNumber > 3 ? R.attr.aBool : false) == "true")'
     # cast/string/from-double
     - actions:
         - cast/string/from-double
@@ -252,6 +405,78 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aDouble) == "-0.6"
+    # cast/string/from-double-spellings
+    - actions:
+        - cast/string/from-double-spellings
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aDouble) == "1e+06" || string(R.attr.aDouble) == "2" || string(R.attr.aDouble) == "-9.5e+18"
+    # cast/string/from-int-beyond-double-precision
+    - actions:
+        - cast/string/from-int-beyond-double-precision
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(int(R.attr.aString)) == "9007199254740993"
+    # cast/string/from-int-past-exponent-threshold
+    - actions:
+        - cast/string/from-int-past-exponent-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(int(R.attr.aDouble)) == "1000000"
+    # cast/string/from-integral-ternary
+    - actions:
+        - cast/string/from-integral-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'string(R.attr.aBool ? 1000000 : 0) == "1000000"'
+    # cast/string/from-ternary-with-int-branch
+    - actions:
+        - cast/string/from-ternary-with-int-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'string(R.attr.aBool ? int(R.attr.aDouble) : 1000000) == "1000000"'
+    # cast/string/negated-from-int-past-exponent-threshold
+    - actions:
+        - cast/string/negated-from-int-past-exponent-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(int(R.attr.aDouble)) == "1000000")'
+    # cast/string/negated-from-integral-ternary
+    - actions:
+        - cast/string/negated-from-integral-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(string(R.attr.aBool ? 1000000 : 0) == "1000000")'
+    # cast/string/from-negative-zero-double
+    - actions:
+        - cast/string/from-negative-zero-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aDouble) == "-0"
     # cast/string/negated-explicit-null
     - actions:
         - cast/string/negated-explicit-null
@@ -396,6 +621,15 @@ resourcePolicy:
       condition:
         match:
           expr: (R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))
+    # collection/exists/map-keys
+    - actions:
+        - collection/exists/map-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.exists(k, k == "inner")
     # collection/exists/element-in-principal-list
     - actions:
         - collection/exists/element-in-principal-list
@@ -441,6 +675,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.tags.exists(t, t.name == "public")'
+    # collection/exists/negated-map-keys
+    - actions:
+        - collection/exists/negated-map-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.exists(k, k == "inner")'
     # collection/exists/negated-nested-over-same-collection
     - actions:
         - collection/exists/negated-nested-over-same-collection
@@ -714,6 +957,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames == ["public"]
+    # comparison/equals/whole-list-literal-order-and-multiplicity
+    - actions:
+        - comparison/equals/whole-list-literal-order-and-multiplicity
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames == [] || R.attr.tagNames == [null] || R.attr.tagNames == ["private", "public"] || R.attr.tagNames == ["public", "public"]
     # comparison/greater-or-equal/fractional-threshold
     - actions:
         - comparison/greater-or-equal/fractional-threshold
@@ -768,6 +1020,15 @@ resourcePolicy:
       condition:
         match:
           expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+    # comparison/greater-than/string-code-point-order
+    - actions:
+        - comparison/greater-than/string-code-point-order
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString > "a"
     # comparison/less-or-equal/field-against-literal
     - actions:
         - comparison/less-or-equal/field-against-literal
@@ -795,6 +1056,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
+    # comparison/less-or-equal/string-code-point-order
+    - actions:
+        - comparison/less-or-equal/string-code-point-order
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString <= "one"
     # comparison/less-or-equal/value-first
     - actions:
         - comparison/less-or-equal/value-first
@@ -804,6 +1074,24 @@ resourcePolicy:
       condition:
         match:
           expr: 3 <= R.attr.aNumber
+    # comparison/less-than/astral-string-against-high-bmp
+    - actions:
+        - comparison/less-than/astral-string-against-high-bmp
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString < "héllo�"
+    # comparison/less-than/boolean-field-against-true
+    - actions:
+        - comparison/less-than/boolean-field-against-true
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBool < true
     # comparison/less-than/double-below-int64-range
     - actions:
         - comparison/less-than/double-below-int64-range
@@ -822,6 +1110,24 @@ resourcePolicy:
       condition:
         match:
           expr: '(0.5 < (R.attr.aBool ? 1.0 : 0.0/0.0)) && now() == now()'
+    # comparison/less-than/negated-astral-string-against-high-bmp
+    - actions:
+        - comparison/less-than/negated-astral-string-against-high-bmp
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < "héllo�")'
+    # comparison/less-than/negated-boolean-field-against-true
+    - actions:
+        - comparison/less-than/negated-boolean-field-against-true
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aBool < true)'
     # comparison/less-than/negative-literal
     - actions:
         - comparison/less-than/negative-literal
@@ -1171,6 +1477,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy("dept.eng").ancestorOf(hierarchy(R.attr.scope))
+    # hierarchy/ancestor-of/empty-delimiter
+    - actions:
+        - hierarchy/ancestor-of/empty-delimiter
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hierarchy(R.attr.scope, "").ancestorOf(hierarchy("dept.eng", ""))
     # hierarchy/ancestor-of/like-metacharacters-in-path
     - actions:
         - hierarchy/ancestor-of/like-metacharacters-in-path
@@ -1243,6 +1558,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy("dept.eng").overlaps(hierarchy(R.attr.scope))
+    # hierarchy/overlaps/empty-delimiter
+    - actions:
+        - hierarchy/overlaps/empty-delimiter
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hierarchy(R.attr.scope, "").overlaps(hierarchy("dept.eng", ""))
     # hierarchy/overlaps/like-metacharacters-in-path
     - actions:
         - hierarchy/overlaps/like-metacharacters-in-path
@@ -1463,6 +1787,15 @@ resourcePolicy:
       condition:
         match:
           expr: 2 in R.attr.aNumberList
+    # membership/in/map-attribute-keys
+    - actions:
+        - membership/in/map-attribute-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"inner" in R.attr.parent'
     # membership/in/map-literal-keys
     - actions:
         - membership/in/map-literal-keys
@@ -1472,6 +1805,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aString in {"one": 1, "same": 2}'
+    # membership/in/negated-map-attribute-keys
+    - actions:
+        - membership/in/negated-map-attribute-keys
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("inner" in R.attr.parent)'
     # membership/in/negated-field-in-resource-list
     - actions:
         - membership/in/negated-field-in-resource-list
@@ -1571,6 +1913,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aOptionalString == null
+    # null/equals/null-literal-on-missing-attribute-under-or
+    - actions:
+        - null/equals/null-literal-on-missing-attribute-under-or
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.scope == null || R.attr.aBool
     # null/exists-one/negated-null-element
     - actions:
         - null/exists-one/negated-null-element
@@ -1634,6 +1985,15 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.aOptionalString)
+    # null/has/composed-with-comparison
+    - actions:
+        - null/has/composed-with-comparison
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.aOptionalString) && R.attr.aNumber > 0
     # null/in/literal-list-of-only-null
     - actions:
         - null/in/literal-list-of-only-null
@@ -1850,6 +2210,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(P.attr.manyTeams.except([R.attr.aOptionalString])) < size(P.attr.manyTeams)
+    # principal/exists-one/duplicate-elements
+    - actions:
+        - principal/exists-one/duplicate-elements
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.duplicateTeams.exists_one(t, t == R.attr.aOptionalString)
     # principal/exists-one/long-list
     - actions:
         - principal/exists-one/long-list
@@ -1994,6 +2363,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^(ab){1,2}$")
+    # regex/matches/brace-without-count-is-literal
+    - actions:
+        - regex/matches/brace-without-count-is-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^a{,2}$")
+    # regex/matches/case-fold-kelvin-and-long-s
+    - actions:
+        - regex/matches/case-fold-kelvin-and-long-s
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("(?i)^ks$")
     # regex/matches/case-insensitive-flag
     - actions:
         - regex/matches/case-insensitive-flag
@@ -2030,6 +2417,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^a.*b$")
+    # regex/matches/dot-plus-excludes-empty-and-newline
+    - actions:
+        - regex/matches/dot-plus-excludes-empty-and-newline
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^.+$")
     # regex/matches/end-anchor-before-final-newline
     - actions:
         - regex/matches/end-anchor-before-final-newline
@@ -2075,6 +2471,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^[ab@#&~<>]+$")
+    # regex/matches/negated-invalid-patterns-from-principal
+    - actions:
+        - regex/matches/negated-invalid-patterns-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a)\\1" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "{2}a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a**" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{1001}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "[b-a]" : "^h") || R.attr.aNumber == 5'
     # regex/matches/posix-character-class
     - actions:
         - regex/matches/posix-character-class
@@ -2084,6 +2489,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("[[:digit:]]")
+    # regex/matches/posix-class-and-range-bounded
+    - actions:
+        - regex/matches/posix-class-and-range-bounded
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^[[:digit:]a-c]{1,2}$")
     # regex/matches/top-level-alternation-prefix-or-suffix
     - actions:
         - regex/matches/top-level-alternation-prefix-or-suffix
@@ -2111,6 +2525,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("ne")
+    # regex/matches/unanchored-quantifiers
+    - actions:
+        - regex/matches/unanchored-quantifiers
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("x*a+b")
+    # regex/matches/whitespace-class
+    - actions:
+        - regex/matches/whitespace-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^\\s*$")
+    # relation/all/negated-to-one-chain
+    - actions:
+        - relation/all/negated-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.mainCategory.subCategories.all(s, s.name == "finance")'
     # relation/all/to-one-chain
     - actions:
         - relation/all/to-one-chain
@@ -2120,6 +2561,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.mainCategory.subCategories.all(s, s.name == "finance")
+    # relation/and/negated-conjunction-one-hop-null-literal
+    - actions:
+        - relation/and/negated-conjunction-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(!R.attr.parent.aBool && R.attr.parent.aOptionalString == null)'
+    # relation/and/negated-conjunction-short-circuits-absent-parent
+    - actions:
+        - relation/and/negated-conjunction-short-circuits-absent-parent
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(!R.attr.aBool && R.attr.parent.aString == "one")'
+    # relation/and/negated-conjunction-two-hops-null-literal
+    - actions:
+        - relation/and/negated-conjunction-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(!R.attr.parent.inner.aBool && R.attr.parent.inner.aOptionalString == null)'
     # relation/and/one-hop-and-root-attribute
     - actions:
         - relation/and/one-hop-and-root-attribute
@@ -2183,6 +2651,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.aString == "One")'
+    # relation/equals/negated-one-hop-null-literal
+    - actions:
+        - relation/equals/negated-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString == null)'
+    # relation/equals/negated-two-hops-null-literal
+    - actions:
+        - relation/equals/negated-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString == null)'
+    # relation/equals/one-hop-null-literal
+    - actions:
+        - relation/equals/one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString == null
     # relation/equals/one-hop-number
     - actions:
         - relation/equals/one-hop-number
@@ -2210,6 +2705,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.inner.aBool == true
+    # relation/equals/two-hops-null-literal
+    - actions:
+        - relation/equals/two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString == null
     # relation/exists/negated-to-one-chain
     - actions:
         - relation/exists/negated-to-one-chain
@@ -2300,6 +2804,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aNumber < 2
+    # relation/not-equals/negated-one-hop-null-literal
+    - actions:
+        - relation/not-equals/negated-one-hop-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString != null)'
+    # relation/not-equals/negated-two-hops-null-literal
+    - actions:
+        - relation/not-equals/negated-two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString != null)'
     # relation/not-equals/one-hop-null-literal
     - actions:
         - relation/not-equals/one-hop-null-literal
@@ -2309,6 +2831,51 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aOptionalString != null
+    # relation/not-equals/two-hops-null-literal
+    - actions:
+        - relation/not-equals/two-hops-null-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString != null
+    # relation/or/negated-one-hop-not-null-or-negated-root-attribute
+    - actions:
+        - relation/or/negated-one-hop-not-null-or-negated-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString != null) || !R.attr.aBool'
+    # relation/or/negated-two-hops-not-null-or-negated-root-attribute
+    - actions:
+        - relation/or/negated-two-hops-not-null-or-negated-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.inner.aOptionalString != null) || !R.attr.aBool'
+    # relation/or/one-hop-null-literal-or-root-attribute
+    - actions:
+        - relation/or/one-hop-null-literal-or-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString == null || R.attr.aBool
+    # relation/or/two-hops-null-literal-or-root-attribute
+    - actions:
+        - relation/or/two-hops-null-literal-or-root-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.inner.aOptionalString == null || R.attr.aBool
     # relation/or/two-hops-or-collection-exists
     - actions:
         - relation/or/two-hops-or-collection-exists
@@ -2561,6 +3128,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aOptionalString + "!") == "nope")'
+    # string/concatenate/ordering
+    - actions:
+        - string/concatenate/ordering
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString + R.attr.aOptionalString < "b"
     # string/concatenate/unsatisfiable-not-equals
     - actions:
         - string/concatenate/unsatisfiable-not-equals
@@ -2822,6 +3398,24 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.createdAt) != timestamp("2024-06-01T00:00:00Z")
+    # timestamp/greater-or-equal/stored-millisecond-spelling
+    - actions:
+        - timestamp/greater-or-equal/stored-millisecond-spelling
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.updatedAt) >= timestamp("2020-03-15T10:30:00Z")
+    # timestamp/not-equals/stored-millisecond-spelling
+    - actions:
+        - timestamp/not-equals/stored-millisecond-spelling
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.updatedAt) != timestamp("2020-03-15T10:30:00Z")
     # type-mismatch/contains/number-field-needle
     - actions:
         - type-mismatch/contains/number-field-needle
@@ -2885,6 +3479,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5
+    # type-mismatch/equals/negated-on-missing-attribute
+    - actions:
+        - type-mismatch/equals/negated-on-missing-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aDouble == "x") || !(string(R.attr.aDouble) == "zzz")'
     # type-mismatch/equals/number-field-against-string-literal
     - actions:
         - type-mismatch/equals/number-field-against-string-literal
@@ -2912,6 +3515,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumberList[0] == true || R.attr.aNumber == 5
+    # type-mismatch/equals/string-field-against-list-literal
+    - actions:
+        - type-mismatch/equals/string-field-against-list-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString == ["same"] || R.attr.aNumber == 5
     # type-mismatch/equals/string-field-against-map-literal
     - actions:
         - type-mismatch/equals/string-field-against-map-literal
@@ -2966,6 +3578,69 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, t.name == 0) || R.attr.aNumber == 5
+    # type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal
+    - actions:
+        - type-mismatch/greater-or-equal/negated-explicit-null-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.owner >= "m")'
+    # type-mismatch/greater-or-equal/negated-number-field-against-string-literal
+    - actions:
+        - type-mismatch/greater-or-equal/negated-number-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aNumber >= "5") || R.attr.aNumber == 2'
+    # type-mismatch/greater-or-equal/string-field-against-number-literal-value-first
+    - actions:
+        - type-mismatch/greater-or-equal/string-field-against-number-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 0 >= R.attr.aString || R.attr.aNumber == 2
+    # type-mismatch/greater-than/boolean-field-against-number-literal
+    - actions:
+        - type-mismatch/greater-than/boolean-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBool > 0 || R.attr.aNumber == 2
+    # type-mismatch/greater-than/number-field-against-string-literal-value-first
+    - actions:
+        - type-mismatch/greater-than/number-field-against-string-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"5" > R.attr.aNumber || R.attr.aNumber == 2'
+    # type-mismatch/greater-than/string-field-against-number-literal
+    - actions:
+        - type-mismatch/greater-than/string-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString > 0 || R.attr.aNumber == 2
+    # type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first
+    - actions:
+        - type-mismatch/greater-than/string-literal-against-explicit-null-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"m" > R.attr.owner'
     # type-mismatch/has-intersection/mapped-names-against-mixed-literal-list
     - actions:
         - type-mismatch/has-intersection/mapped-names-against-mixed-literal-list
@@ -3047,6 +3722,33 @@ resourcePolicy:
       condition:
         match:
           expr: '"2" in R.attr.aNumberList || R.attr.aNumber == 5'
+    # type-mismatch/less-or-equal/negated-boolean-field-against-number-literal
+    - actions:
+        - type-mismatch/less-or-equal/negated-boolean-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aBool <= 0) || R.attr.aNumber == 2'
+    # type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first
+    - actions:
+        - type-mismatch/less-or-equal/negated-number-field-against-string-literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("5" <= R.attr.aNumber) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/explicit-null-field-against-string-literal
+    - actions:
+        - type-mismatch/less-than/explicit-null-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.owner < "m"
     # type-mismatch/less-than/negated-nan-against-string-field
     - actions:
         - type-mismatch/less-than/negated-nan-against-string-field
@@ -3056,6 +3758,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
+    # type-mismatch/less-than/negated-string-field-against-number-literal
+    - actions:
+        - type-mismatch/less-than/negated-string-field-against-number-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString < 0) || R.attr.aNumber == 2'
+    # type-mismatch/less-than/number-field-against-string-literal
+    - actions:
+        - type-mismatch/less-than/number-field-against-string-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber < "5" || R.attr.aNumber == 2
+    # type-mismatch/less-than/number-literal-against-boolean-field-value-first
+    - actions:
+        - type-mismatch/less-than/number-literal-against-boolean-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 0 < R.attr.aBool || R.attr.aNumber == 2
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal

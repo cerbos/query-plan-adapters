@@ -62,6 +62,14 @@ final class LeafTranslator {
         boolean variableFirst = comparison.variableFirst();
 
         String normalizedOperator = normalizeLeafOperator(operator, variableFirst);
+        if ("in".equals(normalizedOperator) && !variableFirst && isObjectPath(field)) {
+            // CEL's `in` over a map tests its keys. An object field's key set is not indexed:
+            // Elasticsearch indexes no JSON null, so a key held with a null value is
+            // indistinguishable from an absent key, and no query answers the membership.
+            throw unsupported("in over the object field '" + field + "' tests its keys, as CEL"
+                    + " does over a map, and Elasticsearch indexes no key whose value is null,"
+                    + " so a query cannot tell a key held with a null from an absent one");
+        }
         if (!whenTrue && "in".equals(normalizedOperator) && !variableFirst) {
             throw unsupported(
                     "Negated membership in a document collection cannot distinguish a missing "
@@ -108,6 +116,12 @@ final class LeafTranslator {
 
         Map<String, Object> positive = positiveQuery(normalizedOperator, field, value);
         return whenTrue ? positive : negatedQuery(normalizedOperator, field, value, positive);
+    }
+
+    /** Whether the field map names a sub-field of {@code field}, so it is an object in the index. */
+    private boolean isObjectPath(String field) {
+        String prefix = field + ".";
+        return options.fieldMap().values().stream().anyMatch(f -> f.startsWith(prefix));
     }
 
     private static Comparison resolveComparison(Operand leftOperand, Operand rightOperand) {

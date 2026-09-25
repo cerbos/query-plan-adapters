@@ -1,20 +1,17 @@
-"""Translator unit test: what this adapter can be asked without a store.
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
 
-Offline -- no PDP, no container, no database. The rows a recorded plan returns are
-``test_adversarial_conformance.py``'s job, replayed from ``conformance/golden/``; nothing
-here re-asserts them. What lives here is what that harness structurally cannot vary or
-see: the caller-supplied options (the null representation, operator overrides, declared
-collection storage, the SDK transport and the model style), the precision rule for a
-folded ``now()``, and the parameters a statement binds on PostgreSQL, which executes only
-the cases that read a declared collection.
+"""Translator unit test: what this adapter can be asked without a store. Offline.
 
-The plans are read from the golden files, not written: see
-`ADR 0010 <../../docs/adr/0010-conformance-replays-recorded-pdp-decisions.md>`_.
-The hand-built plans in ``test_query.py`` cover shapes no policy can produce.
+Rows are the adversarial harness's job. This covers what it cannot vary or see: caller
+options, the SDK transport, the model style, ``now()`` precision and PostgreSQL's bound
+parameters. Plans come from ``conformance/golden/`` (ADR 0010); ``test_query.py`` covers
+shapes no policy can produce.
 """
 
 import math
 from datetime import datetime, timezone
+from typing import ClassVar
 
 import pytest
 from corpus import (
@@ -33,15 +30,15 @@ from corpus import (
     plan_from_golden,
     render,
 )
-
-from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, get_query
 from sqlalchemy import any_
 from sqlalchemy.exc import CompileError
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
+from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, get_query
+
 CURRENT = golden_cases(PDP_TAGS[0])
 
-#: One substitution for ``__NOW_MINUS_24H__`` per run, so two translations of a case agree.
+#: One ``__NOW_MINUS_24H__`` value per run, so two translations of a case agree.
 PLANNED_AT = now_minus_24h()
 
 
@@ -57,7 +54,7 @@ def translate(
     plan=None,
     table=AdvResource,
 ):
-    """The ``Select`` this adapter emits for one corpus case under the corpus mapping."""
+    """The ``Select`` this adapter emits for one corpus case."""
     if plan is None:
         plan = plan_from_golden(golden_case(case_id), planned_at or PLANNED_AT)
     return get_query(
@@ -79,7 +76,7 @@ def _translated_or_refused(build):
 
 
 def _plan_carries_null_literal(node):
-    """Whether any operand anywhere in the plan is a literal null, or a list holding one."""
+    """Whether any operand in the plan is a null literal, or a list holding one."""
     if not isinstance(node, dict):
         return False
     if "value" in node:
@@ -95,13 +92,7 @@ def _plan_carries_null_literal(node):
 
 
 class TestNullAttributeRepresentation:
-    """The call-level null representation, which the corpus mapping fixes at one value.
-
-    ``aOptionalString == null`` produces the same ``eq(attr, null)`` node whichever
-    convention the caller uses, so the adapter has to be told (#302). The corpus mapping
-    declares ``aOptionalString`` omitted per attribute; these vary the call-level option
-    with that declaration removed.
-    """
+    """The call-level null option; the plan cannot say which convention applies (#302)."""
 
     ACTION = "null/equals/null-literal-on-missing-attribute"
 
@@ -116,20 +107,8 @@ class TestNullAttributeRepresentation:
         )
         assert "adversarial_resource.a_optional_string IS NULL" in statement
 
-    def test_omitted_refuses_the_same_plan(self):
-        # A NULL column then sends no attribute, so check() denies on a missing-attribute
-        # error while the filter above returns exactly those rows (#302).
-        with pytest.raises(UnsupportedPlanError, match="null operand"):
-            translate(
-                self.ACTION,
-                null_attribute_representation="omitted",
-                attribute_null_representation=None,
-            )
-
     def test_a_per_attribute_declaration_overrides_the_call_level_option(self):
-        # #308. `owner` declares "explicit" in the shared map, so
-        # `null/equals/null-literal` — which probes it — must still translate under a
-        # call-level "omitted"...
+        # `owner` is declared "explicit", so its null probe still translates (#308)...
         assert render(
             translate(
                 "null/equals/null-literal", null_attribute_representation="omitted"
@@ -137,34 +116,28 @@ class TestNullAttributeRepresentation:
             "sqlite",
         ) == render(translate("null/equals/null-literal"), "sqlite")
 
-        # ...and stripping the declaration must reject the same action under the same option,
-        # so the override above is doing work rather than being quietly equivalent.
-        with pytest.raises(UnsupportedPlanError, match="null operand"):
+        # ...and without the declaration it takes the omitted rendering instead (#551).
+        assert render(
             translate(
                 "null/equals/null-literal",
                 null_attribute_representation="omitted",
                 attribute_null_representation=None,
-            )
+            ),
+            "sqlite",
+        ) != render(translate("null/equals/null-literal"), "sqlite")
 
 
 class TestOperatorOverrides:
-    """The override mechanism itself, which no policy shape can vary.
-
-    The corpus drives one set of overrides -- the collection macros the adapter has no
-    portable translation for. A *different* set is not a hostile CEL shape, it is a different
-    call, so it is asserted here.
-    """
+    """Caller-supplied operator overrides: the corpus uses one fixed set."""
 
     def test_an_override_replaces_the_default_lowering_for_its_operator(self):
-        # The README's own example: PostgreSQL users preferring `= ANY (...)` to `IN`.
+        # The README's example: `= ANY (...)` instead of `IN` on PostgreSQL.
         action = "null/in/missing-attribute-in-multi-element-list"
         attr_map = {
             "request.resource.attr.aOptionalString": AdvResource.a_optional_string
         }
 
-        # The map holds only the one attribute the action reaches, so the corpus's
-        # per-attribute NULL declarations — which name attributes this map does not carry —
-        # go with it.
+        # This map lacks the attributes the corpus's null declarations name.
         def emitted(operator_override_fns):
             return render(
                 translate(
@@ -180,7 +153,7 @@ class TestOperatorOverrides:
         assert "= ANY (" in emitted({"in": lambda c, v: c == any_(v)})
 
     def test_an_unmapped_attribute_is_refused_rather_than_dropped(self):
-        # Dropping it would emit a filter that answers a different question from the policy.
+        # Dropping it would change what the filter means.
         with pytest.raises(KeyError, match="Attribute does not exist"):
             translate(
                 "string/equals/case-sensitive",
@@ -188,13 +161,11 @@ class TestOperatorOverrides:
                 attribute_null_representation=None,
             )
 
-    # The ledger classifies a case against ONE mapping, so "unsupported" there means "this
-    # adapter refuses it with these overrides", not "no caller can translate it". Each test
-    # below asserts both halves: the refusal without the override, and what it buys.
+    # "Unsupported" in the ledger means unsupported with the corpus's overrides.
+    # Each test below checks both halves: refused without the override, translated with it.
 
     def test_a_matches_override_admits_the_regex_the_corpus_refuses(self):
-        # SQL dialect regex engines do not guarantee CEL/RE2 semantics, so the adapter has no
-        # default lowering. An application whose database is known to agree may supply one.
+        # SQL regex engines aren't RE2, so there is no default. A caller may supply one.
         action = "regex/matches/anchored-prefix"
         with pytest.raises(
             UnsupportedPlanError, match="Unrecognised operator: matches"
@@ -215,10 +186,8 @@ class TestOperatorOverrides:
         assert params["a_string_1"] == "^h"
 
     def test_an_index_override_still_serves_storage_nothing_declares(self):
-        # The corpus reads this index through its `collection_columns` declaration (#227).
-        # Storage of any other shape still has the override: here a scalar column standing for
-        # a single-element list. Without either, the undeclared storage is refused by name
-        # rather than read as though it were ordered.
+        # For storage `collection_columns` can't describe (#227). Here a scalar column
+        # stands in for a one-element list. Without a declaration or override, it's refused.
         action = "collection/index/first-element-of-string-list"
         undeclared = {
             "attr_map": {"request.resource.attr.tagNames": AdvResource.a_string},
@@ -244,19 +213,11 @@ class TestOperatorOverrides:
 
 
 class TestDeclaredCollectionStorage:
-    """``collection_columns``, which the corpus structurally cannot vary (#227).
-
-    The corpus mapping declares its collections as JSON documents. A second storage shape, a
-    missing declaration, a declaration the adapter must refuse and the precedence the
-    declaration takes are properties of the caller's argument, not of a plan, so they are
-    asserted here. The harness's PostgreSQL legs execute both storage shapes.
-    """
+    """``collection_columns``, a caller argument the corpus cannot vary (#227)."""
 
     def test_a_declaration_takes_precedence_over_the_size_override(self):
-        # The corpus's overrides include `size`, which counts a relation. The declaration names
-        # the attribute and the override only the operator, so the declaration wins -- and this
-        # is the assertion that says the harness's size shapes run through the declared storage
-        # at all, rather than through the relation count they used before it existed.
+        # The declaration names the attribute, so it beats the `size` override, which
+        # would count the relation.
         declared, _ = render(
             translate("size/greater-than/collection-above-one"), "sqlite"
         )
@@ -280,19 +241,23 @@ class TestDeclaredCollectionStorage:
             ),
             (
                 "collection/index/first-element-of-string-list",
-                "(to_jsonb(adversarial_resource.tag_names_array) -> 0) "
-                "= to_jsonb(CAST(%(param_1)s AS TEXT))",
+                (
+                    "(to_jsonb(adversarial_resource.tag_names_array) -> 0) "
+                    "= to_jsonb(CAST(%(param_1)s AS TEXT))"
+                ),
             ),
             (
                 "collection/index/first-element-of-string-list-equals-null",
-                "jsonb_typeof((to_jsonb(adversarial_resource.tag_names_array) -> 0)) "
-                "= 'null'",
+                (
+                    "jsonb_typeof((to_jsonb(adversarial_resource.tag_names_array) -> 0)) "
+                    "= 'null'"
+                ),
             ),
         ],
     )
     def test_a_pg_array_is_read_by_position_through_to_jsonb(self, action, rendered):
-        # `to_jsonb`, never `array[i + 1]`: the harness rebases every array to start at 0, so an
-        # adapter that assumed PostgreSQL's default lower bound would read the wrong element.
+        # Not `array[i + 1]`: the harness rebases arrays to start at 0, so assuming the
+        # default lower bound would read the wrong element.
         statement, _ = render(
             translate(action, collection_columns=PG_ARRAY_COLLECTION_COLUMNS),
             "postgresql",
@@ -314,9 +279,8 @@ class TestDeclaredCollectionStorage:
         )
 
     def test_an_attr_map_entry_keeps_membership_off_the_declaration(self):
-        # Membership reads the declaration only for an attribute `attr_map` does not map, so
-        # declaring storage for `size()` and `index` never moves a relation marker's membership.
-        # The corpus maps neither number nor boolean list, so the mapped side is caller-only.
+        # Membership uses the declaration only when `attr_map` doesn't map the attribute.
+        # The corpus maps neither list, so the mapped side is caller-only.
         attr_map = {
             **ATTR_MAP,
             "request.resource.attr.aNumberList": AdvResource.a_number_list_json,
@@ -335,8 +299,7 @@ class TestDeclaredCollectionStorage:
         assert "json_each" not in mapped
 
     def test_two_positions_do_not_share_a_cached_statement(self):
-        # The position is inline SQL rather than a bind, so it has to reach the statement
-        # cache key -- or `tagNames[1]` would be served the SQL compiled for `tagNames[0]`.
+        # The position is inlined, so it must be in the cache key.
         first = translate("collection/index/first-element-of-string-list").whereclause
         second = translate("collection/index/negated-out-of-bounds").whereclause
         assert first._generate_cache_key() != second._generate_cache_key()
@@ -352,13 +315,14 @@ class TestDeclaredCollectionStorage:
             )
 
     def test_a_dialect_it_was_not_written_for_is_refused_at_compile_time(self):
-        # The SQL is chosen per dialect at compile time, because `get_query` is never told the
-        # dialect. One it has no rendering for fails there, rather than getting another's SQL.
-        from sqlalchemy.dialects import mysql
+        # `get_query` doesn't know the dialect, so an unsupported one fails at compile time.
+        from sqlalchemy.dialects import mssql
 
-        with pytest.raises(CompileError, match="renders only on SQLite and PostgreSQL"):
+        with pytest.raises(
+            CompileError, match="renders only on SQLite, PostgreSQL and"
+        ):
             translate("collection/index/first-element-of-string-list").compile(
-                dialect=mysql.dialect()
+                dialect=mssql.dialect()
             )
 
     def test_str_of_a_query_still_renders_for_debugging(self):
@@ -367,7 +331,7 @@ class TestDeclaredCollectionStorage:
         )
 
     def test_an_undeclared_collection_column_is_refused_rather_than_measured(self):
-        # LENGTH() of a JSON column is the length of its text: a number, and the wrong one.
+        # LENGTH() of a JSON column would measure its text.
         with pytest.raises(UnsupportedPlanError, match="needs its storage declared"):
             translate(
                 "size/greater-than/collection-above-one",
@@ -378,8 +342,7 @@ class TestDeclaredCollectionStorage:
             )
 
     def test_a_declared_column_must_be_addressable_like_a_mapped_one(self):
-        # A column on another table needs a `table_mapping` join, exactly as an `attr_map`
-        # entry does; the declaration is not a way around that validation.
+        # A column on another table needs `table_mapping`, as in `attr_map`.
         with pytest.raises(TypeError, match="table_mapping"):
             translate(
                 "size/greater-than/collection-above-one",
@@ -401,16 +364,9 @@ class TestDeclaredCollectionStorage:
 
 
 class TestTimestampLiterals:
-    """The one operand a golden file cannot pin, and why the harness substitutes nanoseconds.
+    """Folded ``now()`` literals, refused because the PDP emits nanoseconds."""
 
-    The corpus records the folded ``now() - duration("24h")`` as ``__NOW_MINUS_24H__``, so a
-    reader has to choose a value, and here that choice is load-bearing. The PDP emits
-    NANOSECOND precision, which is the entire reason the ledger lists both relative-window
-    cases as unsupported. A tidy microsecond substitution would translate cleanly and quietly
-    contradict the ledger.
-    """
-
-    CASES = [
+    CASES: ClassVar[list[str]] = [
         "timestamp/less-than/relative-window",
         "timestamp/greater-than/relative-window-value-first",
     ]
@@ -420,16 +376,14 @@ class TestTimestampLiterals:
         with pytest.raises(UnsupportedPlanError, match="precision"):
             translate(case_id)
 
-        # The same plan at microsecond precision translates. Both directions matter: the
-        # refusal is real, and it is a property of the instant rather than of the shape.
+        # At microsecond precision the same plan translates.
         statement, _params = render(
             translate(case_id, planned_at="2026-08-11T09:13:39.123456Z"), "sqlite"
         )
         assert "adversarial_resource.created_at" in statement
 
     def test_excess_fractional_digits_are_accepted_only_when_they_are_zero(self):
-        # CEL's instant range is exact to the microsecond and no further, so trailing zeroes
-        # are information-free and a non-zero digit is a value the column cannot hold.
+        # Trailing zero digits lose nothing; a non-zero one can't be stored.
         statement, params = render(
             translate(self.CASES[0], planned_at="2026-08-11T09:13:39.123456000Z"),
             "sqlite",
@@ -449,26 +403,19 @@ class TestTimestampLiterals:
         ],
     )
     def test_an_instant_the_adapter_cannot_carry_fails_closed(self, value):
-        # Each is refused rather than coerced: a datetime parsed leniently would compare
-        # against the column as some OTHER instant, which is a filter returning rows the PDP
-        # denies rather than an error the caller can see.
+        # Lenient parsing would compare against the wrong instant and over-grant.
         with pytest.raises(
             UnsupportedPlanError, match="RFC-3339|precision|instant range|offset"
         ):
             translate(self.CASES[0], planned_at=value)
 
 
-#: A constant zero denominator recorded as the INTEGER ``0``, which a JSON plan cannot sign.
+#: A zero divisor recorded as the integer ``0``, whose sign JSON has lost.
 INTEGER_ZERO_DIVISOR = "comparison/greater-than/infinity-from-ternary"
 
 
 class TestTransportDecoding:
-    """``get_query`` accepts both SDK clients' responses; the harness replays HTTP-shaped plans.
-
-    Re-encoding each golden plan into the gRPC client's protobuf response keeps the
-    ``MessageToDict`` arm executed. It cannot stand in for a real gRPC frame: JSON can lose
-    what the two transports disagree about (cerbos/query-plan-adapters#321).
-    """
+    """The protobuf (gRPC) decoding path, fed the same golden plans (#321)."""
 
     @pytest.mark.parametrize(
         "case",
@@ -486,22 +433,19 @@ class TestTransportDecoding:
         )
 
     def test_a_double_negative_zero_divisor_translates_over_json(self):
-        # The golden records `-0.0`, which json.loads keeps as a signed float, so the adapter
-        # knows which infinity CEL produced.
+        # `-0.0` stays a signed float through json.loads, so the infinity's sign is known.
         statement, _params = render(
             translate("arithmetic/divide/negative-zero-divisor"), "sqlite"
         )
         assert "adversarial_resource.a_number" in statement
 
     def test_an_integer_zero_divisor_is_refused_over_json_only(self):
-        # Cerbos's HTTP API renders -0.0 as `-0`, which json.loads returns as the INT 0, so an
-        # integer zero cannot say whether CEL produced +Infinity or -Infinity (#312).
+        # The HTTP API renders -0.0 as `-0`, which json.loads makes int 0: sign lost (#312).
         with pytest.raises(UnsupportedPlanError, match="sign is indeterminate"):
             translate(INTEGER_ZERO_DIVISOR)
 
-        # Re-encoded into protobuf, the same value widens to a POSITIVE double, so the guard
-        # does not fire. That is not evidence that gRPC makes this shape supportable: the
-        # sign was decided by the JSON, not by the transport.
+        # Protobuf turns it into +0.0, so the guard doesn't fire. This is a fixture
+        # artefact, not evidence that gRPC supports this shape.
         statement, _params = render(
             translate(
                 INTEGER_ZERO_DIVISOR,
@@ -513,11 +457,7 @@ class TestTransportDecoding:
 
 
 class TestDeclarativeBaseModels:
-    """The SQLAlchemy 2.0 ``DeclarativeBase`` arm of ``GenericTable``.
-
-    Its metaclass sits outside ``DeclarativeMeta``, so it is a different code path in
-    ``get_query``. The twins map the SAME tables, so every case must emit the same SQL.
-    """
+    """SQLAlchemy 2.0 ``DeclarativeBase`` models, a separate path in ``get_query``."""
 
     @pytest.fixture(scope="class")
     def modern(self):
@@ -560,27 +500,45 @@ class TestDeclarativeBaseModels:
         }
 
     def test_every_case_emits_the_same_sql(self, modern):
+        # The twins map the same tables, so the SQL must match.
         differing = [
             case["id"]
             for case in CURRENT
-            if _translated_or_refused(lambda: render(translate(case["id"]), "sqlite"))
+            if _translated_or_refused(
+                lambda cid=case["id"]: render(translate(cid), "sqlite")
+            )
             != _translated_or_refused(
-                lambda: render(translate(case["id"], **modern), "sqlite")
+                lambda cid=case["id"]: render(translate(cid, **modern), "sqlite")
             )
         ]
         assert differing == []
 
 
-def test_every_null_carrying_plan_is_refused_under_omitted():
-    # #302. Under a call-level "omitted" with no per-attribute declarations, every plan
-    # carrying a null literal must be refused. The rejection keys off the null OPERAND, not an
-    # operator list: `hasIntersection(tagNames, ["public", null])` carries one in its value
-    # list, and an allowlist of eq/ne/in would miss it.
+def _null_only_in_equality_with_an_attribute(node):
+    """Whether every null literal is the bare operand of ``eq``/``ne`` with a variable."""
+    if not isinstance(node, dict) or "value" in node or "variable" in node:
+        return not _plan_carries_null_literal(node)
+    expression = node.get("expression", node)
+    operands = expression.get("operands", [])
+    if expression.get("operator") in ("eq", "ne") and len(operands) == 2:
+        values = [operand for operand in operands if "value" in operand]
+        variables = [operand for operand in operands if "variable" in operand]
+        if len(values) == 1 and len(variables) == 1 and values[0]["value"] is None:
+            return True
+    return all(_null_only_in_equality_with_an_attribute(o) for o in operands)
+
+
+def test_every_other_null_carrying_plan_is_refused_under_omitted():
+    # #302. The refusal keys off the null operand, not an operator list, which would
+    # miss the null inside `hasIntersection(tagNames, ["public", null])`. The one
+    # exception is `eq`/`ne` between an attribute and a bare null, rendered as UNKNOWN
+    # for a NULL column (#551).
     null_carrying = [
         case["id"]
         for case in CURRENT
         if case["plan"]["kind"] == "KIND_CONDITIONAL"
         and _plan_carries_null_literal(case["plan"]["condition"])
+        and not _null_only_in_equality_with_an_attribute(case["plan"]["condition"])
     ]
     assert "null/has-intersection/literal-list-with-null-element" in null_carrying
 
@@ -600,10 +558,8 @@ def test_every_null_carrying_plan_is_refused_under_omitted():
 
 
 def test_no_case_binds_a_non_finite_number():
-    # PostgreSQL parses 'NaN' and 'Infinity' as double precision inputs and every comparison
-    # against them is false -- the same rows a folded translation returns -- so only the
-    # parameter list tells them apart. The harness executes PostgreSQL only for the cases that
-    # read a declared collection, so this is stated here over every case and both dialects.
+    # A bound NaN/Infinity can return the same rows as a folded one on PostgreSQL, so only
+    # the parameters reveal it. The harness runs few cases on PostgreSQL, so check all here.
     offenders = []
     for case in CURRENT:
         try:
@@ -618,9 +574,8 @@ def test_no_case_binds_a_non_finite_number():
 
 
 def test_refusals_keep_the_types_they_raised_before():
-    # `UnsupportedPlanError` is a `ValueError`, which every translation refusal raised before
-    # it existed; the one that raised `TypeError` (a relation marker no override consumes)
-    # is both, so no existing handler stops catching it.
+    # Refusals used to raise ValueError (one raised TypeError), so existing handlers
+    # must still catch them.
     with pytest.raises(UnsupportedPlanError) as refused:
         translate("regex/matches/anchored-prefix")
     assert isinstance(refused.value, ValueError)

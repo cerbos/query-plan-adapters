@@ -5,6 +5,8 @@ on:
     tags:
       - sqla/v*
 
+permissions: {}
+
 defaults:
   run:
     working-directory: sqlalchemy
@@ -13,8 +15,15 @@ jobs:
   release-sqla:
     name: SQLA publish
     runs-on: ubuntu-latest
+    # PyPI trusted publishing names this workflow and the `pypi` environment.
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -32,24 +41,14 @@ jobs:
       - run: pdm install -G testcontainers
 
       - name: Set PDM version env
-        run: echo "PDM_PEP517_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
+        run: echo "PDM_BUILD_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
 
       - run: pdm build
 
-      #- name: Publish to Test PyPI
-        #uses: pypa/gh-action-pypi-publish@release/v1
-        #with:
-          #user: __token__
-          #password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          #repository_url: https://test.pypi.org/legacy/
-          #packages_dir: sqlalchemy/dist/
-
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages_dir: sqlalchemy/dist/
+          packages-dir: sqlalchemy/dist/
 
       #- name: Create release
         #run: |-

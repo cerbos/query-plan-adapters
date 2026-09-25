@@ -1,39 +1,35 @@
+# Copyright 2021-2026 Zenauth Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """How a caller represents a NULL column, and what that does to a comparison.
 
-The planner emits the same ``eq(attr, null)`` node whichever convention the caller uses, so
-``get_query`` is told: once per call (``null_attribute_representation``) and optionally per
-attribute (``attribute_null_representation``). See cerbos/query-plan-adapters#302 and #308.
+The plan is the same under either convention, so the caller declares it. See #302 and #308.
 """
 
-from __future__ import annotations
+from typing import Any, Literal
 
-from typing import Any, Dict, Literal, Tuple, Union
+from sqlalchemy import and_, case, literal, not_, or_
 
 from cerbos_sqlalchemy._operators import scalar_kind
 from cerbos_sqlalchemy._plan import Expr, Operand, Value, Variable
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
-from sqlalchemy import and_, case, literal, not_, or_
 
-# How the caller represents a NULL column when building the attributes it sends
-# to check(). See get_query() and
-# https://github.com/cerbos/query-plan-adapters/issues/302.
+# How the caller sends a NULL column to check(). See get_query().
 NullAttributeRepresentation = Literal["explicit", "omitted"]
 
 _REPRESENTATIONS = ("explicit", "omitted")
 
-# The operators CEL evaluates to a definite boolean over a null value, and so the
-# only ones an attribute's declared convention can settle. Anything else -- a
-# collection macro, hasIntersection, a string match -- keeps using the call-level
-# fallback, because the declaration says nothing about what its null means there.
+# The only operators CEL answers definitely over a null, so the only ones a
+# per-attribute declaration settles. Everything else uses the call-level fallback.
 EQUALITY_FAMILY = frozenset({"eq", "ne", "in"})
 
 
 def validate_representations(
     null_attribute_representation: Any,
-    attribute_null_representation: Union[Dict[str, Any], None],
-    attr_map: Dict[str, Any],
-) -> Dict[str, NullAttributeRepresentation]:
-    """Check both options and return the per-attribute declarations (empty when absent)."""
+    attribute_null_representation: dict[str, Any] | None,
+    attr_map: dict[str, Any],
+) -> dict[str, NullAttributeRepresentation]:
+    """Validate both options and return the per-attribute declarations."""
     if null_attribute_representation not in _REPRESENTATIONS:
         raise ValueError(
             "null_attribute_representation must be 'explicit' or 'omitted', got "
@@ -63,12 +59,8 @@ def _carries_null_operand(operand: Operand) -> bool:
     return isinstance(value, list) and any(member is None for member in value)
 
 
-def _compared_attribute_and_literal(node: Operand) -> Union[Tuple[str, Value], None]:
-    """Destructure a binary comparison between a plan variable and a literal.
-
-    Returns ``(variable_name, literal_operand)`` in either operand order, or
-    ``None`` when the node is not that shape.
-    """
+def _compared_attribute_and_literal(node: Operand) -> tuple[str, Value] | None:
+    """Return ``(variable_name, literal)`` for a variable-vs-literal comparison, else None."""
     if not isinstance(node, Expr) or node.operator not in EQUALITY_FAMILY:
         return None
     operands = node.operands
@@ -95,52 +87,56 @@ def _null_operand_error(operator: str) -> UnsupportedPlanError:
 
 def assert_no_null_comparison_operands(
     node: Operand,
-    declarations: Dict[str, NullAttributeRepresentation],
+    declarations: dict[str, NullAttributeRepresentation],
     fallback: str,
 ) -> None:
-    """Reject every null literal operand under the ``omitted`` representation.
+    """Reject null literal operands under the ``omitted`` representation.
 
-    A NULL column then carries no attribute at all, so CEL raises a
-    missing-attribute error and ``check()`` denies the row -- ``IS NULL`` would
-    return exactly the rows the PDP refuses (cerbos/query-plan-adapters#302).
-
-    The scan matches on the OPERAND, never on an allowlist of operators. A null
-    constant reaches a NULL-selecting predicate through more shapes than the
-    obvious ``eq``/``ne``/``in`` -- ``hasIntersection`` carries one in its value
-    list too -- and any operator added later would silently escape a list that
-    has to be maintained by hand.
-
-    The rejection is also deliberately wider than the over-granting shapes:
-    ``ne(x, null)`` on its own is aligned, but negation is applied around the
-    built predicate rather than pushed into the leaf, so a leaf cannot tell
-    whether an enclosing ``not`` will flip ``IS NOT NULL`` back into a
-    NULL-selecting predicate. Rejecting every null operand is correct under any
-    nesting; narrowing it requires negation-parity tracking.
+    An omitted NULL makes CEL error and deny, while ``IS NULL`` would return the row.
+    The scan matches any operand, not a list of operators, so shapes like
+    ``hasIntersection`` and future operators are covered. The one exception is
+    ``eq``/``ne`` between an attribute and a bare null, which the translator renders
+    as UNKNOWN for a NULL column (``omitted_null_comparison``). See #551.
     """
     if not isinstance(node, Expr):
         return
     operator = node.operator
     operands = node.operands
 
-    # A comparison between a mapped attribute and a literal is decided by that
-    # attribute's own declaration, which is what lets one call carry both
-    # conventions (cerbos/query-plan-adapters#308). Confined to that shape: a
-    # null buried in a macro over a literal list reaches a comparison long
-    # after this scan, and nothing here can say which column it will land
-    # against, so those keep using the call-level fallback.
+    # An attribute-vs-literal comparison uses that attribute's declaration.
+    # Other shapes cannot be tied to a column here, so they use the fallback.
     compared = _compared_attribute_and_literal(node)
     if compared is not None:
         variable, value = compared
-        declared = declarations.get(variable)
-        if declared is not None:
-            if declared == "omitted" and _carries_null_operand(value):
-                raise _null_operand_error(operator)
-            return
+        convention = declarations.get(variable, fallback)
+        if (
+            convention == "omitted"
+            and _carries_null_operand(value)
+            and not (operator in ("eq", "ne") and value.value is None)
+        ):
+            raise _null_operand_error(operator)
+        return
 
     if fallback == "omitted" and any(_carries_null_operand(o) for o in operands):
         raise _null_operand_error(operator)
     for operand in operands:
         assert_no_null_comparison_operands(operand, declarations, fallback)
+
+
+def omitted_null_comparison(operator: str, column: Any, overridden: bool) -> Any:
+    """Render ``eq``/``ne`` against null for an attribute on the omitted convention.
+
+    A NULL column sends no attribute, so CEL answers with a missing-attribute error,
+    and a present column is never equal to null. The ``CASE`` has no ``ELSE``, so a
+    NULL column is UNKNOWN, which stays UNKNOWN under any enclosing ``NOT``; a
+    present one is FALSE for ``eq`` and TRUE for ``ne``. See #551.
+
+    An overridden operator, or an attribute mapped to something that is not a SQL
+    expression (e.g. a relation marker), cannot be rendered this way, so it is refused.
+    """
+    if overridden or not hasattr(column, "isnot"):
+        raise _null_operand_error(operator)
+    return case((column.isnot(None), literal(operator == "ne")))
 
 
 def definite_equality(
@@ -150,22 +146,12 @@ def definite_equality(
     left_explicit: bool,
     right_explicit: bool,
 ) -> Any:
-    """Render an equality that can never be SQL UNKNOWN.
+    """Render an equality that is never SQL UNKNOWN for an explicit-null side.
 
-    An attribute the caller sends as an explicit null holds a null VALUE in
-    CEL, so equality against a non-null operand is a definite FALSE,
-    inequality a definite TRUE, and two nulls are EQUAL. SQL answers
-    UNKNOWN to all three, which excludes the row under BOTH polarities --
-    so the NOT an enclosing negation applies has nothing definite to flip.
-
-    Deliberately not ``is_distinct_from``. Two reasons, and the second is
-    the load-bearing one: the same expression has to render on SQLite,
-    PostgreSQL and MySQL -- and a null-safe equality is SYMMETRIC while this
-    rewrite must not be. When only ONE side declares the convention, the
-    other side's NULL is a MISSING attribute on the check side, so CEL raises
-    an error and denies; only the asymmetric expansion below keeps
-    propagating UNKNOWN for it. A null-safe operator would match the two
-    NULLs and over-grant.
+    CEL compares an explicit null as a value, so SQL's UNKNOWN would leave an
+    enclosing NOT nothing to flip. Not ``is_distinct_from``: that is symmetric,
+    but an undeclared side's NULL is a missing attribute that CEL denies, so it
+    must stay UNKNOWN. A null-safe operator would match the two NULLs and over-grant.
     """
     left_kind, right_kind = scalar_kind(left_column), scalar_kind(right)
     if left_kind and right_kind and left_kind != right_kind:
@@ -203,18 +189,11 @@ def with_null_conventions(
     plain: Any,
     overridden: bool,
 ) -> Any:
-    """The comparison with the declared NULL conventions applied, else ``plain``.
+    """Apply the declared NULL conventions to a comparison, else return ``plain``.
 
-    ``plain`` is the ordinary lowering the caller would otherwise return --
-    passed in rather than rebuilt here, so a registered operator override is
-    honoured on every path.
-
-    ``eq``/``ne`` RESTRUCTURE the comparison, so an operator the caller
-    overrode (``overridden``) is left alone: replacing it would make this
-    declaration silently discard the caller's own translation, which is not
-    what it declares. ``in`` only gains a presence guard ANDed alongside
-    whatever the membership lowered to, which composes with an override rather
-    than replacing it.
+    ``plain`` is passed in so an operator override is honoured. An overridden
+    ``eq``/``ne`` is left alone, since rewriting it would discard the override.
+    ``in`` only gains an ANDed presence guard, which composes with an override.
     """
     if operator == "in" and not left_explicit and hasattr(left, "is_"):
         return case((left.isnot(None), plain))
@@ -228,13 +207,10 @@ def with_null_conventions(
             operator == "in"
             and left_explicit
             and hasattr(left, "isnot")
-            # A stored COLLECTION, not a literal list: a null element can
-            # exist at run time and `null in coll` is TRUE when it does, so
-            # the presence guard would exclude exactly the rows CEL allows.
-            # The collection's own lowering already handles the null member.
+            # Literal lists only. A stored collection may hold a null, and
+            # `null in coll` is then TRUE, so a presence guard would under-grant.
             and isinstance(right, list)
-            # A null member already forces the `IS NULL` disjunct, which is
-            # definite on its own.
+            # A null member already adds a definite `IS NULL` disjunct.
             and not any(member is None for member in right)
         ):
             return and_(left.isnot(None), plain)

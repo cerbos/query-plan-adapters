@@ -1,13 +1,49 @@
 {
   "adapter": "sqlalchemy",
   "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "The sum adds int(aNumber) to a double, which CEL rejects as a no-such-overload error; int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the sum is reached."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation."
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "A zero divisor makes CEL's quotient an infinity carrying the zero's sign, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read; a column divisor is refused unless zero can only give NaN (the numerator is the divisor itself or a constant zero)."
+    },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "The dividend is int(aNumber), and int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the int division is reached."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as arithmetic/divide/int-truncates: the truncating int division over it is never reached."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as arithmetic/divide/int-truncates, under negation."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
-      "reason": "The inner division by a constant zero folds to a non-finite value, and arithmetic combining it with a column cannot be carried by SQL."
+      "reason": "Both divisions divide by a column, and a zero divisor makes CEL's quotient an infinity carrying the zero's sign, which SQL cannot read (it compares -0.0 equal to 0.0, and SQLite stores it as 0.0); only a divisor whose zero can give nothing but NaN is lowered."
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "CEL's `%` is defined only over integers and attribute numbers are doubles, so this is a no-such-overload error that must stay denied under negation; SQL `%` over the column would compute a remainder, so `%` over a column is refused."
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
       "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "The self-division's zero arm folds to NaN, a non-finite value, and arithmetic combining it with a column cannot be carried by SQL."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -16,6 +52,10 @@
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so double() is refused rather than lowered to CAST. Negation must not turn CEL's errors into matches."
+    },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
     },
     "cast/int/malformed-string": {
       "status": "unsupported",
@@ -28,6 +68,46 @@
     "cast/int/negative-fraction": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
+    },
+    "cast/string/from-double": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "cast/string/from-double-spellings": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "string() wraps int(aString), and int() is refused: SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "string() wraps int(aDouble), and int() is refused: PostgreSQL and MySQL CAST round where CEL truncates toward zero, and SQL has no error for a double beyond int64."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an int in decimal and a double in Go's shortest %g form (\"1e+06\"), and the plan ships the ternary's int literals as bare numbers, so neither spelling can be chosen."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "The ternary's other branch is int(aDouble), and int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the string() over it is never reached."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "Same refused int() cast as cast/string/from-int-past-exponent-threshold, under negation."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "Same string() refusal as `cast/string/from-integral-ternary`, under negation."
     },
     "cast/timestamp/malformed-string": {
       "status": "unsupported",
@@ -52,6 +132,14 @@
     "collection/except/size-of-difference": {
       "status": "unsupported",
       "reason": "Two-list except has no operator override or built-in SQL list-difference lowering."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so the harness's collection override refuses it."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same map-key iteration over the to-one parent row as collection/exists/map-keys, under negation."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
@@ -93,6 +181,10 @@
       "status": "unsupported",
       "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
     },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "The 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`. The adapter cannot tell that from a -0.0 whose sign was dropped (Cerbos's HTTP API renders -0.0 as `-0`, which json.loads decodes to the integer 0), so it refuses an integer zero denominator rather than guess which infinity CEL produced. A double zero, as a gRPC plan carries, translates."
@@ -101,9 +193,17 @@
       "status": "unsupported",
       "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
     },
+    "hierarchy/ancestor-of/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the prefix LIKE `ancestor + delimiter + '%'` would become a bare prefix match that also matches the path itself, and the literal's ancestors would be split on no separator."
+    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the descendant LIKE `prefix + delimiter + '%'` would become a bare prefix match that also matches the path itself."
+    },
+    "hierarchy/overlaps/empty-delimiter": {
+      "status": "unsupported",
+      "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the prefix LIKE `ancestor + delimiter + '%'` would become a bare prefix match, so the ancestor arms of overlaps could not be told from equality."
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
@@ -113,9 +213,13 @@
       "status": "unsupported",
       "reason": "The path is constructed by list(), which has no SQL lowering, so the walk refuses it before the hierarchy operators are reached."
     },
-    "null/equals/null-literal-on-missing-attribute": {
+    "membership/in/map-attribute-keys": {
       "status": "unsupported",
-      "reason": "aOptionalString is declared `omitted` in attribute_null_representation (a NULL column sends no attribute), so `== null` is a CEL missing-attribute error that denies every row, while IS NULL would return the NULL rows. The adapter refuses a null operand against an omitted attribute (#302)."
+      "reason": "in over the to-one parent tests the keys of a map, and the parent is a related row: SQL cannot read which of its columns are non-NULL as the attribute's keys, so the harness's membership override refuses it."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same key-membership refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",
@@ -124,6 +228,10 @@
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "The literal-list fold accepts only exists/all; a principal-list difference with a resource-dependent second list has no SQL lowering."
+    },
+    "principal/exists-one/duplicate-elements": {
+      "status": "unsupported",
+      "reason": "Only exists/all have a literal-list fold; exists_one over a principal list has no SQL lowering."
     },
     "principal/exists-one/long-list": {
       "status": "unsupported",
@@ -153,6 +261,14 @@
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
@@ -166,6 +282,10 @@
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
     "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
@@ -189,7 +309,15 @@
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
     "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/posix-class-and-range-bounded": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
@@ -205,6 +333,14 @@
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."
@@ -216,6 +352,14 @@
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
+    },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "type-mismatch/equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "A SQL column holds one scalar, and a list literal bound as a parameter would be compared by the driver's coercion (or rejected by it) rather than CEL's typed equality, so comparing a scalar column with a list or map literal is refused."
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",

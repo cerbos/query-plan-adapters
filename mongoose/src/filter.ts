@@ -15,6 +15,7 @@ import type { TranslateContext } from "./context";
 import {
   buildFieldFilter,
   buildGuardedFieldFilter,
+  buildListShapeGuard,
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
@@ -26,8 +27,10 @@ import {
   applyValueParser,
   createScopedMapper,
   isNullableReference,
+  relationOfReference,
   resolveFieldReference,
   resolveMapperConfig,
+  withOmittedNullDefault,
 } from "./mapper";
 import {
   carriesNullOperand,
@@ -37,6 +40,18 @@ import {
   isValue,
   isVariable,
 } from "./operands";
+
+/**
+ * A macro over a reference mapped as a to-one relation. To CEL that attribute is a map, and a macro
+ * over a map ranges over its KEYS; the adapter translates a macro only as an element match over a
+ * collection relation's subdocuments, and has no filter that iterates a subdocument's field names.
+ * A refusal rather than a mapper error: the mapping is right, the shape is what cannot be spelled.
+ */
+const toOneMacroRefusal = (operator: string): UnsupportedQueryPlanError =>
+  new UnsupportedQueryPlanError(
+    `${operator}() over a to-one relation ranges over the related object's keys in CEL, and ` +
+      "a MongoDB filter has no form that iterates a subdocument's field names",
+  );
 import { escapeRegexValue, normalizeRe2PatternForMongo } from "./regex";
 
 /** Translates a CONDITIONAL plan's condition into a Mongoose filter. */
@@ -253,6 +268,57 @@ const translateBareVariable = (
   );
 };
 
+/**
+ * Whether evaluating `operand` always reads the variable `name`, so that a missing attribute
+ * there is an error CEL cannot avoid. `&&` and `||` absorb an erroring operand when another
+ * decides the result, a ternary reads only the branch its condition selects, and a lambda body
+ * is never evaluated over an empty collection: each of those reads `name` unconditionally only
+ * if every path through it does. Every other operator is strict in its operands.
+ */
+const alwaysReads = (operand: PlanExpressionOperand, name: string): boolean => {
+  if (isVariable(operand)) {
+    return operand.name === name;
+  }
+  if (!isExpression(operand)) {
+    return false;
+  }
+  const [first, ...rest] = operand.operands;
+  switch (operand.operator) {
+    case "and":
+    case "or":
+      return operand.operands.every((child) => alwaysReads(child, name));
+    case "if":
+      return (
+        (first !== undefined && alwaysReads(first, name)) ||
+        (rest.length > 0 && rest.every((child) => alwaysReads(child, name)))
+      );
+    default:
+      if (LAMBDA_BINDING_OPERATORS.has(operand.operator)) {
+        return first !== undefined && alwaysReads(first, name);
+      }
+      return operand.operands.some((child) => alwaysReads(child, name));
+  }
+};
+
+const nullableGuardIsExact = (
+  operand: PlanExpressionOperand,
+  ctx: TranslateContext,
+): boolean => {
+  const nullable = collectVariableNames(operand).filter((name) =>
+    isNullableReference(name, ctx.mapper),
+  );
+  if (nullable.length === 0) {
+    return true;
+  }
+  return (
+    ctx.scope.kind === "root" &&
+    nullable.every((name) => alwaysReads(operand, name)) &&
+    nullable.every(
+      (name) => resolveFieldReference(name, ctx.mapper).relation?.type !== "many",
+    )
+  );
+};
+
 const translateNot = (
   operands: PlanExpressionOperand[],
   ctx: TranslateContext,
@@ -262,12 +328,39 @@ const translateNot = (
     0,
     "not operator requires at least one operand",
   );
+  // De Morgan, pushed down to the leaves. CEL's `&&`/`||` let a decided operand absorb an
+  // error in the other, so `!(!aBool && parent.x == "one")` is TRUE on a parentless document
+  // whose aBool is true. Guarding the whole negation for every parent it dots through denies
+  // that document; negating each operand instead gives every leaf its own guard. The rewrite
+  // is exact under CEL's error semantics: `!(a && b)` and `!a || !b` agree on every
+  // combination of true, false and error.
+  if (isExpression(operand) && (operand.operator === "and" || operand.operator === "or")) {
+    const dual = operand.operator === "and" ? "$or" : "$and";
+    return {
+      [dual]: operand.operands.map((child) => translateNot([child], ctx)),
+    };
+  }
+  // `!!x` is `x`, errors included, and eliminating the pair keeps a leaf that answers an error
+  // as `false` from being flipped twice by nested `$nor`s.
+  if (isExpression(operand) && operand.operator === "not") {
+    return buildFilter(
+      getOperandAt(operand.operands, 0, "not operator requires at least one operand"),
+      ctx,
+    );
+  }
+  // An ordering between a field and a constant negates to its complement, so it keeps the
+  // positive leaf's semantics: MongoDB's `$lt` compares only values of the constant's own BSON
+  // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
+  // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
+  // raises an error and denies (cerbos/query-plan-adapters#516).
+  const complement = complementedOrdering(operand);
+  if (complement) {
+    return buildFilter(complement, ctx);
+  }
   if (
-    collectVariableNames(operand).some((name) =>
-      isNullableReference(name, ctx.mapper),
-    ) ||
     (isExpression(operand) &&
-      ["exists", "exists_one", "all"].includes(operand.operator))
+      ["exists", "exists_one", "all"].includes(operand.operator)) ||
+    !nullableGuardIsExact(operand, ctx)
   ) {
     throw new UnsupportedQueryPlanError(
       "not over nullable fields or collection macros cannot preserve Cerbos error semantics",
@@ -275,12 +368,15 @@ const translateNot = (
   }
   // withEvaluationGuards ANDs its conjuncts OUTSIDE this $nor, which is where the
   // absent-parent requirement has to sit: inside, the negation would flip it along with
-  // the predicate and readmit every parentless document (#315, #316).
-  return withEvaluationGuards(
+  // the predicate and readmit every parentless document (#315, #316). A null or absent list
+  // is the same kind of error CEL denies, so its array requirement sits there too (#534).
+  const guarded = withEvaluationGuards(
     { $nor: [buildFilter(operand, ctx)] },
     [operand],
     ctx.mapper,
   );
+  const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
+  return listShape ? { $and: [listShape, guarded] } : guarded;
 };
 
 /** `value OP field` is `field MIRROR(OP) value`. */
@@ -291,6 +387,33 @@ const MIRRORED_COMPARISON: Record<ComparisonOperator, ComparisonOperator> = {
   le: "ge",
   gt: "lt",
   ge: "le",
+};
+
+/** `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all. */
+const COMPLEMENTED_ORDERING: Partial<Record<string, ComparisonOperator>> = {
+  lt: "ge",
+  le: "gt",
+  gt: "le",
+  ge: "lt",
+};
+
+/** The complement of an ordering between one field and one constant; undefined for anything else. */
+const complementedOrdering = (
+  operand: PlanExpressionOperand,
+): PlanExpression | undefined => {
+  if (!isExpression(operand)) return undefined;
+  const complement = COMPLEMENTED_ORDERING[operand.operator];
+  const [left, right] = operand.operands;
+  if (
+    complement === undefined ||
+    operand.operands.length !== 2 ||
+    !left ||
+    !right ||
+    !((isVariable(left) && isValue(right)) || (isValue(left) && isVariable(right)))
+  ) {
+    return undefined;
+  }
+  return { operator: complement, operands: operand.operands };
 };
 
 function comparison(operator: ComparisonOperator): FilterOperator {
@@ -381,6 +504,21 @@ const translateComparison = (
 
   const effectiveOperator =
     variableOperand === leftOperand ? operator : MIRRORED_COMPARISON[operator];
+  // CEL has no ordering between types, so `aNumber < "5"` is an error that denies, where
+  // Mongoose would cast `"5"` to the declared Number and compare. A negation reaches here as the
+  // complemented ordering (`translateNot`), so this `false` holds under both polarities.
+  if (
+    effectiveOperator !== "eq" &&
+    effectiveOperator !== "ne" &&
+    !canOrderAgainstDeclaredType(variableOperand.name, valueOperand.value, mapper)
+  ) {
+    return emitLeafComparison(
+      ctx,
+      variableOperand.name,
+      { $in: [] },
+      { nullable: false, requireExists: false },
+    );
+  }
   // A constant of a different scalar type than the declared field never equals it.
   if (
     (effectiveOperator === "eq" || effectiveOperator === "ne") &&
@@ -456,6 +594,13 @@ const translateIn = (
     );
   }
   if (isValue(leftOperand) && isVariable(rightOperand)) {
+    if (relationOfReference(rightOperand.name, ctx.mapper)?.type === "one") {
+      throw new UnsupportedQueryPlanError(
+        "`in` over a to-one relation tests the related object's keys in CEL, which are the " +
+          "fields its subdocument carries, and the adapter has no filter for a subdocument's " +
+          "field names",
+      );
+    }
     if (
       !canEqualDeclaredType(rightOperand.name, leftOperand.value, ctx.mapper)
     ) {
@@ -759,6 +904,27 @@ const canEqualDeclaredType = (
   );
 };
 
+/**
+ * False when CEL cannot order `reference` against `constant`: the constant is not a number, a
+ * string or a boolean (ordering against null, a list or a map is always an error), or it is a
+ * scalar of another type than the one `reference` declares.
+ */
+const canOrderAgainstDeclaredType = (
+  reference: string,
+  constant: unknown,
+  mapper: Mapper,
+): boolean => {
+  if (
+    typeof constant !== "number" &&
+    typeof constant !== "string" &&
+    typeof constant !== "boolean"
+  ) {
+    return false;
+  }
+  const declared = declaredScalarType(reference, mapper);
+  return declared === undefined || typeof constant === declared;
+};
+
 /** A constant list without the elements `reference`'s declared type can never equal. */
 const withoutUnequalConstants = (
   reference: string,
@@ -770,11 +936,27 @@ const withoutUnequalConstants = (
   );
 
 /** `hasIntersection(collection.map(e, e.field), [values])`: some element's field is in the list. */
+/**
+ * The mapper a lambda body over `collection` is translated with. Under `"omitted"` the element
+ * fields the relation does not declare are nullable by default too, like every other field.
+ */
+const scopedMapperFor = (
+  collection: string,
+  variable: string,
+  ctx: TranslateContext,
+): Mapper => {
+  const scoped = createScopedMapper(collection, variable, ctx.mapper);
+  return ctx.nullRepresentation === "omitted"
+    ? withOmittedNullDefault(scoped)
+    : scoped;
+};
+
 const translateMapIntersection = (
   map: PlanExpression,
   valuesOperand: PlanExpressionOperand,
-  { mapper }: TranslateContext,
+  ctx: TranslateContext,
 ): MongooseFilter => {
+  const { mapper } = ctx;
   const collectionOperand = getOperandAt(
     map.operands,
     0,
@@ -816,16 +998,16 @@ const translateMapIntersection = (
     throw new Error("map operator requires a relation mapping");
   }
   if (relation.type !== "many") {
-    throw new Error("map operator requires a collection relation");
+    throw toOneMacroRefusal("map");
   }
   if (!isVariable(projectionOperand)) {
     throw new UnsupportedQueryPlanError("Map projection must be a variable reference");
   }
 
-  const scopedMapper = createScopedMapper(
+  const scopedMapper = scopedMapperFor(
     collectionOperand.name,
     variableOperand.name,
-    mapper,
+    ctx,
   );
   const elementPath = resolveFieldReference(
     projectionOperand.name,
@@ -911,15 +1093,15 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
       throw new Error(`${operator} operator requires a relation mapping`);
     }
     if (relation.type !== "many") {
-      throw new Error(`${operator} operator requires a collection relation`);
+      throw toOneMacroRefusal(operator);
     }
 
     const elementCondition = buildFilter(conditionOperand, {
       ...ctx,
-      mapper: createScopedMapper(
+      mapper: scopedMapperFor(
         collectionOperand.name,
         variableOperand.name,
-        ctx.mapper,
+        ctx,
       ),
       scope: { kind: "collection", variable: variableOperand.name },
     });

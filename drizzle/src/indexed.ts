@@ -1,5 +1,5 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { is, not, sql } from "drizzle-orm";
+import { and, is, not, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgArray, PgColumn } from "drizzle-orm/pg-core";
@@ -9,6 +9,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mapper";
 import { isNameOperand, isValueOperand } from "./operands";
 import type { BuildFilterOptions, Mapper } from "./types";
+import { UNKNOWN_CONDITION } from "./predicates";
 
 /**
  * Constant positional access — `R.attr.list[0] == x` — over a column whose ordered storage the
@@ -68,6 +69,60 @@ export function indexedEquality({
     return sql`(case when json_type(${column}) = 'array' and ${type} is not null then ${equality} end)`;
   }
   throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
+}
+
+/**
+ * `R.attr.list == [v0, v1, …]` over declared ordered storage: CEL's list equality — the same
+ * length, and each position equal under the typed element comparison `indexedEquality` makes. A
+ * length mismatch is false before any element is read; with equal lengths every position is in
+ * bounds, so each element comparison is definite. A NULL or non-array column stays UNKNOWN.
+ */
+export function indexedListEquality({
+  column,
+  indexable,
+  values,
+}: {
+  column: AnyColumn;
+  indexable: Indexable;
+  values: readonly Value[];
+}): SQL {
+  const scalars = values.map((value): Scalar => {
+    if (
+      (value !== null && typeof value !== "string" && typeof value !== "boolean" &&
+        typeof value !== "number") ||
+      (typeof value === "number" && !Number.isFinite(value))
+    ) {
+      throw new UnsupportedQueryPlanError(
+        "Whole-list comparison over declared indexed storage supports only finite scalar elements",
+      );
+    }
+    return value;
+  });
+  let isArray: SQL;
+  let length: SQL;
+  if (indexable === "pgArray" || is(column, PgColumn)) {
+    const source =
+      indexable === "pgArray"
+        ? (assertPgArrayColumn(column), sql`to_jsonb(${column})`)
+        : (assertPgJsonColumn(column as PgColumn), sql`cast(${column} as jsonb)`);
+    isArray = sql`jsonb_typeof(${source}) = 'array'`;
+    length = sql`jsonb_array_length(${source})`;
+  } else if (is(column, MySqlColumn)) {
+    isArray = sql`json_type(${column}) = 'ARRAY'`;
+    length = sql`json_length(${column})`;
+  } else if (is(column, SQLiteColumn)) {
+    assertSqliteJsonColumn(column);
+    isArray = sql`json_type(${column}) = 'array'`;
+    length = sql`json_array_length(${column})`;
+  } else {
+    throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
+  }
+  const elements = scalars.map((value, index) =>
+    indexedEquality({ column, indexable, index, value }),
+  );
+  const sameLength = sql`${length} = ${scalars.length}`;
+  const equal = elements.length === 0 ? sameLength : and(sameLength, ...elements)!;
+  return sql`(case when ${isArray} then ${equal} end)`;
 }
 
 /**
@@ -180,6 +235,24 @@ export const resolveIndexedMembership = (
   return { column: mapping.column, indexable: mapping.indexable };
 };
 
+/**
+ * The declared ordered storage a WHOLE-list comparison reads. Unlike membership, it is used even
+ * when the mapping also carries a relation: a relation has no order, so it cannot answer this.
+ */
+export const resolveIndexedList = (
+  reference: string,
+  mapper: Mapper,
+): { column: AnyColumn; indexable: Indexable } | undefined => {
+  const mapping = getMappingEntry(reference, mapper);
+  if (!mapping || !isMappingConfig(mapping) || !mapping.indexable || !mapping.column) {
+    return undefined;
+  }
+  if (mapping.transform) {
+    throw new Error("A whole-list comparison requires a declared indexed column without a transform");
+  }
+  return { column: mapping.column, indexable: mapping.indexable };
+};
+
 /** Resolve the opt-in column separately from a relation used for collection predicates. */
 export const resolveIndexedColumn = (
   operands: PlanExpressionOperand[],
@@ -241,6 +314,19 @@ export const buildIndexedComparison = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
+  // A negative or fractional position is an error in CEL whatever the collection holds — out of
+  // bounds for a list, a key no JSON-sourced map carries — and an error denies under both
+  // polarities, exactly as the UNKNOWN every out-of-bounds position already yields below.
+  const [collection, position] = indexed.operands;
+  if (
+    collection !== undefined && isNameOperand(collection) &&
+    position !== undefined && isValueOperand(position) &&
+    typeof position.value === "number" &&
+    (position.value < 0 || !Number.isInteger(position.value))
+  ) {
+    resolveFieldReference(collection.name, mapper);
+    return UNKNOWN_CONDITION;
+  }
   const resolved = resolveIndexedColumn(indexed.operands, mapper, options);
   if (
     (operator !== "eq" && operator !== "ne") || !isValueOperand(other) ||
