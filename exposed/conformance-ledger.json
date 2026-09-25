@@ -205,14 +205,6 @@
       "status": "unsupported",
       "reason": "Whole-list equality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole, so neither the order nor the multiplicity CEL compares can be expressed"
     },
-    "comparison/less-than/astral-string-against-high-bmp": {
-      "status": "unsupported",
-      "reason": "lt orders 'request.resource.attr.aString' against a literal holding a character at or above U+D800 (an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a store that compares UTF-16 code units (H2, Java's String.compareTo) puts a surrogate pair before U+E000–U+FFFF."
-    },
-    "comparison/less-than/negated-astral-string-against-high-bmp": {
-      "status": "unsupported",
-      "reason": "lt orders 'request.resource.attr.aString' against a literal holding a character at or above U+D800 (an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a store that compares UTF-16 code units (H2, Java's String.compareTo) puts a surrogate pair before U+E000–U+FFFF."
-    },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"

@@ -519,11 +519,11 @@ total but not as passed:
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 227 / 308 |
+| adversarial | 229 / 308 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-96 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+94 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -539,8 +539,6 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   and booleans differently from CEL, and cannot read the sign of a stored `-0.0`;
 - a division whose divisor is a floating-point column or computed arithmetic: its zero may be
   `-0.0`, which CEL divides into the opposite infinity, and SQL compares `-0.0` equal to `0.0`;
-- a string ordering against a literal holding a character at or above U+D800: CEL orders by code
-  point, and H2 by UTF-16 code unit, which puts a surrogate pair before U+E000–U+FFFF;
 - a macro or `in` over the to-one `parent` as a map: CEL ranges over its keys, and a related row has
   no key set SQL can read;
 - a list or map constant compared with a column or an element, a number or boolean column as a
@@ -617,6 +615,13 @@ CEL's `size(string)` counts Unicode code points. The adapter lowers it to `CHAR_
 `LENGTH` on SQLite, which has no `CHAR_LENGTH` and whose `LENGTH` already counts characters for a
 text value. MySQL's `LENGTH` counts **bytes** and is never emitted: measuring a multibyte string in
 bytes would compare it against the wrong threshold and return rows the PDP denies.
+
+String **ordering** follows CEL's code point order on every store. PostgreSQL (`C`), MySQL
+(`utf8mb4_0900_bin`) and SQLite compare UTF-8 bytes, which is code point order; H2 compares UTF-16
+code units, which puts an astral character before U+E000–U+FFFF. So an ordering against a literal
+holding a character at or above U+D800 is rendered on H2 as `STRINGTOUTF8(col) < STRINGTOUTF8(?)`,
+and raises when rendered on a dialect outside those four. Two columns ordered against each other
+are still compared by the store: on H2 that is code unit order.
 
 What remains is the unit each engine calls a character. H2 counts UTF-16 units, so a character
 outside the Basic Multilingual Plane — emoji, some CJK extensions — counts as 2 where CEL counts 1:

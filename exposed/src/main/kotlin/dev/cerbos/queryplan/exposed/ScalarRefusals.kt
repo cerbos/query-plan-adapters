@@ -191,13 +191,14 @@ internal object ScalarRefusals {
     )
 
     /**
-     * An ordering of a string attribute against a literal holding a UTF-16 code unit at or above
-     * 0xD800, where code point order (CEL) and code unit order (H2) disagree.
+     * An ordering against a literal holding a UTF-16 code unit at or above 0xD800, rendered on a
+     * dialect whose string order this adapter does not know to be code point order.
      */
     fun codeUnitOrdering(operator: String, variable: String): UnsupportedPlanShapeException = Refusals.unsupported(
-        "$operator orders '$variable' against a literal holding a character at or above U+D800 " +
-            "(an astral character or U+E000–U+FFFF): CEL orders strings by code point, and a " +
-            "store that compares UTF-16 code units (H2, Java's String.compareTo) puts a " +
+        "$operator orders $variable against a literal holding a character at or above U+D800 " +
+            "(an astral character or U+E000–U+FFFF): CEL orders strings by code point, and this " +
+            "dialect is not one whose code point ordering the adapter knows how to spell (H2, " +
+            "PostgreSQL, MySQL, MariaDB, SQLite); a store that compares UTF-16 code units puts a " +
             "surrogate pair before U+E000–U+FFFF.",
     )
 

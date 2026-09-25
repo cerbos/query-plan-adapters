@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.CodePointOrdering
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.Params
@@ -72,9 +73,12 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         // uses Java's String.compareTo), which puts an astral character's high surrogate (from
         // 0xD800) before U+E000–U+FFFF. The two orders can only disagree at a position where one
         // side holds a code unit at or above 0xD800, so a literal holding none cannot be ordered
-        // differently; one that does is refused, since the Op is built before the dialect is known.
-        if (operator in ORDERING_OPERATORS && value is String && value.any { it.code >= 0xD800 }) {
-            throw ScalarRefusals.codeUnitOrdering(operator, target.variable)
+        // differently; one that does is compared in code point order, spelled per dialect when
+        // the statement renders ([CodePointOrdering]).
+        if (operator in ORDERING_OPERATORS && value is String && CodePointOrdering.needed(value) &&
+            ScalarColumnTypes.isText(target.column)
+        ) {
+            return CodePointOrdering(target.expression, Params.of(value), CodePointOrdering.sign(operator))
         }
 
         // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
