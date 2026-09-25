@@ -425,14 +425,6 @@
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead."
     },
-    "timestamp/greater-than/relative-window-value-first": {
-      "status": "unsupported",
-      "reason": "same nanosecond-precision now() limitation in value-first form."
-    },
-    "timestamp/less-than/relative-window": {
-      "status": "unsupported",
-      "reason": "the planner emits a nanosecond-precision now() literal that BSON Date cannot represent without changing the CEL instant."
-    },
     "type-mismatch/descendent-of/number-field-as-path": {
       "status": "unsupported",
       "reason": "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix."

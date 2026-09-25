@@ -8,6 +8,7 @@ require_relative "mapper"
 require_relative "operands"
 require_relative "plan"
 require_relative "regex"
+require_relative "timestamp"
 
 module Cerbos
   module MongoDB
@@ -304,6 +305,9 @@ module Cerbos
           raise UnsupportedError, "An ordering against a list or map constant inside an expression is unsupported"
         end
 
+        truncated = sub_millisecond_timestamp_comparison(operator, left, right, mapper, scope)
+        return truncated if truncated
+
         # Either operand an expression, or two fields: compare inside $expr.
         if expression?(left) || expression?(right) || (variable?(left) && variable?(right))
           if scope.collection?
@@ -429,6 +433,31 @@ module Cerbos
 
         path = config&.field || field
         [{"$map" => {"input" => "$#{relation.name}", "in" => "$$this.#{path}"}}, {relation.name => {"$type" => "array"}}]
+      end
+
+      # timestamp(field) compared with a timestamp literal finer than a millisecond (the planner
+      # folds now() to nanoseconds). The field side is millisecond-exact by construction: a
+      # stored date holds milliseconds, and a string converts only with at most three fractional
+      # digits. So with t the literal and floor(t) the millisecond below it, f < t and f <= t are
+      # f <= floor(t), f > t and f >= t are f > floor(t), f == t never holds and f != t always
+      # does, each where the field evaluates at all. Nil when the comparison is not that shape.
+      def sub_millisecond_timestamp_comparison(operator, left, right, mapper, scope)
+        literal = [left, right].find { |op| expression_with?(op, "timestamp") && value?(op.operands[0]) }
+        field = [left, right].find { |op| expression_with?(op, "timestamp") && !value?(op.operands[0]) }
+        return nil unless literal && field
+
+        floor = Timestamp.sub_millisecond_floor(literal.operands[0].value)
+        return nil if floor.nil?
+        raise UnsupportedError, "timestamp comparisons inside collection predicates are unsupported" if scope.collection?
+
+        effective = field.equal?(left) ? operator : MIRRORED.fetch(operator)
+        instant = Aggregation.build(field, mapper)
+        compared = case effective
+        when "lt", "le" then {"$lte" => [instant, floor]}
+        when "gt", "ge" then {"$gt" => [instant, floor]}
+        else effective == "ne"
+        end
+        Guards.with_evaluation({"$expr" => compared}, [field], mapper)
       end
 
       # False when CEL cannot order +reference+ against +constant+: the constant is not a number,
