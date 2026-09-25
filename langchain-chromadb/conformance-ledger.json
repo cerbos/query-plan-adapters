@@ -373,6 +373,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused: an absent key cannot be told apart from a stored null. `allowPostFilter` does not lift it: `eq` compares a null literal, and Chroma metadata has no null, so a record cannot tell an explicit null attribute from a missing one."
     },
+    "null/equals/null-literal-on-missing-attribute-under-or": {
+      "status": "unsupported",
+      "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused: an absent scope key cannot be told apart from a stored null."
+    },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",
       "reason": "Chroma has no negation of a collection predicate: $ne/$nin negate a scalar comparison, not a macro, and the adapter refuses to invert one. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."

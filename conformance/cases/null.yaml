@@ -62,6 +62,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'aOptionalString follows the omitted convention, so == null is a missing-attribute error for every NULL row and false for every other; CEL denies every seed.'
+- id: 'null/equals/null-literal-on-missing-attribute-under-or'
+  tier: adversarial
+  intent: '== null on scope, which is omitted when its column is NULL, ORed with aBool so the oracle discriminates.'
+  trap: 'A missing scope is an error that only a true aBool absorbs; defaulting scope to the explicit-null convention emits IS NULL and returns g1, whose scope is NULL and aBool false, which the PDP denies (#528).'
+  condition:
+    match:
+      expr: 'R.attr.scope == null || R.attr.aBool'
 - id: 'null/exists-one/negated-null-element'
   tier: adversarial
   intent: 'Negated exists_one() over tags where some elements have a NULL name (b5, b6).'

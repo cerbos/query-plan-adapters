@@ -473,6 +473,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index a JSON null, so `== null` cannot tell a NULL column from a missing field and is refused."
     },
+    "null/equals/null-literal-on-missing-attribute-under-or": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index a JSON null, so scope == null cannot tell a NULL column from a missing field, and the OR cannot absorb the difference: the null comparison is refused."
+    },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot count nested matches or preserve exists_one null/error semantics without scripts"
