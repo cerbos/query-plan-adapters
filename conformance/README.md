@@ -120,6 +120,11 @@ Each adapter implements this once, in its own language. It needs no PDP.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
+   - Where the adapter's language has a Cerbos SDK that reshapes the `PlanResources` response
+     (JavaScript, Python's HTTP client, Ruby), hand the adapter what that SDK returns: serve the
+     recorded plan from a stubbed PDP and fetch it with the SDK's own client, never a hand-built
+     imitation of its types. The stub writes numbers as protojson does (`-0` keeps its sign). The
+     Go and Java SDKs return the protobuf itself, which those harnesses decode directly.
    - **No entry:** translate the plan, run the query, and assert the returned ids equal `allowed`
      exactly.
    - **`unsupported`:** assert that translating throws the adapter's refusal error type.
