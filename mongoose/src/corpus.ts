@@ -1,8 +1,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
+import { fromBinary, fromJson, toBinary } from "@bufbuild/protobuf";
+import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
+import type { PlanResourcesRequest } from "@cerbos/api/cerbos/request/v1/request_pb";
+import type { PlanResourcesResponse as PlanResourcesResponseMessage } from "@cerbos/api/cerbos/response/v1/response_pb";
+import { CerbosService } from "@cerbos/api/cerbos/svc/v1/svc_pb";
 import type { PlanResourcesResponse } from "@cerbos/core";
+import { GRPC } from "@cerbos/grpc";
 import { HTTP } from "@cerbos/http";
+import { Server, ServerCredentials } from "@grpc/grpc-js";
+import type { sendUnaryData, ServerUnaryCall } from "@grpc/grpc-js";
+import { afterAll } from "@jest/globals";
 
 import type { Mapper, MapperConfig } from ".";
 
@@ -83,16 +93,33 @@ export function nowMinus24h(): string {
 
 // -- the plans, as the SDK returns them ----------------------------------------------------------
 
-/**
- * The base URL of the stubbed PDP. `.invalid` never resolves, so a request that escapes the stub
- * fails rather than reaching a real server.
+/*
+ * A golden reaches the adapter through both official JS clients, `@cerbos/http` and
+ * `@cerbos/grpc`, so it arrives as an application's `planResources` call returns it. Only the PDP
+ * is replaced: each transport has a stub that answers PlanResources with the response registered
+ * under the request's `requestId`, a token unique to one call. A plan the two clients decode
+ * differently fails the case, so every case also proves the adapter is handed the same input
+ * whichever transport the application uses.
  */
-const STUB_PDP = "http://stub-pdp.invalid";
+
+/**
+ * The base URL of the stubbed HTTP PDP. `.invalid` never resolves, so a request that escapes the
+ * stub fails rather than reaching a real server.
+ */
+const STUB_HTTP_PDP = "http://stub-pdp.invalid";
+
+const planResources = CerbosService.method.planResources;
 
 /** The response bodies waiting to be served, by the `requestId` of the call that will read them. */
-const pendingResponses = new Map<string, unknown>();
+const pendingResponses = new Map<string, JsonObject>();
 let requestCount = 0;
-let stubClient: HTTP | undefined;
+
+function takeResponse(requestId: string): JsonObject {
+  const body = pendingResponses.get(requestId);
+  pendingResponses.delete(requestId);
+  if (body === undefined) throw new Error(`stub PDP: no response for request ${requestId}`);
+  return body;
+}
 
 function requestUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") return input;
@@ -100,31 +127,85 @@ function requestUrl(input: Parameters<typeof fetch>[0]): string {
 }
 
 /**
- * An `@cerbos/http` client whose PlanResources call is answered here, not by a PDP. Only requests
- * to `STUB_PDP` are intercepted; every other `fetch` goes through untouched.
+ * An `@cerbos/http` client whose PlanResources call is answered here. Only requests to
+ * `STUB_HTTP_PDP` are intercepted; every other `fetch` goes through untouched.
  */
-function sdkClient(): HTTP {
-  if (!stubClient) {
-    const passthrough = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      if (!requestUrl(input).startsWith(STUB_PDP))
-        return passthrough(input, init);
-      const { requestId } = JSON.parse(String(init?.body)) as {
-        requestId: string;
-      };
-      const body = pendingResponses.get(requestId);
-      pendingResponses.delete(requestId);
-      if (body === undefined)
-        throw new Error(`stub PDP: no response for request ${requestId}`);
-      return new Response(toProtoJson(body), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-    stubClient = new HTTP(STUB_PDP);
-  }
-  return stubClient;
+function httpClient(): HTTP {
+  const passthrough = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (!requestUrl(input).startsWith(STUB_HTTP_PDP)) return passthrough(input, init);
+    const { requestId } = JSON.parse(String(init?.body)) as { requestId: string };
+    return new Response(toProtoJson(takeResponse(requestId)), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  return new HTTP(STUB_HTTP_PDP);
 }
+
+/**
+ * An `@cerbos/grpc` client connected to an in-process gRPC server on a loopback port, which
+ * answers PlanResources with the registered response encoded as the protobuf a PDP sends.
+ */
+async function grpcClient(): Promise<{ client: GRPC; server: Server }> {
+  const server = new Server();
+  server.addService(
+    {
+      planResources: {
+        path: `/${CerbosService.typeName}/${planResources.name}`,
+        requestStream: false,
+        responseStream: false,
+        requestSerialize: (message: PlanResourcesRequest) =>
+          Buffer.from(toBinary(planResources.input, message)),
+        requestDeserialize: (bytes: Buffer) => fromBinary(planResources.input, bytes),
+        responseSerialize: (message: PlanResourcesResponseMessage) =>
+          Buffer.from(toBinary(planResources.output, message)),
+        responseDeserialize: (bytes: Buffer) => fromBinary(planResources.output, bytes),
+      },
+    },
+    {
+      planResources: (
+        call: ServerUnaryCall<PlanResourcesRequest, PlanResourcesResponseMessage>,
+        respond: sendUnaryData<PlanResourcesResponseMessage>
+      ) => {
+        try {
+          respond(null, fromJson(planResources.output, takeResponse(call.request.requestId)));
+        } catch (error) {
+          respond(error as Error, null);
+        }
+      },
+    }
+  );
+  const port = await new Promise<number>((resolve, reject) =>
+    server.bindAsync("127.0.0.1:0", ServerCredentials.createInsecure(), (error, bound) =>
+      error ? reject(error) : resolve(bound)
+    )
+  );
+  // The stub is on loopback; never route it through an ambient proxy.
+  const client = new GRPC(`127.0.0.1:${port}`, {
+    tls: false,
+    channelOptions: { "grpc.enable_http_proxy": 0 },
+  });
+  return { client, server };
+}
+
+let stubClients: Promise<{ http: HTTP; grpc: GRPC; server: Server }> | undefined;
+
+function sdkClients(): Promise<{ http: HTTP; grpc: GRPC; server: Server }> {
+  stubClients ??= grpcClient().then(({ client, server }) => ({
+    http: httpClient(),
+    grpc: client,
+    server,
+  }));
+  return stubClients;
+}
+
+afterAll(async () => {
+  if (!stubClients) return;
+  const { grpc, server } = await stubClients;
+  grpc.close();
+  server.forceShutdown();
+});
 
 /**
  * JSON as the PDP writes it. `JSON.stringify` writes -0 as `0`, where protojson keeps the sign, so
@@ -135,49 +216,65 @@ function toProtoJson(node: unknown): string {
   if (Array.isArray(node)) return `[${node.map(toProtoJson).join(",")}]`;
   if (node !== null && typeof node === "object") {
     const members = Object.entries(node).map(
-      ([key, child]) => `${JSON.stringify(key)}:${toProtoJson(child)}`,
+      ([key, child]) => `${JSON.stringify(key)}:${toProtoJson(child)}`
     );
     return `{${members.join(",")}}`;
   }
   return JSON.stringify(node);
 }
 
-function substituteNow(node: unknown, now: string): unknown {
+function substituteNow(node: unknown, now: string): JsonValue {
   if (node === "__NOW_MINUS_24H__") return now;
   if (Array.isArray(node)) return node.map((child) => substituteNow(child, now));
   if (node !== null && typeof node === "object") {
     return Object.fromEntries(
-      Object.entries(node).map(([key, child]) => [
-        key,
-        substituteNow(child, now),
-      ]),
+      Object.entries(node).map(([key, child]) => [key, substituteNow(child, now)])
     );
   }
-  return node;
+  return node as JsonValue;
 }
 
-/**
- * A golden's plan as `@cerbos/http` returns it: the recorded `filter` is served as the body of a
- * stubbed PlanResources call, so the SDK's own decoding produces what the adapter receives.
- */
-export async function planOf(
+/** One PlanResources call through `client`, answered with `response`. */
+function fetchPlan(
+  client: HTTP | GRPC,
   golden: Golden,
-  now: string = nowMinus24h(),
+  response: JsonObject
 ): Promise<PlanResourcesResponse> {
   const requestId = `${golden.id}#${++requestCount}`;
-  pendingResponses.set(requestId, {
-    requestId,
-    action: golden.id,
-    resourceKind: "conformance",
-    policyVersion: "default",
-    filter: substituteNow(golden.plan, now),
-  });
-  return sdkClient().planResources({
+  pendingResponses.set(requestId, response);
+  return client.planResources({
     requestId,
     principal: { id: "stub", roles: ["USER"] },
     resource: { kind: "conformance" },
     action: golden.id,
   });
+}
+
+/**
+ * A golden's plan as the SDK returns it: the recorded `filter` is served as the response to a
+ * stubbed PlanResources call over each transport, so the SDK's own decoding produces what the
+ * adapter receives.
+ */
+export async function planOf(
+  golden: Golden,
+  now: string = nowMinus24h()
+): Promise<PlanResourcesResponse> {
+  const response: JsonObject = {
+    requestId: golden.id,
+    action: golden.id,
+    resourceKind: "conformance",
+    policyVersion: "default",
+    filter: substituteNow(golden.plan, now),
+  };
+  const { http, grpc } = await sdkClients();
+  const [overHttp, overGrpc] = await Promise.all([
+    fetchPlan(http, golden, response),
+    fetchPlan(grpc, golden, response),
+  ]);
+  if (!isDeepStrictEqual(overHttp, overGrpc)) {
+    throw new Error(`${golden.id}: @cerbos/http and @cerbos/grpc decode the plan differently`);
+  }
+  return overGrpc;
 }
 
 // -- the mapper ----------------------------------------------------------------------------------
