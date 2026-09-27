@@ -362,8 +362,11 @@ number of operands. The planner never emits these, but the adapter accepts plans
 
 `spec/conformance_spec.rb` replays every plan recorded in
 [`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
-rows and compares the ids with the ones `check()` allowed. It needs no PDP. It runs on SQLite,
-PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+rows and compares the ids with the ones `check()` allowed. It needs no PDP. Each plan reaches the
+adapter through the Cerbos Ruby SDK: `Cerbos::Client#plan_resources` calls an in-process gRPC
+stub (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter receives
+the SDK's output types (a Symbol kind, and every number as a Float), not the JSON on disk. It
+runs on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
 cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
