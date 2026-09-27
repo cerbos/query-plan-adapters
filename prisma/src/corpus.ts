@@ -1,18 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import {
-  PlanExpression,
-  PlanExpressionValue,
-  PlanExpressionVariable,
-} from "@cerbos/core";
-import type {
-  PlanExpressionOperand,
-  PlanResourcesResponse,
-  Value,
-} from "@cerbos/core";
+import type { PlanResourcesResponse } from "@cerbos/core";
+import { HTTP } from "@cerbos/http";
 
-import { PlanKind, MapperConfig } from ".";
+import type { MapperConfig } from ".";
 
 /**
  * What both of this adapter's suites read from the shared `../conformance/` corpus: the recorded
@@ -85,36 +77,96 @@ export function nowMinus24h(): string {
   return `${ms.slice(0, -1)}456789Z`;
 }
 
-function operandFromWire(node: WireOperand, now: string): PlanExpressionOperand {
-  if (node.expression) {
-    return new PlanExpression(
-      node.expression.operator,
-      node.expression.operands.map((child) => operandFromWire(child, now))
-    );
-  }
-  if (node.variable !== undefined) {
-    return new PlanExpressionVariable(node.variable);
-  }
-  // The golden is JSON the PDP produced, so its leaves are already the shapes `Value` admits.
-  return new PlanExpressionValue(
-    (node.value === "__NOW_MINUS_24H__" ? now : node.value) as Value
-  );
+// -- the plans, as the SDK returns them ----------------------------------------------------------
+
+/**
+ * The base URL of the stubbed PDP. `.invalid` never resolves, so a request that escapes the stub
+ * fails rather than reaching a real server.
+ */
+const STUB_PDP = "http://stub-pdp.invalid";
+
+/** The response bodies waiting to be served, by the `requestId` of the call that will read them. */
+const pendingResponses = new Map<string, unknown>();
+let requestCount = 0;
+let stubClient: HTTP | undefined;
+
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return input;
+  return input instanceof URL ? input.href : input.url;
 }
 
-/** A golden's plan decoded the way `@cerbos/http` decodes a PlanResources response. */
-export function planOf(
+/**
+ * An `@cerbos/http` client whose PlanResources call is answered here, not by a PDP. Only requests
+ * to `STUB_PDP` are intercepted; every other `fetch` goes through untouched.
+ */
+function sdkClient(): HTTP {
+  if (!stubClient) {
+    const passthrough = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (!requestUrl(input).startsWith(STUB_PDP)) return passthrough(input, init);
+      const { requestId } = JSON.parse(String(init?.body)) as { requestId: string };
+      const body = pendingResponses.get(requestId);
+      pendingResponses.delete(requestId);
+      if (body === undefined) throw new Error(`stub PDP: no response for request ${requestId}`);
+      return new Response(toProtoJson(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    stubClient = new HTTP(STUB_PDP);
+  }
+  return stubClient;
+}
+
+/**
+ * JSON as the PDP writes it. `JSON.stringify` writes -0 as `0`, where protojson keeps the sign, so
+ * a stub serialising with it would hand the SDK a different number from the one the PDP sends.
+ */
+function toProtoJson(node: unknown): string {
+  if (Object.is(node, -0)) return "-0";
+  if (Array.isArray(node)) return `[${node.map(toProtoJson).join(",")}]`;
+  if (node !== null && typeof node === "object") {
+    const members = Object.entries(node).map(
+      ([key, child]) => `${JSON.stringify(key)}:${toProtoJson(child)}`
+    );
+    return `{${members.join(",")}}`;
+  }
+  return JSON.stringify(node);
+}
+
+function substituteNow(node: unknown, now: string): unknown {
+  if (node === "__NOW_MINUS_24H__") return now;
+  if (Array.isArray(node)) return node.map((child) => substituteNow(child, now));
+  if (node !== null && typeof node === "object") {
+    return Object.fromEntries(
+      Object.entries(node).map(([key, child]) => [key, substituteNow(child, now)])
+    );
+  }
+  return node;
+}
+
+/**
+ * A golden's plan as `@cerbos/http` returns it: the recorded `filter` is served as the body of a
+ * stubbed PlanResources call, so the SDK's own decoding produces what the adapter receives.
+ */
+export async function planOf(
   golden: Golden,
   now: string = nowMinus24h()
-): PlanResourcesResponse {
-  const base = { cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined };
-  const { kind, condition } = golden.plan;
-  if (kind === PlanKind.CONDITIONAL && condition) {
-    return { ...base, kind: PlanKind.CONDITIONAL, condition: operandFromWire(condition, now) };
-  }
-  if (kind === PlanKind.ALWAYS_ALLOWED || kind === PlanKind.ALWAYS_DENIED) {
-    return { ...base, kind };
-  }
-  throw new Error(`${golden.id}: unrecognised plan ${JSON.stringify(golden.plan)}`);
+): Promise<PlanResourcesResponse> {
+  const requestId = `${golden.id}#${++requestCount}`;
+  pendingResponses.set(requestId, {
+    requestId,
+    action: golden.id,
+    resourceKind: "conformance",
+    policyVersion: "default",
+    filter: substituteNow(golden.plan, now),
+  });
+  return sdkClient().planResources({
+    requestId,
+    principal: { id: "stub", roles: ["USER"] },
+    resource: { kind: "conformance" },
+    action: golden.id,
+  });
 }
 
 // -- the mapper ----------------------------------------------------------------------------------
