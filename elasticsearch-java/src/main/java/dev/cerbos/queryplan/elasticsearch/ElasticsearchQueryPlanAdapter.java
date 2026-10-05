@@ -193,8 +193,40 @@ public class ElasticsearchQueryPlanAdapter {
     }
 
     private static Result translateCondition(Operand condition, Options options) {
-        assertNoExplicitNullAttributeComparisons(condition, options);
-        return new Result.Conditional(new PlanWalker(options).translate(condition));
+        Operand normalized = selectStringIndexes(condition);
+        assertNoExplicitNullAttributeComparisons(normalized, options);
+        return new Result.Conditional(new PlanWalker(options).translate(normalized));
+    }
+
+    /**
+     * Rewrites {@code x["key"]}, a map index by a string literal, as the selection {@code x.key}.
+     * CEL gives both the same meaning, an error when the key is absent, so the field map resolves
+     * the index like any other path. A key holding a {@code .} would name a different path, so it
+     * is left as an index, which the leaf translator refuses.
+     */
+    private static Operand selectStringIndexes(Operand operand) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return operand;
+        }
+        Expression expression = operand.getExpression();
+        Expression.Builder rebuilt = expression.toBuilder();
+        for (int i = 0; i < expression.getOperandsCount(); i++) {
+            rebuilt.setOperands(i, selectStringIndexes(expression.getOperands(i)));
+        }
+        if ("index".equals(expression.getOperator()) && rebuilt.getOperandsCount() == 2) {
+            Operand target = rebuilt.getOperands(0);
+            Operand key = rebuilt.getOperands(1);
+            if (target.getNodeCase() == Operand.NodeCase.VARIABLE
+                    && key.getNodeCase() == Operand.NodeCase.VALUE
+                    && key.getValue().getKindCase() == Value.KindCase.STRING_VALUE
+                    && !key.getValue().getStringValue().isEmpty()
+                    && !key.getValue().getStringValue().contains(".")) {
+                return Operand.newBuilder()
+                        .setVariable(target.getVariable() + "." + key.getValue().getStringValue())
+                        .build();
+            }
+        }
+        return Operand.newBuilder().setExpression(rebuilt).build();
     }
 
     // Convenience overloads: the Options form with the other declarations empty.

@@ -43,7 +43,7 @@ final class Queries {
         return Map.of("prefix", Map.of(field, Map.of("value", value)));
     }
 
-    private static Map<String, Object> range(String field, String bound, Object value) {
+    static Map<String, Object> range(String field, String bound, Object value) {
         return Map.of("range", Map.of(field, Map.of(bound, value)));
     }
 

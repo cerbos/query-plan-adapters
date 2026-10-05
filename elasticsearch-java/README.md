@@ -402,6 +402,12 @@ silently by returning documents the PDP denies.
 | `exists` / negated `all` over a nested collection | `nested` + inner query / `nested` + definitely-false inner query |
 | `hasIntersection` + `map` | `nested` + `terms` |
 | `exists` / `all` over a literal value list | `bool.should` / `bool.must` of the substituted body |
+| `exists` / `all` over a list built from scalar fields (`[R.attr.a, R.attr.b].exists(s, …)`) | the same fold, plus an `exists` on every field element |
+| `"x" in R.attr.tags.map(t, t.name)` over a nested path | `nested` + `terms`, as `hasIntersection` + `map` |
+| `x["key"]`, a map index by a string literal | the field `x.key` |
+| `{"k": v, …}[field] == x` / `!=` | `terms` on the keys whose value equals (or differs from) `x` |
+| `upperAscii(field)` / `lowerAscii(field)` `==` / `!=` a string literal | `terms` over the literal's ASCII case variants (at most 10 ASCII letters) |
+| `timestamp(field) ± duration(d)` compared with a `timestamp()` literal | `range` against the literal shifted by `d`, bounded to where the sum stays in CEL's timestamp range |
 
 Literals: a list or map literal where a scalar is expected (`eq`, `ne`, ordering, string operators,
 an `in` / `hasIntersection` element) and a map literal as the collection of `in` throw — a `term` or
@@ -460,8 +466,13 @@ would change the security and performance profile of every filter.
 - field-to-field comparisons; a constant string receiver with a field argument
 - arithmetic over fields, `int()` / `double()` / `string()` casts, conditional values (CEL ternary, as a
   condition or an operand)
-- `except()`; `filter()` / `map()` used as a condition; `exists_one`; a macro over an object field
-  (a CEL map, whose keys the macro ranges over, which no query can enumerate)
+- `except()`; `intersect()`; `isSubset()`; `filter()` / `map()` used as a condition or as a
+  computed list, except membership in a plain `map()` field projection over a nested path;
+  `exists_one`; a macro over an object field (a CEL map, whose keys the macro ranges over, which
+  no query can enumerate); a two-variable macro (`exists(i, v, …)`), whose index or key no query
+  reads
+- list concatenation (`R.attr.tagNames + ["x"]`), a list literal holding a computed element, and
+  `timeSince()`, which is measured from the PDP's request time the plan does not carry
 - counts other than emptiness; `size()` over an undeclared field; collection-empty checks
 - ordered array indexing (`R.attr.tagNames[0] == "public"`) — a `term` matches any position
 - positive `all` and negated `exists` over a document collection; negated membership in, or
@@ -481,22 +492,25 @@ the current PDP (0.55.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 25 / 26 |
-| extended | 28 / 80 |
-| adversarial | 113 / 318 |
+| core | 28 / 29 |
+| extended | 34 / 97 |
+| adversarial | 120 / 338 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is four extended cases and three adversarial cases. In
+pass them. On 0.55.0 that is four extended cases and five adversarial cases. In
 `null/has/missing-attribute` and `null/has/composed-with-comparison` the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
 the omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
 cases a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it excludes j2,
 while `check()` receives `aNumber` as absent and treats the erroring DENY as not matching
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). In `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string` the planner rewrites an `in` over a scalar container
+to `eq`, while `check()` has no `in` overload for it and errors on that disjunct
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 ## Mapping hazards
 
@@ -584,6 +598,13 @@ applies to every field, and quietly returns more rows.
   it), throws `UnsupportedPlanShapeException` instead of `UnmappedAttributeException`. CEL's `in`
   over a map tests its keys, and Elasticsearch indexes no key whose value is null, so no query
   answers it ([#554](https://github.com/cerbos/query-plan-adapters/issues/554)).
+- Six corpus shapes that threw now translate: a map index by a string literal (`R.attr.obj["inner"]`),
+  a map literal indexed by a field and compared with `==`/`!=`, `upperAscii()`/`lowerAscii()`
+  compared with a string literal, `timestamp(field) + duration(d)` compared with a `timestamp()`
+  literal, `exists`/`all` over a list built from scalar fields, and a literal's membership in a
+  `map()` projection over a nested path.
+- A ternary inside a comparison operand throws `if (CEL ternary) cannot be expressed…`, and a
+  two-variable macro throws by name instead of with the flat-array or unmapped-attribute message.
 - Refusals are typed (`UnsupportedPlanShapeException`, `UnmappedAttributeException`,
   `MalformedPlanException`); all extend `IllegalArgumentException`, so existing catches still work.
 
