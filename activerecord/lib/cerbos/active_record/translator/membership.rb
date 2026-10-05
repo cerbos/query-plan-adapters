@@ -16,9 +16,23 @@ module Cerbos
           haystack = haystack.keys if haystack.is_a?(Hash)
           return composite_membership(needle, haystack) if composite?(needle)
           return relation_membership(haystack.scope, needle) if haystack.is_a?(Values::Collection)
+          return projection_membership(needle, haystack.projections) if haystack.is_a?(Values::ConstantProjection)
           return relation_membership(needle.scope, haystack) if needle.is_a?(Values::Collection)
 
+          # A filtered or projected relation, or a filtered list, has no membership translation.
+          reject_collection("in", needle)
+          reject_collection("in", haystack)
           scalar_membership(needle, haystack)
+        end
+
+        # `needle in list.map(t, ...)` over a list of constants. `map()` never ignores an element's
+        # error, so a NULL projection (a computed error) makes the list, and the lookup, UNKNOWN.
+        # A needle that is not `:explicit` is a missing attribute when NULL, UNKNOWN too.
+        # Otherwise it is an ordinary lookup in the projected values.
+        def projection_membership(needle, projections)
+          errors = projections.filter_map { |projection| ArelSupport.is_null(projection) if ArelSupport.arel_node?(projection) }
+          errors << ArelSupport.is_null(needle) if ArelSupport.arel_node?(needle) && null_convention(needle) != :explicit
+          unknown_if_any(errors, as_predicate(scalar_membership(needle, projections)))
         end
 
         # A list or map literal.

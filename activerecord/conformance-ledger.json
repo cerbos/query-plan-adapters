@@ -65,15 +65,7 @@
       "reason": "The mapper supplies a string column; the adapter only compares instants through native temporal columns, without portable error-preserving parsing of malformed strings.",
       "status": "unsupported"
     },
-    "collection/except/as-whole-condition": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
     "collection/except/equals-list-literal": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
-    "collection/except/size-of-difference": {
       "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
       "status": "unsupported"
     },
@@ -152,18 +144,6 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
-      "status": "unsupported"
-    },
-    "principal/map/membership-in-mapped-list": {
-      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
-      "status": "unsupported"
     },
     "regex/matches/anchored-prefix": {
       "reason": "ActiveRecord has no portable RE2 predicate; matches is refused.",

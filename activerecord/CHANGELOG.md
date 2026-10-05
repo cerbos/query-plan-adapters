@@ -40,6 +40,10 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A map or list literal holding a column, one given to any other operator or to an operator override, and a ternary with a list or map arm still raise. A field a map does not hold is a CEL error, UNKNOWN. `x in map` tests the map's keys, as CEL does.
 
+- `filter()` and `map()` over a list of constants, and `except()` of a list of constants or a scalar relation, evaluated element by element: `size()` of a filtered list or a difference, and `in` over a projected list ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. An element whose body errors makes the whole list an error (UNKNOWN), as `filter()` and `map()` never ignore one, and a missing attribute inside `except()`'s right list errors the call. `except` follows Cerbos's `exceptList`, keeping duplicates. Any other use of these lists still raises.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))

@@ -79,13 +79,100 @@ module Cerbos
           when "exists" then ArelSupport.or_node(bodies)
           when "all" then ArelSupport.and_node(bodies)
           when "exists_one" then exactly_one_of(bodies)
+          when "filter" then Values::ConstantList.new(elements: values, keeps: bodies)
+          when "map"
+            projections = values.map { |value| evaluate(body_node, environment.bind(iterator, value)) }
+            projections.each do |projection|
+              reject_double_text("map", projection)
+              reject_collection("map", projection)
+              reject_deferred("map", projection)
+            end
+            Values::ConstantProjection.new(projections: projections)
           else
-            # `filter`/`map` here would need a list-valued `size`/`hasIntersection`. No corpus
-            # shape needs it, so refuse.
-            raise UnsupportedOperatorError,
-              "#{operator} over a list of constants is not supported: only exists, all and " \
-              "exists_one have a translation for that shape"
+            raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
           end
+        end
+
+        # `left.except(right)`: the elements of `left` that no element of `right` equals, by CEL
+        # equality, duplicates kept (Cerbos's `exceptList`). An error in either list, such as a
+        # missing attribute inside `right`, is an error of the whole call.
+        def except(left, right)
+          unless right.is_a?(Array) && right.none? { |element| collection?(element) }
+            raise UnsupportedOperatorError,
+              "except is translated only with a list literal on its right, got #{describe(right)}"
+          end
+
+          case left
+          when Values::Collection then except_from_relation(left.scope, right)
+          when Array then except_from_constants(left, right)
+          else
+            raise UnsupportedOperatorError, "except needs a list on its left, got #{describe(left)}"
+          end
+        end
+
+        # A relation's members that equal no constant on the right, as the body of a filtered
+        # relation that `size()` counts. A member is a stored scalar list element, which holds null
+        # values: `null` equals only a null constant, and a constant of another kind (or a list or
+        # map) equals no member at all.
+        def except_from_relation(scope, right)
+          kind = member_kind(scope)
+          unless kind && right.all? { |element| deep_constant?(element) }
+            raise UnsupportedOperatorError,
+              "except over a relation is translated only for a member column of a known type " \
+              "against a list of constants"
+          end
+
+          member = scope.member_column
+          candidates = right.reject { |element| composite?(element) || cross_type_literal?(element, kind) }
+          present = candidates.compact
+          removes_null = candidates.include?(nil)
+          body =
+            if present.empty?
+              removes_null ? ArelSupport.comparison("ne", member, nil) : true
+            else
+              outside = ArelSupport.not_node(
+                Arel::Nodes::In.new(member, present.map { |value| ArelSupport.quote(value) })
+              )
+              if removes_null
+                ArelSupport.and_node([ArelSupport.comparison("ne", member, nil), outside])
+              else
+                ArelSupport.or_node([ArelSupport.comparison("eq", member, nil), outside])
+              end
+            end
+          Values::FilteredCollection.new(scope: scope, body: body)
+        end
+
+        # Constants on the left, and on the right constants or columns. A column that is not
+        # `:explicit`, or a computed node, is an error when NULL, which makes the list, and so the
+        # call, an error: every keep is UNKNOWN there. Otherwise an element stays unless it equals
+        # some right element, a null only equalling an explicit null.
+        def except_from_constants(left, right)
+          unless left.all? { |element| deep_constant?(element) }
+            raise UnsupportedOperatorError, "except is translated only over a list of constants"
+          end
+
+          missing = right.filter_map { |element|
+            ArelSupport.is_null(element) if ArelSupport.arel_node?(element) && null_convention(element) != :explicit
+          }
+          keeps = left.map do |element|
+            equal = ArelSupport.or_node(right.map { |other| as_predicate(member_equality(element, other)) })
+            unknown_if_any(missing, ArelSupport.not_node(equal))
+          end
+          Values::ConstantList.new(elements: left, keeps: keeps)
+        end
+
+        # How many keeps are TRUE, or UNKNOWN when one is: `filter()` never ignores an element's
+        # error, and an error in `except()` is an error of the whole list.
+        def count_constant_list(keeps)
+          return keeps.count(true) if keeps.all? { |keep| keep == true || keep == false }
+
+          total = keeps
+            .map { |keep| ArelSupport.case_node([[keep, 1]], else_value: 0) }
+            .reduce { |left, right| ArelSupport.infix("+", left, right) }
+          ArelSupport.case_node(
+            [[ArelSupport.or_node(keeps.map { |keep| ArelSupport.is_null(keep) }), nil]],
+            else_value: total
+          )
         end
 
         # UNKNOWN if any element errors, else true when exactly one element is true.
@@ -129,6 +216,8 @@ module Cerbos
 
         def count_of(target)
           case target
+          when Values::ConstantList
+            count_constant_list(target.keeps)
           when Values::Collection
             # Counting never errors, so NULL members count too. The hop guard is still needed:
             # a missing parent counts 0, and `== 0` would return a denied row (#309, #316).
