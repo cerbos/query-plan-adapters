@@ -105,6 +105,9 @@ jobs:
           - adapter: spring-data
             translator-test: "*SpringDataQueryPlanAdapterTest"
             example-task: assemble
+          - adapter: exposed
+            translator-test: "*ContractTest"
+            example-task: assemble
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -126,13 +129,17 @@ jobs:
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # An offline unit test resolves the full test runtime classpath, which a compile task alone
-      # would not. Spring-data resolves a second ORM set on its `next` leg, so
-      # both are fetched. The example resolves the adapter from mavenLocal, so it is published first.
+      # would not. Spring-data resolves a second ORM set on its `next` leg, and exposed on its
+      # `floor` leg, so both are fetched. The example resolves the adapter from mavenLocal, so it is
+      # published first.
       - name: Resolve dependencies
         run: |
           ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
           if [[ "${{ matrix.adapter }}" == spring-data ]]; then
             ADAPTER_TEST_ORM=next ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
+          fi
+          if [[ "${{ matrix.adapter }}" == exposed ]]; then
+            ADAPTER_TEST_ORM=floor ./gradlew test --tests '${{ matrix.translator-test }}' --no-daemon
           fi
           ./gradlew publishToMavenLocal --no-daemon
           ./gradlew -p example ${{ matrix.example-task }} --no-daemon

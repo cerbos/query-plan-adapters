@@ -24,6 +24,7 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | pgx / PostgreSQL | Go | `go get github.com/cerbos/query-plan-adapters/pgx` | [pgx](pgx/) |
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
+| Exposed (alpha) | Kotlin | Build from source (not yet on Maven Central) | [exposed](exposed/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
 
 Each adapter's README starts with an install step and a quick-start snippet.
