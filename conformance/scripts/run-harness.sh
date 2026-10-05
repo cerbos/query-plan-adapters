@@ -14,6 +14,7 @@
 #   convex              convex
 #   sqlalchemy          all                      (one pytest run covers every store)
 #   activerecord        sqlite postgres mysql    (ACTIVERECORD_VERSION / RUBY_VERSION pass through)
+#   mongodb-ruby        mongo mongo-next         (Ruby and Bundler from the host)
 #   ent, pgx            all                      (the Go harness starts its own containers)
 #   elasticsearch-java  elasticsearch elasticsearch-next
 #   spring-data         h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
@@ -48,6 +49,7 @@ stores_for() {
     convex) echo "convex" ;;
     sqlalchemy | ent | pgx) echo "all" ;;
     activerecord) echo "sqlite postgres mysql" ;;
+    mongodb-ruby) echo "mongo mongo-next" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
     spring-data) echo "h2 postgres mysql mysql-server-prep" ;;
     *) return 1 ;;
@@ -156,6 +158,10 @@ run_leg() { # <adapter> <store>
     activerecord:sqlite | activerecord:postgres | activerecord:mysql)
       ADAPTER_TEST_DB="${store}" ./scripts/test.sh spec/conformance_spec.rb ;;
 
+    # scripts/test.sh starts and removes its own MongoDB, on a port Docker picks.
+    mongodb-ruby:mongo) ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_IMAGE ./scripts/test.sh spec/conformance_spec.rb ;;
+    mongodb-ruby:mongo-next) ADAPTER_TEST_MONGO_IMAGE_FILE=MONGO_NEXT_IMAGE ./scripts/test.sh spec/conformance_spec.rb ;;
+
     ent:all | pgx:all) go test -count=1 -run TestAdversarialConformance -timeout 30m ./... ;;
 
     elasticsearch-java:elasticsearch)
@@ -198,7 +204,7 @@ run_adapter() { # <adapter> [store...]
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do
