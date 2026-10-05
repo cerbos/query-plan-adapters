@@ -18,5 +18,5 @@ end
 # In dependency order and not alphabetically: the models read their tables when they are
 # defined, so the database must exist first, and the seeder reads the corpus.
 %w[
-  database conformance_corpus conformance_store corpus_attributes edge_case_models
+  database conformance_corpus conformance_store corpus_attributes edge_case_models stub_pdp
 ].each { |file| require_relative "support/#{file}" }
