@@ -258,6 +258,9 @@ internal class SizeTranslator(private val translation: Translation) {
                 if (argument.expression.operator == "except") {
                     throw RelationRefusals.exceptUnsupported()
                 }
+                if (argument.expression.operator == "intersect") {
+                    throw RelationRefusals.intersectSizeUnsupported()
+                }
                 if (argument.expression.operator != "filter") {
                     throw RelationRefusals.sizeOperand()
                 }

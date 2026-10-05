@@ -39,6 +39,14 @@ internal class CollectionTranslator(private val translation: Translation) {
         }
         val collectionOperand = operands[0]
         val lambdaOperand = operands[1]
+        // A two-variable lambda is refused for what it binds, before the range is resolved: over a
+        // map the range is an attribute no mapping can declare, and an unmapped-attribute error
+        // would send the caller to fix a mapping that cannot help.
+        if (lambdaOperand.nodeCase == Operand.NodeCase.EXPRESSION && lambdaOperand.expression.operator == "lambda" &&
+            lambdaOperand.expression.operandsCount == 3
+        ) {
+            ParsedLambda.parse(lambdaOperand, "", "", "")
+        }
 
         // A literal value-list collection arrives when the planner could not unroll the macro
         // itself: at 10 elements or fewer it folds exists/all into an or/and chain, above that the
@@ -63,6 +71,11 @@ internal class CollectionTranslator(private val translation: Translation) {
                 .build()
             return translation.walker.enterMacro(operator) {
                 foldKnownValues(operator, asValue, lambdaOperand, scope)
+            }
+        }
+        if (PlanWalker.isComputedList(collectionOperand)) {
+            return translation.walker.enterMacro(operator) {
+                overComputedList(operator, collectionOperand, lambdaOperand, scope)
             }
         }
         if (collectionOperand.nodeCase != Operand.NodeCase.VARIABLE) {
@@ -212,6 +225,68 @@ internal class CollectionTranslator(private val translation: Translation) {
         }
         return translation.walker.traverse(Operand.newBuilder().setExpression(combined).build(), scope)
     }
+
+    /**
+     * `exists` or `all` over a list built from expressions (`[R.attr.a, R.attr.b].exists(s, s ==
+     * "x")`): each element is substituted into the body and the results are folded by
+     * [PlanWalker.overComputedList], which keeps the row UNKNOWN when any element raises. A body
+     * reading a member of the element (`s.f`) is refused: the element is an expression, not a row.
+     */
+    private fun overComputedList(
+        operator: String,
+        collection: Operand,
+        lambdaOperand: Operand,
+        scope: Scope,
+    ): Op<Boolean> {
+        if (operator != "exists" && operator != "all") {
+            throw Refusals.unsupported(
+                "$operator over a list built from expressions is not supported: only exists() and " +
+                    "all() fold into a flat filter",
+            )
+        }
+        val lambda = ParsedLambda.parse(
+            lambdaOperand,
+            "$operator second operand must be a lambda",
+            "$operator supports single-variable lambdas only",
+            "$operator lambda variable must be a variable operand",
+        )
+        val elements = collection.expression.operandsList
+        val bodies = elements.map { substituteOperand(lambda.body, lambda.variable, it) }
+        return translation.walker.overComputedList(elements, bodies, operator == "exists", scope)
+    }
+
+    /**
+     * Replaces [variable] with [replacement] in a body, respecting shadowing as [substitute] does.
+     * A member read of the variable (`variable.f`) is refused: the replacement is an expression,
+     * not a row with members.
+     */
+    private fun substituteOperand(operand: Operand, variable: String, replacement: Operand): Operand =
+        when (operand.nodeCase) {
+            Operand.NodeCase.VARIABLE -> when {
+                operand.variable == variable -> replacement
+                operand.variable.startsWith("$variable.") -> throw Refusals.unsupported(
+                    "Cannot resolve \"${operand.variable}\": a member of a list element built from an " +
+                        "expression has no column",
+                )
+                else -> operand
+            }
+            Operand.NodeCase.EXPRESSION -> {
+                val expression = operand.expression
+                val rebuilt = expression.toBuilder()
+                val operands = expression.operandsList
+                if (expression.operator in LAMBDA_BINDING_OPERATORS && operands.size == 2 &&
+                    shadows(operands[1], variable)
+                ) {
+                    rebuilt.setOperands(0, substituteOperand(operands[0], variable, replacement))
+                } else {
+                    operands.forEachIndexed { index, nested ->
+                        rebuilt.setOperands(index, substituteOperand(nested, variable, replacement))
+                    }
+                }
+                Operand.newBuilder().setExpression(rebuilt).build()
+            }
+            else -> operand
+        }
 
     /**
      * `exists_one` over a literal list, from one body per element POSITION (a repeated element is

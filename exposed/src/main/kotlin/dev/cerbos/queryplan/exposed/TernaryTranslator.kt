@@ -22,21 +22,52 @@ internal class TernaryTranslator(private val translation: Translation) {
         translateTernary(operands, scope) { branch -> translation.walker.traverse(branch, scope) }
 
     /**
-     * A comparison with a ternary operand, or `null` when neither operand is one. Called FIRST by
-     * [ComparisonTranslator.translate], on raw operands, because it must see source order: each
-     * branch is substituted back into the comparison AS WRITTEN and walked again, and mirroring
-     * first would substitute into a comparison the policy never had.
+     * A comparison or `in` with a ternary operand, or `null` when neither operand holds one. Called
+     * FIRST, on raw operands, because it must see source order: each branch is substituted back
+     * into the comparison AS WRITTEN and walked again, and mirroring first would substitute into a
+     * comparison the policy never had.
+     *
+     * The ternary may sit under list or string `+` (`["a"] + (c ? ["b"] : []) == [...]`): `+`
+     * evaluates both its operands, so substituting a branch in place keeps CEL's meaning, and a
+     * substituted `add(list, list)` of constants is folded into the list it concatenates.
      */
     fun tryTernaryComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
-        if (operator !in ComparisonTranslator.COMPARISON_OPERATORS || operands.size != 2) return null
-        val index = when {
-            isTernary(operands[0]) -> 0
-            isTernary(operands[1]) -> 1
-            else -> return null
+        if ((operator !in ComparisonTranslator.COMPARISON_OPERATORS && operator != "in") || operands.size != 2) {
+            return null
         }
-        return translateTernary(operands[index].expression.operandsList, scope) { branch ->
-            translation.walker.traverseExpression(substitute(operator, operands, index, branch), scope)
+        for (index in 0..1) {
+            val path = ternaryUnderAdd(operands[index]) ?: continue
+            val ternary = at(operands[index], path)
+            return translateTernary(ternary.expression.operandsList, scope) { branch ->
+                val substituted = PlanRewrites.foldListConcatenation(replaceAt(operands[index], path, 0, branch))
+                translation.walker.traverseExpression(substitute(operator, operands, index, substituted), scope)
+            }
         }
+        return null
+    }
+
+    /**
+     * The operand indices from [operand] down to the first `if` that is [operand] or is reached
+     * from it through `add` alone; `null` when there is none.
+     */
+    private fun ternaryUnderAdd(operand: Operand): List<Int>? {
+        if (isTernary(operand)) return emptyList()
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "add") return null
+        operand.expression.operandsList.forEachIndexed { i, nested ->
+            ternaryUnderAdd(nested)?.let { return listOf(i) + it }
+        }
+        return null
+    }
+
+    private fun at(root: Operand, path: List<Int>): Operand =
+        path.fold(root) { current, i -> current.expression.getOperands(i) }
+
+    private fun replaceAt(root: Operand, path: List<Int>, depth: Int, replacement: Operand): Operand {
+        if (depth == path.size) return replacement
+        val i = path[depth]
+        val rebuilt = root.expression.toBuilder()
+            .setOperands(i, replaceAt(root.expression.getOperands(i), path, depth + 1, replacement))
+        return Operand.newBuilder().setExpression(rebuilt).build()
     }
 
     /**

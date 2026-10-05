@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
@@ -57,14 +58,124 @@ internal class PlanWalker(private val translation: Translation) {
             )
             "except" -> throw ScalarRefusals.exceptUnsupported()
             "hasIntersection", "has_intersection" -> translation.membership.translateHasIntersection(operands, scope)
-            "in" -> translation.membership.translateIn(operands, scope)
+            "in" -> membership(operands, scope)
+            "isSubset" -> PlanRewrites.subsetAsMembership(operands, scope)?.let { traverse(it, scope) }
+                ?: translation.comparisons.translate(operator, operands, scope)
             "if" -> translation.ternary.translateBare(operands, scope)
             "overlaps", "ancestorOf", "descendentOf" -> translation.hierarchy.translate(operator, operands, scope)
             "matches" -> matches(operands, scope)
             else -> matchesComparedWithBoolean(operator, operands, scope)
                 ?: textOfConditionCompared(operator, operands, scope)
+                ?: (
+                    PlanRewrites.intersectionEmptiness(operator, operands)
+                        ?: PlanRewrites.differenceEmptiness(operator, operands, scope)
+                    )?.let { traverse(it, scope) }
+                ?: mapLiteralLookup(operator, operands, scope)
                 ?: translation.comparisons.translate(operator, operands, scope)
         }
+    }
+
+    /**
+     * `in`, after the shapes that rewrite into others: a ternary operand (substituted in place),
+     * two constants (decided here), a `map()` or `filter()` projection, a list concatenation, and a
+     * list built from expressions. What is left is [MembershipTranslator]'s.
+     */
+    private fun membership(operands: List<Operand>, scope: Scope): Op<Boolean> {
+        if (operands.size != 2) return translation.membership.translateIn(operands, scope)
+        translation.ternary.tryTernaryComparison("in", operands, scope)?.let { return it }
+        val needle = PlanValues.builtConstant(operands[0])
+        val haystack = PlanValues.builtConstant(operands[1])
+        if (needle !== PlanValues.NotConstant && haystack !== PlanValues.NotConstant) {
+            return constantIn(needle, haystack)
+        }
+        (
+            PlanRewrites.membershipInProjection(operands)
+                ?: PlanRewrites.membershipInConcatenation(operands, scope)
+            )?.let { return traverse(it, scope) }
+        if (haystack === PlanValues.NotConstant && isComputedList(operands[1])) {
+            val elements = operands[1].expression.operandsList
+            return overComputedList(elements, elements.map { PlanRewrites.expression("eq", operands[0], it) }, true, scope)
+        }
+        return translation.membership.translateIn(operands, scope)
+    }
+
+    /**
+     * `value in list` or `value in map` over two constants, which a ternary substitution leaves
+     * behind (`"r" in (c ? ["r"] : [])`): CEL list membership is element equality, numbers compared
+     * by value, and map membership is a key test.
+     */
+    private fun constantIn(needle: Any?, haystack: Any?): Op<Boolean> {
+        val holds = when (haystack) {
+            is List<*> -> haystack.any { celEquals(needle, it) }
+            is Map<*, *> -> needle is String && haystack.containsKey(needle)
+            // CEL has no `in` over a scalar, so the planner cannot emit this.
+            else -> throw Refusals.malformed("in requires a list or map, got ${PlanValues.typeName(haystack)}")
+        }
+        return if (holds) Op.TRUE else Op.FALSE
+    }
+
+    /**
+     * A macro or membership over a list built from expressions (`[R.attr.a, "x"]`), folded per
+     * element: [any] joins [perElement] with `or` (`exists`, `in`), otherwise with `and` (`all`).
+     * CEL builds the list first, so one erroring element errors the whole result even where another
+     * element decides it, and a plain disjunction would let a TRUE element hide that error. Each
+     * computed element's `e == e || !(e == e)` is TRUE where the element evaluates and UNKNOWN where
+     * it raises, and the fold is taken under that guard as a ternary, which is UNKNOWN under both
+     * polarities whenever the guard is.
+     */
+    fun overComputedList(elements: List<Operand>, perElement: List<Operand>, any: Boolean, scope: Scope): Op<Boolean> {
+        if (perElement.isEmpty()) return if (any) Op.FALSE else Op.TRUE
+        val fold = PlanResourcesFilter.Expression.newBuilder().setOperator(if (any) "or" else "and")
+            .addAllOperands(perElement).build()
+        val guards = elements.filter { it.nodeCase != Operand.NodeCase.VALUE }.map { element ->
+            val same = PlanRewrites.expression("eq", element, element)
+            PlanRewrites.expression("or", same, PlanRewrites.expression("not", same))
+        }
+        if (guards.isEmpty()) return traverseExpression(fold, scope)
+        val guard = PlanResourcesFilter.Expression.newBuilder().setOperator("and").addAllOperands(guards).build()
+        return TriLogic.ternary(traverseExpression(guard, scope), traverseExpression(fold, scope), Op.FALSE)
+    }
+
+    /**
+     * `{"k1": v1, ...}[key] == c` (or `!=`), a lookup in a map literal by a computed key: the keys
+     * whose value equals `c` (or differs from it) when `key` is one of the map's keys, and UNKNOWN
+     * under both polarities when it is not, since CEL raises on a missing key. Values compare by CEL
+     * equality (numbers by value). `null` for any other shape.
+     */
+    private fun mapLiteralLookup(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
+        for (i in 0..1) {
+            val index = operands[i]
+            val compared = operands[1 - i]
+            if (index.nodeCase != Operand.NodeCase.EXPRESSION || index.expression.operator != "index" ||
+                index.expression.operandsCount != 2 || compared.nodeCase != Operand.NodeCase.VALUE
+            ) {
+                continue
+            }
+            val map = PlanValues.builtConstant(index.expression.getOperands(0)) as? Map<*, *> ?: continue
+            val key = index.expression.getOperands(1)
+            if (key.nodeCase == Operand.NodeCase.VALUE) continue
+            val target = PlanValues.toKotlin(compared.value)
+            val keys = com.google.protobuf.ListValue.newBuilder()
+            val selected = com.google.protobuf.ListValue.newBuilder()
+            for ((k, v) in map) {
+                val keyValue = PlanValues.toValue(k) ?: return null
+                keys.addValues(keyValue)
+                if (celEquals(v, target) == (operator == "eq")) selected.addValues(keyValue)
+            }
+            val present = PlanRewrites.expression(
+                "in",
+                key,
+                PlanRewrites.constant(com.google.protobuf.Value.newBuilder().setListValue(keys).build()),
+            )
+            val matching = PlanRewrites.expression(
+                "in",
+                key,
+                PlanRewrites.constant(com.google.protobuf.Value.newBuilder().setListValue(selected).build()),
+            )
+            return TriLogic.ternary(traverse(present, scope), traverse(matching, scope), TriLogic.unknown())
+        }
+        return null
     }
 
     /**
@@ -175,12 +286,21 @@ internal class PlanWalker(private val translation: Translation) {
         }
     }
 
-    private companion object {
+    companion object {
+        /** A `list(...)` the literal fold could not read as a constant: an element is computed. */
+        fun isComputedList(operand: Operand): Boolean =
+            operand.nodeCase == Operand.NodeCase.EXPRESSION && operand.expression.operator == "list" &&
+                PlanValues.builtConstant(operand) === PlanValues.NotConstant
+
+        /** CEL equality between two plan constants: numbers by value, everything else by kind and value. */
+        private fun celEquals(left: Any?, right: Any?): Boolean =
+            if (left is Number && right is Number) left.toDouble() == right.toDouble() else left == right
+
         /** Operators whose CEL result is always a bool (or an error). */
-        val BOOLEAN_OPERATORS = setOf(
+        private val BOOLEAN_OPERATORS = setOf(
             "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "in", "hasIntersection",
             "has_intersection", "contains", "startsWith", "endsWith", "matches", "exists", "all",
-            "exists_one", "overlaps", "ancestorOf", "descendentOf",
+            "exists_one", "overlaps", "ancestorOf", "descendentOf", "isSubset",
         )
     }
 }

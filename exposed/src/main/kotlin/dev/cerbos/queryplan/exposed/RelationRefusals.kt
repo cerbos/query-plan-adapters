@@ -113,6 +113,12 @@ internal object RelationRefusals {
      * `size(x.except(y))`. List difference is a set operation over two collections, and a row
      * filter has no set-valued operand to hold the right-hand side.
      */
+    fun intersectSizeUnsupported(): UnsupportedPlanShapeException = Refusals.unsupported(
+        "size(intersect(...)) is not supported: Cerbos's intersect() keeps duplicates from whichever " +
+            "list is shorter, so its size depends on the two lengths, which no set operation in SQL " +
+            "reproduces; intersect() translates only compared with an empty list, as hasIntersection",
+    )
+
     fun exceptUnsupported(): UnsupportedPlanShapeException = Refusals.unsupported(
         "except() computes a list difference, which SQL cannot express as a row filter; write the " +
             "policy as size(x.filter(e, !(e in y))) instead",

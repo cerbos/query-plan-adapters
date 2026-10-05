@@ -91,15 +91,15 @@
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
-      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
     },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
-      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
     },
     "collection/except/size-of-difference": {
       "status": "unsupported",
-      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
     },
     "collection/exists/map-keys": {
       "status": "unsupported",
@@ -108,6 +108,14 @@
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
       "reason": "Same refusal as collection/exists/map-keys, under negation: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate"
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds a list index or a map key as its first variable, and no mapped column holds either: the rows a relation subquery returns carry no CEL list order to number, and an attribute mapping names columns, never the key set of a map. The lambda is refused for what it binds, before its range is resolved"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds a list index or a map key as its first variable, and no mapped column holds either: the rows a relation subquery returns carry no CEL list order to number, and an attribute mapping names columns, never the key set of a map. The lambda is refused for what it binds, before its range is resolved"
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -161,6 +169,10 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so size(intersect(a, b)) depends on the two lists' lengths, which no SQL set operation or correlated count reproduces. intersect() is translated only compared with an empty list, where it is hasIntersection()"
+    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() returns a list, not a boolean, so it cannot be a condition on its own; only hasIntersection(map(...), [...]) gives the list a scalar meaning"
@@ -191,7 +203,7 @@
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
-      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and every consumer of it — size(), equality, a root boolean, a principal list — would need the difference materialised. Refused wherever in the walk it arrives, with one message"
+      "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",

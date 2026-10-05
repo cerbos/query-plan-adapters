@@ -50,7 +50,8 @@ public object ExposedQueryPlanAdapter {
         else -> throw Refusals.malformed("Unknown filter kind: ${filter.kind}")
     }
 
-    private fun conditional(condition: Operand, options: Options): QueryPlanFilter {
+    private fun conditional(planned: Operand, options: Options): QueryPlanFilter {
+        val condition = PlanRewrites.selectMapKeys(planned, options.mapping)
         NullOperandScan.assertTranslatable(condition, options)
         val translation = Translation(options)
         return QueryPlanFilter.Conditional(translation.walker.traverse(condition, translation.rootScope()))

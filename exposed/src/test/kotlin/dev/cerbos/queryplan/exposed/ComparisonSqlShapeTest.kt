@@ -199,15 +199,25 @@ class ComparisonSqlShapeTest {
     private fun hasAttributeInAttribute(operand: Operand): Boolean {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
         val expression = operand.expression
+        // `x in rel + [...]` is `x in rel || x in [...]`, so a concatenated relation counts.
         val direct = expression.operator == "in" && expression.operandsCount == 2 &&
-            expression.operandsList.all { it.nodeCase == Operand.NodeCase.VARIABLE }
+            expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE &&
+            concatenatesAttribute(expression.getOperands(1))
         return direct || expression.operandsList.any(::hasAttributeInAttribute)
+    }
+
+    private fun concatenatesAttribute(operand: Operand): Boolean = when (operand.nodeCase) {
+        Operand.NodeCase.VARIABLE -> true
+        Operand.NodeCase.EXPRESSION ->
+            operand.expression.operator == "add" && operand.expression.operandsList.any(::concatenatesAttribute)
+        else -> false
     }
 
     /**
      * Whether a lambda in the subtree ranges over a SCALAR collection — a relation mapped with an
      * element column. Its variable is a list element, which CEL never reads as missing, so the
      * adapter reads its NULL as an explicit null exactly as if the element were declared EXPLICIT.
+     * `isSubset` and `except` count too: each is translated as an `all()` over the receiver.
      */
     private fun iteratesScalarCollection(operand: Operand): Boolean {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
@@ -385,7 +395,7 @@ class ComparisonSqlShapeTest {
         // IS NULL is the witness for the column it never compares (`hier-overlaps-list-prefix`).
         val SELF_GUARDING_OPERATORS = setOf("string", "size", "map", "list")
 
-        val LAMBDA_MACROS = setOf("exists", "all", "exists_one", "filter", "map")
+        val LAMBDA_MACROS = setOf("exists", "all", "exists_one", "filter", "map", "isSubset", "except")
 
         /** Anti-vacuity floors. 10 actions emit `IS NOT NULL` today and 27 emit `IS NULL`. */
         const val PRESENCE_TEST_FLOOR = 5

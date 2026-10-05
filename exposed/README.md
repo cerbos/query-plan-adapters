@@ -537,13 +537,13 @@ total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 68 / 80 |
-| adversarial | 260 / 308 |
+| core | 29 / 29 |
+| extended | 85 / 97 |
+| adversarial | 285 / 338 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-53 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+56 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -552,8 +552,13 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   CEL matches with RE2, which no SQL engine implements. See [Regular expressions](#regular-expressions);
 - a positional read of a list (`[i]`, `.member` of `[i]`): a to-many relation is a correlated
   subquery over an association, and an association carries no element order to index into;
-- `except()`, `filter()` or `map()` used as a value rather than inside `size()` or
-  `hasIntersection()`, and whole-list equality against a relation;
+- `except()`, `filter()` or `map()` used as a value rather than inside `size()`,
+  `hasIntersection()` or `in`, and whole-list equality against a relation. `rel.except([...]) == []`
+  translates, as every element of the relation being in the list, and so do `rel.isSubset([...])`
+  and `intersect(a, b) == []` (as `!hasIntersection(a, b)`); `size(intersect(...))` is refused,
+  since Cerbos's `intersect()` keeps duplicates from whichever list is shorter;
+- a two-variable comprehension (`list.exists(i, v, ...)`, `map.all(k, v, ...)`): its first
+  variable is a list index or a map key, and no mapped column holds either;
 - `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
   where CEL requires the whole string, and rounds where CEL truncates. `int()` of a numeric column
   compared with a constant translates, solved for the column: `int(x) >= 1` is `x >= 1`,
@@ -582,6 +587,26 @@ that does not pass is listed with its reason in [`conformance-ledger.json`](conf
   32 elements, as a pairwise exclusion that stays UNKNOWN when any element errors),
   `size(filter(...))` (a strict count, UNKNOWN when any element errors), and `x in list.map(...)`
   (a disjunction of equalities).
+
+These translate, each by rewriting into a shape above rather than by a new lowering:
+
+- `x in rel.map(t, ...)` and `x in coll.filter(t, p)`, as a strict `size(filter(...)) > 0`, so an
+  element whose projection or predicate errors keeps the row UNKNOWN;
+- `x in rel + [...]`, as `x in rel || x in [...]`, when every part is a literal list or a direct
+  relation;
+- `x in [R.attr.a, ...]` and `[R.attr.a, ...].exists(...)` / `.all(...)` over a list built from
+  attributes, folded per element and UNKNOWN when any element is: CEL builds the list first;
+- a ternary under list `+` or as the target of `in` (`"r" in (c ? ["r"] : [])`, which is how
+  `runtime.effectiveDerivedRoles` arrives), substituted per branch;
+- `{"k": v, ...}[R.attr.x] == c`, as membership in the keys whose value matches, UNKNOWN when the
+  key is missing; and `R.attr.m["k"]` as the attribute `m.k` where the mapping declares it;
+- `x.upperAscii() == "..."`, as 26 case-sensitive `REPLACE`s: SQL `UPPER` also folds non-ASCII
+  letters, which CEL's `upperAscii()` does not;
+- `timestamp(x) + duration(...)` against a timestamp, solved for the column, and
+  `timestamp(x).timeSince()` against a duration. `timeSince()` reads the clock when the filter is
+  built, so a filter kept and reused later goes stale by that much;
+- a bare attribute ordered against a `timestamp()`, and a text column ordered against a column
+  plus or minus a number, as UNKNOWN: CEL has no overload for either.
 
 `==` and `!=` between two columns under mixed null conventions translate: the definite expansion
 over the `EXPLICIT` side, made UNKNOWN when the other side's column is NULL.
@@ -830,6 +855,10 @@ ADAPTER_TEST_DB=postgres ./gradlew test     # conformance suite on PostgreSQL
 ADAPTER_TEST_DB=mysql ./gradlew test        # … on MySQL (see "Database collation and case sensitivity")
 ADAPTER_TEST_ORM=floor ./gradlew test       # every suite on Exposed 1.0.0
 ```
+
+`conformance/scripts/run-harness.sh exposed [h2|sqlite|postgres|mysql|mysql-server-prep]`, from the
+repository root, runs the conformance suite on each store leg CI runs, one at a time
+(`ADAPTER_TEST_ORM` passes through), in a JDK container when none is on `PATH`.
 
 Two tagged suites start containers of their own, use Docker when it is there, and skip when it is
 not: `ReviewOperandTypeTest` (`docker`) shows the coercion behind the operand-type rule on the

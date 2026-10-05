@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.AsciiReplace
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.NullLiteral
@@ -22,6 +23,7 @@ import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.booleanParam
 import org.jetbrains.exposed.v1.core.stringParam
+import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
@@ -115,6 +117,23 @@ internal class ComparisonTranslator(private val translation: Translation) {
         /** `string(variable)` — CEL's text conversion over a mapped column. */
         class TextCast(val variable: String) : Resolved
 
+        /**
+         * `timestamp(variable) + duration(value)`, `duration(value) + timestamp(variable)` or
+         * `timestamp(variable) - duration(value)`, with the signed [shift].
+         */
+        class ShiftedTimestampField(val variable: String, val shift: Duration) : Resolved
+
+        /** `timestamp(variable).timeSince()`. */
+        class TimeSinceField(val variable: String) : Resolved
+
+        /** `duration(value)`, parsed lazily like a timestamp constant. */
+        class DurationConstant(val operand: Operand) : Resolved {
+            fun duration(): Duration = CelDuration.parse(PlanValues.toKotlin(operand.value))
+        }
+
+        /** `variable.upperAscii()`. */
+        class UpperAsciiField(val variable: String) : Resolved
+
         /** A `list(...)` or `struct(...)` the planner built from constants alone. */
         class BuiltConstant(val value: Any) : Resolved
 
@@ -141,6 +160,18 @@ internal class ComparisonTranslator(private val translation: Translation) {
                         else -> Resolved.Opaque
                     }
                 }
+                inner == "duration" && expression.operandsCount == 1 &&
+                    expression.getOperands(0).nodeCase == Operand.NodeCase.VALUE ->
+                    Resolved.DurationConstant(expression.getOperands(0))
+                inner == "timeSince" && expression.operandsCount == 1 ->
+                    timestampOfVariable(expression.getOperands(0))?.let { Resolved.TimeSinceField(it) }
+                        ?: Resolved.Opaque
+                inner == "upperAscii" && expression.operandsCount == 1 &&
+                    expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
+                    Resolved.UpperAsciiField(expression.getOperands(0).variable)
+                (inner == "add" || inner == "sub") && expression.operandsCount == 2 &&
+                    shiftedTimestamp(inner, expression.getOperands(0), expression.getOperands(1)) != null ->
+                    shiftedTimestamp(inner, expression.getOperands(0), expression.getOperands(1))!!
                 inner == "int" && expression.operandsCount == 1 &&
                     expression.getOperands(0).nodeCase == Operand.NodeCase.VARIABLE ->
                     Resolved.IntCast(expression.getOperands(0).variable)
@@ -169,6 +200,47 @@ internal class ComparisonTranslator(private val translation: Translation) {
             }
         }
         else -> Resolved.Opaque
+    }
+
+    /** The variable of `timestamp(variable)`, else `null`. */
+    private fun timestampOfVariable(operand: Operand): String? {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "timestamp" ||
+            operand.expression.operandsCount != 1 ||
+            operand.expression.getOperands(0).nodeCase != Operand.NodeCase.VARIABLE
+        ) {
+            return null
+        }
+        return operand.expression.getOperands(0).variable
+    }
+
+    /** The constant of `duration(value)`, else `null`. */
+    private fun durationOperand(operand: Operand): Operand? {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "duration" ||
+            operand.expression.operandsCount != 1 ||
+            operand.expression.getOperands(0).nodeCase != Operand.NodeCase.VALUE
+        ) {
+            return null
+        }
+        return operand.expression.getOperands(0)
+    }
+
+    private fun shiftedTimestamp(operator: String, left: Operand, right: Operand): Resolved.ShiftedTimestampField? {
+        val leftVariable = timestampOfVariable(left)
+        val rightDuration = durationOperand(right)
+        if (leftVariable != null && rightDuration != null) {
+            val shift = CelDuration.parse(PlanValues.toKotlin(rightDuration.value))
+            return Resolved.ShiftedTimestampField(leftVariable, if (operator == "sub") shift.negated() else shift)
+        }
+        val rightVariable = timestampOfVariable(right)
+        val leftDuration = durationOperand(left)
+        // duration - timestamp has no CEL overload.
+        if (operator == "add" && rightVariable != null && leftDuration != null) {
+            return Resolved.ShiftedTimestampField(
+                rightVariable,
+                CelDuration.parse(PlanValues.toKotlin(leftDuration.value)),
+            )
+        }
+        return null
     }
 
     private fun isAddRooted(resolved: Resolved): Boolean =
@@ -251,6 +323,35 @@ internal class ComparisonTranslator(private val translation: Translation) {
             if (left is Resolved.TimestampField && right is Resolved.TimestampField) {
                 return timestampFieldPair(operator, left.variable, right.variable, scope)
             }
+            if (left is Resolved.ShiftedTimestampField && right is Resolved.TimestampConstant) {
+                return shiftedTimestampLeaf(operator, left, right.instant(), scope)
+            }
+            if (left is Resolved.TimestampConstant && right is Resolved.ShiftedTimestampField) {
+                return shiftedTimestampLeaf(NormalizedBinary.mirror(operator), right, left.instant(), scope)
+            }
+            if (left is Resolved.TimeSinceField && right is Resolved.DurationConstant) {
+                return timeSinceLeaf(operator, left, right.duration(), scope)
+            }
+            if (left is Resolved.DurationConstant && right is Resolved.TimeSinceField) {
+                return timeSinceLeaf(NormalizedBinary.mirror(operator), right, left.duration(), scope)
+            }
+            // An attribute is never a CEL timestamp: check() receives JSON values, so a string,
+            // number, bool, list or map ordered against a timestamp has no overload and raises,
+            // whatever the mapped column's type. The comparison is UNKNOWN on every row.
+            val bareField = (left as? Resolved.Field) ?: (right as? Resolved.Field)
+            if (operator in ORDERING_OPERATORS && bareField != null &&
+                (left is Resolved.TimestampConstant || right is Resolved.TimestampConstant)
+            ) {
+                // Resolved for its refusal: an unmapped attribute is still the caller's to fix.
+                scope.resolve(bareField.variable)
+                return TriLogic.unknown()
+            }
+            if (left is Resolved.UpperAsciiField && right is Resolved.Constant) {
+                return upperAsciiComparison(operator, left, right.value(), scope)
+            }
+            if (left is Resolved.Constant && right is Resolved.UpperAsciiField) {
+                return upperAsciiComparison(NormalizedBinary.mirror(operator), right, left.value(), scope)
+            }
             if (left is Resolved.TextCast || right is Resolved.TextCast) {
                 return textCastComparison(operator, left, right, operands, scope)
             }
@@ -284,6 +385,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
                     )
                 }
                 if (operands.any(::alwaysRaises)) return TriLogic.unknown()
+                if (orderedAgainstText(operator, left, right, operands, scope)) return TriLogic.unknown()
                 return arithmetic.numericComparison(operator, operands, scope)
             }
         } else if (isAddRooted(left) || isAddRooted(right)) {
@@ -317,6 +419,148 @@ internal class ComparisonTranslator(private val translation: Translation) {
         }
 
         throw leafOperandError(operator, operands)
+    }
+
+    /**
+     * Whether a text column is ORDERED against a column plus or minus a finite number:
+     * `R.attr.aString < R.attr.aNumber + 1.0`. The arithmetic is not a concatenation (the caller
+     * checked), so it is a finite number, an infinity or a CEL error, and CEL has no ordering
+     * between a string and a number: the comparison raises on every row, which is UNKNOWN under
+     * both polarities. NaN is the exception — CEL orders NaN against anything as false — which is
+     * why the shape is held to one column and one finite constant under `+` or `-`, an expression
+     * that cannot produce NaN. Equality is not this case: CEL answers a mixed-type `==` as false.
+     */
+    private fun orderedAgainstText(
+        operator: String,
+        left: Resolved,
+        right: Resolved,
+        operands: List<Operand>,
+        scope: Scope,
+    ): Boolean {
+        if (operator !in ORDERING_OPERATORS) return false
+        val (field, arithmetic) = when {
+            left is Resolved.Field && isArithmeticRooted(right) -> left to operands[1]
+            right is Resolved.Field && isArithmeticRooted(left) -> right to operands[0]
+            else -> return false
+        }
+        if (!isColumnShiftedByFiniteConstant(arithmetic)) return false
+        val target = scope.resolve(field.variable) as? Resolution.Scalar ?: return false
+        return ScalarColumnTypes.kindOf(target.column) == ScalarColumnKind.TEXT
+    }
+
+    /** `add` or `sub` of exactly one variable and one finite number constant, in either order. */
+    private fun isColumnShiftedByFiniteConstant(operand: Operand): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operandsCount != 2) return false
+        if (operand.expression.operator != "add" && operand.expression.operator != "sub") return false
+        val kinds = operand.expression.operandsList
+        val variables = kinds.count { it.nodeCase == Operand.NodeCase.VARIABLE }
+        val constants = kinds.count {
+            it.nodeCase == Operand.NodeCase.VALUE && it.value.kindCase == com.google.protobuf.Value.KindCase.NUMBER_VALUE &&
+                it.value.numberValue.isFinite()
+        }
+        return variables == 1 && constants == 1
+    }
+
+    /**
+     * `timestamp(field) + shift op c`, solved for the column as `timestamp(field) op c - shift`:
+     * adding a duration is exact on instants, so the two agree wherever the sum is a timestamp.
+     * Where it is not, the sum leaves CEL's year-1 to year-9999 range and CEL raises, so a column
+     * within `shift` of that bound is UNKNOWN under both polarities. A solved constant outside the
+     * range is refused: there is no column value on the other side of it to bind.
+     */
+    private fun shiftedTimestampLeaf(
+        operator: String,
+        shifted: Resolved.ShiftedTimestampField,
+        constant: Instant,
+        scope: Scope,
+    ): Op<Boolean> {
+        val shift = shifted.shift
+        val solved = constant.minus(shift)
+        if (solved < MIN_CEL_INSTANT || solved > MAX_CEL_INSTANT) {
+            throw Refusals.unsupported(
+                "timestamp() + duration() compared with a timestamp whose solved bound leaves CEL's " +
+                    "timestamp range (years 1 to 9999)",
+            )
+        }
+        val target = scope.scalar(shifted.variable)
+        val base = compare(operator, target.expression, TimestampBinder.bind(solved, target.column, shifted.variable))
+        if (shift.isZero) return base
+        // The column values whose sum overflows: past MAX - shift, or before MIN - shift.
+        val overflow = if (shift.isNegative) {
+            LessOp(
+                target.expression,
+                TimestampBinder.bind(MIN_CEL_INSTANT.minus(shift), target.column, shifted.variable),
+            )
+        } else {
+            GreaterOp(
+                target.expression,
+                TimestampBinder.bind(MAX_CEL_INSTANT.minus(shift), target.column, shifted.variable),
+            )
+        }
+        return TriLogic.baseUnlessUnknown(base, overflow)
+    }
+
+    /**
+     * `timestamp(field).timeSince() op d`: `now - field op d`, solved for the column as
+     * `field op' now - d` with `op` mirrored. `now` is read when the filter is built, which is when
+     * the caller asks the question; a filter kept and reused later goes stale by that much. The
+     * difference of two CEL timestamps always fits a CEL duration.
+     */
+    private fun timeSinceLeaf(
+        operator: String,
+        since: Resolved.TimeSinceField,
+        duration: Duration,
+        scope: Scope,
+    ): Op<Boolean> {
+        val bound = Instant.now().minus(duration)
+        if (bound < MIN_CEL_INSTANT || bound > MAX_CEL_INSTANT) {
+            throw Refusals.unsupported(
+                "timeSince() compared with a duration whose solved bound leaves CEL's timestamp " +
+                    "range (years 1 to 9999)",
+            )
+        }
+        val target = scope.scalar(since.variable)
+        return compare(
+            NormalizedBinary.mirror(operator),
+            target.expression,
+            TimestampBinder.bind(bound, target.column, since.variable),
+        )
+    }
+
+    /**
+     * `column.upperAscii() ==/!= "text"`. CEL's `upperAscii()` folds only the 26 ASCII letters,
+     * while SQL `UPPER` is Unicode-aware (`é` becomes `É`), so the fold is spelled as 26 nested
+     * case-sensitive `REPLACE`s, each mapping one lowercase ASCII letter to its capital, compared
+     * under the column's own collation. A NULL column is UNKNOWN, since `upperAscii()` of a missing
+     * attribute or of null raises, and a number or boolean column has no overload. A non-string
+     * constant is CEL's mixed-type equality: FALSE under `==`, TRUE under `!=`, UNKNOWN for a NULL
+     * column. An ordering is refused: it would compare under the collation, not by code point as
+     * CEL does.
+     */
+    private fun upperAsciiComparison(
+        operator: String,
+        field: Resolved.UpperAsciiField,
+        constant: Any?,
+        scope: Scope,
+    ): Op<Boolean> {
+        val target = scope.scalar(field.variable)
+        if (translation.leaf.lacksTextOverload(target)) return TriLogic.unknown()
+        translation.leaf.requireText("upperAscii()", target)
+        if (operator != "eq" && operator != "ne") {
+            throw Refusals.unsupported(
+                "upperAscii() is translated only under == and !=: an ordering over the folded text " +
+                    "would compare under the store's collation, not by code point as CEL does",
+            )
+        }
+        if (constant !is String) {
+            val never = TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
+            return if (operator == "eq") never else TriLogic.not(never)
+        }
+        var folded: Expression<*> = target.expression
+        for (lower in 'a'..'z') {
+            folded = AsciiReplace(folded, lower.toString(), lower.uppercaseChar().toString())
+        }
+        return compare(operator, folded, stringParam(constant))
     }
 
     /**
@@ -872,6 +1116,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         private const val EXACT_DOUBLE_INTEGER: Double = 9.007199254740992E15
 
         val COMPARISON_OPERATORS: Set<String> = setOf("eq", "ne", "lt", "le", "gt", "ge")
+        private val ORDERING_OPERATORS: Set<String> = setOf("lt", "le", "gt", "ge")
         val STRING_MATCH_OPERATORS: Set<String> = setOf("contains", "startsWith", "endsWith")
 
         /** CEL's supported instant range: year 1 through year 9999, inclusive. */
