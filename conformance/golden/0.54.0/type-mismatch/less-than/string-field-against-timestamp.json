@@ -1,0 +1,75 @@
+{
+  "allowed": [
+    "a3",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/less-than/string-field-against-timestamp",
+  "intent": "A string attribute compared directly with a timestamp, without a timestamp() conversion, beside an equality that discriminates.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "__NOW_MINUS_24H__"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/less-than/string-field-against-timestamp",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.createdAt < now() - duration(\"24h\") || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL has no string < timestamp overload, so check() errors on that disjunct; a translator that casts the column to a timestamp over-grants the past-dated rows."
+}

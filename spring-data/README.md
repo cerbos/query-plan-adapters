@@ -348,7 +348,16 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 | `lt` / `gt` / `le` / `ge` | `cb.lessThan` / `greaterThan` / `lessThanOrEqualTo` / `greaterThanOrEqualTo` |
 | Value-first (`5 < R.attr.x`) | Normalized field-first with the operator mirrored |
 | `in` | `path.in(values)`, or correlated `EXISTS` over a relation |
-| `R.attr.x in list.map(t, body)` over a literal list | `size(list.filter(t, R.attr.x == body)) > 0` as a strict count, UNKNOWN when any element's body errors, as CEL's `map` does |
+| `R.attr.x in coll.map(t, body)` over a literal list or a relation | `size(coll.filter(t, R.attr.x == body)) > 0` as a strict count, UNKNOWN when any element's body errors, as CEL's `map` does |
+| `R.attr.x in coll.filter(t, p)` over a literal list or a relation | `size(coll.filter(t, p ? R.attr.x == t : false)) > 0`, UNKNOWN when any element's `p` errors, as CEL's `filter` does |
+| `R.attr.x in a + b`, each part a literal list or a direct relation | `R.attr.x in a OR R.attr.x in b`; neither part can error, so the disjunction errors only where the needle does |
+| `R.attr.x in [R.attr.a, "c"]`, `[R.attr.a, R.attr.b].exists(s, ...)` / `.all(s, ...)` | Each element folded into an `OR` (`AND` for `all`) of per-element predicates, under a guard that is UNKNOWN when any computed element errors: CEL builds the list first, so one erroring element denies even where another decides the result |
+| `rel.exists(i, v, body)` / `rel.all(i, v, body)` over a relation with `withPositionField` | The one-variable macro over `v`, with `i` read from the position field |
+| `rel.isSubset([...])` | `rel.all(e, e in [...])` |
+| `intersect(a, b) == []` / `!= []` | `!hasIntersection(a, b)` / `hasIntersection(a, b)` |
+| `{"k": v, ...}[R.attr.x] == c` / `!=` | `R.attr.x IN (keys whose value equals c)` when `R.attr.x` is one of the map's keys, UNKNOWN otherwise, as CEL errors on a missing key |
+| `R.attr.m["k"]` with `R.attr.m.k` mapped | Read as the mapped attribute `R.attr.m.k` |
+| Ternary inside list or string `+` (`["a"] + (c ? ["b"] : []) == [...]`), and under `in` (`"r" in (c ? ["r"] : [])`) | Each branch substituted in place and walked again, so constants fold |
 | `in(R.attr.x, R.attr.coll)` | Correlated `EXISTS` comparing member to scalar; a `NULL` scalar matches a `NULL` member (CEL `null in [..., null]` is true) |
 | `contains` / `startsWith` / `endsWith` | `cb.like` with `\`, `%`, `_`, `[` escaped; also the constant-receiver form (`"a,b".contains(R.attr.x)`) |
 | Field-to-field `contains` / `startsWith` / `endsWith` | `LIKE` over a `REPLACE`-escaped column pattern with a NULL-needle guard |
@@ -371,6 +380,10 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 | `eq(field, add(c1, c2))`, `eq(value, add(c, field))` | Constant fold; solve for `field` (string prefix/suffix strip, numeric subtract), unsolvable → `1=0` / `1=1` |
 | String `+` in comparisons (`R.attr.a == "p:" + R.id`, `R.attr.a + R.attr.b == "x"`) | `cb.concat` when a string constant or `String` column sits under the `add`, any other leaf refused; UNKNOWN when a concatenated column is NULL |
 | `timestamp(R.attr.t) <op> now() - duration(...)` | Temporal comparison for all six operators, both operand orders; column must be `Instant` or `OffsetDateTime`; NULL excluded (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
+| `timestamp(R.attr.t) + duration(d) <op> timestamp(c)` (also `- duration`) | Solved for the column, `t <op> c - d`; UNKNOWN where `t + d` would leave CEL's year 1 to 9999 range, as CEL errors |
+| `timestamp(R.attr.t).timeSince() <op> duration(d)` | `t <op'> now - d`, with `now` read when the Specification builds its predicate (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
+| `R.attr.x <op> timestamp(c)`, `<op>` an ordering | UNKNOWN: an attribute is never a CEL timestamp, so the ordering has no overload |
+| `R.attr.s.upperAscii() <op> "text"` | 26 nested `REPLACE`s of each lowercase ASCII letter by its capital, compared under the column's collation; SQL `UPPER` would fold non-ASCII letters too (`é`), which CEL's `upperAscii()` leaves alone |
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
 | A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
@@ -395,14 +408,16 @@ consulted.
 | Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
-| Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in arithmetic | no | Only `timestamp(field)` vs constant is translated |
+| Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in other arithmetic | no | Only `timestamp(field)`, shifted by a constant duration or under `timeSince()`, vs a constant is translated |
+| `size(intersect(...))` | `size(intersect(R.attr.tags, ["a", "b"])) == 1` | no | Cerbos's `intersect()` keeps duplicates from whichever list is shorter, so its size depends on the two lengths row by row; compare it with `[]` instead |
+| Two-variable macros other than `exists`/`all` over a relation with `withPositionField` | `R.attr.obj.exists(k, v, ...)` | no | The index needs a declared position; over a map the first variable is a key, and a JPA row has no key set (`UnmappedAttributeException` when the map is not a mapped attribute) |
 | `eq`/`ne` between a relation without a declared position field and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; declare `withPositionField(...)`, or use `in`/`hasIntersection` |
 | `except` in boolean position, compared with a list of two or more elements, or removing a computed list of two or more | `R.attr.tags.except(["a"]) == ["b", "c"]` | no | A list difference in SQL has no order to compare; `size(...)` of one and equality with at most one element translate |
 
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 41 seed rows on
+plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 42 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -410,21 +425,23 @@ total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 76 / 80 |
-| adversarial | 269 / 308 |
+| core | 29 / 29 |
+| extended | 93 / 97 |
+| adversarial | 295 / 338 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 36 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
-extended cases and three adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
+extended cases and five adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
 `null/has/composed-with-comparison`, where the planner folds `has()` to true by design while
 `check()` receives the omitted attribute as absent (see
 [Gotchas](#has-does-not-filter-a-null-column--write--null-instead)),
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
 planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
-overload and denies every row (write `1.0`), and
+overload and denies every row (write `1.0`),
+`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`,
+whose `in` over a scalar the plan and `check()` answer differently, and
 three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
 `not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
 DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
@@ -521,6 +538,9 @@ The planner folds `now() - duration("24h")` into a constant instant when it plan
 
 - The cutoff is frozen per plan. Re-plan per request if the window must track the clock; don't cache
   the Specification.
+- `timeSince()` is the exception: the planner leaves it unevaluated, so the adapter reads the JVM
+  clock each time the Specification builds its predicate and compares the column with
+  `now - duration`.
 - The column must be `java.time.Instant` or `java.time.OffsetDateTime` (Hibernate 6 stores both
   UTC-normalized). `LocalDateTime`, `java.util.Date` and `String` throw; if you know their zone
   semantics, register an `OperatorFunction` for the comparison operator (it receives an `Instant`).
@@ -665,6 +685,17 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- New translations, where these used to throw: membership in a `map()` over a relation, in a
+  `filter()`, in a list concatenation (`R.attr.x in R.attr.tags + ["a"]`) and in a list holding
+  attributes (`R.attr.x in [R.attr.a]`); `exists`/`all` over a list holding attributes, and their
+  two-variable form over a relation with `withPositionField`; `isSubset` of a relation;
+  `intersect(...) == []`; a map literal indexed by an attribute; `R.attr.m["k"]` where `m.k` is
+  mapped; a ternary inside list or string `+`, or as the collection of `in`; `upperAscii()`;
+  `timestamp() ± duration()` and `timeSince()` compared with a constant.
+- An attribute ordered against a `timestamp()` constant (`R.attr.s < now() - duration("1h")`) is
+  now UNKNOWN, as the missing CEL overload makes it, instead of throwing.
+- A two-variable lambda (`list.filter(i, v, ...)`) that does not translate now throws
+  `UnsupportedPlanShapeException` instead of `MalformedPlanException`: the planner emits it.
 - **Breaking:** a comparison against a division by a `Double` column or an expression that may be
   zero (`R.attr.a / R.attr.d > 0.0`) now throws `UnsupportedPlanShapeException` when the sign of
   that zero decides the result, instead of assuming a positive zero and over-granting rows holding

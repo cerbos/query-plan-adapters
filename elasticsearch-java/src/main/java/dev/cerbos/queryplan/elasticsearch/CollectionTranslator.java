@@ -14,6 +14,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,6 +67,20 @@ final class CollectionTranslator {
 
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
+
+        if (lambdaOperand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "lambda".equals(lambdaOperand.getExpression().getOperator())
+                && lambdaOperand.getExpression().getOperandsCount() == 3) {
+            throw unsupported(operator + " with two variables binds each element's index, or each"
+                    + " map key, beside its value: Elasticsearch indexes an array as an unordered"
+                    + " set of terms and holds no term for an object's keys, so no Query DSL query"
+                    + " reads either");
+        }
+
+        if (listOperand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "list".equals(listOperand.getExpression().getOperator())) {
+            return handleListExpression(operator, listOperand.getExpression(), lambdaOperand, polarity);
+        }
 
         // The planner unrolls a macro over a literal list of up to 10 elements itself; a longer
         // list arrives as the collection operand, so fold it here the same way.
@@ -189,10 +204,57 @@ final class CollectionTranslator {
         Expression.Builder combined = Expression.newBuilder()
                 .setOperator("exists".equals(operator) ? "or" : "and");
         for (Value element : elements) {
-            combined.addOperands(substituteLambdaVariable(lambda.body(), lambda.variable(), element));
+            combined.addOperands(substituteLambdaVariable(
+                    lambda.body(), lambda.variable(), Operand.newBuilder().setValue(element).build()));
         }
         Expression folded = combined.build();
         return walker.expression(folded, root, polarity);
+    }
+
+    /**
+     * Folds {@code exists}/{@code all} over a list built in the policy, such as
+     * {@code [R.attr.a, R.attr.b].exists(s, s == "x")}, the same way as a literal list. CEL builds
+     * the list before the macro runs, so a missing element attribute errors the whole expression:
+     * every field element must exist, under either polarity.
+     */
+    private Map<String, Object> handleListExpression(
+            String operator, Expression list, Operand lambdaOperand, Polarity polarity) {
+        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+            throw malformed(operator + " second operand must be a lambda expression");
+        }
+        Lambda lambda = Lambda.of(lambdaOperand.getExpression(),
+                operator + " over a list expression supports single-variable lambdas only");
+        List<Map<String, Object>> clauses = new ArrayList<>();
+        Expression.Builder combined = Expression.newBuilder()
+                .setOperator("exists".equals(operator) ? "or" : "and");
+        for (Operand element : list.getOperandsList()) {
+            switch (element.getNodeCase()) {
+                case VALUE -> { }
+                case VARIABLE -> {
+                    String field = root.field(element.getVariable());
+                    if (!options.scalarTypes().containsKey(field)
+                            || options.explicitNullAttributes().contains(element.getVariable())) {
+                        throw unsupported(operator + " over a list holding the attribute '"
+                                + element.getVariable() + "' folds only when the field is a"
+                                + " declared scalar whose null is a missing field: Elasticsearch"
+                                + " indexes no JSON null, and a collection or object element has no"
+                                + " single-term comparison");
+                    }
+                    clauses.add(Queries.exists(field));
+                }
+                default -> throw unsupported(operator + " over a list holding a computed element"
+                        + " cannot be folded: the Query DSL compares a field against a literal, and"
+                        + " computing the element needs a script");
+            }
+            combined.addOperands(substituteLambdaVariable(lambda.body(), lambda.variable(), element));
+        }
+        if (list.getOperandsCount() == 0) {
+            boolean holds = "all".equals(operator);
+            return holds == polarity.holds() ? Queries.matchAll() : Queries.matchNone();
+        }
+        clauses.add(walker.expression(combined.build(), root, polarity));
+        return clauses.size() == 1 ? clauses.get(0) : Queries.boolMust(clauses);
     }
 
     /**
@@ -213,22 +275,27 @@ final class CollectionTranslator {
     }
 
     /**
-     * Replaces the lambda variable with {@code element} in a lambda body. {@code v.a.b} reads a
-     * field of the element and throws if it is missing. A nested lambda that rebinds the same
+     * Replaces the lambda variable with {@code element}, a literal or a field, in a lambda body.
+     * Over a literal, {@code v.a.b} reads a field of the element and throws if it is missing; over
+     * a field, it names the sub-field. A nested lambda that rebinds the same
      * name shadows it, so only that macro's collection operand is substituted.
      */
     private static Operand substituteLambdaVariable(
-            Operand operand, String varName, Value element) {
+            Operand operand, String varName, Operand element) {
         switch (operand.getNodeCase()) {
             case VARIABLE -> {
                 String name = operand.getVariable();
                 if (name.equals(varName)) {
-                    return Operand.newBuilder().setValue(element).build();
+                    return element;
                 }
                 if (name.startsWith(varName + ".")) {
+                    String path = name.substring(varName.length() + 1);
+                    if (element.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                        return Operand.newBuilder()
+                                .setVariable(element.getVariable() + "." + path).build();
+                    }
                     return Operand.newBuilder()
-                            .setValue(resolveElementPath(
-                                    name, name.substring(varName.length() + 1), element))
+                            .setValue(resolveElementPath(name, path, element.getValue()))
                             .build();
                 }
                 return operand;
@@ -302,6 +369,47 @@ final class CollectionTranslator {
         }
 
         return leaf.applyResolvedLeaf("hasIntersection", operands, root, Polarity.TRUE);
+    }
+
+    /** {@code "x" in c.map(t, t.f)}: a literal needle tested against a {@code map()} projection. */
+    static boolean isMembershipInMapProjection(List<Operand> operands) {
+        return operands.size() == 2
+                && operands.get(0).getNodeCase() == Operand.NodeCase.VALUE
+                && isMapProjection(operands.get(1))
+                && operands.get(1).getExpression().getOperandsCount() == 2
+                && operands.get(1).getExpression().getOperands(0).getNodeCase()
+                        == Operand.NodeCase.VARIABLE;
+    }
+
+    /**
+     * {@code "x" in c.map(t, t.f)} is {@code hasIntersection(c.map(t, t.f), ["x"])}: both hold
+     * when one element's projection equals the needle, and both error when an element lacks the
+     * projected field. The negated form is refused for the same missing-versus-empty reason.
+     */
+    Map<String, Object> translateMapProjectionMembership(List<Operand> operands, Polarity polarity) {
+        if (!polarity.holds()) {
+            throw unsupported("Negated membership in a map() projection cannot distinguish a missing"
+                    + " collection from an empty collection in Elasticsearch");
+        }
+        Expression map = operands.get(1).getExpression();
+        String esField = root.field(map.getOperands(0).getVariable());
+        Operand lambda = map.getOperands(1);
+        boolean plainProjection = lambda.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && lambda.getExpression().getOperandsCount() == 2
+                && lambda.getExpression().getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE
+                && lambda.getExpression().getOperands(1).getNodeCase() == Operand.NodeCase.VARIABLE
+                && lambda.getExpression().getOperands(0).getVariable()
+                        .startsWith(lambda.getExpression().getOperands(1).getVariable() + ".");
+        if (!options.nestedPaths().contains(esField) || !plainProjection) {
+            throw unsupported("Membership in a map() projection reduces to a nested query only when"
+                    + " the collection is a nested path and each element projects one of its"
+                    + " fields; any other projection is computed per element, which the Query DSL"
+                    + " cannot do without scripts");
+        }
+        Value needle = Value.newBuilder().setListValue(
+                com.google.protobuf.ListValue.newBuilder().addValues(operands.get(0).getValue())).build();
+        return handleMapHasIntersection(
+                operands.get(1).getExpression(), Operand.newBuilder().setValue(needle).build());
     }
 
     /** Whether the field map names a sub-field of {@code esField}, so it is an object in the index. */

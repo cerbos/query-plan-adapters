@@ -364,14 +364,15 @@ describe(`conformance (${STORE_NAME})`, () => {
       `${tag} %s`,
       async (_id, golden) => {
         const entry = ledgerEntry(golden, tag);
+        const queryPlan = await planOf(golden);
         if (entry?.status === "unsupported") {
           expect(() =>
-            queryPlanToPrisma({ queryPlan: planOf(golden), mapper: MAPPER, model: MODEL })
+            queryPlanToPrisma({ queryPlan, mapper: MAPPER, model: MODEL })
           ).toThrow(UnsupportedQueryPlanError);
           return;
         }
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.
-        const ids = await selectAllowed(planOf(golden));
+        const ids = await selectAllowed(queryPlan);
         const allowed = [...golden.allowed].sort();
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(allowed);

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -191,6 +192,9 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 	case "hasIntersection":
 		return b.hasIntersection(n, m, negated)
 
+	case "isSubset":
+		return b.isSubset(n, m, negated)
+
 	case "matches":
 		return nil, fmt.Errorf(
 			"unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL " +
@@ -240,6 +244,23 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		)
 	}
 
+	// SQL has no list operand, so a ternary yielding a list is lifted above the comparison, and an
+	// emptiness test of a set function becomes the predicate it is equivalent to.
+	if lifted, ok := liftListTernary(n); ok {
+		return b.ternaryPredicate(lifted, m, negated)
+	}
+	if rewritten, ok := emptyListComparison(n); ok {
+		return b.predicate(rewritten, m, negated)
+	}
+	if cmpOp, ok := comparisonOps[n.operator]; ok {
+		if out, ok, err := b.mapLiteralLookup(cmpOp, n, m); err != nil || ok {
+			if err != nil {
+				return nil, err
+			}
+			return negate(out, negated), nil
+		}
+	}
+
 	left, right := n.operands[0], n.operands[1]
 	operator := n.operator
 	cmpOp, comparison := comparisonOps[operator]
@@ -256,6 +277,13 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	// which would otherwise move the collection out of the operand position CEL puts it in and
 	// leave the relation unrecognised (`null in R.attr.tagNames`).
 	if operator == "in" {
+		if parts, ok := concatenatedHaystack(m, right); ok {
+			disjuncts := make([]*node, 0, len(parts))
+			for _, part := range parts {
+				disjuncts = append(disjuncts, &node{kind: nodeExpression, operator: "in", operands: []*node{left, part}})
+			}
+			return b.predicate(&node{kind: nodeExpression, operator: "or", operands: disjuncts}, m, negated)
+		}
 		if rel, parent, ok := relationFor(m, right); ok {
 			return b.membershipOverRelation(left, rel, parent, m, negated)
 		}
@@ -273,6 +301,15 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	if left.isValue() && right.isVariable() && (comparison || operator == "in") {
 		left, right = right, left
 		cmpOp = cmpOp.Mirror()
+	}
+
+	if comparison {
+		if out, ok, err := b.bareTemporalAgainstTimestamp(cmpOp, left, right, m); err != nil || ok {
+			if err != nil {
+				return nil, err
+			}
+			return negate(out, negated), nil
+		}
 	}
 
 	if comparison && omittedNullOperand(cmpOp, left, right, m) {
@@ -297,9 +334,16 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	var out Expr
-	if comparison {
+	deferred, inDeferred := rv.(deferredCollection)
+	list, inList := rv.(listValue)
+	switch {
+	case comparison:
 		out, err = compare(cmpOp, lv, rv)
-	} else {
+	case operator == "in" && inDeferred:
+		out, err = b.membershipInDeferred(lv, deferred)
+	case operator == "in" && inList:
+		out, err = membershipInList(lv, list)
+	default:
 		out, err = binaryOperators[operator](lv, rv)
 	}
 	if err != nil {
@@ -353,9 +397,14 @@ func (b *builder) membershipOverRelation(needle *node, rel *Relation, parent str
 //
 // It keeps the element's declared type so a literal of another type is answered as CEL answers
 // it — `"2" in [2]` is false — rather than handed to an engine that coerces '2' onto a numeric
-// column, or 'true' onto a boolean one.
+// column, or 'true' onto a boolean one. It keeps the element's null convention too: a NULL element
+// declared explicit is a real null member, which CEL's `"x" == null` answers false, not UNKNOWN —
+// otherwise `!("x" in list)` would drop a row whose list holds a null and no "x".
 func elementColumn(alias string, field *Entry) Column {
-	return Column{Qualifier: alias, Name: field.Column, Type: field.ValueType}
+	return Column{
+		Qualifier: alias, Name: field.Column, Type: field.ValueType,
+		ExplicitNull: field.NullConvention == NullConventionExplicit,
+	}
 }
 
 // elementMatches builds the per-element predicate for membership against a stored collection.
@@ -561,8 +610,26 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 		return b.foldValueListMacro(n.operator, collection.value, lambda, m, negated)
 	}
 
+	if collection.isExpr() && collection.operator == "list" {
+		v, err := b.listConstructor(collection, m)
+		if err != nil {
+			return nil, err
+		}
+		if l, computed := v.(listValue); computed {
+			return b.foldListConstructorMacro(n.operator, l, lambda, m, negated)
+		}
+		return b.foldValueListMacro(n.operator, v, lambda, m, negated)
+	}
+
 	if !collection.isVariable() {
 		return nil, fmt.Errorf("'%s' requires a collection attribute or a literal list", n.operator)
+	}
+
+	// The lambda is checked before the collection is resolved: a two-variable lambda is refused
+	// whatever the collection maps to.
+	body, variable, err := lambdaParts(lambda, n.operator)
+	if err != nil {
+		return nil, err
 	}
 
 	entry, err := requireRelation(m, collection.variable)
@@ -570,11 +637,6 @@ func (b *builder) collectionMacro(n *node, m Mapper, negated bool) (Expr, error)
 		return nil, err
 	}
 	rel := entry.Relation
-
-	body, variable, err := lambdaParts(lambda, n.operator)
-	if err != nil {
-		return nil, err
-	}
 
 	alias := b.newAlias()
 	inner := scopedMapper{variable: variable, relation: rel, alias: alias, parent: m}
@@ -748,6 +810,11 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 // per-element expression lets the consuming operator build exactly the subquery it needs.
 type deferredCollection struct {
 	body Expr
+	// element is the relation's element column, nil when the relation maps none: what a filter()
+	// keeps, and so what membership in its result compares.
+	element Expr
+	rel     *Relation
+	parent  string
 	scope
 	isMap bool
 }
@@ -796,8 +863,13 @@ func (b *builder) deferredCollection(n *node, m Mapper) (value, error) {
 		return nil, err
 	}
 
+	var element Expr
+	if rel.Field != nil {
+		element = elementColumn(alias, rel.Field)
+	}
 	return deferredCollection{
 		scope: b.relationScope(rel, alias, entry.Qualifier), body: bodyExpr, isMap: n.operator == "map",
+		element: element, rel: rel, parent: entry.Qualifier,
 	}, nil
 }
 
@@ -835,6 +907,45 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 
 	case "size":
 		return b.size(n, m)
+
+	case "index":
+		return b.index(n, m)
+
+	case "list":
+		return b.listConstructor(n, m)
+
+	case "struct":
+		return structLiteral(n)
+
+	case "upperAscii":
+		if len(n.operands) != unaryOperands {
+			return nil, fmt.Errorf("'upperAscii' requires exactly one operand")
+		}
+		v, err := b.value(n.operands[0], m)
+		if err != nil {
+			return nil, err
+		}
+		return upperASCII(v)
+
+	case "duration":
+		if len(n.operands) != unaryOperands {
+			return nil, fmt.Errorf("'duration' requires exactly one operand")
+		}
+		v, err := b.value(n.operands[0], m)
+		if err != nil {
+			return nil, err
+		}
+		return parseDuration(v)
+
+	case "timeSince":
+		if len(n.operands) != unaryOperands {
+			return nil, fmt.Errorf("'timeSince' requires exactly one operand")
+		}
+		v, err := b.value(n.operands[0], m)
+		if err != nil {
+			return nil, err
+		}
+		return timeSince(n.operands[0], v)
 
 	case "filter", "map":
 		// Neither produces a boolean, so both are held back until the operator that consumes
@@ -950,6 +1061,28 @@ func isSymbolic(v value) bool {
 	}
 }
 
+// index lowers `m["key"]` for a map attribute m and a constant string key, as the member
+// `m.key` the mapper declares: CEL reads a map member the same way through either spelling, and
+// a missing key is the same error. Every other index is refused: a list position has no lowering,
+// since a related table has no row order, and a map literal indexed by an attribute has no SQL
+// lookup.
+func (b *builder) index(n *node, m Mapper) (value, error) {
+	if len(n.operands) != binaryOperands {
+		return nil, fmt.Errorf("'index' requires exactly two operands")
+	}
+	container, key := n.operands[0], n.operands[1]
+	if container.isVariable() && key.isValue() {
+		if k, ok := key.value.(string); ok && k != "" && !strings.Contains(k, ".") {
+			return b.resolveVariable(container.variable+"."+k, m)
+		}
+	}
+	return nil, errors.New(
+		"index() translates only a constant string key into a map attribute whose member is " +
+			"mapped: a list position has no lowering, since a related table has no row order, " +
+			"and a map literal indexed by an attribute has no SQL lookup",
+	)
+}
+
 // size lowers size() over either a relation (a correlated count) or a string column.
 func (b *builder) size(n *node, m Mapper) (value, error) {
 	if len(n.operands) != unaryOperands {
@@ -1020,6 +1153,15 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 	}
 
 	op := arithmeticOps[n.operator]
+
+	if out, ok, err := temporalArith(op, lv, rv); ok {
+		// An attribute read bare is the RFC 3339 string CEL holds, and string has no `+` or `-`
+		// overload with a duration, so only timestamp() over it may be shifted.
+		if err == nil && (n.operands[0].isVariable() || n.operands[1].isVariable()) {
+			return nil, errors.New("a duration shifts only a timestamp() value, not a bare attribute, which CEL holds as a string")
+		}
+		return out, err
+	}
 
 	// CEL overloads `+` on strings, and it reaches the wire as the same `add` node as numeric
 	// addition. Which overload it is has to be read off the operands, because the plan never
@@ -1150,6 +1292,13 @@ func isUntypedColumn(v value) bool {
 // translation reads, the same reason there is no CastInt (#319). A corpus action that reaches it is
 // what should introduce it.
 func addValue(lv, rv value) (value, error) {
+	// Concatenating two list literals folds to one literal.
+	if l, ok := lv.([]any); ok {
+		if r, ok := rv.([]any); ok {
+			return append(slices.Clone(l), r...), nil
+		}
+	}
+
 	if isStringOperand(lv) || isStringOperand(rv) {
 		l, err := asExpr(lv)
 		if err != nil {
@@ -1348,7 +1497,10 @@ func lambdaParts(operand *node, operator string) (*node, string, error) {
 		return nil, "", fmt.Errorf("second operand of %s must be a lambda expression", operator)
 	}
 	if len(operand.operands) != binaryOperands {
-		return nil, "", fmt.Errorf("%s supports single-variable lambdas only", operator)
+		return nil, "", fmt.Errorf(
+			"%s supports single-variable lambdas only: the two-variable form binds a list index or a "+
+				"map key, and a related table has neither a row order nor keys", operator,
+		)
 	}
 	body, variable := operand.operands[0], operand.operands[1]
 	if !variable.isVariable() || variable.variable == "" {

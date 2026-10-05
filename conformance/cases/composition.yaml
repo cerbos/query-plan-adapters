@@ -94,6 +94,13 @@ cases:
     condition:
       match:
         expr: R.attr.aNumber < 5
+- id: 'composition/derived-role/runtime-effective-derived-roles'
+  tier: extended
+  intent: 'A condition reading runtime.effectiveDerivedRoles while the derived role is conditional, so the planner inlines a ternary yielding role lists.'
+  trap: 'The membership target is a conditional list; an adapter must express the ternary or throw, and the derived role''s aBool condition must survive.'
+  condition:
+    match:
+      expr: '"compose_flagged" in runtime.effectiveDerivedRoles && R.attr.aNumber < 10'
 - id: 'composition/derived-role/unconditional-deny-for-derived-role'
   tier: extended
   intent: 'An ALLOW on aNumber < 12 plus an unconditional DENY for a derived role conditioned on aBool == true, planned as and(not(eq), lt).'
@@ -106,6 +113,19 @@ cases:
   - effect: EFFECT_DENY
     derivedRoles:
     - compose_flagged
+- id: 'composition/multiple-allow/constant-false-and-conditional'
+  tier: extended
+  intent: 'An ALLOW whose condition folds to false plus a conditional ALLOW, planned as the conditional rule alone.'
+  trap: 'Keeping the folded branch as true grants every row.'
+  rules:
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: P.attr.zero == 1
+  - effect: EFFECT_ALLOW
+    condition:
+      match:
+        expr: 'R.attr.aNumber > 30'
 - id: 'composition/multiple-allow/none-of-condition'
   tier: extended
   intent: 'An ALLOW on aNumber > 20 plus an ALLOW whose condition is match.none (aBool == true), planned as or(gt, not(eq)).'

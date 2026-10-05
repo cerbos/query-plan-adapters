@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/equals/map-member-by-string-key",
+  "intent": "A map attribute indexed by a string key (obj[\"inner\"] == \"one\"), as a map indexed by a principal attribute plans once the key folds.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.obj"
+                },
+                {
+                  "value": "inner"
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": "one"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/equals/map-member-by-string-key",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.obj[\"inner\"] == \"one\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The index is a map key, not a list position; resolving it to a column other than obj.inner, or matching rows whose obj has no inner key (j1), is wrong."
+}

@@ -217,14 +217,18 @@ Evaluated in JavaScript (`postFilter`, needs `allowPostFilter: true`):
 | Category | Operators | Behaviour |
 | --- | --- | --- |
 | String | `contains`, `startsWith`, `endsWith` | `includes` / `startsWith` / `endsWith` |
-| Collection | `hasIntersection`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation |
-| Quantifiers | `exists`, `exists_one`, `all` | CEL lambda semantics, including empty collections, missing members and literal lists |
+| Collection | `hasIntersection`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation; `index` on a map looks a key up, and an absent key is an error |
+| Set operations | `except`, `intersect`, `isSubset` | Cerbos's list semantics: `except` and `intersect` keep duplicates, `intersect` takes its elements from the shorter list |
+| Literals | `list`, `struct` / `set-field`, list `+` | A list or map literal holding expressions; an element's error is the literal's, and `+` concatenates two lists in order |
+| Quantifiers | `exists`, `exists_one`, `all` | CEL lambda semantics, including empty collections, missing members and literal lists; the two-variable forms bind (index, element) over a list and (key, value) over a map |
 | Higher-order | `filter`, `map`, `lambda` | Inside larger expressions only — see below |
 | Arithmetic | `add`, `sub`, `mult`, `div`, `mod` | Numeric, with CEL error propagation |
-| Conversion | `string`, `double`, `int`, `timestamp` | CEL source types and strict formats only; JS coercions like `Number(true)`, `Number("")`, `String(null)` fail closed. RFC 3339 timestamps |
+| Conversion | `string`, `double`, `int`, `timestamp`, `duration` | CEL source types and strict formats only; JS coercions like `Number(true)`, `Number("")`, `String(null)` fail closed. RFC 3339 timestamps; durations in Go's `time.ParseDuration` syntax |
+| String functions | `upperAscii` | Folds the ASCII letters only, as CEL does |
+| Time | `timeSince`, timestamp ± duration, duration ± duration, timestamp - timestamp | `timeSince` reads the clock when `postFilter` runs; an overflow or a timestamp outside 0001–9999 is an error |
 | Conditional | `if` | Evaluates only the selected branch |
 | Pattern | `matches` | Constant patterns in the safe RE2/JS subset: literals, `^`/`$` anchors, a trailing `.*` when there is no `$`. Dynamic patterns and anything else throw (avoids JS-only regex semantics and ReDoS) |
-| Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Delimiter-aware comparison |
+| Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Segment-wise, as Cerbos's hierarchy type compares: the delimiter only splits the input, and `hierarchy([...])` takes the segments from a list |
 
 ### What throws
 
@@ -249,8 +253,10 @@ It is raised, before any filter exists, when:
 
 - the plan kind is unknown (`Invalid query plan.`);
 - a conditional plan lacks the `operator`/`operands` structure (`Invalid Cerbos expression structure`);
-- an operator is not implemented (`Unsupported operator: <name>`) — including the `list`, `struct`,
-  `set-field` and `except` forms without a lowering;
+- an operator is not implemented (`Unsupported operator: <name>`);
+- a map literal (`struct`) has an entry that is not a `set-field` with a constant string key, or a
+  `set-field` appears outside one;
+- a lambda is malformed, or `filter()`/`map()` declares two variables;
 - `filter()`/`map()` sits in a boolean position;
 - a `matches` pattern is outside the supported subset;
 - a constant zero divisor whose sign JSON discards, or a division used as another division's
@@ -265,17 +271,17 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 41 seed documents. Passed cases on the current PDP, 0.55.0, where the
+function over the corpus's 42 seed documents. Passed cases on the current PDP, 0.55.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 67 / 80 |
-| adversarial | 275 / 308 |
+| core | 29 / 29 |
+| extended | 88 / 97 |
+| adversarial | 312 / 338 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there are seven, four extended and three
+them, because the plan and `check()` disagree. On 0.55.0 there are nine, four extended and five
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
@@ -283,7 +289,10 @@ receives the omission as absent and denies the document; use `R.attr.x != null` 
 `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
 `not(...)` of it denies j2, which lacks `aNumber`, while `check()` receives `aNumber` as absent and
 treats the erroring DENY as not matching
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And
+`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
+the planner rewrites an `in` over a scalar container to `eq`, which `check()` has no overload for
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
 documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -296,17 +305,17 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 349 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.55.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
-| Convex's filter engine, alone | 18 |
-| the adapter's `postFilter`, alone | 325 |
+| Convex's filter engine, alone | 19 |
+| the adapter's `postFilter`, alone | 404 |
 | folded to an unconditional plan before any filter exists | 6 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
-Convex's own comparison semantics only decide the 18, which include the null comparisons against
+Convex's own comparison semantics only decide the 19, which include the null comparisons against
 the explicit-null `owner` field (`q.eq(field, null)` against a stored null) and its orderings
 against a string, where a stored null must not sort below `"m"`.
 The corpus's three most-read scalars, `aBool`, `aString` and `aNumber`, can each be absent (one
@@ -336,6 +345,13 @@ document — so most do not apply.
 ## Behaviour changes
 
 See also [CHANGELOG.md](CHANGELOG.md).
+
+- `postFilter` now evaluates shapes it used to refuse: the `list` and `struct` literals, `except`,
+  `intersect`, `isSubset`, list `+`, `upperAscii`, `duration`, `timeSince` with timestamp and
+  duration arithmetic, the two-variable `exists`/`all`/`exists_one`, and `index` on a map. Plans
+  that threw `UnsupportedQueryPlanError` now translate. `hierarchy` values now compare by segment,
+  as Cerbos does, so `hierarchy("a:b", ":")` equals `hierarchy("a.b")`, where the old
+  delimiter-aware comparison held them unequal.
 
 - **Breaking:** under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
   declare `nullable` is treated as `nullable: true`, and `postFilter` reads a stored `null` as a

@@ -1,0 +1,79 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/map/literal-in-mapped-upper-ascii",
+  "intent": "A literal tested for membership in a resource string list mapped through upperAscii() (\"PUBLIC\" in tagNames.map(t, t.upperAscii())).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "PUBLIC"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "upperAscii"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "map"
+            }
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/map/literal-in-mapped-upper-ascii",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"PUBLIC\" in R.attr.tagNames.map(t, t.upperAscii())"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dropping upperAscii denies everything; c1 \"Public\" must match, and a NULL element errors and denies."
+}

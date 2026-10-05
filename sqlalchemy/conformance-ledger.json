@@ -125,6 +125,10 @@
       "status": "unsupported",
       "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
     },
+    "collection/except/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
+    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
@@ -149,6 +153,18 @@
       "status": "unsupported",
       "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
     },
+    "collection/exists/relative-window-in-body": {
+      "status": "unsupported",
+      "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds each element's index (or a map's key) beside the element; an operator override receives only the collection's rows, which have no position, and a map attribute's keys have no SQL enumeration, so the translator refuses it."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds each element's index (or a map's key) beside the element; an operator override receives only the collection's rows, which have no position, and a map attribute's keys have no SQL enumeration, so the translator refuses it."
+    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; the override's deferred value reaches `and` unconsumed and is refused rather than dropped."
@@ -168,6 +184,18 @@
     "collection/index/negative-position": {
       "status": "unsupported",
       "reason": "The declared JSON storage accepts only a constant non-negative 32-bit integer position; CEL raises for this one, so it must not be coerced into a valid element read."
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "Two-list intersect has no operator override or built-in SQL lowering: Cerbos keeps the shorter list's duplicates, a multiset intersection that a SQL membership test over the relation's rows cannot count."
+    },
+    "collection/intersect/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "Two-list intersect has no SQL lowering, and the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/is-subset/resource-list-of-literal-list": {
+      "status": "unsupported",
+      "reason": "isSubset() has no default SQL lowering, and the relation-mapped tagNames reaches it outside any operator override."
     },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
@@ -239,11 +267,11 @@
     },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
-      "reason": "The planner emits list/struct constructors for the principal's objects, and the literal-list fold accepts only literal value lists."
+      "reason": "The planner emits list/struct constructors for the principal's objects; a constructed list is folded only over scalar attribute and expression elements, and a struct element is a map, which SQL has no value to hold."
     },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
-      "reason": "The planner emits list/struct constructors for the principal's objects, and the literal-list fold accepts only literal value lists."
+      "reason": "The planner emits list/struct constructors for the principal's objects; a constructed list is folded only over scalar attribute and expression elements, and a struct element is a map, which SQL has no value to hold."
     },
     "principal/filter/size-of-filtered-long-list": {
       "status": "unsupported",
@@ -349,6 +377,10 @@
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
     },
+    "timestamp/greater-than/time-since-duration": {
+      "status": "unsupported",
+      "reason": "timeSince() measures from the PDP's evaluation clock, and the plan carries no instant for it (the planner folds now() but leaves timeSince() unevaluated), so the database's clock would move the boundary."
+    },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
@@ -380,6 +412,10 @@
     "type-mismatch/in/string-field-in-list-of-lists": {
       "status": "unsupported",
       "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
+    },
+    "type-mismatch/less-than/string-field-against-timestamp": {
+      "status": "unsupported",
+      "reason": "A bare temporal attribute is the RFC 3339 string the application sent, which a stored SQL timestamp no longer spells, and CEL has no string-against-timestamp overload; the translator refuses a DateTime column read outside timestamp() rather than compare it as an instant."
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",

@@ -131,6 +131,105 @@ def substitute_lambda_variable(
     )
 
 
+def substitute_lambda_operand(
+    operand: Operand, variable_name: str, element: Operand
+) -> Operand:
+    """Substitute an element that is itself a plan operand, e.g. an attribute in ``[a, b]``.
+
+    A field read off the element (``s.name``) follows the attribute path when the element
+    is a variable, and is refused otherwise: a constructed element has no fields to read.
+    """
+    if isinstance(element, Value):
+        return substitute_lambda_variable(operand, variable_name, element.value)
+    if isinstance(operand, Value):
+        return operand
+    if isinstance(operand, Variable):
+        name = operand.name
+        if name == variable_name:
+            return element
+        if name.startswith(f"{variable_name}."):
+            if isinstance(element, Variable):
+                return Variable(element.name + name[len(variable_name) :])
+            raise UnsupportedPlanError(
+                f'Cannot resolve "{name}": the list element is an expression, not an '
+                "attribute, so it has no field to read"
+            )
+        return operand
+
+    operator = operand.operator
+    children = operand.operands
+    if operator in LAMBDA_BINDING_OPERATORS and len(children) == 2:
+        nested_collection, nested_lambda = children
+        if (
+            isinstance(nested_lambda, Expr)
+            and nested_lambda.operator == "lambda"
+            and len(nested_lambda.operands) == 2
+            and isinstance(nested_lambda.operands[1], Variable)
+            and nested_lambda.operands[1].name == variable_name
+        ):
+            return Expr(
+                operator,
+                (
+                    substitute_lambda_operand(
+                        nested_collection, variable_name, element
+                    ),
+                    nested_lambda,
+                ),
+            )
+
+    return Expr(
+        operator,
+        tuple(
+            substitute_lambda_operand(child, variable_name, element)
+            for child in children
+        ),
+    )
+
+
+def assert_single_variable_lambdas(operand: Operand) -> None:
+    """Refuse a two-variable comprehension, e.g. ``list.exists(i, v, ...)``.
+
+    Its first variable is the element's index, or a map's key. An operator override
+    receives only the collection's rows, and a relation's rows have no position, nor a
+    map attribute's keys a SQL enumeration, so neither can be bound.
+    """
+    if not isinstance(operand, Expr):
+        return
+    if operand.operator == "lambda" and len(operand.operands) != 2:
+        raise UnsupportedPlanError(
+            "A two-variable comprehension binds each element's index (or a map's key) "
+            "beside the element, and neither has a SQL lowering: an operator override "
+            "receives the collection's rows, which have no position, and a map "
+            "attribute's keys cannot be enumerated"
+        )
+    for child in operand.operands:
+        assert_single_variable_lambdas(child)
+
+
+def resolve_map_member_paths(operand: Operand, attributes: frozenset[str]) -> Operand:
+    """Rewrite ``m["key"]`` to the attribute path ``m.key`` when that path is mapped.
+
+    CEL reads a map member the same way through either spelling, and both raise for a
+    missing key. A key holding a ``.`` is left alone, since its path would be ambiguous.
+    """
+    if not isinstance(operand, Expr):
+        return operand
+    children = tuple(
+        resolve_map_member_paths(child, attributes) for child in operand.operands
+    )
+    if operand.operator == "index" and len(children) == 2:
+        container, key = children
+        if (
+            isinstance(container, Variable)
+            and isinstance(key, Value)
+            and isinstance(key.value, str)
+            and "." not in key.value
+            and f"{container.name}.{key.value}" in attributes
+        ):
+            return Variable(f"{container.name}.{key.value}")
+    return Expr(operand.operator, children)
+
+
 def declared_collection_name(expression: Expr, declared: frozenset[str]) -> str | None:
     """The attribute ``expression`` reads through its declared storage, if it reads one."""
     if expression.operator not in COLLECTION_STORAGE_OPERATORS:

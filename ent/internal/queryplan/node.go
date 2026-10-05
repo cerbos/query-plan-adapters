@@ -11,8 +11,10 @@
 //
 // The files split along the translation's stages: node.go decodes the protobuf plan, translate.go
 // walks it (operator dispatch, macros, relations, NULL-operand rejection), values.go folds and
-// lowers operands (comparisons, arithmetic, LIKE, timestamps, hierarchies), scalar_types.go
-// handles caller-declared column types, and mapper.go resolves plan variables onto storage.
+// lowers operands (comparisons, arithmetic, LIKE, timestamps, hierarchies), lists.go rewrites the
+// list-valued shapes SQL has no operand for, temporal.go folds durations into timestamp
+// comparisons, scalar_types.go handles caller-declared column types, and mapper.go resolves plan
+// variables onto storage.
 //
 // The semantics encoded here (value-first operand inversion, LIKE metacharacter escaping,
 // three-valued logic under negation) are proved against ../../../conformance/, the shared

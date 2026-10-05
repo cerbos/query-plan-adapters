@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "i8",
+    "i9",
+    "j1",
+    "j3",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "composition/multiple-allow/constant-false-and-conditional",
+  "intent": "An ALLOW whose condition folds to false plus a conditional ALLOW, planned as the conditional rule alone.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 30
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/multiple-allow/constant-false-and-conditional",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.zero == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    },
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber > 30"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Keeping the folded branch as true grants every row."
+}

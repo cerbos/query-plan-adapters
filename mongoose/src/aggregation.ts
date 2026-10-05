@@ -2,7 +2,11 @@ import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MongooseFilter } from "./index";
-import { relationOfReference, resolveFieldReference } from "./mapper";
+import {
+  declaredScalarType,
+  relationOfReference,
+  resolveFieldReference,
+} from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
 import { normalizeRe2PatternForMongo } from "./regex";
 import {
@@ -30,7 +34,7 @@ export type ComparisonOperator = keyof typeof COMPARISON_OPERATORS;
 /**
  * Builds an aggregation-pipeline expression value for use inside `$expr`.
  * - Variables become field paths prefixed with `$` (e.g. `"$aNumber"`).
- * - Values become themselves.
+ * - Values become themselves, wrapped in `$literal` where the pipeline would evaluate them.
  * - Nested expressions recurse.
  */
 export const buildAggregationExpression = (
@@ -42,12 +46,147 @@ export const buildAggregationExpression = (
     return "$" + path.join(".");
   }
   if (isValue(operand)) {
-    return operand.value;
+    return buildConstant(operand.value);
   }
   if (isExpression(operand)) {
     return buildAggregationExpressionFromExpression(operand, mapper);
   }
   throw new UnsupportedQueryPlanError("Invalid operand structure");
+};
+
+/**
+ * A plan constant as an aggregation expression. The pipeline reads a string starting with `$` as
+ * a field path (`"$$…"` as a variable), and evaluates a list or map element by element, so such a
+ * constant — `R.attr.aString + "g" == "$aOptionalString"` — would compare against the document's
+ * own field (cerbos/query-plan-adapters#575). `$literal` makes it a constant. Every other constant
+ * stays bare: Mongoose's `$expr` caster sends each literal operand of `$add`, `$subtract` and the
+ * like through its Number cast, which rejects a `{ $literal: 1 }`.
+ */
+const buildConstant = (value: unknown): unknown =>
+  isEvaluatedByPipeline(value) ? { $literal: value } : value;
+
+const isEvaluatedByPipeline = (value: unknown): boolean => {
+  if (typeof value === "string") return value.startsWith("$");
+  if (Array.isArray(value)) return value.some(isEvaluatedByPipeline);
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).some(
+      ([key, element]) => key.startsWith("$") || isEvaluatedByPipeline(element),
+    );
+  }
+  return false;
+};
+
+type CelScalarType = "number" | "string" | "boolean" | "timestamp" | "duration";
+
+/**
+ * The CEL type `operand` evaluates to, as far as the plan settles it: a constant's own, a field's
+ * declared `valueType`, and the result type of an operator that has one. `mixed` is a ternary
+ * whose branches have different types; undefined is a type the plan does not carry.
+ */
+const celScalarType = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): CelScalarType | "mixed" | undefined => {
+  if (isValue(operand)) {
+    const type = typeof operand.value;
+    return type === "number" || type === "string" || type === "boolean"
+      ? type
+      : undefined;
+  }
+  if (isVariable(operand)) {
+    return declaredScalarType(operand.name, mapper);
+  }
+  if (!isExpression(operand)) {
+    return undefined;
+  }
+  switch (operand.operator) {
+    // CEL has no mixed-type `+`, so one operand of a known type types the sum. The one
+    // heterogeneous overload is timestamp + duration, which is a timestamp.
+    case "add": {
+      const types = operand.operands.map((op) => celScalarType(op, mapper));
+      if (types.includes("mixed")) return "mixed";
+      if (types.includes("timestamp")) return "timestamp";
+      if (types.length > 0 && types.every((type) => type === "duration")) {
+        return "duration";
+      }
+      return types.find((type) => type === "string" || type === "number");
+    }
+    // timestamp - timestamp is a duration, timestamp - duration a timestamp.
+    case "sub": {
+      const [left, right] = operand.operands.map((op) => celScalarType(op, mapper));
+      if (left === "timestamp") {
+        return right === "timestamp"
+          ? "duration"
+          : right === "duration"
+            ? "timestamp"
+            : undefined;
+      }
+      return left === "duration" ? "duration" : "number";
+    }
+    case "timestamp":
+      return "timestamp";
+    case "duration":
+    case "timeSince":
+      return "duration";
+    case "upperAscii":
+      return "string";
+    case "mult":
+    case "div":
+    case "mod":
+    case "size":
+      return "number";
+    case "string":
+      return "string";
+    case "if": {
+      const [, thenType, elseType] = operand.operands.map((op) =>
+        celScalarType(op, mapper),
+      );
+      if (thenType === "mixed" || elseType === "mixed") return "mixed";
+      if (thenType === undefined || elseType === undefined) return undefined;
+      return thenType === elseType ? thenType : "mixed";
+    }
+    case "eq":
+    case "ne":
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge":
+    case "and":
+    case "or":
+    case "not":
+    case "matches":
+    case "contains":
+    case "startsWith":
+    case "endsWith":
+      return "boolean";
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Whether CEL can never order `left` against `right`: both types are known and differ. CEL has no
+ * ordering between types, so the comparison is an error that denies under either polarity, where
+ * `$lt` falls back to BSON's cross-type order (every number sorts below every string) and answers
+ * true or false for every document. A type the plan does not carry is not checked, as on the
+ * field-to-constant path. A ternary whose branches differ orders against one branch and raises on
+ * the other, per document, which one `$expr` cannot say, so it is refused.
+ */
+export const isUnorderable = (
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  mapper: Mapper,
+): boolean => {
+  const leftType = celScalarType(left, mapper);
+  const rightType = celScalarType(right, mapper);
+  if (leftType === "mixed" || rightType === "mixed") {
+    throw new UnsupportedQueryPlanError(
+      "Cannot order against a conditional whose branches have different types: CEL raises an " +
+        "error on the documents that take the branch of the other type, and $expr would order " +
+        "them by BSON type instead",
+    );
+  }
+  return leftType !== undefined && rightType !== undefined && leftType !== rightType;
 };
 
 type AggregationOperator = {
@@ -169,13 +308,16 @@ const celDoubleToString = (double: unknown): unknown => ({
 const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
   eq: variadic(COMPARISON_OPERATORS.eq),
   ne: variadic(COMPARISON_OPERATORS.ne),
-  lt: variadic(COMPARISON_OPERATORS.lt),
-  le: variadic(COMPARISON_OPERATORS.le),
-  gt: variadic(COMPARISON_OPERATORS.gt),
-  ge: variadic(COMPARISON_OPERATORS.ge),
+  lt: ordering(COMPARISON_OPERATORS.lt),
+  le: ordering(COMPARISON_OPERATORS.le),
+  gt: ordering(COMPARISON_OPERATORS.gt),
+  ge: ordering(COMPARISON_OPERATORS.ge),
   and: variadic("$and"),
   or: variadic("$or"),
-  sub: variadic("$subtract"),
+  sub: {
+    build: variadic("$subtract").build,
+    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
+  },
   mult: variadic("$multiply"),
   // CEL's `%` is integer-only: it has no double overload, and every number a resource attribute
   // carries reaches CEL as a double, so `R.attr.x % 2` is a no-such-overload error that denies
@@ -227,6 +369,20 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       if (operands.some((op) => isValue(op) && typeof op.value === "string")) {
         return { $concat: built() };
       }
+      // CEL also overloads `+` on lists, which `$add` rejects as loudly as strings. A list
+      // operand is spelled out in the plan — a list constant, a ternary between two, or a
+      // nested concatenation — and `$concatArrays` keeps CEL's order and duplicates. A list
+      // read from a field is not: a relation projects through its elements, so it is refused.
+      if (operands.some(isListOperand)) {
+        if (!operands.every(isListOperand)) {
+          throw new UnsupportedQueryPlanError(
+            "List concatenation is translated only between list constants and ternaries over " +
+              "them: a list read from the document is a projection over a relation's " +
+              "elements, not an ordered list value $concatArrays can extend",
+          );
+        }
+        return { $concatArrays: built() };
+      }
       // Only two bare field paths reveal nothing. A nested expression keeps the numeric reading
       // it has always had — the divisions and ternaries that reach here are numeric by
       // construction, and narrowing them would refuse shapes this adapter already answers.
@@ -237,8 +393,17 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
             "$add nor $concat can be chosen",
         );
       }
+      // A nested concatenation (`a + "_" + b` is `(a + "_") + b`) carries its string type up
+      // even though no operand of THIS `+` is a constant.
+      if (
+        operands.some((op) => isExpression(op) && celScalarType(op, mapper) === "string")
+      ) {
+        return { $concat: built() };
+      }
       return { $add: built() };
     },
+    // timestamp + duration leaves CEL's timestamp range as an error, where `$add` carries on.
+    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
   },
   div: {
     build: ({ operands }, mapper) => {
@@ -522,7 +687,152 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         ? notNullGuard(expression, mapper)
         : undefined,
   },
+  // A duration is carried as its length in milliseconds, the unit `$add` and `$subtract` apply to
+  // a date and the one the difference of two dates is in. The planner normalises the literal to
+  // seconds ("86400s"); one finer than a millisecond has no exact spelling and is refused, as a
+  // sub-millisecond timestamp literal is.
+  duration: {
+    build: ({ operands }) => {
+      const operand = operands[0];
+      if (!operand || !isValue(operand) || typeof operand.value !== "string") {
+        throw new UnsupportedQueryPlanError(
+          "duration() is translated only over a constant string",
+        );
+      }
+      return parseDurationMilliseconds(operand.value);
+    },
+  },
+  // `timeSince` is relative to the clock of whoever evaluates it, so it is read from the server's
+  // own `$$NOW` at query time, in milliseconds like every duration here.
+  timeSince: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("timeSince requires an operand");
+      }
+      if (celScalarType(operand, mapper) !== "timestamp") {
+        throw new UnsupportedQueryPlanError(
+          "timeSince() is translated only over a timestamp() conversion",
+        );
+      }
+      return {
+        $subtract: ["$$NOW", buildAggregationExpression(operand, mapper)],
+      };
+    },
+  },
+  // CEL's upperAscii folds a-z only and leaves every other character as it is, which is what
+  // MongoDB's `$toUpper` does too. `$toUpper` turns a null into "" and a number into its digits,
+  // where CEL has no overload, so anything but a string is null here and guarded out.
+  upperAscii: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("upperAscii requires an operand");
+      }
+      const input = buildAggregationExpression(operand, mapper);
+      return {
+        $cond: [{ $eq: [{ $type: input }, "string"] }, { $toUpper: input }, null],
+      };
+    },
+    guard: notNullGuard,
+  },
 };
+
+/**
+ * Whether `operand` is a list the plan spells out: a list constant, a ternary whose branches are
+ * both such lists, or a concatenation of them.
+ */
+const isListOperand = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) {
+    return Array.isArray(operand.value);
+  }
+  if (!isExpression(operand)) {
+    return false;
+  }
+  if (operand.operator === "if") {
+    const [, thenOperand, elseOperand] = operand.operands;
+    return (
+      thenOperand !== undefined &&
+      elseOperand !== undefined &&
+      isListOperand(thenOperand) &&
+      isListOperand(elseOperand)
+    );
+  }
+  return (
+    operand.operator === "add" &&
+    operand.operands.length > 0 &&
+    operand.operands.every(isListOperand)
+  );
+};
+
+/** A timestamp computed by `+` or `-` outside CEL's range is an error to CEL, not a date. */
+function timestampRangeGuard(
+  expression: PlanExpression,
+  mapper: Mapper,
+): MongooseFilter | undefined {
+  if (celScalarType(expression, mapper) !== "timestamp") {
+    return undefined;
+  }
+  const computed = buildAggregationExpressionFromExpression(expression, mapper);
+  return {
+    $expr: {
+      $and: [
+        { $gte: [computed, MIN_CEL_TIMESTAMP] },
+        { $lte: [computed, MAX_CEL_TIMESTAMP] },
+      ],
+    },
+  };
+}
+
+const DURATION_UNIT_NANOSECONDS: Record<string, bigint> = {
+  ns: 1n,
+  us: 1_000n,
+  "µs": 1_000n,
+  "μs": 1_000n,
+  ms: 1_000_000n,
+  s: 1_000_000_000n,
+  m: 60_000_000_000n,
+  h: 3_600_000_000_000n,
+};
+
+/**
+ * A Go duration string ("86400s", "1h30m", "-1.5s", "250ms") as a whole number of milliseconds.
+ * Refused when it is not millisecond-exact, or not a duration at all.
+ */
+function parseDurationMilliseconds(literal: string): number {
+  const refuse = (): never => {
+    throw new UnsupportedQueryPlanError(
+      `duration ${JSON.stringify(literal)} is not a millisecond-exact duration: a BSON date ` +
+        "carries milliseconds, so a finer duration has no exact spelling",
+    );
+  };
+  const match = /^([+-]?)((?:\d+(?:\.\d*)?|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+$/.exec(literal);
+  if (!match) {
+    return refuse();
+  }
+  const sign = match[1] === "-" ? -1n : 1n;
+  let nanoseconds = 0n;
+  for (const [, digits, unit] of literal
+    .slice(match[1]!.length)
+    .matchAll(/(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)/g)) {
+    const scale = DURATION_UNIT_NANOSECONDS[unit!]!;
+    const [whole = "", fraction = ""] = digits!.split(".");
+    const fractionScale = 10n ** BigInt(fraction.length);
+    const fractional = BigInt(fraction || "0") * scale;
+    if (fractional % fractionScale !== 0n) {
+      return refuse();
+    }
+    nanoseconds += BigInt(whole || "0") * scale + fractional / fractionScale;
+  }
+  if (nanoseconds % 1_000_000n !== 0n) {
+    return refuse();
+  }
+  const milliseconds = sign * (nanoseconds / 1_000_000n);
+  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return refuse();
+  }
+  return Number(milliseconds);
+}
 
 const aggregationOperator = (
   operator: string,
@@ -569,6 +879,27 @@ function variadic(mongoOperator: string): AggregationOperator {
         buildAggregationExpression(op, mapper),
       ),
     }),
+  };
+}
+
+/**
+ * An ordering nested inside `$expr`, where it cannot answer CEL's error: an operand of each type
+ * would leave a ternary's condition, or a `$not`, to BSON's cross-type order.
+ */
+function ordering(mongoOperator: string): AggregationOperator {
+  const { build } = variadic(mongoOperator);
+  return {
+    build: (expression, mapper) => {
+      const built = build(expression, mapper);
+      const [left, right] = expression.operands;
+      if (left && right && isUnorderable(left, right, mapper)) {
+        throw new UnsupportedQueryPlanError(
+          "Cannot order operands of different types inside an aggregation expression: CEL " +
+            "raises an error there, and $expr would order them by BSON type instead",
+        );
+      }
+      return built;
+    },
   };
 }
 

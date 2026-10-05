@@ -8,7 +8,8 @@
 #   2. the PDP pin: pdp-versions.json is well-formed, and every restatement of it agrees;
 #   3. service image pinning (repo:tag@sha256, one digest per tag);
 #   4. the ent and pgx vendored translator trees are byte-identical;
-#   5. the dataset's to-one relation resolves.
+#   5. the dataset's to-one relation resolves;
+#   6. each adapter README's "Conformance contract" table matches its ledger on the current PDP.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -177,6 +178,33 @@ done < <(jq -r '
     elif $parent != null and ($ids | index($parent)) == null then "\(.id): parentSeedId \($parent | tojson) is not a seed id"
     else empty end
 ' seeds.json)
+
+# ---- 6. README contract tables. ---------------------------------------------------------------
+# Each adapter's README carries `| <tier> | <passed> / <total> |` for the current PDP. The numbers
+# follow from the goldens and the ledger: total is every case in the tier, passed drops the cases
+# the ledger names for this tag and the planner divergences every harness skips. A table left
+# behind by a corpus or ledger change is caught here instead of by a reviewer's arithmetic.
+find "golden/${current_tag}" -name '*.json' -exec cat {} + \
+  | jq -s --arg tag "${current_tag}" \
+    'map({id, tier, skipped: ((.plannerDivergence.pdp // []) | index($tag) != null)})' \
+    >"${TMP}/tiers.json"
+for adapter in "${roster[@]}"; do
+  readme="${REPO_ROOT}/${adapter}/README.md"
+  rows="$(grep -E '^\| (core|extended|adversarial) \| [0-9]+ / [0-9]+ \|' "${readme}" 2>/dev/null || true)"
+  if [[ "$(printf '%s' "${rows}" | grep -c '^|')" -ne 3 ]]; then
+    fail "${adapter}/README.md needs exactly one '| <tier> | <passed> / <total> |' row per tier (core, extended, adversarial)"
+    continue
+  fi
+  while IFS=$'\t' read -r tier want; do
+    have="$(printf '%s\n' "${rows}" | sed -n "s/^| ${tier} | \([0-9]* \/ [0-9]*\) |.*/\1/p")"
+    [[ "${have}" == "${want}" ]] \
+      || fail "${adapter}/README.md: ${tier} reads '${have}', the goldens and ledger give '${want}' on ${current_tag}"
+  done < <(jq -r --arg tag "${current_tag}" --slurpfile tiers "${TMP}/tiers.json" '
+    (.cases | with_entries(select(.value.pdp == null or (.value.pdp | index($tag) != null))) | keys) as $ledgered
+    | $tiers[0] | group_by(.tier)[]
+    | "\(.[0].tier)\t\(map(select((.skipped | not) and (.id as $id | $ledgered | index($id) == null))) | length) / \(length)"
+  ' "${REPO_ROOT}/${adapter}/conformance-ledger.json")
+done
 
 if [[ "${failures}" -gt 0 ]]; then
   echo "Corpus invalid: ${failures} problem(s)" >&2

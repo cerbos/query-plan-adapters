@@ -176,7 +176,8 @@ attribute you send must be the millisecond Prisma returns for it. An instant bet
 milliseconds — what the planner folds `now()` into — is compared against the next millisecond,
 which is exact for a whole-millisecond attribute: `a < T` and `a <= T` become `< ceil(T)`, `a > T`
 and `a >= T` become `>= ceil(T)`, and `a == T` never holds. Anywhere else (a list, arithmetic, two
-literals) such an instant still throws.
+literals) such an instant still throws. `timeSince(timestamp(x))` against a duration reads the
+clock when `queryPlanToPrisma` runs, so translate the plan for the query you are about to run.
 
 ## NULL attribute representation
 
@@ -327,13 +328,14 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Logical | `and`, `or`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in` |
 | Null checks | `== null` / `!= null` → `{ equals: null }` / `{ not: null }` (the planner has no existence operator) |
-| Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles |
+| Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles; `x.upperAscii() == "LIT"` becomes an `in` over the spellings with each ASCII capital in either case (a store's `UPPER` would also fold non-ASCII letters) |
 | Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
-| Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation |
-| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of two string columns against a literal as one arm per split of it |
+| Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation; `isSubset` and the emptiness of the `except`/`intersect` list functions against a literal list; `"x" in c.map(...)` and `"x" in c.filter(...)` (an element whose projection or predicate errors denies the row); `exists`/`all` over a list built from columns (`[R.attr.a, R.attr.b].exists(...)`, a missing element denying the row) |
+| Maps | `R.attr.m["key"]` reads like `R.attr.m.key`; `{"k1": v1, ...}[R.attr.x] == v` becomes an `in` over the keys whose value matches (a missing key denies under both polarities) |
+| Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of string columns and literals against a literal as one arm per split of it; list concatenation around a ternary over literal lists (`["a"] + (R.attr.b ? ["c"] : []) == [...]`) |
 | Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row |
 | Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)` (an empty delimiter splits per code point, so a descendant is `startsWith(path + "_")`), `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
-| Timestamps | `timestamp()` over `valueType: "dateTime"` columns |
+| Timestamps | `timestamp()` over `valueType: "dateTime"` columns; `timestamp(x) ± duration(d)` against a timestamp literal, solved for the column (a shift past CEL's 0001–9999 range denies); `timeSince(timestamp(x))` against a duration, as `x` against `now - d` read when the plan is translated. A bare `dateTime` attribute is the RFC 3339 string, which never orders against a timestamp: that comparison settles as CEL's error |
 
 Outer-column references inside a macro (`R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`)
 are hoisted or case-split so each filter lands on its own model.
@@ -366,14 +368,17 @@ A mapper misconfiguration, such as a field-to-field comparison without the `mode
   prefixes (`ancestorOf`, `descendentOf`, `overlaps`) throw on `%`, `_`, `\` or `[` (SQL Server
   opens a character class on `[` even with `ESCAPE`). If you match on backslashes, compare the
   whole value with `==`.
-- **Counting.** `exists_one` over a relation, and `size()` of a mapped relation other than empty, non-empty or (on
-  a chain) reachable.
+- **Counting.** `exists_one` over a relation, `size()` of a mapped relation other than empty, non-empty or (on
+  a chain) reachable, and `size()` of a derived list such as `intersect()`.
+- **Two-variable comprehensions** (`list.exists(i, v, ...)`, `map.all(k, v, ...)`): a relation
+  filter tests related rows, which carry no position, and enumerates no map keys.
 - **Cross-model column comparisons**, including membership between an outer scalar column and a
-  related collection column.
+  related collection column, and membership in a list built from expressions over columns
+  (`R.attr.a in ["x", R.attr.b + "y"]`, `R.attr.a in R.attr.list + ["x"]`).
 - **Unsolvable arithmetic.** Arithmetic on both sides, and division *by* a column other than
   `x / x`.
-- **Other malformed shapes:** the two-list `except` function compared to a list or counted past
-  emptiness, non-scalar comparison literals, empty `and`/`or`, and
+- **Other malformed shapes:** the two-list `except` function compared to a non-empty list or
+  counted past emptiness, non-scalar comparison literals, empty `and`/`or`, and
   negating a sub-condition that translates to `{}` (Prisma reads `{ NOT: {} }` as true).
 
 #### Operators Prisma `where` cannot express
@@ -387,7 +392,7 @@ or a same-model field reference, never an expression. These shapes throw:
 | `a % b` | `arithmetic/modulo/*` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
 | Arithmetic on both sides | `arithmetic/add/on-both-sides` | Field references compare two columns as they are; no operand is an expression. |
 | `matches` beyond the LIKE-decidable subset | `regex/matches/lucene-reserved-characters-in-class` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)), and no provider here has RE2. A repeated class (`[ab]+`), a negated class, a wildcard in a pattern not anchored at both ends, or a literal `%`/`_`/`\` inside a LIKE has no exact LIKE spelling. |
-| List index `l[i]` | `collection/index/*` | List filters test membership, emptiness or equality, never a position. |
+| List index `l[i]` | `collection/index/*` (every positional case) | List filters test membership, emptiness or equality, never a position. |
 | `int()`, `double()` or `timestamp()` parsing a string; an `int()` threshold | `cast/int/malformed-string`, `cast/double/malformed-string`, `cast/timestamp/malformed-string` and their negations | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). `int()` of a number is translated only as `==` (or `!=` under a `!`): a threshold would need CEL's ±2^63 overflow bound spelled out, which an `Int` column rejects. The invertible casts are solved for the column instead — `string()` of a boolean or number, `int(d) == k` as the interval truncation maps to `k`, and `string()`/`double()` of a column already of that type. |
 | `size()` of `filter()` over a relation | `size/equals/filtered-collection` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
@@ -407,27 +412,30 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
-queries over the corpus's 41 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+queries over the corpus's 42 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
 `utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
 out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 60 / 80 |
-| adversarial | 232 / 308 |
+| core | 29 / 29 |
+| extended | 75 / 97 |
+| adversarial | 250 / 338 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is four extended cases and three adversarial cases.
+never as passed. On 0.55.0 that is four extended cases and five adversarial cases.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
 receives the omission as absent and denies the row; use `R.attr.x != null` instead of
-`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And the three `composition/*` cases with a conditional `DENY` rule: the deny
+`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
 condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while
 `checkResource` receives `aNumber` as absent and treats the erroring deny as not matching
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And
+`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
+CEL has no `in` overload for a scalar container, so `check()` errors on that disjunct, while the
+planner rewrites the `in` to an equality.
 
 **Providers.** `ADAPTER_TEST_MYSQL_COLLATION` replays the MySQL legs under another collation, which
 is how the figures in the collation section were measured, and `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
@@ -483,6 +491,24 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Fix:** a string function (`startsWith`, `endsWith`, `contains`) over the element
+  of a projected list (`R.attr.tagNames.all(t, t.startsWith("p"))`) is an error on a null element,
+  and `all()` and a negated `exists()` now deny the row holding one; they used to admit it.
+- **Fix:** `!hasIntersection(R.attr.tags.map(t, t.name), [...])` denies a row holding an element
+  whose projected column is NULL: building the mapped list is an error, which CEL denies under
+  the negation too. The null-projection guard used to be ANDed onto the positive filter, so the
+  negation turned the error into a match and admitted those rows.
+- **Fix, breaking:** a two-variable comprehension (`R.attr.list.exists(i, v, ...)`) throws
+  `UnsupportedQueryPlanError`. It used to drop the second variable and emit a filter over the
+  first, which returned the wrong rows.
+- **Fix:** a bare `dateTime` column ordered against a timestamp (`R.attr.createdAt < now()`) settles
+  as the no-overload error CEL raises on the RFC 3339 string; it used to be compared as a timestamp,
+  admitting rows the PDP denies.
+- New translations: `m["key"]` member reads, lookups into a map literal, `upperAscii() == "LIT"`,
+  `timeSince()` and `timestamp ± duration` comparisons, `isSubset`, the emptiness of the
+  `except`/`intersect` list functions, membership in `map()`/`filter()` results, a ternary inside
+  a list concatenation or a membership list, `exists`/`all` over a list built from columns, and a
+  concatenation of more than two string terms against a literal.
 - An ordering of a boolean column against a boolean constant (`R.attr.flag < true`) translates:
   CEL orders `false < true`, and Prisma's Boolean filter has only `equals`, so it becomes the bools
   that satisfy it (`< true` is `equals: false`). It used to emit `lt` on a Boolean field, which the
@@ -619,8 +645,8 @@ A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-p
 | `npm run test:adversarial:mysql:v7` / `:v6` | Conformance harness on MySQL | Docker |
 
 `npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. CI runs all six
-store/Prisma combinations. The SQLite legs reset `prisma/dev-adversarial.db` with
-`prisma db push --force-reset`, so point them only at disposable databases.
+store/Prisma combinations. The SQLite legs delete `prisma/dev-adversarial.db` and push the schema
+into a fresh file, so they need no `--force-reset` (which Prisma refuses to run under an AI agent).
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` for both
 pinned PDPs and applies [`conformance-ledger.json`](conformance-ledger.json): a case with no entry

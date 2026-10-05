@@ -46,6 +46,25 @@ import {
 } from "./translate";
 import { UnsupportedQueryPlanError } from "./errors";
 
+/**
+ * Refuses a two-variable comprehension (`list.exists(i, v, ...)`, `map.exists(k, v, ...)`), whose
+ * lambda binds the element's index or key as well as the element. A Prisma relation filter tests
+ * related rows, which carry no position, and enumerates no map keys, so the first variable has
+ * nothing to bind to.
+ */
+export function assertSingleVariableLambda(
+  operator: string,
+  lambda: { operator: string; operands: PlanExpressionOperand[] }
+): void {
+  if (lambda.operator === "lambda" && lambda.operands.length > 2) {
+    throw new UnsupportedQueryPlanError(
+      `${operator} with a two-variable lambda: the first variable binds the element's list ` +
+        "index or map key, and a Prisma relation filter tests related rows, which carry no " +
+        "position, and enumerates no map keys"
+    );
+  }
+}
+
 function newLambdaScope(
   variableName: string,
   relations: RelationConfig[]
@@ -170,6 +189,7 @@ function buildCollectionLambdaParts(
       `Second operand of ${operator} must be a lambda expression`
     );
   }
+  assertSingleVariableLambda(operator, lambda);
 
   const variable = assertDefined(
     lambda.operands[1],
@@ -457,6 +477,7 @@ export function handleMapOperator(
   if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
     throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
+  assertSingleVariableLambda("map", lambda);
 
   const projection = assertDefined(
     lambda.operands[0],
@@ -572,6 +593,7 @@ function handleMapIntersection(
   if (!isOperatorOperand(lambda)) {
     throw new UnsupportedQueryPlanError("Lambda expression must have operands");
   }
+  assertSingleVariableLambda("map", lambda);
 
   const variable = assertDefined(
     lambda.operands[1],

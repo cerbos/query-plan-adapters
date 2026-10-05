@@ -1,36 +1,12 @@
 {
   "adapter": "activerecord",
   "cases": {
-    "arithmetic/add/int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "int() over the integer column beside the double column is refused: CEL has no overload mixing int and double, so the sum is an error that denies every row, where SQL adds the two numbers."
-    },
-    "arithmetic/add/negated-int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Same int-beside-double refusal as arithmetic/add/int-beside-double-field, under negation."
-    },
-    "arithmetic/add/self-division-plus-constant-greater-than": {
-      "reason": "CEL carries a NaN or a signed Infinity out of the division and through the arithmetic composed on top of it; SQL has no value that does, because the NULLIF divide-by-zero guard turns the whole sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so a division nested under further arithmetic fails closed instead of emitting the under-granting filter",
-      "status": "unsupported"
-    },
-    "arithmetic/add/self-division-plus-constant-not-equals": {
-      "reason": "The same nested-division limitation as `arithmetic/add/self-division-plus-constant-greater-than`, and the arm that proves it matters: `NaN != 2.0` is TRUE and the PDP allows the zero row, while `NULL + 1 <> 2` is UNKNOWN and drops it",
-      "status": "unsupported"
-    },
     "arithmetic/divide/field-by-field": {
       "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable",
       "status": "unsupported"
     },
     "arithmetic/divide/nested-division-divisor": {
       "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division.",
-      "status": "unsupported"
-    },
-    "arithmetic/modulo/negated-double-operand": {
-      "reason": "CEL's % has no double overload, and every number in a request attribute is a double, so `aNumber % 2` errors on every row; SQL computes an integer remainder over the integer column instead, and the negation would return most rows. The adapter translates % only over int() results, size() and whole constants, and refuses it over a bare attribute",
-      "status": "unsupported"
-    },
-    "arithmetic/multiply/nan-times-zero-plus-column": {
-      "reason": "The self-division yields NaN on the zero row, and CEL carries it through `* 0.0 + aDouble`; SQL has no NaN, and the NULLIF divide-by-zero guard would turn the sum into NULL. The adapter resolves a non-finite division only where the division IS the comparison operand, so the multiplication refuses its possibly-NaN operand rather than emit a filter",
       "status": "unsupported"
     },
     "cast/double/malformed-string": {
@@ -41,20 +17,12 @@
       "reason": "SQL floating-point casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe.",
       "status": "unsupported"
     },
-    "cast/int/double-truncation-bounds": {
-      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused.",
-      "status": "unsupported"
-    },
     "cast/int/malformed-string": {
       "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused.",
       "status": "unsupported"
     },
     "cast/int/negated-malformed-string": {
       "reason": "SQL numeric casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe.",
-      "status": "unsupported"
-    },
-    "cast/int/negative-fraction": {
-      "reason": "PostgreSQL and MySQL CAST round to nearest where CEL int() truncates toward zero; int() over a double column is refused.",
       "status": "unsupported"
     },
     "cast/int/string-beyond-double-precision": {
@@ -65,10 +33,6 @@
       "status": "unsupported",
       "reason": "string() wraps int() over a string column, which is refused: CEL reads the whole string or errors, but a SQL CAST reads the leading digits and gives a number."
     },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "string() wraps int() over a double column, which is refused: CEL truncates toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number."
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "string() over a ternary of whole-number constants is refused: the plan carries 1000000 and 1000000.0 as the same number, and CEL spells the int \"1000000\" and the double \"1e+06\", so SQL cannot know which text to produce."
@@ -76,14 +40,6 @@
     "cast/string/from-negative-zero-double": {
       "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused",
       "status": "unsupported"
-    },
-    "cast/string/from-ternary-with-int-branch": {
-      "status": "unsupported",
-      "reason": "The int() arm reads a double column, which is refused: CEL truncates toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number."
-    },
-    "cast/string/negated-from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refused int() over a double column as cast/string/from-int-past-exponent-threshold, under negation."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
@@ -97,15 +53,7 @@
       "reason": "The mapper supplies a string column; the adapter only compares instants through native temporal columns, without portable error-preserving parsing of malformed strings.",
       "status": "unsupported"
     },
-    "collection/except/as-whole-condition": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
     "collection/except/equals-list-literal": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
-    "collection/except/size-of-difference": {
       "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
       "status": "unsupported"
     },
@@ -117,12 +65,16 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as collection/exists/map-keys, under negation."
     },
-    "collection/filter/as-conjunct": {
-      "reason": "filter() yields a list, not a boolean; a filtered relation cannot be used as a condition, even as one conjunct.",
+    "collection/exists/relative-window-in-body": {
+      "reason": "The same sub-microsecond now() literal as `timestamp/less-than/relative-window`, reached inside an exists() body. The comparison binds it against the temporal column, where ActiveRecord would truncate it to microseconds, so the refusal is the same one",
       "status": "unsupported"
     },
-    "collection/filter/as-whole-condition": {
-      "reason": "filter() yields a list, not a boolean; a filtered relation cannot be used as a condition.",
+    "collection/exists/two-variable-index-and-element": {
+      "reason": "A two-variable exists() over a list binds each element's position. tagNames is a has_many relation, and its rows have no position for SQL to bind, so the adapter refuses every two-variable comprehension",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "reason": "A two-variable exists() over a map binds each key beside its value. obj is not a stored map but columns of the resource row, and SQL cannot enumerate a row's columns as keys, so the adapter refuses every two-variable comprehension",
       "status": "unsupported"
     },
     "collection/index/first-element-of-boolean-list": {
@@ -169,10 +121,6 @@
       "reason": "Relational associations do not expose CEL positional scalar-list indexing; the adapter refuses index before building a query.",
       "status": "unsupported"
     },
-    "collection/map/as-whole-condition": {
-      "reason": "map() yields a list, not a boolean; a projected relation cannot be used as a condition.",
-      "status": "unsupported"
-    },
     "collection/map/equals-list-literal": {
       "reason": "map() is held as a projected relation until size() or hasIntersection() gives it a scalar meaning as an aggregate or an EXISTS subquery. Comparing the ordered projection itself to a literal list gives it neither, and a correlated subquery has no ordering to compare element-wise against, so the held projection reaches a plain value position and is refused there",
       "status": "unsupported"
@@ -197,118 +145,6 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
     },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "reason": "One side declares the explicit-null convention and the other does not; no single SQL predicate is both definite for the declared NULL and UNKNOWN for the omitted one, so the comparison is refused.",
-      "status": "unsupported"
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
-    "principal/exists/list-of-structs": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
-      "status": "unsupported"
-    },
-    "principal/map/membership-in-mapped-list": {
-      "reason": "Filtering or mapping a principal list produces a list-valued intermediate that this translator does not represent.",
-      "status": "unsupported"
-    },
-    "regex/matches/anchored-prefix": {
-      "reason": "ActiveRecord has no portable RE2 predicate; matches is refused.",
-      "status": "unsupported"
-    },
-    "regex/matches/bounded-repetition": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/brace-without-count-is-literal": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/case-fold-kelvin-and-long-s": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/case-insensitive-flag": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/compared-to-true": {
-      "reason": "ActiveRecord has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
-      "status": "unsupported"
-    },
-    "regex/matches/digit-class": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/dot-excludes-newline": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/dot-plus-excludes-empty-and-newline": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "reason": "ActiveRecord has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
-      "status": "unsupported"
-    },
-    "regex/matches/grouped-alternation": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/literal-brace": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/lookahead-from-principal": {
-      "reason": "ActiveRecord has no portable RE2 predicate; matches is refused even inside equality or disjunction.",
-      "status": "unsupported"
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/negated-invalid-patterns-from-principal": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/posix-character-class": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/posix-class-and-range-bounded": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "reason": "ActiveRecord has no portable RE2 predicate; matches is refused.",
-      "status": "unsupported"
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/unanchored": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/unanchored-quantifiers": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
-    "regex/matches/whitespace-class": {
-      "reason": "The adapter has no RE2-compatible matches operator across its SQL dialects; the walk refuses matches before emitting SQL.",
-      "status": "unsupported"
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required.",
       "status": "unsupported"
@@ -321,68 +157,12 @@
       "reason": "The planner folds `now() - duration(\"24h\")` to a literal with nanosecond precision, and ActiveRecord binds a Time into SQL at microsecond precision at best — SQLite stores a formatted string and MySQL DATETIME(6) truncates. Rounding the literal compares against a different instant than the policy names, in the direction that admits rows just outside the window, so the adapter refuses rather than move the boundary",
       "status": "unsupported"
     },
-    "type-mismatch/contains/number-field-needle": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/contains/number-field-receiver": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/ends-with/number-field-needle": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/ends-with/number-field-receiver": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "reason": "The cross-type probe `aBoolList[0] == 1 || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-boolean-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite holds a boolean column as the integer 1, so a positional lowering that compared the stored `aBoolList` element with the literal would return b4 and c1, whose first element is true, where CEL's heterogeneous equality is false for every row",
       "status": "unsupported"
     },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "reason": "The cross-type probe `aNumberList[0] == true || aNumber == 5`, refused at the `index` in its first disjunct for the same missing element order as `collection/index/first-element-of-number-list`, so nothing is emitted for either disjunct. The refusal is also what keeps the cross-type hazard shut on this store: SQLite reads the literal TRUE as the integer 1, so a positional lowering that compared the stored `aNumberList` element with the literal would return b4, whose first element is 1, where CEL's heterogeneous equality is false for every row",
-      "status": "unsupported"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query.",
-      "status": "unsupported"
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "reason": "SQL scalar membership cannot bind or compare a nested list element; the adapter refuses before constructing the query.",
-      "status": "unsupported"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "reason": "The planner emits a struct through set-field; this translator has no structured literal value and refuses that operator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/size/boolean-field": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/size/number-field": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/starts-with/number-field-needle": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
-      "status": "unsupported"
-    },
-    "type-mismatch/starts-with/number-field-receiver": {
-      "reason": "CEL requires a string for this operation; the mapped ActiveRecord column is numeric or boolean, so SQL coercion would over-grant.",
       "status": "unsupported"
     }
   }

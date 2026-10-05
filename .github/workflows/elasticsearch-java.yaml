@@ -28,7 +28,7 @@ defaults:
 permissions: {}
 
 jobs:
-  # All suites run here, including the conformance harness (CLAUDE.md, "CI").
+  # All suites run here, including the conformance harness (docs/ci.md).
   test:
     permissions:
       contents: read

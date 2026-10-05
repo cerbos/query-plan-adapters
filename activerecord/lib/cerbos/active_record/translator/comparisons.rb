@@ -29,19 +29,46 @@ module Cerbos
             return compare_non_finite(operator, left, right)
           end
 
+          return compare_temporal(operator, left, right) if temporal_value?(left) || temporal_value?(right)
+          if left.is_a?(Values::SetOperation) || right.is_a?(Values::SetOperation)
+            return compare_set_operation(operator, left, right)
+          end
+          # `except(...) == []` and its `!=`: a list is empty exactly when its size is 0.
+          if %w[eq ne].include?(operator) && [left, right].include?([]) && [left, right].any? { |value| filtered_list?(value) }
+            return compare(operator, size(filtered_list?(left) ? left : right), 0)
+          end
+
           reject_collection(operator, left)
           reject_collection(operator, right)
           assert_timestamp_wrapped(left, right)
-          return compare_list_literal(operator, left, right) if left.is_a?(Array) || right.is_a?(Array)
+          if [left, right].any? { |value| value.is_a?(Array) || value.is_a?(Hash) }
+            return compare_list_literal(operator, left, right)
+          end
+
+          # A timestamp against a value CEL does not hold as one: a bare temporal column is the
+          # RFC-3339 string the request carried. No ordering overload exists, so the comparison
+          # is an error; `==` across types is false. Comparing the column as an instant would
+          # grant the rows the error denies.
+          if left.is_a?(::Time) ^ right.is_a?(::Time)
+            other = left.is_a?(::Time) ? right : left
+            if not_a_timestamp?(other)
+              return heterogeneous_comparison(operator, left, right, explicit_null?(left), explicit_null?(right))
+            end
+          end
 
           # Two constants: compute the result here instead of emitting constant SQL.
           if constant?(left) && constant?(right)
             return fold_comparison(operator, left, right)
           end
 
-          # `= NULL` is never true in SQL. Put the null on the right so Arel emits IS [NOT] NULL.
-          if left.nil? && %w[eq ne].include?(operator)
-            return ArelSupport.comparison(operator, right, nil)
+          if (left.nil? || right.nil?) && %w[eq ne].include?(operator)
+            operand = left.nil? ? right : left
+            # CEL never holds a computed value as null, so a NULL one is an error, not a null.
+            if computed_node?(operand)
+              return unknown_if_any([ArelSupport.is_null(operand)], operator == "ne")
+            end
+            # `= NULL` is never true in SQL. Put the null on the right so Arel emits IS [NOT] NULL.
+            return ArelSupport.comparison(operator, right, nil) if left.nil?
           end
 
           if different_scalar_types?(left, right)
@@ -51,14 +78,14 @@ module Cerbos
           ArelSupport.comparison(operator, left, right)
         end
 
-        # A list literal. CEL compares lists element by element, in order, and a list never
-        # equals a scalar. A column is always a scalar here: a relation was refused above.
+        # A list or map literal. CEL compares lists element by element, in order, and maps key by
+        # key; neither ever equals a scalar (heterogeneous equality is FALSE, not an error). A
+        # column is always a scalar here: a relation was refused above.
         def compare_list_literal(operator, left, right)
-          constants = [left, right].grep(Array).flatten.all? { |element| element.nil? || constant?(element) }
-          unless constants && %w[eq ne].include?(operator)
+          literals = [left, right].select { |value| value.is_a?(Array) || value.is_a?(Hash) }
+          unless literals.all? { |literal| deep_constant?(literal) } && %w[eq ne].include?(operator)
             raise UnsupportedOperatorError,
-              "#{operator} with a list literal: only eq and ne against a list of constants " \
-              "are translated"
+              "#{operator} with a list or map literal: only eq and ne against constants are translated"
           end
           return fold_comparison(operator, left, right) unless ArelSupport.arel_node?(left) || ArelSupport.arel_node?(right)
 
@@ -76,14 +103,34 @@ module Cerbos
             "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()"
         end
 
+        # A constant that is not an instant, or a node of a known type that did not go through
+        # `timestamp()`. A computed node of no recorded type (a ternary of instants) is left
+        # alone.
+        def not_a_timestamp?(value)
+          return !value.is_a?(::Time) if constant?(value)
+          return false unless ArelSupport.arel_node?(value)
+
+          !timestamp_operand?(value) && !(column_type(value) || cel_type(value)).nil?
+        end
+
         def scalar_kind(value)
           case value
           when ::String then :string
           when Numeric then :number
           when true, false then :boolean
           when Array then :list
+          when Hash then :map
           else
-            kind_of_column_type(column_type(value))
+            kind_of_column_type(column_type(value)) || kind_of_cel_type(cel_type(value))
+          end
+        end
+
+        # The kind a computed node (arithmetic, a concatenation, a ternary) was recorded with.
+        def kind_of_cel_type(type)
+          case type
+          when :int, :double, :ambiguous_number, :number then :number
+          when :string then :string
+          when :bool then :boolean
           end
         end
 
@@ -148,6 +195,17 @@ module Cerbos
 
         def fold_comparison(operator, left, right)
           left.public_send(RUBY_COMPARISONS.fetch(operator), right)
+        end
+
+        # A node that is no attribute's column (arithmetic, a connective, a quantifier, a CASE).
+        # It is NULL only where CEL errors; see {Translator#null_convention}.
+        # A list a macro or `except()` filtered, whose size {#size} counts.
+        def filtered_list?(value)
+          value.is_a?(Values::FilteredCollection) || value.is_a?(Values::ConstantList)
+        end
+
+        def computed_node?(value)
+          ArelSupport.arel_node?(value) && null_convention(value).nil?
         end
 
         # `CASE WHEN <any of missing> THEN NULL ELSE result END`. A missing attribute is an
