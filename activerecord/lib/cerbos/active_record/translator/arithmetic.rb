@@ -19,6 +19,7 @@ module Cerbos
 
           # Any other arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
+          return cel_type_error if arithmetic_type_error?(operator, left, right)
           return cel_type_error if int_beside_non_int?(operator, left, right)
 
           # SQLite and MySQL treat `'a' + 'b'` as numeric (0), so strings need the dialect's
@@ -106,6 +107,33 @@ module Cerbos
             "#{describe(other)}: only a number, or NaN beside a double, is carried"
         end
 
+        # CEL has no arithmetic over a boolean, and over a string only `+` of two strings. Each
+        # such operand is an error on every row, where SQL concatenates a string with a number,
+        # and SQLite and MySQL read a boolean or a string as a number. An operand of unknown kind
+        # decides nothing.
+        def arithmetic_type_error?(operator, left, right)
+          [left, right].each { |operand| reject_non_scalar_arithmetic(operator, operand) }
+          kinds = [scalar_kind(left), scalar_kind(right)]
+          return true if kinds.include?(:boolean)
+          return false unless kinds.include?(:string)
+
+          operator != "add" || kinds.include?(:number)
+        end
+
+        # List concatenation is valid CEL with no SQL form, and the adapter has no durations: a
+        # temporal column is an RFC-3339 string to CEL unless timestamp() wraps it, and a
+        # timestamp takes only a duration. Each is refused.
+        def reject_non_scalar_arithmetic(operator, operand)
+          if operand.is_a?(Array) || operand.is_a?(Hash)
+            raise UnsupportedOperatorError, "#{operator} over a list or map literal is not translated"
+          end
+          return unless TEMPORAL_COLUMN_TYPES.include?(column_type(operand))
+
+          raise UnsupportedOperatorError,
+            "#{operator} over a temporal column is not translated: CEL reads it as an RFC-3339 " \
+            "string, or as a timestamp that takes only a duration"
+        end
+
         def exact_numeric_column?(value)
           ArelSupport.arel_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
@@ -156,6 +184,7 @@ module Cerbos
         # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
+          return cel_type_error if arithmetic_type_error?("div", numerator, denominator)
           return cel_type_error if int_beside_non_int?("div", numerator, denominator)
           return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 

@@ -187,18 +187,21 @@ module Cerbos
             # A trailing `?` makes the repetition lazy, which changes WHERE it matches, not WHETHER.
             @position += 1 if peek == "?"
             node = Repeat.new(node, bounds[0], bounds[1])
+            # RE2 rejects a repetition whose nested copies exceed MAX_REPEAT: `(a{2}){600}`.
+            raise InvalidPattern unless Regex.repeat_size_valid?(node, MAX_REPEAT)
           end
         end
 
-        # `{n}`, `{n,}` or `{n,m}`; anything else starting with `{` is a literal brace in RE2.
+        # `{n}`, `{n,}` or `{n,m}`; anything else starting with `{` is a literal brace in RE2,
+        # which reads no count with a leading zero: `a{01}` is `a` then the text "{01}".
         def counted_repeat
-          match = /\A\{(\d+)(,(\d*))?\}/.match(rest)
+          match = /\A\{(0|[1-9]\d*)(,(0|[1-9]\d*)?)?\}/.match(rest)
           return nil if match.nil?
 
           min = match[1].to_i
           max =
             if match[2].nil? then min
-            elsif match[3].empty? then nil
+            elsif match[3].nil? then nil
             else match[3].to_i
             end
           raise InvalidPattern if min > MAX_REPEAT || (!max.nil? && (max > MAX_REPEAT || max < min))
@@ -332,6 +335,22 @@ module Cerbos
           return escaped if escaped.match?(PUNCTUATION)
 
           raise Regex.unsupported(@pattern, "the escape \\#{escaped} is not read")
+        end
+      end
+
+      # Go's `repeatIsValid`: each repetition divides the budget by its count (its maximum, or its
+      # minimum when unbounded), and a count beyond what is left is invalid.
+      def repeat_size_valid?(node, budget)
+        case node
+        when Repeat
+          count = node.max || node.min
+          return true if count.zero?
+          return false if count > budget
+
+          repeat_size_valid?(node.node, budget / count)
+        when Group
+          node.alternatives.all? { |sequence| sequence.all? { |inner| repeat_size_valid?(inner, budget) } }
+        else true
         end
       end
 

@@ -418,9 +418,9 @@ module Cerbos
         reject_double_text("if", else_value)
         # The CASE would hide the error from {#apply}: `(c ? size(aNumber) : 1) in [2, null]`
         # would test the CASE with IS NULL, TRUE wherever `c` picks the error arm.
-        # A list or map arm has no SQL value for the CASE to hold.
-        if [then_value, else_value].any? { |value| value.is_a?(Array) || value.is_a?(Hash) }
-          raise UnsupportedOperatorError, "A ternary with a list or map arm is not translated"
+        # A list, map or collection arm has no SQL value for the CASE to hold.
+        if [then_value, else_value].any? { |value| value.is_a?(Array) || value.is_a?(Hash) || collection?(value) }
+          raise UnsupportedOperatorError, "A ternary with a list, map or collection arm is not translated"
         end
         if [condition, then_value, else_value].any? { |value| cel_error?(value) }
           raise UnsupportedOperatorError,
@@ -564,13 +564,15 @@ module Cerbos
         end
       end
 
-      # A constant all the way down: a scalar, a null, or a list or map of those.
+      # A constant all the way down: a string, number, boolean or null, or a list or map of
+      # those. Not a held {Values} struct: a value that may be NaN or Infinity is no constant.
       def deep_constant?(value)
         case value
-        when nil then true
+        when nil, true, false, Numeric then true
+        when ::String then !ArelSupport.arel_node?(value)
         when Array then value.all? { |element| deep_constant?(element) }
         when Hash then value.values.all? { |element| deep_constant?(element) }
-        else constant?(value)
+        else false
         end
       end
 

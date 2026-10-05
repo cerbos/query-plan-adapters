@@ -57,13 +57,12 @@ module Cerbos
             })
           when Regex::AllCharactersIn
             # Remove every allowed character; nothing may be left. REPLACE is literal and
-            # case-sensitive on every store, as the LIKE escaping already relies on.
+            # case-sensitive on every store, as the LIKE escaping already relies on. The residue is
+            # compared with '' rather than measured: SQLite's LENGTH stops at a NUL.
             rest = plan.characters.reduce(receiver) { |current, character|
               ArelSupport.function("REPLACE", [current, character, ""])
             }
-            ArelSupport.and_node(
-              [ArelSupport.comparison("eq", dialect.char_length(rest), 0), at_least(receiver, plan.min)].compact
-            )
+            ArelSupport.and_node([ArelSupport.comparison("eq", rest, ""), at_least(receiver, plan.min)].compact)
           when Regex::NoNewline
             ArelSupport.and_node([no_newline(receiver), at_least(receiver, plan.min)].compact)
           when Regex::PrefixSuffix

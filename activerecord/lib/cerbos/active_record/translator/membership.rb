@@ -184,7 +184,15 @@ module Cerbos
           # hasIntersection is symmetric and the planner keeps source order, so the literal list
           # can be on either side.
           left, right = right, left if left.is_a?(Array) && !right.is_a?(Array)
-          values = right.is_a?(Array) ? right : [right]
+          unless right.is_a?(Array)
+            # hasIntersection takes two lists: a map or a scalar is CEL's no-overload error. A
+            # column might hold an array the adapter cannot see, so it is refused.
+            return cel_type_error if right.nil? || right.is_a?(Hash) || constant?(right)
+
+            raise UnsupportedOperatorError,
+              "hasIntersection is translated only against a list literal, got #{describe(right)}"
+          end
+          values = right
 
           case left
           when Values::Collection

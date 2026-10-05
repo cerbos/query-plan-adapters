@@ -46,13 +46,23 @@
 
 - `matches()` over a string column with a constant pattern, lowered to exact string predicates without the store's regex engine ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
-  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported. An operator override for `matches` now replaces this built-in translation.
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported; unlike drizzle's, it reads a count with a leading zero (`{01}`) as literal text and rejects a nested repetition over 1000 copies, as RE2 does. An operator override for `matches` now replaces this built-in translation.
 
 - `+`, `-` and `*` over a division that may be NaN or Infinity (`x / x + 1`), carried into the division's branches ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A non-finite constant is computed in Ruby with IEEE-754, and NaN beside a double stays NaN wherever that value is present. An Infinity beside a column, which might hold the opposite Infinity, and arithmetic between two such values still raise.
 
 ### Changed
+
+- Arithmetic over a boolean, and `-`, `*`, `/` or `%` over a string, or `+` of a string and a number, is SQL `NULL`, the CEL error it is ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  Attributes are dynamically typed, so `R.attr.aString + R.attr.aNumber == "one5"` type-checks, and CEL has no such overload. The filter concatenated the two and returned the row, and SQLite and MySQL read a boolean or a string as a number. Filters only get narrower.
+
+- `hasIntersection` against a map or a scalar constant is SQL `NULL`, CEL's no-overload error, where it answered FALSE and its negation granted every row ([#577](https://github.com/cerbos/query-plan-adapters/issues/577)). Against a column it raises.
+
+- **Breaking:** arithmetic over a temporal column raises `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  CEL reads a raw temporal attribute as an RFC-3339 string and a `timestamp()` as a timestamp that takes only a duration, so `R.attr.createdAt - 5` is an error, but SQLite and MySQL read the text as a number. A list or map literal in arithmetic, `string()` of a list, map or held collection, and a ternary with a held collection arm raise the same error where a Ruby `TypeError` escaped before.
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 

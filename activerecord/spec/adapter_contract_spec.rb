@@ -758,9 +758,9 @@ RSpec.describe Cerbos::ActiveRecord do
     it "raises for an operator it does not implement" do
       expect {
         translate(conditional(
-          expression("eq", expression("index", variable("request.resource.attr.tags"), value(0)), value("public"))
+          expression("eq", expression("noSuchOperator", variable("request.resource.attr.aString")), value("x"))
         ))
-      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: index/)
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: noSuchOperator/)
     end
 
     it "raises for a sub-microsecond timestamp literal" do
@@ -1142,6 +1142,99 @@ RSpec.describe Cerbos::ActiveRecord do
 
       expect { translate(conditional(expression("in", ternary, value([2, nil])))) }
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "arithmetic over a string or a boolean" do
+    # Corpus gap. Attributes are dyn, so each of these type-checks, and CEL has no overload for
+    # any of them: every row is an error. SQL concatenates the string and the number, or reads the
+    # boolean and the string as numbers on SQLite and MySQL.
+    {
+      "a string plus a number" => ["add", "aString", "aNumber", "one5"],
+      "a boolean plus a number" => ["add", "aBool", "aNumber", 6],
+      "a string times zero" => ["mult", "aString", 0, 0],
+      "a string minus a number" => ["sub", "aString", "aNumber", -5]
+    }.each do |shape, (operator, left, right, result)|
+      it "denies every row for #{shape}" do
+        operand = ->(name) { name.is_a?(String) ? variable("request.resource.attr.#{name}") : value(name) }
+        equality = expression("eq", expression(operator, operand.call(left), operand.call(right)), value(result))
+
+        expect(translate(conditional(equality))).to be_empty
+        expect(translate(conditional(expression("not", equality)))).to be_empty
+      end
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "matches() against RE2's own parse" do
+    def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
+
+    # Corpus gap. RE2 reads no count with a leading zero, so `e{01}` is `e` then the text "{01}".
+    it "reads a brace whose count has a leading zero as literal text" do
+      expect(translate(conditional(matches("^one{01}$")))).to be_empty
+    end
+
+    # Corpus gap. RE2 rejects a nested repetition over 1000 copies, so CEL errors on every row.
+    it "denies every row for a nested repetition RE2 rejects" do
+      expect(translate(conditional(expression("not", matches("^(a{2}){600}$"))))).to be_empty
+    end
+
+    # Corpus gap. SQLite's LENGTH stops at a NUL, so a residue holding one must not read as empty.
+    it "keeps a NUL out of a character set" do
+      row = AdvResource.create!(id: "zz-nul", a_string: "a\u0000x", created_by: "nobody")
+      begin
+        expect(translate(conditional(matches("^[ax]+$"))).where(id: row.id)).to be_empty
+      ensure
+        row.destroy!
+      end
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "an operand of no type the operator takes" do
+    let(:tags) { variable("request.resource.attr.tags") }
+    let(:may_divide_by_zero) { expression("div", variable("request.resource.attr.aNumber"), value(0.0)) }
+
+    # Corpus gap. hasIntersection takes two lists; a map or a scalar is CEL's no-overload error.
+    it "denies a hasIntersection against a map or a scalar under negation" do
+      map = expression("struct", expression("set-field", value("a"), value(1)))
+      [map, value("public")].each do |operand|
+        expect(translate(conditional(expression("not", expression("hasIntersection", tags, operand))))).to be_empty
+      end
+    end
+
+    # Corpus gap. A division by zero is held as branches; it is no constant to fold in Ruby.
+    it "refuses a value that may be NaN or Infinity inside a list or map literal" do
+      map = expression("struct", expression("set-field", value("a"), may_divide_by_zero))
+      list = expression("list", may_divide_by_zero)
+      [expression("ne", map, expression("struct", expression("set-field", value("a"), value(1.0)))),
+        expression("ne", list, value([1.0])),
+        expression("not", expression("in", list, value([[1.0]])))].each do |condition|
+        expect { translate(conditional(condition)) }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
+      end
+    end
+
+    # Corpus gap. Each would hand a list or a held collection to SQL, which cannot quote it.
+    it "refuses a list, a filtered list or a raw timestamp where SQL needs a scalar" do
+      with_timestamp = ATTRS.merge("request.resource.attr.createdAt" => field("created_at"))
+      filtered = ->(bound) {
+        expression("filter", value([1, 2]),
+          expression("lambda", expression("gt", variable("t"), value(bound)), variable("t")))
+      }
+      [
+        expression("eq", expression("size",
+          expression("if", variable("request.resource.attr.aBool"), filtered.call(0), filtered.call(1))), value(1)),
+        expression("eq", expression("add", value([1]), expression("list", variable("request.resource.attr.aNumber"))), value([1, 5])),
+        expression("eq", expression("string", value([1])), value("[1]")),
+        expression("eq", expression("sub", variable("request.resource.attr.createdAt"), value(5)), value(2020))
+      ].each do |condition|
+        expect { translate(conditional(condition), attributes: with_timestamp) }
+          .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
+      end
     end
   end
 
