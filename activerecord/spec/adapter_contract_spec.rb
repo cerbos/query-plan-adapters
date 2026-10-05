@@ -211,15 +211,16 @@ RSpec.describe Cerbos::ActiveRecord do
     end
 
     # Each operand type has its own message, so it is clear which one refused (#326).
-    it "raises for int() over a double column, naming the rounding difference" do
+    # The corpus maps one double column, so it cannot ask about a decimal one.
+    it "raises for int() over a decimal column, naming the nearest-double difference" do
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("eq",
             expression("int", variable("d")), value(0))),
-          model: EdgeDocument, attributes: {"d" => field("score")}
+          model: EdgeDocument, attributes: {"d" => field("amount")}
         )
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError,
-        /int\(\) applied to a double column is not portable/)
+        /int\(\) applied to a :decimal column/)
     end
 
     it "raises for double() over a string column" do

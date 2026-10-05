@@ -28,6 +28,10 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no overload mixing an int with a double, and `%` has no double overload, so every row is an error. Beside an operand whose type the plan does not settle, such as a ternary of whole constants, they still raise.
 
+- `int()` over a double column, truncated toward zero inside CEL's range (-2^63, 2^63) and UNKNOWN outside it ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`, because PostgreSQL and MySQL round a `CAST`. The fraction is now dropped first (`TRUNC`, `TRUNCATE`; SQLite's `CAST` already truncates). `int()` over a decimal column still raises: CEL truncates the double nearest the stored value, which can differ.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))

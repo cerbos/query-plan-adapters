@@ -358,8 +358,7 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
 | `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
-| `cast/int/negative-fraction` | CEL truncates toward zero; PostgreSQL and MySQL round. |
-| `cast/string/from-int-beyond-double-precision`, `cast/string/from-int-past-exponent-threshold`, `cast/string/negated-from-int-past-exponent-threshold` | `string()` over `int()` of a string or double column: the `int()` is refused for the reasons above. |
+| `cast/string/from-int-beyond-double-precision` | `string()` over `int()` of a string column: the `int()` is refused for the reason above. |
 | `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
@@ -380,7 +379,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 251 / 318 |
+| adversarial | 256 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

@@ -15,23 +15,22 @@ module Cerbos
 
         private
 
-        # Only an integer column is safe, where the cast is a no-op.
+        # An integer column is a no-op and a double column truncates (see {#int_of_double}).
         # - String: `int("1junk")` errors in CEL, but SQLite's CAST gives 1.
-        # - Double: CEL truncates toward zero; PostgreSQL and MySQL round.
-        # Each case has its own message because the corpus pins each one.
+        # - Decimal: CEL truncates the nearest double, not the exact value.
         def cast_to_int(value)
           return value.to_i if value.is_a?(Numeric)
 
           type = column_type(value)
           return record_cel_type(value, :int) if INTEGER_COLUMN_TYPES.include?(type)
+          return int_of_double(value) if type == :float
 
           if NUMERIC_COLUMN_TYPES.include?(type)
             raise UnsupportedOperatorError,
-              "int() applied to a double column is not portable: CEL removes the fraction " \
-              "toward zero, and PostgreSQL and MySQL round a CAST to the nearest whole number " \
-              "instead, so the two disagree for every value with a fraction of one half or " \
-              "more. Give an operator override that removes the fraction the way your database " \
-              "does it."
+              "int() applied to a #{type.inspect} column: the attribute CEL truncates is the " \
+              "double nearest the stored exact value, which can truncate to a different whole " \
+              "number than the exact value does. Map a double column, or give an operator " \
+              "override."
           end
 
           raise UnsupportedOperatorError,
@@ -39,6 +38,19 @@ module Cerbos
             "string or makes an error, and Cerbos then denies the row, but SQL reads the digits " \
             "at the front and gives a number, so the filter would keep the row. Compare the " \
             "column directly, or give an operator override."
+        end
+
+        # CEL's int() of a double truncates toward zero, and errors when the double is NaN, an
+        # Infinity, or outside (-2^63, 2^63): cel-go's range check rejects both bounds
+        # themselves. The CASE keeps exactly that range and is NULL (the error, UNKNOWN) outside
+        # it. A NaN, which only PostgreSQL stores and orders above every number, fails the upper
+        # bound. The bounds are compared as doubles; 2^63 is exact in binary64.
+        def int_of_double(value)
+          in_range = ArelSupport.and_node([
+            ArelSupport.comparison("gt", value, cast(-(2.0**63), dialect.double_type)),
+            ArelSupport.comparison("lt", value, cast(2.0**63, dialect.double_type))
+          ])
+          record_cel_type(ArelSupport.case_node([[in_range, dialect.truncate_to_int(value)]]), :int)
         end
 
         # Numeric columns only: `double("abc")` errors in CEL, but SQL gives 0.0.
@@ -183,9 +195,7 @@ module Cerbos
         def cast(value, type)
           return value if value.nil?
 
-          Arel::Nodes::NamedFunction.new(
-            "CAST", [Arel::Nodes::As.new(ArelSupport.quote(value), Arel.sql(type))]
-          )
+          ArelSupport.cast(value, type)
         end
 
         def timestamp(value)
