@@ -130,7 +130,7 @@ def _response_dict(case: dict[str, Any], planned_at: str | None) -> dict[str, An
 # -- the stub PDP -----------------------------------------------------------
 # A golden reaches the adapter through the real SDK clients, so it arrives in the form a
 # user passes. Only the PDP is replaced: a loopback server on each transport answers a
-# PlanResources request with the response registered under the request's action, a token
+# PlanResources request with the response registered under the request's id, a token
 # unique to one call, so concurrent and repeated calls never see each other's plan. The
 # stub ignores the principal; it is the corpus's own only so the request is a real one.
 
@@ -174,7 +174,7 @@ class _StubPDP:
             def do_POST(self) -> None:
                 body = self.rfile.read(int(self.headers["Content-Length"]))
                 response = (
-                    stub.take(json.loads(body)["action"])
+                    stub.take(json.loads(body)["requestId"])
                     if self.path == "/api/plan/resources"
                     else None
                 )
@@ -202,9 +202,11 @@ class _StubPDP:
 
         class Servicer(svc_pb2_grpc.CerbosServiceServicer):
             def PlanResources(self, request, context):
-                response = stub.take(request.action)
+                response = stub.take(request.request_id)
                 if response is None:
-                    context.abort(grpc.StatusCode.NOT_FOUND, "no stub for this action")
+                    context.abort(
+                        grpc.StatusCode.NOT_FOUND, "no stub for this request id"
+                    )
                 return ParseDict(response, response_pb2.PlanResourcesResponse())
 
         server = grpc.server(ThreadPoolExecutor(max_workers=8))
@@ -239,7 +241,8 @@ def plan_from_golden(
     stub = _stub_pdp()
     token = stub.register(case, _response_dict(case, planned_at))
     return stub.http_client.plan_resources(
-        action=token,
+        case["request"]["action"],
+        request_id=token,
         principal=Principal(id=_PRINCIPAL["id"], roles=set(_PRINCIPAL["roles"])),
         resource=ResourceDesc(case["request"]["resourceKind"]),
     )
@@ -254,7 +257,8 @@ def grpc_plan_from_golden(
     stub = _stub_pdp()
     token = stub.register(case, _response_dict(case, planned_at))
     return stub.grpc_client.plan_resources(
-        action=token,
+        case["request"]["action"],
+        request_id=token,
         principal=engine_pb2.Principal(id=_PRINCIPAL["id"], roles=_PRINCIPAL["roles"]),
         resource=engine_pb2.PlanResourcesInput.Resource(
             kind=case["request"]["resourceKind"]
