@@ -209,6 +209,10 @@ Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
+An override replaces the built-in translation for every pattern, including the ones the adapter
+lowers itself (see below). Your store's regex dialect is not RE2, so an override like this one
+accepts the differences the adapter refuses to.
+
 Structural operators cannot be overridden: `and`, `or`, `not`, `if`, `lambda` and the collection
 macros.
 
@@ -341,6 +345,13 @@ instead of collapsing it to a boolean. You will see this in the SQL:
   beside a non-int. UNKNOWN denies under both polarities as the error does, and any strict
   operator over it (`==`, `in`, `string()`) stays UNKNOWN. A `NULL` from a computed value, which
   CEL never holds as `null`, is read as that error by `== null` and `in [..., null]` too.
+- `matches()` is never handed to the store's regex engine, since none is RE2: MySQL's lets `$`
+  match before a final newline, and SQLite has none. The adapter parses the pattern and lowers it
+  only when its matches are a finite set of literals under its anchors (`=`, or `LIKE` prefix,
+  suffix or substring), every character drawn from a small set (`REPLACE` each one away until
+  nothing is left), or a prefix and suffix around a run of non-newline characters. `(?i)` folds
+  as RE2 does, including KELVIN SIGN and LONG S. A pattern RE2 rejects is CEL's error, UNKNOWN.
+  Any other pattern raises; use an operator override for it.
 - Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
   element is true, `all` if any element is false, `exists_one` never does.
 - `string()` over a boolean — a boolean column, or any comparison, logical operator, `in` or
@@ -360,7 +371,6 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
 | `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
 | `arithmetic/add/self-division-plus-constant-greater-than`, `arithmetic/add/self-division-plus-constant-not-equals` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
-| `regex/matches/anchored-prefix` | `matches()` is RE2; no SQL dialect matches it. Use an operator override. |
 | `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
 | `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
@@ -384,8 +394,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 62 / 80 |
-| adversarial | 266 / 318 |
+| extended | 69 / 80 |
+| adversarial | 281 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

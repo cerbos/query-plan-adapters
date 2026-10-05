@@ -756,9 +756,9 @@ RSpec.describe Cerbos::ActiveRecord do
     it "raises for an operator it does not implement" do
       expect {
         translate(conditional(
-          expression("matches", variable("request.resource.attr.aString"), value("^s"))
+          expression("eq", expression("index", variable("request.resource.attr.tags"), value(0)), value("public"))
         ))
-      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: matches/)
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: index/)
     end
 
     it "raises for a sub-microsecond timestamp literal" do
@@ -794,7 +794,7 @@ RSpec.describe Cerbos::ActiveRecord do
           "matches" => ->(column, _pattern) { Arel::Nodes::Equality.new(column, Arel::Nodes.build_quoted("one")) }
         }
       )
-      # `matches` has no default and would raise, so these rows come from the override.
+      # The default would return strings starting with "str", so these rows come from the override.
       expect(relation.pluck(:a_string)).to eq(["one"])
     end
 

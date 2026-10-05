@@ -44,6 +44,10 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. An element whose body errors makes the whole list an error (UNKNOWN), as `filter()` and `map()` never ignore one, and a missing attribute inside `except()`'s right list errors the call. `except` follows Cerbos's `exceptList`, keeping duplicates. Any other use of these lists still raises.
 
+- `matches()` over a string column with a constant pattern, lowered to exact string predicates without the store's regex engine ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported. An operator override for `matches` now replaces this built-in translation.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
