@@ -279,6 +279,14 @@ the other declares nothing, the adapter raises `UnsupportedOperatorError`. Decla
 neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
+A list literal holding a column, `a in [b, "x"]`, compares each element as `eq` would, under each
+column's own convention (an undeclared column takes the call's): two `:explicit` columns use the
+`eq(a, b)` expansion above, an `:explicit` column beside a constant is guarded `IS NOT NULL`, and a
+NULL `:omitted` column or computed value (`b + 1`) anywhere in the membership makes the whole
+membership UNKNOWN, since CEL fails to build the list. A needle and a member column under different conventions raise
+`UnsupportedOperatorError`, as `eq` does
+([#574](https://github.com/cerbos/query-plan-adapters/issues/574)).
+
 > [!WARNING]
 > **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
 > unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
@@ -370,7 +378,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 233 / 314 |
+| adversarial | 237 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

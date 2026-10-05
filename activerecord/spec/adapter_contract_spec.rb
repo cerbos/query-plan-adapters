@@ -266,6 +266,81 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  # A column inside the list compares as `==` between the two columns does, each under its own
+  # declared convention (#574). The corpus maps one convention per attribute, so only this
+  # suite can mix them or vary the call's default.
+  describe "membership against a column member under declared conventions" do
+    let(:rows) do
+      [[nil, nil], [1, nil], [nil, 1], [1, 1], [1, 2], [2, nil]].map do |author_id, n|
+        EdgeDocument.create!(author_id: author_id, n: n)
+      end
+    end
+
+    let(:in_column) { expression("in", variable("a"), expression("list", variable("b"))) }
+    let(:in_column_or_two) do
+      expression("in", variable("a"), expression("list", variable("b"), value(2)))
+    end
+
+    after { rows.each(&:destroy!) }
+
+    def mapping(a, b)
+      {
+        "a" => described_class.field("author_id", null_representation: a),
+        "b" => described_class.field("n", null_representation: b)
+      }
+    end
+
+    def member_ids(condition, attributes, call = :explicit)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument, attributes: attributes,
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).pluck(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    %i[explicit omitted].each do |call|
+      context "when the call's convention is #{call}" do
+        it "treats two explicit nulls as equal, and an explicit null beside a value as unequal" do
+          explicit = mapping(:explicit, :explicit)
+          expect(member_ids(in_column, explicit, call)).to eq(rows_at(0, 3))
+          expect(member_ids(expression("not", in_column), explicit, call)).to eq(rows_at(1, 2, 4, 5))
+          expect(member_ids(in_column_or_two, explicit, call)).to eq(rows_at(0, 3, 5))
+          expect(member_ids(expression("not", in_column_or_two), explicit, call))
+            .to eq(rows_at(1, 2, 4))
+        end
+
+        it "denies a row where either omitted column is NULL, under any nesting" do
+          omitted = mapping(:omitted, :omitted)
+          expect(member_ids(in_column, omitted, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column), omitted, call)).to eq(rows_at(4))
+          # CEL builds the list first, so a missing member errors even when 2 would match.
+          expect(member_ids(in_column_or_two, omitted, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column_or_two), omitted, call)).to eq(rows_at(4))
+        end
+
+        it "leaves a NULL computed member UNKNOWN, since CEL errors computing it" do
+          # `null + 1` is an error in CEL, never a null that `null in [...]` could match.
+          in_sum = expression("in", variable("a"),
+            expression("list", expression("add", variable("b"), value(1))))
+          explicit = mapping(:explicit, :explicit)
+          expect(member_ids(in_sum, explicit, call)).to be_empty
+          expect(member_ids(expression("not", in_sum), explicit, call)).to eq(rows_at(2, 3, 4))
+        end
+
+        it "refuses a column member under the other convention, as == does" do
+          [mapping(:explicit, :omitted), mapping(:omitted, :explicit)].each do |mixed|
+            [in_column, expression("not", in_column)].each do |condition|
+              expect { member_ids(condition, mixed, call) }.to raise_error(
+                Cerbos::ActiveRecord::UnsupportedOperatorError, /mixed null conventions/
+              )
+            end
+          end
+        end
+      end
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
     # UNKNOWN.

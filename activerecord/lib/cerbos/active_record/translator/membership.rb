@@ -75,13 +75,27 @@ module Cerbos
             return ArelSupport.or_node(predicates)
           end
 
-          # A column in the list, or a constant needle: one comparison per element.
-          # E.g. `null in [R.attr.x]` is true when the column is null.
-          ArelSupport.or_node(members.map { |member| member_equality(needle, member) })
+          # A column in the list, or a constant needle: one comparison per element, each as `==`
+          # would compare it (#574). E.g. `null in [R.attr.x]` is true when the column is null.
+          columns = [needle, *members].select { |operand| ArelSupport.arel_node?(operand) }
+          # Only the needle meets each member. A computed node has no declaration to align.
+          needle_convention = ArelSupport.arel_node?(needle) && null_convention(needle)
+          if needle_convention && members.any? { |member|
+            ArelSupport.arel_node?(member) && ![nil, needle_convention].include?(null_convention(member))
+          }
+            raise mixed_null_conventions_error("in")
+          end
+
+          result = ArelSupport.or_node(members.map { |member| member_equality(needle, member) })
+          # CEL builds the list before it compares, so a missing attribute or a computed error
+          # anywhere errors the whole membership, whatever the other elements say. Under `not` too.
+          missing = columns.reject { |column| null_convention(column) == :explicit }
+          unknown_if_any(missing.uniq.map { |column| ArelSupport.is_null(column) }, result)
         end
 
-        # CEL equality for one element. Two nulls are equal in CEL but UNKNOWN in SQL, so spell
-        # that case out.
+        # CEL equality for one element. A NULL column under `:explicit` is a null value, so a
+        # comparison against it must be definite: two nulls are equal, a null and a value are
+        # not. A NULL column under `:omitted` is left UNKNOWN; {#scalar_membership} guards it.
         def member_equality(needle, member)
           needle_is_node = ArelSupport.arel_node?(needle)
           member_is_node = ArelSupport.arel_node?(member)
@@ -89,9 +103,15 @@ module Cerbos
           return ArelSupport.comparison("eq", member, nil) if needle.nil? && member_is_node
           return ArelSupport.comparison("eq", needle, nil) if member.nil? && needle_is_node
 
-          return null_equality(needle, member) if needle_is_node && member_is_node
-
           return needle.nil? == member.nil? if needle.nil? || member.nil?
+
+          needle_explicit = needle_is_node && null_convention(needle) == :explicit
+          member_explicit = member_is_node && null_convention(member) == :explicit
+          definite = (needle_explicit || member_explicit) &&
+            [needle, member].all? { |operand| ArelSupport.arel_node?(operand) || constant?(operand) }
+          if definite
+            return definite_equality("eq", needle, member, needle_explicit, member_explicit)
+          end
 
           ArelSupport.to_predicate(compare("eq", needle, member))
         end

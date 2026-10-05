@@ -501,6 +501,14 @@
       "status": "unsupported",
       "reason": "This predicate combines field arithmetic and nested-to-outer field comparison, neither expressible by Elasticsearch Query DSL without scripts"
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "A `terms` query matches a field against literal values only and Query DSL cannot compare two document fields without scripts, so a list literal holding another attribute is refused (#574)."
+    },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts"
@@ -508,6 +516,14 @@
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "CEL's in over a map tests its keys; parent is an object field in the index, and Elasticsearch indexes no JSON null, so a query cannot tell a key held with a null value from an absent key."
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",

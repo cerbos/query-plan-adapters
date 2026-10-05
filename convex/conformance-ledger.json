@@ -53,6 +53,22 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "The adapter evaluates `list` only as the constant haystack of `in`; a list literal holding another attribute reaches it as an unsupported `list` operator and is refused (#574)."
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
