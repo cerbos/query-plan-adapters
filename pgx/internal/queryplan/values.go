@@ -368,6 +368,9 @@ func applyIEEE(op ArithOp, l, r float64) float64 {
 // compare builds a comparison, distributing over any retained ternary so that a non-finite arm
 // reaches compareLeaf as a constant instead of leaking PostgreSQL's non-IEEE NaN ordering.
 func compare(op CmpOp, l, r value) (Expr, error) {
+	if out, ok, err := compareTemporal(op, l, r); ok {
+		return out, err
+	}
 	if cv, ok := l.(condValue); ok {
 		return distribute(op, cv, r, true)
 	}
@@ -492,7 +495,14 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	if mixed, ok := compareMixedTypes(op, l, r); ok {
 		return mixed, nil
 	}
-	if _, list := l.([]any); list {
+	if ll, list := l.([]any); list {
+		if rl, list := r.([]any); list && (op == OpEq || op == OpNe) {
+			equal, err := constantListsEqual(ll, rl)
+			if err != nil {
+				return nil, err
+			}
+			return BoolConst{V: equal == (op == OpEq)}, nil
+		}
 		return nil, errListOperand
 	}
 	if _, list := r.([]any); list {
@@ -819,6 +829,13 @@ type hierarchyValue struct {
 }
 
 func newHierarchy(v, delimiter value) (hierarchyValue, error) {
+	switch v.(type) {
+	case []any, listValue:
+		return hierarchyValue{}, errors.New(
+			"hierarchy() over a list of segments has no lowering: it compares segment by segment, " +
+				"and this translator lowers only a delimited string",
+		)
+	}
 	d := "."
 	if delimiter != nil {
 		s, ok := delimiter.(string)
@@ -901,6 +918,33 @@ func hierarchyOverlaps(l, r value) (Expr, error) {
 	return or(eq, lAnc, rAnc), nil
 }
 
+// upperASCII lowers CEL's upperAscii(), which folds the 26 ASCII letters and leaves every other
+// character as it is. SQL's UPPER() is not that function — MySQL's and PostgreSQL's fold Unicode
+// letters under most collations — so a column is folded letter by letter with REPLACE, which is
+// byte-exact on every dialect.
+func upperASCII(v value) (value, error) {
+	if s, ok := v.(string); ok {
+		return strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' {
+				return r - 'a' + 'A'
+			}
+			return r
+		}, s), nil
+	}
+	if v == nil || knownNonString(v) {
+		// upperAscii() over a null or a non-string is a CEL no-overload error: UNKNOWN.
+		return Lit{V: nil}, nil
+	}
+	x, err := asExpr(v)
+	if err != nil {
+		return nil, err
+	}
+	for letter := 'a'; letter <= 'z'; letter++ {
+		x = Call{Name: FuncReplace, Args: []Expr{x, Lit{V: string(letter)}, Lit{V: string(letter - 'a' + 'A')}}}
+	}
+	return x, nil
+}
+
 // asExpr lifts a resolved operand into the expression tree.
 func asExpr(v value) (Expr, error) {
 	switch t := v.(type) {
@@ -923,6 +967,10 @@ func asExpr(v value) (Expr, error) {
 		// translator emitted a filter for a shape it cannot express and only the driver's
 		// encoder refused it, at execution time (cerbos/query-plan-adapters#387).
 		return nil, fmt.Errorf("'%s' produces a collection rather than a plain value; it only translates inside size() or hasIntersection(), which give the collection a scalar meaning", t.macro())
+	case []any, map[string]any:
+		// SQL has no list or map operand. Bound as a parameter, a literal list reaches the engine
+		// as one opaque value, and a comparison against it answers a question CEL never asked.
+		return nil, errors.New("a list or map literal has no SQL representation as a plain value")
 	case symbolicValue:
 		return nil, fmt.Errorf("symbolic value %T has no SQL representation", v)
 	default:
