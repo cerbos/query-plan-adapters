@@ -38,9 +38,11 @@ module Cerbos
 
           scope = bindings[head]
 
-          # Bound to a constant list element, which has no fields.
+          # Bound to a constant list element. A map element (a struct the planner inlined) has
+          # fields; any other value has none.
           unless scope.is_a?(Relations::Scope)
             return scope if rest.nil?
+            return translator.constant_field(scope, rest) if scope.is_a?(Hash)
 
             raise UnmappedAttributeError,
               "#{name.inspect} reads the field #{rest.inspect} from #{head.inspect}, but " \

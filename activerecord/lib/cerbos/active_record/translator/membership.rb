@@ -11,15 +11,47 @@ module Cerbos
         private
 
         def membership(needle, haystack)
-          if needle.is_a?(Array) || needle.is_a?(Hash) ||
-              (haystack.is_a?(Array) && haystack.any? { |member| member.is_a?(Array) || member.is_a?(Hash) })
-            raise UnsupportedOperatorError,
-              "in requires scalar elements; SQL scalar membership cannot compare a list or map element"
-          end
+          # `x in map` tests the map's keys in CEL. The planner folds a literal map to `==`, but a
+          # map can still arrive as a value; answering FALSE would grant its negation.
+          haystack = haystack.keys if haystack.is_a?(Hash)
+          return composite_membership(needle, haystack) if composite?(needle)
           return relation_membership(haystack.scope, needle) if haystack.is_a?(Values::Collection)
+          return projection_membership(needle, haystack.projections) if haystack.is_a?(Values::ConstantProjection)
           return relation_membership(needle.scope, haystack) if needle.is_a?(Values::Collection)
 
+          # A filtered or projected relation, or a filtered list, has no membership translation.
+          reject_collection("in", needle)
+          reject_collection("in", haystack)
           scalar_membership(needle, haystack)
+        end
+
+        # `needle in list.map(t, ...)` over a list of constants. `map()` never ignores an element's
+        # error, so a NULL projection (a computed error) makes the list, and the lookup, UNKNOWN.
+        # A needle that is not `:explicit` is a missing attribute when NULL, UNKNOWN too.
+        # Otherwise it is an ordinary lookup in the projected values.
+        def projection_membership(needle, projections)
+          errors = projections.filter_map { |projection| ArelSupport.is_null(projection) if ArelSupport.arel_node?(projection) }
+          errors << ArelSupport.is_null(needle) if ArelSupport.arel_node?(needle) && null_convention(needle) != :explicit
+          unknown_if_any(errors, as_predicate(scalar_membership(needle, projections)))
+        end
+
+        # A list or map literal.
+        def composite?(value)
+          value.is_a?(Array) || value.is_a?(Hash)
+        end
+
+        # A list or map needle. A relation's members are scalars, which a list or map never
+        # equals, so the answer is FALSE (the chain guard keeps an absent parent UNKNOWN). Against
+        # a list of constants it is folded with CEL equality.
+        def composite_membership(needle, haystack)
+          unless deep_constant?(needle)
+            raise UnsupportedOperatorError, "in with a list or map needle holding a column is not translated"
+          end
+          return haystack.scope.guarded(haystack.scope.exists(false)) if haystack.is_a?(Values::Collection)
+          return haystack.any? { |member| member == needle } if haystack.is_a?(Array) && deep_constant?(haystack)
+
+          raise UnsupportedOperatorError,
+            "in with a list or map needle is translated only against a relation or a list of constants"
         end
 
         # `value in R.attr.<relation>`, as an EXISTS over the related rows.
@@ -48,6 +80,18 @@ module Cerbos
           members = values.is_a?(Array) ? values : [values]
           return false if members.empty?
 
+          # A list or map element never equals a scalar column, so it cannot match. A constant
+          # needle is folded against it like any other element, below.
+          if ArelSupport.arel_node?(needle) && members.any? { |member| composite?(member) }
+            members = members.reject { |member| composite?(member) }
+            if members.empty?
+              return false if explicit_null?(needle)
+
+              # A missing attribute is still an error.
+              return unknown_if_any([ArelSupport.is_null(needle)], false)
+            end
+          end
+
           # Common case: a column against constants, as an IN clause.
           if ArelSupport.arel_node?(needle) && members.none? { |member| ArelSupport.arel_node?(member) }
             # Drop constants of another type: `aNumber in ["5"]` is false in CEL, but SQLite
@@ -69,9 +113,15 @@ module Cerbos
                 ArelSupport.quote(needle), present.map { |value| ArelSupport.quote(value) }
               )
             end
-            # A null element matches a null attribute (a null value, not a missing one).
-            predicates << ArelSupport.comparison("eq", needle, nil) if present.length != members.length
+            return ArelSupport.or_node(predicates) if present.length == members.length
+            # A computed needle is never null in CEL; NULL is its error, which errors the whole
+            # membership. See {Comparisons#computed_node?}.
+            if computed_node?(needle)
+              return unknown_if_any([ArelSupport.is_null(needle)], ArelSupport.or_node(predicates))
+            end
 
+            # A null element matches a null attribute (a null value, not a missing one).
+            predicates << ArelSupport.comparison("eq", needle, nil)
             return ArelSupport.or_node(predicates)
           end
 
@@ -134,16 +184,25 @@ module Cerbos
           # hasIntersection is symmetric and the planner keeps source order, so the literal list
           # can be on either side.
           left, right = right, left if left.is_a?(Array) && !right.is_a?(Array)
-          values = right.is_a?(Array) ? right : [right]
+          unless right.is_a?(Array)
+            # hasIntersection takes two lists: a map or a scalar is CEL's no-overload error. A
+            # column might hold an array the adapter cannot see, so it is refused.
+            return cel_type_error if right.nil? || right.is_a?(Hash) || constant?(right)
+
+            raise UnsupportedOperatorError,
+              "hasIntersection is translated only against a list literal, got #{describe(right)}"
+          end
+          values = right
 
           case left
           when Values::Collection
             # Guarded as in membership (#315). Literals of another type never intersect.
             kind = member_kind(left.scope)
             values = values.reject { |value| cross_type_literal?(value, kind) }
-            left.scope.guarded(
-              left.scope.exists(scalar_membership(left.scope.member_column, values))
-            )
+            # A scalar list holds null values, as {Environment#element} registers it, so a null
+            # literal matches a NULL element rather than reading as a computed error.
+            member = register_null_representation(left.scope.member_column, :explicit)
+            left.scope.guarded(left.scope.exists(scalar_membership(member, values)))
           when Values::MappedCollection
             # map() never ignores an element's error, so check for errors before matches.
             left.scope.guarded(
