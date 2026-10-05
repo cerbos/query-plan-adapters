@@ -645,8 +645,8 @@ A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-p
 | `npm run test:adversarial:mysql:v7` / `:v6` | Conformance harness on MySQL | Docker |
 
 `npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. CI runs all six
-store/Prisma combinations. The SQLite legs reset `prisma/dev-adversarial.db` with
-`prisma db push --force-reset`, so point them only at disposable databases.
+store/Prisma combinations. The SQLite legs delete `prisma/dev-adversarial.db` and push the schema
+into a fresh file, so they need no `--force-reset` (which Prisma refuses to run under an AI agent).
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` for both
 pinned PDPs and applies [`conformance-ledger.json`](conformance-ledger.json): a case with no entry
