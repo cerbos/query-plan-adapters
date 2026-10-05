@@ -29,6 +29,7 @@ plus one or more scope labels.
 | `langchain-chromadb` | LangChain/ChromaDB (TypeScript) |
 | `sqlalchemy` | SQLAlchemy (Python) |
 | `activerecord` | ActiveRecord (Ruby) |
+| `mongodb-ruby` | MongoDB driver (Ruby) |
 | `ent` | Ent (Go) |
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
