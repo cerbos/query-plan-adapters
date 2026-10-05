@@ -60,6 +60,13 @@ module ConformanceCorpus
   # one typed by hand.
   def golden(id, tag = PDP_TAGS.first) = read_golden(File.join(DIR, "golden", tag, "#{id}.json"))
 
+  # The golden's plan as the Cerbos Ruby SDK returns it: sent through Cerbos::Client#plan_resources
+  # against the stub PDP (spec/support/stub_pdp.rb), which answers with the recorded plan. This is
+  # the form an application passes to the adapter, not the JSON hash on disk.
+  def sdk_plan(golden)
+    StubPdp.plan_resources(golden.fetch("plan"), resource_kind: golden.fetch("request").fetch("resourceKind"))
+  end
+
   # The ledger entry for a case under one PDP, or nil. An entry scoped with `pdp` applies only
   # to the tags it lists.
   def ledger_entry(id, tag)

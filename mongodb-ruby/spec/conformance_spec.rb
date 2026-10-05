@@ -6,10 +6,11 @@ require "cerbos/mongodb/mongoid"
 # The conformance harness. It implements conformance/README.md, "The harness contract":
 #
 # 1. Store the dataset (spec/support/conformance_store.rb) and map it (spec/support/corpus_mapper.rb).
-# 2. For each PDP and each recorded golden file, translate the plan, run the query, and
-#    compare the ids with the ones check() allowed. conformance-ledger.json lists the
-#    exceptions: `unsupported` must raise the adapter's refusal error, and `divergent` must
-#    still give a wrong answer.
+# 2. For each PDP and each recorded golden file, fetch the plan through the Cerbos Ruby SDK
+#    from a stub PDP that answers with the recorded plan (spec/support/stub_pdp.rb), so the
+#    adapter gets the SDK's output types. Translate it, run the query, and compare the ids with
+#    the ones check() allowed. conformance-ledger.json lists the exceptions: `unsupported` must
+#    raise the adapter's refusal error, and `divergent` must still give a wrong answer.
 # 3. Fail if the ledger names a case that has no golden file.
 #
 # Every case runs twice: through the official driver, and through Mongoid on typed models
@@ -17,7 +18,7 @@ require "cerbos/mongodb/mongoid"
 # query constant to its field's declared type, which is the one way the same filter could return
 # other documents there.
 #
-# Needs no PDP: the plans and decisions are recorded. It needs a MongoDB at MONGODB_URI, which
+# Needs no PDP: the plans and decisions are recorded, and the stub only replays them. It needs a MongoDB at MONGODB_URI, which
 # scripts/test.sh starts from MONGO_IMAGE (or MONGO_NEXT_IMAGE).
 Mongo::Logger.logger.level = Logger::FATAL
 
@@ -90,12 +91,13 @@ RSpec.describe "conformance" do
 
       ConformanceCorpus.goldens(tag).each do |golden|
         id = golden.fetch("id")
-        plan = golden.fetch("plan")
         allowed = golden.fetch("allowed").sort
 
         LEGS.each do |leg, ids|
           it "#{leg} #{golden.fetch("tier")}: #{id}" do
             skip "planner divergence" if ConformanceCorpus.skipped?(golden, tag)
+
+            plan = ConformanceCorpus.sdk_plan(golden)
 
             case ConformanceCorpus.ledger_entry(id, tag)&.fetch("status")
             when nil then expect(ids.call(translate(plan))).to eq(allowed)

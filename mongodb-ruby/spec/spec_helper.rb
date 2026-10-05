@@ -4,6 +4,7 @@ require "json"
 require "logger"
 require "time"
 
+require "cerbos"
 require "cerbos/mongodb"
 
 RSpec.configure do |config|
