@@ -63,11 +63,20 @@ final class CollectionTranslator {
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
 
+        if (isTwoVariableLambda(lambdaOperand)) {
+            return handleTwoVariableMacro(op, listOperand, lambdaOperand, scope);
+        }
+
         // The planner unrolls a macro over a known list of up to 10 elements itself; above
         // that the list arrives as the collection operand, so fold it here the same way.
         if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
             return walker.enterMacro(op,
                     () -> handleKnownValueCollection(op, listOperand.getValue(), lambdaOperand, scope));
+        }
+
+        if (PlanWalker.isComputedList(listOperand)) {
+            return walker.enterMacro(op,
+                    () -> handleComputedList(op, listOperand, lambdaOperand, scope));
         }
 
         if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
@@ -153,6 +162,135 @@ final class CollectionTranslator {
                     substituteLambdaVariable(lambda.body(), lambda.varName(), element));
         }
         return walker.traverse(Operand.newBuilder().setExpression(combined).build(), scope);
+    }
+
+    /**
+     * {@code exists} or {@code all} over a list built from expressions
+     * ({@code [R.attr.a, R.attr.b].exists(s, s == "x")}): each element is substituted into the
+     * body and the results are folded by {@link PlanWalker#overComputedList}, which keeps the
+     * row UNKNOWN when any element errors. A body reading a field of the element
+     * ({@code s.f}) is refused: the element is an expression, not a row with members.
+     */
+    private Predicate handleComputedList(String op, Operand listOperand, Operand lambdaOperand,
+                                         Scope scope) {
+        if (!"exists".equals(op) && !"all".equals(op)) {
+            throw Refusals.unsupported(op + " over a list built from expressions is not"
+                    + " supported: only exists() and all() fold into a flat filter");
+        }
+        ParsedLambda lambda = ParsedLambda.parse(lambdaOperand,
+                op + " second operand must be a lambda",
+                "lambda requires exactly 2 operands",
+                "lambda variable must be a variable operand");
+        List<Operand> elements = listOperand.getExpression().getOperandsList();
+        List<Operand> bodies = elements.stream()
+                .map(element -> substituteWithOperand(lambda.body(), lambda.varName(), element))
+                .toList();
+        return walker.overComputedList(elements, bodies, "exists".equals(op), scope);
+    }
+
+    private static boolean isTwoVariableLambda(Operand lambdaOperand) {
+        return lambdaOperand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "lambda".equals(lambdaOperand.getExpression().getOperator())
+                && lambdaOperand.getExpression().getOperandsCount() == 3
+                && lambdaOperand.getExpression().getOperands(1).getNodeCase()
+                        == Operand.NodeCase.VARIABLE
+                && lambdaOperand.getExpression().getOperands(2).getNodeCase()
+                        == Operand.NodeCase.VARIABLE;
+    }
+
+    /**
+     * {@code list.exists(i, v, body)} and {@code list.all(i, v, body)}, where {@code i} is the
+     * element's index and {@code v} the element. Over a direct relation that declares its
+     * {@linkplain AttributeMapping.Relation#withPositionField position field}, {@code i} reads
+     * that field, so the macro becomes the one-variable macro over {@code v} with
+     * {@code v.position} for {@code i}. Over a map, {@code i} is a key, and no mapping names a
+     * key set to range over; any other collection, a literal list included, is refused too.
+     */
+    private Predicate handleTwoVariableMacro(String op, Operand listOperand,
+                                             Operand lambdaOperand, Scope scope) {
+        List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
+        Operand body = lambdaOps.get(0);
+        String indexVar = lambdaOps.get(1).getVariable();
+        String elementVar = lambdaOps.get(2).getVariable();
+        if (!"exists".equals(op) && !"all".equals(op)) {
+            throw Refusals.unsupported("Two-variable " + op + " is not supported: only exists()"
+                    + " and all() fold into a flat filter");
+        }
+        if (indexVar.equals(elementVar)) {
+            throw Refusals.malformed("Two-variable lambda binds " + indexVar + " twice");
+        }
+        if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
+            throw Refusals.unsupported("Two-variable " + op + " requires a relation attribute");
+        }
+        // resolve() throws for an unmapped attribute, a map among them.
+        if (!(scope.resolve(listOperand.getVariable()) instanceof Scope.ResolvedRelation ref)
+                || ref.isChained() || ref.tail().positionField() == null
+                || ref.tail().fields().containsKey(ref.tail().positionField())) {
+            throw Refusals.unsupported("Two-variable " + op + " over "
+                    + listOperand.getVariable() + " binds the element's index, which needs a"
+                    + " direct Relation mapping that declares its position field"
+                    + " (AttributeMapping.Relation#withPositionField): a JPA collection has no"
+                    + " order a plan can name otherwise");
+        }
+        Operand position = Operand.newBuilder()
+                .setVariable(elementVar + "." + ref.tail().positionField()).build();
+        Operand rewritten = substituteWithOperand(body, indexVar, position);
+        Operand element = Operand.newBuilder().setVariable(elementVar).build();
+        PlanResourcesFilter.Expression.Builder lambda = PlanResourcesFilter.Expression
+                .newBuilder().setOperator("lambda").addOperands(rewritten).addOperands(element);
+        return handleCollectionOperator(op, List.of(listOperand,
+                Operand.newBuilder().setExpression(lambda).build()), scope);
+    }
+
+    /**
+     * Replaces the variable {@code varName} with {@code replacement} in a body, respecting
+     * shadowing as {@link #substituteLambdaVariable} does. A field read of the variable
+     * ({@code var.f}) is refused: the replacement is an expression, not a row.
+     */
+    private static Operand substituteWithOperand(Operand operand, String varName,
+                                                 Operand replacement) {
+        switch (operand.getNodeCase()) {
+            case VARIABLE -> {
+                String name = operand.getVariable();
+                if (name.equals(varName)) {
+                    return replacement;
+                }
+                if (name.startsWith(varName + ".")) {
+                    throw Refusals.unsupported("Cannot resolve \"" + name + "\": a field of a"
+                            + " list element built from an expression, or of an element"
+                            + " index, has no column");
+                }
+                return operand;
+            }
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression expr = operand.getExpression();
+                List<Operand> ops = expr.getOperandsList();
+                PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
+                if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
+                        && bindsVariable(ops.get(1), varName)) {
+                    rebuilt.setOperands(0, substituteWithOperand(ops.get(0), varName, replacement));
+                    return Operand.newBuilder().setExpression(rebuilt).build();
+                }
+                for (int i = 0; i < ops.size(); i++) {
+                    rebuilt.setOperands(i, substituteWithOperand(ops.get(i), varName, replacement));
+                }
+                return Operand.newBuilder().setExpression(rebuilt).build();
+            }
+            default -> {
+                return operand;
+            }
+        }
+    }
+
+    /** Whether a lambda operand binds {@code varName}, as its only or either variable. */
+    private static boolean bindsVariable(Operand lambdaOperand, String varName) {
+        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
+            return false;
+        }
+        List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
+        return ops.subList(1, ops.size()).stream().anyMatch(v ->
+                v.getNodeCase() == Operand.NodeCase.VARIABLE && varName.equals(v.getVariable()));
     }
 
     /** A lambda variable no plan names, bound to the element a positional read selects. */
@@ -313,10 +451,7 @@ final class CollectionTranslator {
                 || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
             return false;
         }
-        List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
-        return ops.size() == 2
-                && ops.get(1).getNodeCase() == Operand.NodeCase.VARIABLE
-                && varName.equals(ops.get(1).getVariable());
+        return bindsVariable(lambdaOperand, varName);
     }
 
     private static Value resolveElementPath(String fullRef, String path, Value element) {
