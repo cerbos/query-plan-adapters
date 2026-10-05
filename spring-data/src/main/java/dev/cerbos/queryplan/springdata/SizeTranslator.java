@@ -108,6 +108,12 @@ final class SizeTranslator {
             if ("except".equals(argOperator)) {
                 return exceptAsFilter(arg.getExpression());
             }
+            if ("intersect".equals(argOperator)) {
+                throw Refusals.unsupported("size(intersect(...)) is not supported: Cerbos's"
+                        + " intersect() keeps duplicates from whichever list is shorter, so its"
+                        + " size depends on the two lengths; intersect() translates only"
+                        + " compared with an empty list, as hasIntersection");
+            }
             // A computed collection, e.g. a map() projection or a literal list.
             throw Refusals.unsupported(
                     "Unsupported size() expression: size() argument must be a collection "

@@ -5,11 +5,13 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 
 import { ARITHMETIC_OPERATORS, evaluateConstantComparison, foldArithmetic } from "./evaluate";
 import {
+  assertStringField,
   buildComparisonFilter,
   buildFieldFilter,
   buildMembershipFilter,
   rejectConstantFalse,
 } from "./fields";
+import { literalValue } from "./literals";
 import type { PrismaFilter } from "./index";
 import {
   currentScope,
@@ -18,6 +20,7 @@ import {
   isResolvedFieldReference,
   isResolvedValue,
   namesToOneRelation,
+  recordErroringNullElement,
   resolveFieldReference,
 } from "./mapping";
 import type {
@@ -54,6 +57,12 @@ export function handleRelationalOperator(
   const ternaryFilter = tryHandleTernaryComparison(operator, operands, context);
   if (ternaryFilter) {
     return ternaryFilter;
+  }
+  const lookupFilter =
+    tryHandleMapLiteralLookup(operator, operands, context) ??
+    tryHandleUpperAsciiComparison(operator, operands, context);
+  if (lookupFilter) {
+    return lookupFilter;
   }
 
   ({ operator, operands } = normalizeBinaryOperands(operator, operands));
@@ -98,6 +107,8 @@ export function handleRelationalOperator(
         `Wrap the map() expression in hasIntersection(map(...), [...]) instead.`
     );
   }
+
+  assertNoRawTemporalAgainstTimestamp(leftOperand, rightOperand, context);
 
   // Only a comparison between a column and one constant can absorb a sub-millisecond instant.
   const oneColumn = isColumnOperand(leftOperand) !== isColumnOperand(rightOperand);
@@ -146,6 +157,170 @@ export function handleRelationalOperator(
   }
 
   return buildValueComparisonFilter(context, left, operator, right);
+}
+
+/** `{"k": v, ...}[x]`: an index into a map literal. */
+function isMapLiteralLookup(operand: PlanExpressionOperand): operand is OperatorOperand {
+  if (!isOperatorOperand(operand) || operand.operator !== "index" || operand.operands.length !== 2) {
+    return false;
+  }
+  const [map] = operand.operands;
+  return isOperatorOperand(map!) && map.operator === "struct";
+}
+
+/** Whether a map-literal lookup appears anywhere in `operand`. */
+export function containsMapLiteralLookup(operand: PlanExpressionOperand): boolean {
+  if (!isOperatorOperand(operand)) return false;
+  return operand.operands.some(containsMapLiteralLookup) || isMapLiteralLookup(operand);
+}
+
+/**
+ * `{"k1": v1, "k2": v2}[x] == v` (and `!=`, either side first), with `x` a string column: the keys
+ * whose value equals `v` are exactly the values of `x` that make it true, and every other key the
+ * values that make it false. Any `x` that is not a key is an error, true under neither polarity,
+ * so the comparison and its negation are two membership tests, never one test and its NOT:
+ * `negated` asks for the negation's filter, and buildNegatedFilter pushes every `not` above a
+ * lookup down to it. Inside a lambda body a macro negates its body with a plain NOT, so the
+ * lookup is refused there.
+ */
+export function tryHandleMapLiteralLookup(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  context: TranslationContext,
+  negated = false
+): PrismaFilter | null {
+  if ((operator !== "eq" && operator !== "ne") || operands.length !== 2) return null;
+  const lookupIndex = operands.findIndex(isMapLiteralLookup);
+  if (lookupIndex === -1) return null;
+  const lookup = operands[lookupIndex] as OperatorOperand;
+  const other = operands[1 - lookupIndex]!;
+  const [mapOperand, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const map = literalValue(mapOperand);
+  if (
+    map === undefined ||
+    map === null ||
+    typeof map !== "object" ||
+    Array.isArray(map) ||
+    !isValueOperand(other) ||
+    !isNamedOperand(key)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "An index into a map literal is translated only as a literal map indexed by a column " +
+        "and compared with a literal: a Prisma filter has no map lookup"
+    );
+  }
+  if (context.scopes.length > 0) {
+    throw new UnsupportedQueryPlanError(
+      "An index into a map literal inside a lambda body is not supported: a missing key is an " +
+        "error under both polarities, and the macro negates its body with a plain NOT"
+    );
+  }
+  const fieldRef = resolveFieldReference(key.name, context);
+  if (fieldRef.valueType !== "string") {
+    throw new UnsupportedQueryPlanError(
+      `An index into a map literal requires a string key column, and ${key.name} is not mapped ` +
+        'with valueType: "string"'
+    );
+  }
+  const keys = Object.keys(map);
+  const matching = keys.filter((k) => evaluateConstantComparison("eq", map[k]!, other.value));
+  const holds = (operator === "eq") !== negated;
+  return buildFieldFilter(
+    fieldRef,
+    "in",
+    holds ? matching : keys.filter((k) => !matching.includes(k))
+  );
+}
+
+/** Past this many spellings, `upperAscii(x) == "LIT"` is refused rather than enumerated. */
+const MAX_UPPER_ASCII_SPELLINGS = 1024;
+
+/**
+ * `x.upperAscii() == "LIT"` (and `!=`, either side first), with `x` a string column: upperAscii
+ * maps exactly the ASCII letters a-z to A-Z and leaves every other code point alone, so the
+ * strings it maps to "LIT" are its spellings with each ASCII capital in either case — none at all
+ * when the literal holds a lowercase ASCII letter. An IN over those spellings compares the bytes
+ * exactly, where a store's UPPER would also fold non-ASCII letters. A NULL column stays UNKNOWN,
+ * as upperAscii of a missing (or null) value is an error.
+ */
+function tryHandleUpperAsciiComparison(
+  operator: string,
+  operands: PlanExpressionOperand[],
+  context: TranslationContext
+): PrismaFilter | null {
+  if ((operator !== "eq" && operator !== "ne") || operands.length !== 2) return null;
+  const callIndex = operands.findIndex(
+    (operand) => isOperatorOperand(operand) && operand.operator === "upperAscii"
+  );
+  if (callIndex === -1) return null;
+  const call = operands[callIndex] as OperatorOperand;
+  const other = operands[1 - callIndex]!;
+  const [subject] = call.operands;
+  if (
+    call.operands.length !== 1 ||
+    subject === undefined ||
+    !isNamedOperand(subject) ||
+    !isValueOperand(other) ||
+    typeof other.value !== "string"
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "upperAscii() is translated only as a column compared with a string literal: a Prisma " +
+        "filter has no ASCII-only case mapping"
+    );
+  }
+  const fieldRef = resolveFieldReference(subject.name, context);
+  assertStringField(fieldRef, "upperAscii");
+  recordErroringNullElement(context, subject, fieldRef);
+  let spellings = [""];
+  for (const character of other.value) {
+    if (character >= "a" && character <= "z") {
+      spellings = [];
+      break;
+    }
+    const cases =
+      character >= "A" && character <= "Z" ? [character, character.toLowerCase()] : [character];
+    spellings = spellings.flatMap((prefix) => cases.map((c) => prefix + c));
+    if (spellings.length > MAX_UPPER_ASCII_SPELLINGS) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot translate upperAscii() == ${JSON.stringify(other.value)}: its spellings exceed ` +
+          `the ${MAX_UPPER_ASCII_SPELLINGS}-entry limit`
+      );
+    }
+  }
+  const filter = buildFieldFilter(fieldRef, "in", spellings);
+  return operator === "eq" ? filter : { NOT: filter };
+}
+
+/**
+ * Refuses a bare `dateTime` column compared with a `timestamp(...)` operand. The attribute the
+ * application sends for that column is its RFC 3339 STRING (a Cerbos attribute has no timestamp
+ * type), and CEL has no overload ordering a string against a timestamp: `check()` raises an error,
+ * which decides the row under neither polarity the way any column filter would. Wrapping the
+ * attribute in timestamp() is what the policy means.
+ */
+function assertNoRawTemporalAgainstTimestamp(
+  first: PlanExpressionOperand,
+  second: PlanExpressionOperand,
+  context: TranslationContext
+): void {
+  for (const [column, other] of [
+    [first, second],
+    [second, first],
+  ] as const) {
+    if (
+      isNamedOperand(column) &&
+      isOperatorOperand(other) &&
+      other.operator === "timestamp" &&
+      resolveFieldReference(column.name, context).valueType === "dateTime"
+    ) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot compare ${column.name} with a timestamp: the attribute holds an RFC 3339 ` +
+          "string, and CEL has no overload comparing a string with a timestamp, so check() " +
+          "raises an error that no column filter reproduces under both polarities; wrap the " +
+          "attribute in timestamp()"
+      );
+    }
+  }
 }
 
 /** A column reference, bare or wrapped in timestamp(). */
@@ -276,6 +451,13 @@ function handleSizeComparison(
   context: TranslationContext
 ): PrismaFilter {
   const collectionOperand = sizeOperand.operands[0];
+  if (collectionOperand && isOperatorOperand(collectionOperand)) {
+    throw new UnsupportedQueryPlanError(
+      `size() of ${collectionOperand.operator}(...) counts the elements of a derived list, and a ` +
+        "Prisma relation filter can only test whether some, every or no related row matches, " +
+        "never count them"
+    );
+  }
   if (!collectionOperand || !isNamedOperand(collectionOperand)) {
     throw new UnsupportedQueryPlanError("size operator requires a named collection operand");
   }
@@ -710,6 +892,10 @@ export function handleInOperator(
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError("in requires exactly two operands");
   }
+  const ternaryFilter = tryHandleTernaryComparison("in", operands, context);
+  if (ternaryFilter) {
+    return ternaryFilter;
+  }
   const member = assertDefined(operands[0], "in requires a member operand");
   const collection = assertDefined(
     operands[1],
@@ -736,6 +922,15 @@ export function handleInOperator(
       context,
       resolveFieldReference(collection.name, context),
       [member.value]
+    );
+  }
+
+  if (isOperatorOperand(collection) && (collection.operator === "list" || collection.operator === "add")) {
+    throw new UnsupportedQueryPlanError(
+      `Membership in a list built by ${collection.operator}(...) from columns: each element is ` +
+        "compared with the member, and a Prisma field reference compares two plain columns of " +
+        "one model, never a column with an expression over another column or with the " +
+        "elements of a related list"
     );
   }
 

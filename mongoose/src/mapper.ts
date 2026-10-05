@@ -27,6 +27,29 @@ export const resolveMapperConfig = (
 ): MapperConfig | undefined =>
   lookupConfig(mapper, reference) || relationFieldConfig(reference, mapper);
 
+/**
+ * The scalar type a reference's stored value is declared with — for a relation mapped to one
+ * element field (`relation.field`), that element field's — or undefined when a constant cannot be
+ * checked against it: no `valueType`, a `dateTime` (compared through its own path), or a
+ * `valueParser`, which is the caller's explicit override of the constant.
+ */
+export const declaredScalarType = (
+  reference: string,
+  mapper: Mapper,
+): "number" | "string" | "boolean" | undefined => {
+  const config = resolveMapperConfig(reference, mapper);
+  const relation = config?.relation;
+  const typed = relation
+    ? relation.field
+      ? relation.fields?.[relation.field]
+      : undefined
+    : config;
+  if (!typed || typed.valueParser || config?.valueParser) {
+    return undefined;
+  }
+  return typed.valueType === "dateTime" ? undefined : typed.valueType;
+};
+
 /** `config` with `nullable: true` wherever it, or a relation field beneath it, declares nothing. */
 const nullableByDefault = (config: MapperConfig): MapperConfig => {
   const fields = config.relation?.fields;

@@ -290,9 +290,17 @@ so the SQL is equivalent either side of the threshold. A bare `t` becomes the el
 drills into it, and each body goes through the normal pipeline (overrides and NULL handling apply).
 An empty list: `exists` matches nothing, `all` matches everything.
 
+A list the plan builds from attributes (`[R.attr.a, R.attr.b].exists(s, s == "x")`) folds the same
+way, with each element substituted into the body. Building the list evaluates every element, so an
+element that raises in CEL (a missing attribute, or an expression over one) makes the whole macro
+raise even beside a match: the folded filter is UNKNOWN for that row. `in` over a built list is an
+`==` per element under the same guard, `x in (cond ? A : B)` is taken per branch, and `x in A + B`
+is `x in A || x in B`.
+
 `exists_one`, `filter`, `map` and `except` over a literal list raise, as does a `t.path` the element
-doesn't carry. Macros over a column or relation (`R.attr.tags.exists(...)`) need an
-`operator_override_fns` entry.
+doesn't carry, a map or list element, and a two-variable comprehension (`exists(i, v, ...)`), whose
+index or map key has no SQL lowering. Macros over a column or relation (`R.attr.tags.exists(...)`)
+need an `operator_override_fns` entry.
 
 ### Transports
 
@@ -377,8 +385,15 @@ For an async engine, listen on `async_engine.sync_engine`.
 
 Timestamp literals must be strict RFC 3339, within CEL's year 0001–9999 range, and exactly
 representable at microsecond precision (discarded fractional digits must be zero); the mapped column
-and database must preserve microseconds. Bare comparisons of temporal attributes raise — compare
-instants with `timestamp()` on both operands.
+and database must preserve microseconds. A temporal attribute read outside `timestamp()` raises:
+CEL sees the RFC 3339 string the application sent, which a stored timestamp no longer spells, and
+has no overload comparing that string with a timestamp. Compare instants with `timestamp()` on both
+operands.
+
+`timestamp(R.attr.x) + duration("86400s")` (or `-`) compared with a timestamp literal is rewritten
+to compare the column with the literal shifted the other way, guarded so a row whose sum leaves
+CEL's range stays denied. Durations must be exact at microsecond precision. `timeSince()` raises:
+the planner leaves it unevaluated, and the plan carries no instant to measure from.
 
 ## Supported operators
 
@@ -393,10 +408,16 @@ instants with `timestamp()` on both operands.
 | `string()` over a numeric column | refused: CEL prints Go's shortest `%g` form (`1e+06`, `-0`) | an override matching your database |
 | `int()`, `double()` | refused | an override matching your database |
 | `size()` over a string column | `LENGTH` (`CHAR_LENGTH` on MySQL, whose `LENGTH` counts bytes) | — |
+| `upperAscii()` | a `REPLACE` per ASCII letter (`UPPER` also folds non-ASCII letters on PostgreSQL and MySQL); compared with a string literal, only the literal's own letters, which keeps SQLite before 3.46 inside its parser stack | — |
+| `m["key"]` over a map attribute | read as `m.key` when `attr_map` maps that path | — |
+| `{"k": v, ...}[R.attr.x] == literal`, `!=` (a map literal read at an attribute key) | the keys whose value answers it, UNKNOWN for a key outside the map | — |
+| `timestamp(x) ± duration(...)` against a timestamp literal | the literal shifted instead | — |
+| `timeSince()` | refused: the plan carries no evaluation instant | — |
 | `size()` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `x[i] == literal`, `x[i] != literal` over a JSON or PostgreSQL array column | refused until declared | `collection_columns` |
 | `literal in x`, `hasIntersection(x, [literals])` over a JSON or PostgreSQL array column | refused until declared | `collection_columns`, for an attribute `attr_map` does not map |
-| `exists`, `all` over a literal list (a principal attribute) | folded | — |
+| `exists`, `all` over a literal list (a principal attribute) or a list built from attributes | folded | — |
+| `in` over a list built from attributes, a ternary of lists, or a concatenation `A + B` | translated per element, branch or operand | — |
 | `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | overrides; `require_hops` for a chain through a to-one parent |
 | `index` over any other storage | refused | an `index` override |
 | `matches()` | refused | an override, only if your engine matches RE2 |
@@ -409,22 +430,24 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
-recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is translated with one mapping, executed on SQLite
-(through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL (`utf8mb4_0900_bin`),
-and the returned ids are compared with the decisions the PDP recorded. The collections are stored as
-JSON on every store; the cases that read a collection declared in `collection_columns` run once more
-on PostgreSQL with them stored as arrays (`pgArray`). The results are the same on every store. For
-the current PDP, 0.55.0, where the total is every golden case recorded in that tier:
+recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is served by a stub PDP and fetched through the SDK's
+HTTP `CerbosClient`, so it arrives as your application receives it, then translated with one mapping,
+executed on SQLite (through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL
+(`utf8mb4_0900_bin`), and the returned ids are compared with the decisions the PDP recorded. The
+collections are stored as JSON on every store; the cases that read a collection declared in
+`collection_columns` run once more on PostgreSQL with them stored as arrays (`pgArray`). The results
+are the same on every store. For the current PDP, 0.55.0, where the total is every golden case
+recorded in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 57 / 80 |
-| adversarial | 228 / 308 |
+| core | 29 / 29 |
+| extended | 69 / 97 |
+| adversarial | 252 / 338 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (96 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (105 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.55.0 those are four extended cases and three adversarial cases:
+harness does not compare. Under 0.55.0 those are four extended cases and five adversarial cases:
 `null/has/missing-attribute` and `null/has/composed-with-comparison` (the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
 the omission as absent and denies the row; use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
@@ -433,7 +456,10 @@ the omission as absent and denies the row; use `R.attr.x != null` instead), `ari
 and three
 `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of
 it denies j2, while `check()` receives `aNumber` as absent and treats the erroring DENY as not
-matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)), and
+`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`
+(the planner rewrites `in` over a scalar container to `==`, which `check()` has no overload for;
+[#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 
@@ -613,3 +639,7 @@ Without PDM installed, run the same commands through the [pyprojectx](https://py
 wrapper, `./pw` (`pw.bat` on Windows), which installs PDM, ruff and isort into `.pyprojectx/` on
 first use: `./pw install`, `./pw test`, `./pw format`, `./pw lint`, or `./pw pdm <command>`. CI runs
 `format` and `lint` on the SQLAlchemy 2.x leg and fails if they leave a diff.
+
+CI links Ubuntu 24.04's SQLite (3.45), usually older than the one a developer's Python bundles, and
+before 3.46 a deeply nested expression overflows SQLite's parser stack. `scripts/test-ci-sqlite.sh`
+runs every suite that needs no Docker store against that SQLite, from `pdm.lock`, in a container.

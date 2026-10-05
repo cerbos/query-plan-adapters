@@ -10,6 +10,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.all(t, t.name == "public")'
+- id: 'collection/all/negated-nested-exists-in-body'
+  tier: adversarial
+  intent: 'all over an object list whose body negates a nested exists (categories.all(c, !c.subCategories.exists(s, s.name in ["finance", "legal"]))).'
+  trap: 'Hoisting the not() out of the lambda, or scoping NOT EXISTS against the outer row instead of each element, changes the rows; an empty list is vacuously true.'
+  condition:
+    match:
+      expr: 'R.attr.categories.all(c, !c.subCategories.exists(s, s.name in ["finance", "legal"]))'
+- id: 'collection/all/nested-all-over-literal-list'
+  tier: adversarial
+  intent: 'all over a resource list whose body is an all over a list literal referencing the outer variable (tagNames.all(t, ["private", "other"].all(x, x != t))).'
+  trap: 'Inner and outer lambda variables must stay distinct; in CEL null != "private" is true, so a NULL element must not deny the row.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.all(t, ["private", "other"].all(x, x != t))'
+- id: 'collection/all/nested-exists-over-literal-list'
+  tier: adversarial
+  intent: 'all over a resource list whose body is an exists over a list literal binding both lambda variables (tagNames.all(t, ["pub", "pri"].exists(p, t.startsWith(p)))).'
+  trap: 'Confusing the inner and outer variables, or unrolling the inner literal list wrongly, changes which rows pass; an empty list is vacuously true.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.all(t, ["pub", "pri"].exists(p, t.startsWith(p)))'
 - id: 'collection/all/nested-exists-over-same-collection'
   tier: adversarial
   intent: 'all() over tags whose body is an exists() over the same tags, requiring a different tag (by id) with the same name.'
@@ -24,6 +45,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/concatenate/ternary-list-branches-equals-literal'
+  tier: adversarial
+  intent: 'List concatenation with a ternary whose branches are list literals, compared with a list literal; the shape runtime.effectiveDerivedRoles plans to.'
+  trap: 'List + is ordered, so the ternary must pick the right branch in place; an adapter that cannot express list concatenation must throw.'
+  condition:
+    match:
+      expr: '["one"] + (R.attr.aBool ? ["three"] : []) + ["two"] == ["one", "three", "two"]'
 - id: 'collection/except/as-whole-condition'
   tier: adversarial
   intent: 'The two-list except() used as the whole condition, returning a list rather than a boolean.'
@@ -34,6 +62,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'except() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.'
+- id: 'collection/except/equals-empty-list'
+  tier: extended
+  intent: 'except() compared with an empty list (tagNames.except(["public"]) == []).'
+  trap: 'Comparing to an empty list literal: rows holding only "public" (and empty lists) pass, a6 and b6 do not.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.except(["public"]) == []'
 - id: 'collection/except/equals-list-literal'
   tier: extended
   intent: 'A resource list minus a literal list, compared for equality with a list literal.'
@@ -118,6 +153,13 @@ cases:
   condition:
     match:
       expr: '!R.attr.tags.exists(t, t.name == "private")'
+- id: 'collection/exists/literal-list-element-as-contains-needle'
+  tier: adversarial
+  intent: 'exists over a list literal whose body uses the lambda variable as a contains() needle, kept as a comprehension by sitting under an or.'
+  trap: 'The needle is bound per element and matched literally: an unescaped LIKE makes "%_o" match any "o" after a character and over-grants a3 "100xdone" and b1; the X needle is case-sensitive.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber == 33 || ["%_o", "X"].exists(t, R.attr.aString.contains(t))'
 - id: 'collection/exists/negated-element-in-literal-list'
   tier: adversarial
   intent: Negated exists() over a resource string list whose body tests membership in a literal list.
@@ -188,6 +230,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, t.name == "public"))'
+- id: 'collection/exists/range-built-from-attributes'
+  tier: extended
+  intent: 'exists over a list literal built from two attributes ([aString, aOptionalString].exists(s, s == "set")), which is never unrolled.'
+  trap: 'The range is an expression, not a stored list; a missing element attribute makes the list error, so the row denies.'
+  condition:
+    match:
+      expr: '[R.attr.aString, R.attr.aOptionalString].exists(s, s == "set")'
+- id: 'collection/exists/relative-window-in-body'
+  tier: extended
+  intent: 'A relative time window inside an exists body, so the folded now() literal sits in a lambda.'
+  trap: 'The harness and translator must handle the folded timestamp inside the lambda; a4 (private) and the future-dated public rows deny.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name == "public" && timestamp(R.attr.createdAt) < now() - duration("24h"))'
 - id: 'collection/exists/scalar-list-equals'
   tier: core
   intent: 'exists() over a string list with an equality body (tagNames.exists(tagName, tagName == "public")).'
@@ -202,6 +258,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames.exists(tagName, !(tagName == "public"))'
+- id: 'collection/exists/two-variable-index-and-element'
+  tier: adversarial
+  intent: 'A two-variable exists over a list binding the index and the element (tagNames.exists(i, n, i == 0 && n == "public")).'
+  trap: 'Ignoring the index over-grants b6, whose "public" sits at index 1; binding the first variable to the element is wrong.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.exists(i, n, i == 0 && n == "public")'
+- id: 'collection/exists/two-variable-map-key-and-value'
+  tier: adversarial
+  intent: 'A two-variable exists over a map binding the key and the value (obj.exists(k, v, k == "inner" && v.startsWith("100"))).'
+  trap: 'The first variable is the key, the second the value; swapping them, or treating the map as a list, changes the rows.'
+  condition:
+    match:
+      expr: 'R.attr.obj.exists(k, v, k == "inner" && v.startsWith("100"))'
 - id: 'collection/filter/as-conjunct'
   tier: adversarial
   intent: 'A list-valued filter() as one conjunct of an and, beside a boolean attribute.'
@@ -225,6 +295,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'filter() returns a list, not a boolean, so the condition is not evaluable and CEL denies every seed.'
+- id: 'collection/filter/literal-in-filtered-list'
+  tier: extended
+  intent: 'A literal tested for membership in a filtered resource list ("public" in tagNames.filter(t, t.startsWith("p") && aBool)).'
+  trap: 'Ignoring the filter degrades to plain membership and over-grants a5 and b6, whose aBool is false.'
+  condition:
+    match:
+      expr: '"public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool)'
 - id: 'collection/has-intersection/mapped-names-value-first'
   tier: adversarial
   intent: 'hasIntersection(["public", "other"], tags.map(t, t.name)): the literal list first, a projection second.'
@@ -239,6 +316,13 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", "héllo🚀", "100%_x"])'
+- id: 'collection/has-intersection/negated-mapped-names'
+  tier: adversarial
+  intent: 'The negation of hasIntersection between a map() projection over an object list and a list literal.'
+  trap: 'A nameless tag makes map() error, which CEL denies under the negation too; a guard ANDed with the result turns that error into true under not() and over-grants b5 and e1.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tags.map(t, t.name), ["public"])'
 - id: 'collection/has-intersection/value-first'
   tier: adversarial
   intent: hasIntersection with the literal list first and the resource list second.
@@ -288,6 +372,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5'
+- id: 'collection/index/map-literal-by-attribute-key'
+  tier: extended
+  intent: 'A map literal indexed by an attribute and compared at the root ({...}[aString] == "ADMIN"), which the planner rewrites to an or of equalities on the key.'
+  trap: 'The keys whose value matches are the answer; a missing key errors in CEL and denies, so no row outside "one" and "same" passes.'
+  condition:
+    match:
+      expr: '{"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString] == "ADMIN"'
+- id: 'collection/index/map-literal-by-attribute-key-under-or'
+  tier: adversarial
+  intent: 'The same map literal indexed by an attribute, but under an or, so the planner keeps the index over a struct literal.'
+  trap: 'An index into a map literal needs lookup semantics, and a missing key errors and denies; an adapter that cannot express it must throw.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber == 33 || {"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString] == "ADMIN"'
+- id: 'collection/index/map-literal-by-attribute-key-value-first'
+  tier: adversarial
+  intent: 'The literal on the left of a map literal indexed by an attribute ("ADMIN" == {...}[aString]), which the planner does not rewrite.'
+  trap: 'The plan keeps the index over a struct literal; translating it as a column lookup, or letting a missing key match, is wrong.'
+  condition:
+    match:
+      expr: '"ADMIN" == {"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString]'
 - id: 'collection/index/negated-first-element-of-boolean-list'
   tier: adversarial
   intent: '!(aBoolList[0] == true): the negated first-element comparison over a boolean list.'
@@ -323,6 +428,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames[-1] == "public" || R.attr.aNumber == 5'
+- id: 'collection/intersect/duplicates-in-shorter-list'
+  tier: adversarial
+  intent: 'The size of intersect() between a resource list and a list literal (size(intersect(tagNames, ["public", "other"])) == 1).'
+  trap: 'Cerbos intersect keeps duplicates from the shorter list, so a3 ["public", "public"] has size 2 and denies; set semantics over-grants it.'
+  condition:
+    match:
+      expr: 'size(intersect(R.attr.tagNames, ["public", "other"])) == 1'
+- id: 'collection/intersect/equals-empty-list'
+  tier: extended
+  intent: 'intersect() compared with an empty list (intersect(tagNames, ["public"]) == []).'
+  trap: 'intersect is not hasIntersection: rows without "public" pass, and rows holding it deny.'
+  condition:
+    match:
+      expr: 'intersect(R.attr.tagNames, ["public"]) == []'
+- id: 'collection/is-subset/resource-list-of-literal-list'
+  tier: extended
+  intent: 'isSubset() of a resource list against a list literal (tagNames.isSubset(["public", "private"])).'
+  trap: 'Inverting the subset direction, failing to treat an empty list as a subset, or ignoring NULL elements changes the rows.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.isSubset(["public", "private"])'
 - id: 'collection/map/as-whole-condition'
   tier: adversarial
   intent: 'map() used as the entire condition, returning a list rather than a boolean.'
@@ -340,3 +466,24 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.map(t, t.id) == ["t3a", "t3b"]'
+- id: 'collection/map/literal-in-mapped-names'
+  tier: extended
+  intent: 'A literal tested for membership in a list projected by map() from an object list ("public" in tags.map(t, t.name)).'
+  trap: 'A plain EXISTS over tags.name returns b6, whose nameless tag makes map() error so check() denies it; a join without DISTINCT duplicates a3.'
+  condition:
+    match:
+      expr: '"public" in R.attr.tags.map(t, t.name)'
+- id: 'collection/map/literal-in-mapped-upper-ascii'
+  tier: extended
+  intent: 'A literal tested for membership in a resource string list mapped through upperAscii() ("PUBLIC" in tagNames.map(t, t.upperAscii())).'
+  trap: 'Dropping upperAscii denies everything; c1 "Public" must match, and a NULL element errors and denies.'
+  condition:
+    match:
+      expr: '"PUBLIC" in R.attr.tagNames.map(t, t.upperAscii())'
+- id: 'collection/map/negated-literal-in-mapped-names'
+  tier: adversarial
+  intent: 'The negation of a literal membership in a map() projection over an object list.'
+  trap: 'NOT EXISTS returns b5 and e1, whose nameless tags make map() error so check() denies them.'
+  condition:
+    match:
+      expr: '!("public" in R.attr.tags.map(t, t.name))'

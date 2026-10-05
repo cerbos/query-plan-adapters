@@ -340,7 +340,8 @@ public final class SpringDataQueryPlanAdapter {
      * OMITTED when the call does not.
      */
     private static <T> Specification<T> conditional(Operand planned, Options options) {
-        Operand condition = PlanLiterals.fold(planned);
+        Operand condition = PlanLiterals.selectMapKeys(PlanLiterals.fold(planned),
+                options.mapping());
         assertNoNullComparisonOperands(condition, options.mapping(),
                 options.operatorOverrides(), options.nullAttributeRepresentation());
         return (root, query, cb) ->

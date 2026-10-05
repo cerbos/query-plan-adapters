@@ -16,7 +16,7 @@ It is one of the repository's two shared policy directories, and they prove diff
 is whether the adapter can be installed, imported and handed to the ORM's real query methods at all.
 A third, unnamed policy suite at the repository root was absorbed into the conformance corpus
 ([ADR 0008](../docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
-Glossary: [`CONTEXT.md`](../CONTEXT.md).
+Glossary: [`GLOSSARY.md`](../GLOSSARY.md).
 
 ## Running an example
 

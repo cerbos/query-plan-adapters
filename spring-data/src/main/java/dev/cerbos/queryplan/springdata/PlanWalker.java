@@ -120,10 +120,30 @@ final class PlanWalker {
             case "hasIntersection", "has_intersection" ->
                     membership.handleHasIntersection(operands, scope);
             case "in" -> {
-                Operand rewritten = membershipInMappedLiteral(operands);
+                Predicate viaTernary = ternary.tryTernaryComparison(op, operands, scope);
+                if (viaTernary != null) {
+                    yield viaTernary;
+                }
+                Operand rewritten = membershipInProjection(operands);
+                if (rewritten == null) {
+                    rewritten = membershipInConcatenation(operands, scope);
+                }
+                if (rewritten != null) {
+                    yield traverse(rewritten, scope);
+                }
+                if (operands.size() == 2 && isComputedList(operands.get(1))) {
+                    List<Operand> elements = operands.get(1).getExpression().getOperandsList();
+                    yield overComputedList(elements,
+                            elements.stream().map(e -> expression("eq", operands.get(0), e))
+                                    .toList(),
+                            true, scope);
+                }
+                yield membership.handleIn(operands, scope);
+            }
+            case "isSubset" -> {
+                Operand rewritten = subsetAsMembership(operands, scope);
                 yield rewritten != null
-                        ? traverse(rewritten, scope)
-                        : membership.handleIn(operands, scope);
+                        ? traverse(rewritten, scope) : leafComparison(op, operands, scope);
             }
             case "if" -> ternary.handleBareTernary(operands, scope);
             case "overlaps" -> hierarchy.handleOverlaps(operands, scope);
@@ -142,8 +162,15 @@ final class PlanWalker {
             }
             case "eq", "ne" -> {
                 Operand predicate = booleanComparison(op, operands);
+                if (predicate == null) {
+                    predicate = intersectionEmptiness(op, operands);
+                }
                 if (predicate != null) {
                     yield traverse(predicate, scope);
+                }
+                Predicate lookup = mapLiteralLookup(op, operands, scope);
+                if (lookup != null) {
+                    yield lookup;
                 }
                 Operand rewritten = wholeListEquality(op, operands, scope);
                 yield rewritten != null
@@ -334,25 +361,34 @@ final class PlanWalker {
     }
 
     /**
-     * {@code x in list.map(t, body)} over a literal list, rewritten as
-     * {@code size(list.filter(t, x == body)) > 0}, whose strict count is UNKNOWN when any
+     * {@code x in coll.map(t, body)}, over a literal list or a relation, rewritten as
+     * {@code size(coll.filter(t, x == body)) > 0}, whose strict count is UNKNOWN when any
      * element's comparison is. That is exact because CEL's {@code map} errors when any element's
      * body does, and {@code x == body} is UNKNOWN only where the body errors or {@code x} is a
-     * missing attribute. Returns {@code null} for any other shape, and when {@code x} reads the
-     * lambda variable's name, which the rewrite would capture.
+     * missing attribute.
+     *
+     * <p>{@code x in coll.filter(t, p)} likewise becomes
+     * {@code size(coll.filter(t, p ? x == t : false)) > 0}: CEL's {@code filter} errors when
+     * any element's {@code p} does, and the ternary keeps an UNKNOWN {@code p} UNKNOWN where
+     * {@code p && x == t} would let a FALSE comparison absorb it.
+     *
+     * <p>Returns {@code null} for any other shape, and when {@code x} reads the lambda
+     * variable's name, which the rewrite would capture.
      */
-    private static Operand membershipInMappedLiteral(List<Operand> operands) {
+    private static Operand membershipInProjection(List<Operand> operands) {
         if (operands.size() != 2
                 || operands.get(1).getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return null;
         }
-        PlanResourcesFilter.Expression map = operands.get(1).getExpression();
-        if (!"map".equals(map.getOperator()) || map.getOperandsCount() != 2
-                || map.getOperands(0).getNodeCase() != Operand.NodeCase.VALUE) {
+        PlanResourcesFilter.Expression macro = operands.get(1).getExpression();
+        boolean map = "map".equals(macro.getOperator());
+        if ((!map && !"filter".equals(macro.getOperator())) || macro.getOperandsCount() != 2
+                || (macro.getOperands(0).getNodeCase() != Operand.NodeCase.VALUE
+                        && macro.getOperands(0).getNodeCase() != Operand.NodeCase.VARIABLE)) {
             return null;
         }
-        ParsedLambda lambda = ParsedLambda.parse(map.getOperands(1),
-                "map second operand must be a lambda",
+        ParsedLambda lambda = ParsedLambda.parse(macro.getOperands(1),
+                macro.getOperator() + " second operand must be a lambda",
                 "lambda requires exactly 2 operands",
                 "lambda variable must be a variable operand");
         Operand needle = operands.get(0);
@@ -360,9 +396,209 @@ final class PlanWalker {
             return null;
         }
         Operand variable = Operand.newBuilder().setVariable(lambda.varName()).build();
-        Operand filter = expression("filter", map.getOperands(0), expression("lambda",
-                expression("eq", needle, lambda.body()), variable));
+        Operand body = map
+                ? expression("eq", needle, lambda.body())
+                : expression("if", lambda.body(), expression("eq", needle, variable),
+                        Operand.newBuilder().setValue(Value.newBuilder().setBoolValue(false))
+                                .build());
+        Operand filter = expression("filter", macro.getOperands(0),
+                expression("lambda", body, variable));
         return expression("gt", expression("size", filter), number(0));
+    }
+
+    /**
+     * {@code x in a + b}, rewritten as {@code x in a || x in b}, when every part of the
+     * concatenation is a literal list or a direct relation. Neither can error, so the
+     * disjunction errors exactly where {@code x in (a + b)} does: when {@code x} is a missing
+     * attribute. A part that can error (a relation reached through a to-one parent, a computed
+     * list) is left to the refusal, since a TRUE disjunct would hide its error.
+     */
+    private static Operand membershipInConcatenation(List<Operand> operands, Scope scope) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        List<Operand> parts = new java.util.ArrayList<>();
+        if (!concatenationParts(operands.get(1), scope, parts) || parts.size() < 2) {
+            return null;
+        }
+        PlanResourcesFilter.Expression.Builder any = PlanResourcesFilter.Expression.newBuilder()
+                .setOperator("or");
+        parts.forEach(part -> any.addOperands(expression("in", operands.get(0), part)));
+        return Operand.newBuilder().setExpression(any).build();
+    }
+
+    private static boolean concatenationParts(Operand o, Scope scope, List<Operand> parts) {
+        switch (o.getNodeCase()) {
+            case VALUE -> {
+                parts.add(o);
+                return o.getValue().getKindCase() == Value.KindCase.LIST_VALUE;
+            }
+            case VARIABLE -> {
+                parts.add(o);
+                return isDirectRelation(o.getVariable(), scope);
+            }
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression e = o.getExpression();
+                return "add".equals(e.getOperator()) && e.getOperandsCount() == 2
+                        && concatenationParts(e.getOperands(0), scope, parts)
+                        && concatenationParts(e.getOperands(1), scope, parts);
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
+    private static boolean isDirectRelation(String variable, Scope scope) {
+        try {
+            return scope.resolve(variable) instanceof Scope.ResolvedRelation ref
+                    && !ref.isChained();
+        } catch (IllegalArgumentException unmapped) {
+            return false;
+        }
+    }
+
+    /** A {@code list(...)} the literal fold left as an expression: an element is computed. */
+    static boolean isComputedList(Operand o) {
+        return o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "list".equals(o.getExpression().getOperator());
+    }
+
+    /**
+     * A macro or membership over a list built from expressions ({@code [R.attr.a, "x"]}),
+     * folded per element: {@code any} joins {@code perElement} with {@code or}
+     * ({@code exists}, {@code in}), otherwise with {@code and} ({@code all}). CEL builds the
+     * list first, so one erroring element errors the whole result, even where another element
+     * decides it; a plain disjunction would let a TRUE element hide that error. Each computed
+     * element's {@code e == e || !(e == e)} is TRUE where the element evaluates and UNKNOWN
+     * where it errors, and the fold is taken under that guard as a ternary, which is UNKNOWN
+     * under both polarities whenever the guard is.
+     */
+    Predicate overComputedList(List<Operand> elements, List<Operand> perElement, boolean any,
+                               Scope scope) {
+        if (perElement.isEmpty()) {
+            return any ? cb.disjunction() : cb.conjunction();
+        }
+        PlanResourcesFilter.Expression.Builder fold = PlanResourcesFilter.Expression.newBuilder()
+                .setOperator(any ? "or" : "and").addAllOperands(perElement);
+        PlanResourcesFilter.Expression.Builder evaluated =
+                PlanResourcesFilter.Expression.newBuilder().setOperator("and");
+        for (Operand element : elements) {
+            if (element.getNodeCase() != Operand.NodeCase.VALUE) {
+                Operand same = expression("eq", element, element);
+                evaluated.addOperands(expression("or", same, expression("not", same)));
+            }
+        }
+        Operand body = Operand.newBuilder().setExpression(fold).build();
+        if (evaluated.getOperandsCount() == 0) {
+            return traverse(body, scope);
+        }
+        Operand guard = Operand.newBuilder().setExpression(evaluated).build();
+        return tri.ternary(() -> traverse(guard, scope), () -> traverse(body, scope),
+                cb::disjunction);
+    }
+
+    /**
+     * {@code rel.isSubset([...])}, Cerbos's "every element of {@code rel} is in the list", as
+     * {@code rel.all(e, e in [...])}. {@code null} for any other shape.
+     */
+    private static Operand subsetAsMembership(List<Operand> operands, Scope scope) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        Operand receiver = operands.get(0);
+        Operand other = operands.get(1);
+        if (receiver.getNodeCase() == Operand.NodeCase.VARIABLE
+                && isRelation(receiver.getVariable(), scope)
+                && other.getNodeCase() == Operand.NodeCase.VALUE
+                && other.getValue().getKindCase() == Value.KindCase.LIST_VALUE) {
+            Operand element = Operand.newBuilder().setVariable(LIST_ELEMENT).build();
+            return expression("all", receiver,
+                    expression("lambda", expression("in", element, other), element));
+        }
+        return null;
+    }
+
+    /**
+     * {@code intersect(a, b) == []} as {@code !hasIntersection(a, b)}, and {@code != []} as
+     * {@code hasIntersection(a, b)}: Cerbos's {@code intersect} keeps the elements the two
+     * lists share, so it is empty exactly when they share none. Its size is not translated, as
+     * it counts duplicates from whichever list is shorter. {@code null} for any other shape.
+     */
+    private static Operand intersectionEmptiness(String op, List<Operand> operands) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        for (int i = 0; i < 2; i++) {
+            Operand intersect = operands.get(i);
+            Operand empty = operands.get(1 - i);
+            if (intersect.getNodeCase() == Operand.NodeCase.EXPRESSION
+                    && "intersect".equals(intersect.getExpression().getOperator())
+                    && intersect.getExpression().getOperandsCount() == 2
+                    && empty.getNodeCase() == Operand.NodeCase.VALUE
+                    && empty.getValue().getKindCase() == Value.KindCase.LIST_VALUE
+                    && empty.getValue().getListValue().getValuesCount() == 0) {
+                PlanResourcesFilter.Expression.Builder shared = intersect.getExpression()
+                        .toBuilder().setOperator("hasIntersection");
+                Operand any = Operand.newBuilder().setExpression(shared).build();
+                return "eq".equals(op) ? expression("not", any) : any;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code {"k1": v1, ...}[key] == c} (or {@code !=}), a lookup in a map literal by a
+     * computed key: the keys whose value equals {@code c} (or differs from it) when
+     * {@code key} is one of the map's keys, and UNKNOWN under both polarities when it is not,
+     * as CEL errors on a missing key. Values are compared with CEL equality (numbers by
+     * value, other types by kind and value). {@code null} for any other shape.
+     */
+    private Predicate mapLiteralLookup(String op, List<Operand> operands, Scope scope) {
+        if (operands.size() != 2) {
+            return null;
+        }
+        for (int i = 0; i < 2; i++) {
+            Operand index = operands.get(i);
+            Operand compared = operands.get(1 - i);
+            if (index.getNodeCase() != Operand.NodeCase.EXPRESSION
+                    || !"index".equals(index.getExpression().getOperator())
+                    || index.getExpression().getOperandsCount() != 2
+                    || compared.getNodeCase() != Operand.NodeCase.VALUE) {
+                continue;
+            }
+            Operand map = index.getExpression().getOperands(0);
+            Operand key = index.getExpression().getOperands(1);
+            if (map.getNodeCase() != Operand.NodeCase.VALUE
+                    || map.getValue().getKindCase() != Value.KindCase.STRUCT_VALUE
+                    || key.getNodeCase() == Operand.NodeCase.VALUE) {
+                continue;
+            }
+            Object target = PlanValues.protoValueToJava(compared.getValue());
+            com.google.protobuf.ListValue.Builder keys = com.google.protobuf.ListValue.newBuilder();
+            com.google.protobuf.ListValue.Builder selected =
+                    com.google.protobuf.ListValue.newBuilder();
+            map.getValue().getStructValue().getFieldsMap().forEach((k, v) -> {
+                Value keyValue = Value.newBuilder().setStringValue(k).build();
+                keys.addValues(keyValue);
+                if (celEquals(PlanValues.protoValueToJava(v), target) == "eq".equals(op)) {
+                    selected.addValues(keyValue);
+                }
+            });
+            Operand present = expression("in", key,
+                    constant(Value.newBuilder().setListValue(keys).build()));
+            Operand matching = expression("in", key,
+                    constant(Value.newBuilder().setListValue(selected).build()));
+            return tri.ternary(() -> traverse(present, scope), () -> traverse(matching, scope),
+                    tri::unknown);
+        }
+        return null;
+    }
+
+    private static boolean celEquals(Object left, Object right) {
+        return left instanceof Number l && right instanceof Number r
+                ? l.doubleValue() == r.doubleValue()
+                : java.util.Objects.equals(left, right);
     }
 
     private static boolean readsName(Operand operand, String name) {

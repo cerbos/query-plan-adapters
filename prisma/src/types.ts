@@ -9,6 +9,7 @@ import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import type { MapperConfig } from "./index";
 import { isInvalidPattern } from "./regex";
 import { constantFoldExpression } from "./rewrite";
+import { rewriteTemporalComparison } from "./timestamp";
 import { COMPARISON_OPERATORS, isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 
@@ -94,6 +95,7 @@ export function settleTypeMismatches(
     distributeTernary(expr, context) ??
     rewriteCastComparison(expr, context, positive) ??
     rewriteConcatenation(expr, context) ??
+    rewriteTemporalComparison(expr, positive) ??
     splitDivision(expr, context);
   if (cast !== undefined) return settleTypeMismatches(cast, context, positive);
 
@@ -138,7 +140,10 @@ function settleLambdaBody(
     !isNamedOperand(collection) ||
     lambda === undefined ||
     !isOperatorOperand(lambda) ||
-    lambda.operator !== "lambda"
+    lambda.operator !== "lambda" ||
+    // A two-variable comprehension binds a second variable; rebuilding the lambda below would
+    // drop it. It is left whole for the translator to refuse.
+    lambda.operands.length !== 2
   ) {
     return expr;
   }
@@ -449,14 +454,19 @@ function substituteDivision(
   return { operator: expr.operator, operands };
 }
 
-/** Past this many code points, a literal is not split across a two-column concatenation. */
+/** Past this many code points, a literal is not split across a concatenation of columns. */
 const MAX_CONCATENATION_SPLITS = 256;
 
+/** Past this many ways to split the literal, the concatenation is left to the translator. */
+const MAX_CONCATENATION_ARMS = 256;
+
 /**
- * `a + b == "lit"` over two string columns: the literal split at every code point, one arm per
- * split, `a == prefix && b == suffix`. Each arm also ORs in `!startsWith(column, "")` for both
- * columns — FALSE for a present value, UNKNOWN for a NULL one — so a missing operand leaves the
- * whole comparison UNKNOWN under both polarities, as the error `+` raises on it does in CEL.
+ * `a + "sep" + b == "lit"` over string columns and string literals, with at least two columns:
+ * one arm per way of splitting the literal into consecutive pieces, each column taking one piece
+ * (`a == prefix && b == suffix`) and each literal term matching its own text in place. Each arm
+ * also ORs in `!startsWith(column, "")` for every column — FALSE for a present value, UNKNOWN for a
+ * NULL one — so a missing operand leaves the whole comparison UNKNOWN under both polarities, as
+ * the error `+` raises on it does in CEL.
  */
 function rewriteConcatenation(
   expr: OperatorOperand,
@@ -469,16 +479,16 @@ function rewriteConcatenation(
   if (
     !isOperatorOperand(sum) ||
     sum.operator !== "add" ||
-    sum.operands.length !== 2 ||
     !isValueOperand(literal) ||
     typeof literal.value !== "string"
   ) {
     return undefined;
   }
-  const [left, right] = sum.operands as [PlanExpressionOperand, PlanExpressionOperand];
-  const columns = [left, right].filter(isNamedOperand);
+  const terms = concatenationTerms(sum);
+  if (terms === undefined) return undefined;
+  const columns = terms.filter(isNamedOperand);
   if (
-    columns.length !== 2 ||
+    columns.length < 2 ||
     columns.some((column) => {
       const fieldRef = resolveFieldReference(column.name, context);
       return fieldRef.valueType !== "string" || (fieldRef.relations?.length ?? 0) > 0;
@@ -490,15 +500,27 @@ function rewriteConcatenation(
   if (codePoints.length > MAX_CONCATENATION_SPLITS) return undefined;
 
   const arms: PlanExpressionOperand[] = [];
-  for (let split = 0; split <= codePoints.length; split++) {
-    arms.push({
-      operator: "and",
-      operands: [
-        { operator: "eq", operands: [left, { value: codePoints.slice(0, split).join("") }] },
-        { operator: "eq", operands: [right, { value: codePoints.slice(split).join("") }] },
-      ],
-    });
-  }
+  const split = (index: number, offset: number, pieces: PlanExpressionOperand[]): boolean => {
+    if (index === terms.length) {
+      if (offset !== codePoints.length) return true;
+      arms.push(pieces.length === 1 ? pieces[0]! : { operator: "and", operands: pieces });
+      return arms.length <= MAX_CONCATENATION_ARMS;
+    }
+    const term = terms[index]!;
+    if (isValueOperand(term)) {
+      const text = Array.from(term.value as string);
+      const matches = text.every((point, i) => codePoints[offset + i] === point);
+      return !matches || split(index + 1, offset + text.length, pieces);
+    }
+    const last = index === terms.length - 1;
+    for (let end = last ? codePoints.length : offset; end <= codePoints.length; end++) {
+      const piece = codePoints.slice(offset, end).join("");
+      const equality = { operator: "eq", operands: [term, { value: piece }] };
+      if (!split(index + 1, end, [...pieces, equality])) return false;
+    }
+    return true;
+  };
+  if (!split(0, 0, [])) return undefined;
   for (const column of columns) {
     arms.push({
       operator: "not",
@@ -507,6 +529,22 @@ function rewriteConcatenation(
   }
   const equality: PlanExpressionOperand = { operator: "or", operands: arms };
   return operator === "eq" ? equality : { operator: "not", operands: [equality] };
+}
+
+/** The terms of a nested `add` of string columns and string literals, left to right. */
+function concatenationTerms(
+  expr: PlanExpressionOperand
+): (NamedOperand | { value: string })[] | undefined {
+  if (isNamedOperand(expr)) return [expr];
+  if (isValueOperand(expr)) {
+    return typeof expr.value === "string" ? [{ value: expr.value }] : undefined;
+  }
+  if (!isOperatorOperand(expr) || expr.operator !== "add" || expr.operands.length !== 2) {
+    return undefined;
+  }
+  const left = concatenationTerms(expr.operands[0]!);
+  const right = concatenationTerms(expr.operands[1]!);
+  return left && right && [...left, ...right];
 }
 
 /**
@@ -570,6 +608,14 @@ function leafOutcomes(
       const [subject] = size.operands;
       const type = subject && scalarFieldType(subject, context);
       return type === "number" || type === "boolean" ? { error: true } : undefined;
+    }
+    // A bare date-time column is the RFC 3339 STRING the application sends, and a string never
+    // orders against a timestamp: no overload, so an error on every row. Equality across the two
+    // types is heterogeneous, and false.
+    if (comparesRawTemporalWithTimestamp(left, right, context)) {
+      return ORDERING_OPERATORS.has(operator)
+        ? { error: true }
+        : definite(operator !== "eq", [left, right], context);
     }
     const leftType = operandType(left, context);
     const rightType = operandType(right, context);
@@ -643,6 +689,24 @@ function leafOutcomes(
   return undefined;
 }
 
+/** Whether one operand is a bare `dateTime` column and the other a `timestamp(...)` call. */
+function comparesRawTemporalWithTimestamp(
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  context: TranslationContext
+): boolean {
+  return [
+    [left, right],
+    [right, left],
+  ].some(
+    ([column, other]) =>
+      isNamedOperand(column!) &&
+      isOperatorOperand(other!) &&
+      other.operator === "timestamp" &&
+      resolveFieldReference(column.name, context).valueType === "dateTime"
+  );
+}
+
 /**
  * `x == null` / `x != null` over a column the caller omits when NULL: a present value is never
  * null, and an absent one is a missing-attribute error, so neither outcome can select the NULL
@@ -709,7 +773,7 @@ function definite(
  * the plain comparisons the translator leaves to SQL's three-valued logic. Undefined for a column
  * whose type is not declared.
  */
-function presence(
+export function presence(
   column: NamedOperand,
   fieldRef: ResolvedFieldReference
 ): PlanExpressionOperand | undefined {

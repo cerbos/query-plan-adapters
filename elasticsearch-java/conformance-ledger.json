@@ -213,6 +213,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)"
     },
+    "collection/all/negated-nested-exists-in-body": {
+      "status": "unsupported",
+      "reason": "Elasticsearch does not index empty nested arrays, so a positive all over categories cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "collection/all/nested-all-over-literal-list": {
+      "status": "unsupported",
+      "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping: tagNames is indexed as an unordered set of keyword terms, so the inner all() over the literal list has no element to bind t to, and a positive all() cannot tell an empty array from a missing one"
+    },
+    "collection/all/nested-exists-over-literal-list": {
+      "status": "unsupported",
+      "reason": "Same flat-array refusal as collection/all/nested-all-over-literal-list: each tagNames element must satisfy a startsWith over the literal list, and a flat keyword array has no per-element query scope"
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error); the adapter refuses all() before it reaches the nested comparison collection/exists/nested-over-same-collection refuses"
@@ -221,9 +233,17 @@
       "status": "unsupported",
       "reason": "Same one-scope-too-deep refusal as collection/exists/nested-three-levels: the second-level all() over c.subCategories reaches the leaf resolver as a lambda operand inside the outer nested scope, before either the third level or the positive-all emptiness ambiguity is reached"
     },
+    "collection/concatenate/ternary-list-branches-equals-literal": {
+      "status": "unsupported",
+      "reason": "List concatenation with + and the ternary branch it concatenates are computed operands: the Query DSL has no list-valued expression or conditional value, and a term query compares one field against a literal"
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/except/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation; comparing it to [] is a positive all() over a flat array, which also cannot tell an empty array from a missing one"
     },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
@@ -305,9 +325,21 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot correlate nested traversal with an outer relation-count predicate without scripts"
     },
+    "collection/exists/relative-window-in-body": {
+      "status": "unsupported",
+      "reason": "The runtime timestamp threshold inside the lambda carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
     "collection/exists/scalar-list-negated-body": {
       "status": "unsupported",
       "reason": "A flat scalar array has no per-element query scope: bool.must_not of a term excludes mixed arrays containing both matching and nonmatching elements, whereas CEL exists with a negated body accepts a nonmatching element. This requires nested element documents or scripts, neither supplied by the flat-array mapping."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable exists binds each element's index: Elasticsearch indexes an array as an unordered set of terms, so no Query DSL query reads an element's position"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable exists over a map binds each key: obj is an object field in the index, and a Query DSL query matches its sub-fields' values, never the set of keys the object holds"
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -316,6 +348,14 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean, so there is no query to emit."
+    },
+    "collection/filter/literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "filter() over the flat tagNames array evaluates its predicate per element, and errors on a null element, which Elasticsearch does not index; a flat keyword array has no per-element query scope, so the filtered list is a computed operand the Query DSL cannot build without scripts"
+    },
+    "collection/has-intersection/negated-mapped-names": {
+      "status": "unsupported",
+      "reason": "Negated hasIntersection over the map() projection of the nested tags path: a bool.must_not of the nested query matches a document whose tags are missing (CEL error), and Elasticsearch does not index an empty nested array, so the two cannot be told apart"
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -361,6 +401,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for ordered array indexing."
     },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "size() of an intersect() counts matching elements with their duplicates; Elasticsearch indexes a flat array as a set of terms, so no query counts how many elements match"
+    },
+    "collection/intersect/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "intersect() computes a list, which has no Query DSL form; comparing it to [] is a negated hasIntersection over a flat array, and a bool.must_not cannot tell an empty array (true) from a missing one (CEL error)"
+    },
+    "collection/is-subset/resource-list-of-literal-list": {
+      "status": "unsupported",
+      "reason": "isSubset is a positive all() over the flat tagNames array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list"
+    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() returns a list, not a boolean, so there is no query to emit."
@@ -368,6 +420,14 @@
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "A map() projection is a computed leaf operand with no Query DSL equivalent, and list equality over a nested projection needs a script"
+    },
+    "collection/map/literal-in-mapped-upper-ascii": {
+      "status": "unsupported",
+      "reason": "map(t, t.upperAscii()) over the flat tagNames array computes each element: a flat keyword array has no per-element query scope, and upperAscii over a field needs a script"
+    },
+    "collection/map/negated-literal-in-mapped-names": {
+      "status": "unsupported",
+      "reason": "Negated membership in a map() projection over the nested tags path: a bool.must_not of the nested query matches a document whose tags are missing (CEL error), since Elasticsearch does not index an empty nested array either"
     },
     "comparison/equals/field-to-field": {
       "status": "unsupported",
@@ -404,6 +464,10 @@
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "ne against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
+    },
+    "composition/derived-role/runtime-effective-derived-roles": {
+      "status": "unsupported",
+      "reason": "runtime.effectiveDerivedRoles plans to a ternary over two list literals, and Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
     "conditional/ternary/as-whole-exists-body": {
       "status": "unsupported",
@@ -501,21 +565,49 @@
       "status": "unsupported",
       "reason": "This predicate combines field arithmetic and nested-to-outer field comparison, neither expressible by Elasticsearch Query DSL without scripts"
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "A `terms` query matches a field against literal values only and Query DSL cannot compare two document fields without scripts, so a list literal holding another attribute is refused (#574)."
+    },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test membership of one document field in another without scripts"
+    },
+    "membership/in/list-mixing-literal-and-expression": {
+      "status": "unsupported",
+      "reason": "The list literal holds aOptionalString + \"ret\", a value computed from a document field: a terms query matches a field against literal values only, and concatenating a field needs a script"
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "CEL's in over a map tests its keys; parent is an object field in the index, and Elasticsearch indexes no JSON null, so a query cannot tell a key held with a null value from an absent key."
     },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
+    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts"
     },
+    "membership/in/negated-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Negated membership in a document collection: bool.must_not of a term on tagNames matches a document whose tagNames is missing (CEL error), and Elasticsearch does not index an empty array, so the two cannot be told apart"
+    },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same limitation as membership/in/map-attribute-keys, under negation: no query answers key membership in an object field."
+    },
+    "membership/in/resource-list-plus-literal-list": {
+      "status": "unsupported",
+      "reason": "tagNames + [\"one\"] is a computed list; distributing it leaves aString in tagNames, a membership of one document field in another, which Elasticsearch Query DSL cannot test without scripts"
     },
     "null/all/null-element-with-true-sibling": {
       "status": "unsupported",
@@ -833,6 +925,10 @@
       "status": "unsupported",
       "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
     },
+    "string/concatenate/dollar-prefixed-literal": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as string/concatenate/field-to-field: a term query compares a field against a literal, and there is no place to append the suffix to the field first"
+    },
     "string/concatenate/field-to-field": {
       "status": "unsupported",
       "reason": "Same missing computed operand as identifier/equals/concatenation, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks"
@@ -844,6 +940,10 @@
     "string/concatenate/ordering": {
       "status": "unsupported",
       "reason": "Same missing computed operand as string/concatenate/field-to-field: a range query compares a field against a literal, and there is no place to concatenate two fields first"
+    },
+    "string/concatenate/three-terms-with-separator": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as string/concatenate/field-to-field: a term query compares a field against a literal, and there is no place to concatenate aString, the separator and aOptionalString without scripts"
     },
     "string/concatenate/unsatisfiable-not-equals": {
       "status": "unsupported",
@@ -892,6 +992,10 @@
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
       "reason": "The value-first runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
+    "timestamp/greater-than/time-since-duration": {
+      "status": "unsupported",
+      "reason": "timeSince() is measured from the PDP's request time, which the plan does not carry; an Elasticsearch now is the store's clock at millisecond precision, and computing timeSince over a field needs a script"
     },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
@@ -948,6 +1052,30 @@
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate the retained conditional numeric operand without scripts; the translator refuses the ternary before comparing it with the string field."
+    },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/string-field-against-arithmetic, under negation"
+    },
+    "type-mismatch/less-than/negated-string-field-against-ternary-number": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string, under negation"
+    },
+    "type-mismatch/less-than/number-field-against-mixed-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string: the ternary is a conditional value the Query DSL cannot evaluate without scripts"
+    },
+    "type-mismatch/less-than/number-field-against-ternary-string": {
+      "status": "unsupported",
+      "reason": "Same missing conditional value as conditional/ternary/compared-to-literal: Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as arithmetic/add/on-both-sides: a range query compares a field against a literal, and Elasticsearch Query DSL cannot evaluate aNumber + 1.0 per document without scripts"
+    },
+    "type-mismatch/less-than/string-field-against-timestamp": {
+      "status": "unsupported",
+      "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve; the translator refuses it before the string-against-timestamp mismatch is reached"
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",

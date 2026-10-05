@@ -29,7 +29,7 @@ permissions: {}
 
 jobs:
   # All suites run here on H2, including the conformance suite, which replays the recorded golden
-  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (CLAUDE.md, "CI").
+  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (docs/ci.md).
   test:
     permissions:
       contents: read

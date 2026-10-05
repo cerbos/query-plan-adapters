@@ -94,6 +94,9 @@ final class PlanWalker {
             case "ancestorOf", "descendentOf", "overlaps" ->
                     hierarchy.translate(operator, operands, polarity);
             default -> {
+                if ("in".equals(operator) && CollectionTranslator.isMembershipInMapProjection(operands)) {
+                    yield collections.translateMapProjectionMembership(operands, polarity);
+                }
                 CollectionTranslator.rejectUnfoldableValueListMacro(operator, operands);
                 Map<String, Object> sizeResult = sizes.tryTranslate(operator, operands, polarity);
                 if (sizeResult != null) {

@@ -7,6 +7,7 @@ import { PgColumn } from "drizzle-orm/pg-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import {
+  ARITHMETIC_OPERATORS,
   evaluateConstantNumberComparison,
   evaluateScalarValueComparison,
   findZeroCapableDivision,
@@ -52,6 +53,7 @@ import {
   constantCondition,
   bindConstant,
   operandExpression,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
@@ -317,9 +319,11 @@ const buildMixedTypeComparison = (
     mappingNullRepresentation(
       resolveFieldReference(operand.name, mapper).mapping,
     ) === "explicit";
-  // A `string()` over a NULL boolean is NULL (`buildBooleanString`): CEL raises there.
+  // A `string()` over a NULL boolean is NULL (`buildBooleanString`), and arithmetic over a NULL
+  // column is NULL: CEL raises there.
   const canBeNull = (operand: PlanExpressionOperand): boolean =>
     isStringConversion(operand) ||
+    (isExpressionOperand(operand) && operand.operator in ARITHMETIC_OPERATORS) ||
     (isNameOperand(operand) && !declaresExplicitNull(operand));
 
   const leftResolved = resolveScalarOperand(left, mapper, options);
@@ -602,6 +606,15 @@ const scalarType = (
   // `string(flag) == R.attr.aNumber` to the heterogeneous-equality arm, where MySQL would
   // otherwise coerce `'true'` to 0 and match every row whose number is 0.
   if (isStringConversion(operand)) return "string";
+  // CEL has no mixed-type arithmetic, so an operand of a known type types the result: `+` over a
+  // string is a concatenation, and over a number, like `-`, `*`, `/` and `%`, a number. Untyped
+  // here, `aString < aNumber + 1` reached SQL, where SQLite compares the two as text
+  // (cerbos/query-plan-adapters#575).
+  if (isExpressionOperand(operand) && operand.operator in ARITHMETIC_OPERATORS) {
+    const types = operand.operands.map((inner) => scalarType(inner, mapper));
+    if (operand.operator === "add" && types.includes("string")) return "string";
+    return types.includes("number") ? "number" : undefined;
+  }
   if (isNameOperand(operand)) {
     const mapping = resolveFieldReference(operand.name, mapper).mapping;
     if (isMappingConfig(mapping) && mapping.transform) return undefined;
@@ -676,6 +689,21 @@ export const buildComparisonFilter = (
   negated: boolean,
 ): SQL => {
   const context: ComparisonContext = { operator, mapper, options, negated };
+
+  // An attribute is a JSON value — a string, number, boolean, null, list or map — never a CEL
+  // timestamp, and CEL has no ordering between a timestamp and any of those: the comparison is a
+  // no-overload error, denied under both polarities, whatever the column stores. Only a
+  // `timestamp(attribute)` conversion compares as an instant.
+  if (operator !== "eq" && operator !== "ne") {
+    const isAttribute = (operand: PlanExpressionOperand) =>
+      isNameOperand(operand) && operand.name.startsWith("request.");
+    if (
+      (isAttribute(left) && isOperatorCall(right, "timestamp")) ||
+      (isAttribute(right) && isOperatorCall(left, "timestamp"))
+    ) {
+      return UNKNOWN_CONDITION;
+    }
+  }
 
   const indexed = [left, right].find((operand) =>
     isOperatorCall(operand, "index"),

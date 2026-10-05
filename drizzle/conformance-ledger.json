@@ -85,9 +85,21 @@
       "status": "unsupported",
       "reason": "Same refusal as `collection/exists/map-keys`: a macro over the to-one `parent` ranges over its attribute names, which SQL has no row to iterate."
     },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds an element's position in the list, or a map's key, as well as its value. The adapter evaluates a macro as a correlated subquery whose one variable is the element row (a JSON array element, or a related row), and neither a JSON array element's index nor an attribute name of the row is a column it reads, so a two-variable macro is refused."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable comprehension binds an element's position in the list, or a map's key, as well as its value. The adapter evaluates a macro as a correlated subquery whose one variable is the element row (a JSON array element, or a related row), and neither a JSON array element's index nor an attribute name of the row is a column it reads, so a two-variable macro is refused."
+    },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
       "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "size(intersect(L, K)): Cerbos's intersect() keeps the duplicates of whichever list is shorter, so the size depends on comparing the stored list's length with the literal's on every row before counting matches. The adapter has no SQL form for that comparison, so it refuses the shape instead of counting a set."
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
