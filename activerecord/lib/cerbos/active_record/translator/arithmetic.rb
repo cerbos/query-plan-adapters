@@ -15,7 +15,7 @@ module Cerbos
         def arithmetic(operator, left, right)
           # Arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
-          reject_int_beside_non_int(operator, left, right)
+          return cel_type_error if int_beside_non_int?(operator, left, right)
 
           # SQLite and MySQL treat `'a' + 'b'` as numeric (0), so strings need the dialect's
           # concatenation.
@@ -26,6 +26,10 @@ module Cerbos
           end
 
           if operator == "mod" && !(cel_int?(left) && cel_int?(right))
+            # `%` exists for ints only. An operand CEL certainly holds as something else (every
+            # attribute number is a double) makes it an error on every row.
+            return cel_type_error if certainly_non_int?(left) || certainly_non_int?(right)
+
             raise UnsupportedOperatorError,
               "% has no double overload in CEL, and every number in a request attribute is a " \
               "double, so % over an attribute that has not gone through int() is an error that " \
@@ -55,20 +59,36 @@ module Cerbos
           ArelSupport.arel_node?(value) && EXACT_NUMERIC_COLUMN_TYPES.include?(column_type(value))
         end
 
-        # CEL has no overload mixing an int with a double: `int(x) + R.attr.d` is an error that
-        # denies the row under either polarity, where SQL adds the two numbers and a negation
-        # turns the sum into a grant. An int() result beside an operand that is not certainly an
-        # int (a column, whose attribute is a double, or a fractional constant) is refused.
-        def reject_int_beside_non_int(operator, left, right)
+        # CEL has no overload mixing an int with anything else: `int(x) + R.attr.d` is an error
+        # that denies the row under either polarity, where SQL adds the two numbers and a negation
+        # turns the sum into a grant. Beside an operand CEL certainly holds as something other than
+        # an int, that error is on every row: true, and the caller renders it UNKNOWN. Beside one
+        # whose CEL type the plan does not settle (a ternary of whole constants) it is refused.
+        def int_beside_non_int?(operator, left, right)
           mixed = (cel_type(left) == :int && !cel_int?(right)) ||
             (cel_type(right) == :int && !cel_int?(left))
-          return unless mixed
+          return false unless mixed
+          return true if certainly_non_int?(left) || certainly_non_int?(right)
 
           raise UnsupportedOperatorError,
             "#{operator} of an int() result and an operand that is not an int: CEL has no " \
             "overload mixing int and double, so the expression is an error that denies the row, " \
             "but SQL computes it. Every number in a request attribute is a double; wrap both " \
             "operands in int(), or neither."
+        end
+
+        # An operand CEL holds as something other than an int whatever the row: an attribute
+        # column that has not gone through int() (a request attribute number is a double), a
+        # computed double, string or boolean, a fractional or non-finite constant, a string or a
+        # boolean. A whole constant, or a ternary of them, may be either, so it is not.
+        def certainly_non_int?(value)
+          return value != value.truncate || !value.finite? if value.is_a?(Float)
+          return true if value.is_a?(::String) || value == true || value == false
+          return false unless ArelSupport.arel_node?(value)
+          return false if cel_type(value) == :int
+          return true if %i[double string bool].include?(cel_type(value))
+
+          !column_type(value).nil?
         end
 
         # An operand CEL holds as an int: an int() result, or arithmetic on those. A whole
@@ -85,7 +105,7 @@ module Cerbos
         # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
-          reject_int_beside_non_int("div", numerator, denominator)
+          return cel_type_error if int_beside_non_int?("div", numerator, denominator)
           return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 
           if numerator.is_a?(Numeric) && denominator.is_a?(Numeric)

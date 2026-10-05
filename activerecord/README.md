@@ -363,7 +363,6 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `arithmetic/modulo/negated-double-operand` | `%` over an attribute that has not gone through `int()`. Every number in a request attribute is a double and CEL's `%` has no double overload, so the row errors; SQL would compute a remainder. |
 | `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
@@ -381,7 +380,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 248 / 318 |
+| adversarial | 251 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

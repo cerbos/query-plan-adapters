@@ -24,6 +24,10 @@
 
   It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL's logical operators take only a boolean, so a list there is an error on every row.
 
+- Arithmetic of an `int()` result beside an operand CEL certainly holds as something else (an attribute column, a computed double, a fractional constant), and `%` over such an operand, translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no overload mixing an int with a double, and `%` has no double overload, so every row is an error. Beside an operand whose type the plan does not settle, such as a ternary of whole constants, they still raise.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
