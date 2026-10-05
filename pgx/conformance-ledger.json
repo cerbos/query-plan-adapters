@@ -221,8 +221,24 @@
       "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
       "status": "unsupported"
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute.",
+      "status": "unsupported"
+    },
+    "membership/in/field-in-list-of-field": {
+      "reason": "The translator lowers `list` only as the constant haystack of `in`; a list literal holding another attribute reaches it as an unsupported `list` operator and is refused (#574).",
+      "status": "unsupported"
+    },
     "membership/in/map-attribute-keys": {
       "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
+      "status": "unsupported"
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation.",
+      "status": "unsupported"
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation.",
       "status": "unsupported"
     },
     "membership/in/negated-map-attribute-keys": {

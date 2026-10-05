@@ -345,6 +345,14 @@
       "status": "unsupported",
       "reason": "The membership spelling of `logic/or/comparison-or-exists`. Chroma's $in tests a metadata field against a literal LIST; the plan asks the mirror image — whether a literal is a member of a list-valued metadata field — and `$contains` would test that, but the adapter does not translate it (#475): Chroma stores an empty list as an absent key and rejects null elements and mixed types, so the corpus lists cannot be stored as the PDP sees them. So the right branch is refused before the disjunction is built. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "`owner` has no fieldNameMapper entry: Chroma metadata has no null value, so an explicit-null attribute cannot be stored, and the post-filter refuses an attribute it cannot read. The list literal holding `coOwner` would be refused as in `membership/in/field-in-list-of-field` regardless (#574)."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Chroma's `$in` takes a list of literal values, never a metadata key, and the post-filter has no evaluation for a `list` operator holding an attribute, so a list literal holding another attribute is refused (#574)."
+    },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
       "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
@@ -356,6 +364,14 @@
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "Chroma metadata is a flat scalar map with no relation or nested-object model, and $in tests a field against a literal list, never a literal against a field, so key membership in the to-one parent cannot be translated"
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
@@ -788,6 +804,14 @@
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "Chroma metadata filters cannot evaluate the retained ternary and arithmetic operands of this comparison. `allowPostFilter` does not lift it: `div` is applied to two integral literals (the ternary branches), and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN."
+    },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as `type-mismatch/less-than/string-field-against-arithmetic`, under negation."
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a stored field against a literal only — there is no computed-value or column-arithmetic operand — so the plan's arithmetic expression cannot be translated. `allowPostFilter` does not lift it: `add` meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",

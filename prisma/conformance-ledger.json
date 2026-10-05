@@ -241,6 +241,14 @@
       "status": "unsupported",
       "reason": "Two independent limitations sit in this predicate, and the adapter reports the one its walk reaches first: startsWith(aString, '100%') in the left branch hits the same LIKE-metacharacter limitation as string/starts-with/percent-in-needle, before the right branch's cross-model element-vs-outer column comparison (t.name == R.attr.aString) — which collection/exists/element-field-to-outer-field covers on its own — is ever visited"
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "A Prisma `in` filter takes a list of values, never a field reference, so the adapter translates `in` only as a field against a list of constants or a constant against a mapped collection, and refuses a list literal holding another attribute (#574)."
+    },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
       "reason": "Comparing a related element column with an outer scalar column is cross-model, while Prisma field references are same-model only"
@@ -248,6 +256,14 @@
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so `in` over a to-one relation is refused."
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
@@ -356,6 +372,14 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
+    },
+    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "Same refusal as `type-mismatch/less-than/string-field-against-arithmetic`, under negation."
+    },
+    "type-mismatch/less-than/string-field-against-arithmetic": {
+      "status": "unsupported",
+      "reason": "aNumber + 1 has a second column on the other side of the comparison, so no constant is left to solve the sum against, and a Prisma where-filter cannot compare a column with column arithmetic; the translator refuses before it could tell that CEL has no string-vs-number ordering either way."
     }
   }
 }

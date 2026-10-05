@@ -34,7 +34,8 @@
     "i8",
     "i9",
     "j1",
-    "j2"
+    "j2",
+    "k1"
   ],
   "degenerateReason": null,
   "id": "conditional/ternary/negated-branch-on-relation",

@@ -3,6 +3,13 @@
 area: string
 description: 'contains / startsWith / endsWith, LIKE metacharacters, case sensitivity, concatenation.'
 cases:
+- id: 'string/concatenate/dollar-prefixed-literal'
+  tier: adversarial
+  intent: 'A concatenation compared with a literal that spells a field path ((aString + "g") == "$aOptionalString").'
+  trap: 'Inside a MongoDB aggregation expression a raw "$aOptionalString" is the aOptionalString field, not a string: the filter misses k1 (whose aString + "g" is that literal) and matches any row whose aString + "g" equals its own aOptionalString. A constant there must be wrapped in $literal.'
+  condition:
+    match:
+      expr: 'R.attr.aString + "g" == "$aOptionalString"'
 - id: 'string/concatenate/field-to-field'
   tier: adversarial
   intent: 'Concatenation of two string attributes compared with a literal (aString + aOptionalString == "oneset").'

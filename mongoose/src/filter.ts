@@ -5,6 +5,7 @@ import {
   COMPARISON_OPERATORS,
   buildAggregationExpression,
   buildAggregationExpressionFromExpression,
+  isUnorderable,
 } from "./aggregation";
 import type { ComparisonOperator } from "./aggregation";
 import {
@@ -26,6 +27,7 @@ import { LAMBDA_BINDING_OPERATORS, foldLiteralCollection } from "./lambda";
 import {
   applyValueParser,
   createScopedMapper,
+  declaredScalarType,
   isNullableReference,
   relationOfReference,
   resolveFieldReference,
@@ -353,6 +355,16 @@ const translateNot = (
   // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
   // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
   // raises an error and denies (cerbos/query-plan-adapters#516).
+  // An ordering CEL can never evaluate is an error under both polarities, so its negation is the
+  // same `false` (cerbos/query-plan-adapters#575). A `$nor` over it would return every document.
+  if (
+    isExpression(operand) &&
+    COMPLEMENTED_ORDERING[operand.operator] !== undefined &&
+    operand.operands.length === 2 &&
+    isUnorderable(operand.operands[0]!, operand.operands[1]!, ctx.mapper)
+  ) {
+    return buildFilter(operand, ctx);
+  }
   const complement = complementedOrdering(operand);
   if (complement) {
     return buildFilter(complement, ctx);
@@ -486,6 +498,16 @@ const translateComparison = (
     }
     const leftAgg = buildAggregationExpression(leftOperand, mapper);
     const rightAgg = buildAggregationExpression(rightOperand, mapper);
+    // CEL has no ordering between types, and `$expr` falls back to BSON's cross-type order, so an
+    // ordering between a string and a computed number is decided here, as the constant path
+    // decides `aNumber < "5"`: false, and its negation reaches here as the same ordering.
+    if (
+      operator !== "eq" &&
+      operator !== "ne" &&
+      isUnorderable(leftOperand, rightOperand, mapper)
+    ) {
+      return { $expr: false };
+    }
     return withEvaluationGuards(
       { $expr: { [COMPARISON_OPERATORS[operator]]: [leftAgg, rightAgg] } },
       bothOperands,
@@ -858,29 +880,6 @@ const translateHasIntersection = (
       requireExists: values.includes(null),
     },
   );
-};
-
-/**
- * The scalar type a reference's stored value is declared with — for a relation mapped to one
- * element field (`relation.field`), that element field's — or undefined when a constant cannot be
- * checked against it: no `valueType`, a `dateTime` (compared through its own path), or a
- * `valueParser`, which is the caller's explicit override of the constant.
- */
-const declaredScalarType = (
-  reference: string,
-  mapper: Mapper,
-): "number" | "string" | "boolean" | undefined => {
-  const config = resolveMapperConfig(reference, mapper);
-  const relation = config?.relation;
-  const typed = relation
-    ? relation.field
-      ? relation.fields?.[relation.field]
-      : undefined
-    : config;
-  if (!typed || typed.valueParser || config?.valueParser) {
-    return undefined;
-  }
-  return typed.valueType === "dateTime" ? undefined : typed.valueType;
 };
 
 /**

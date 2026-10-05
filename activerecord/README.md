@@ -209,6 +209,10 @@ Cerbos::ActiveRecord.query_plan_to_relation(
 )
 ```
 
+An override replaces the built-in translation for every pattern, including the ones the adapter
+lowers itself (see below). Your store's regex dialect is not RE2, so an override like this one
+accepts the differences the adapter refuses to.
+
 Structural operators cannot be overridden: `and`, `or`, `not`, `if`, `lambda` and the collection
 macros.
 
@@ -274,10 +278,24 @@ Undeclared, `NULL != 'x'` is UNKNOWN and excludes the row under both polarities 
 the decision, so safe but not in agreement. Ordering and string operators are unchanged: CEL
 raises no-overload on a null receiver, which denies exactly like UNKNOWN.
 
-**Do not mix conventions in a column-to-column comparison.** If one side declares `:explicit` and
-the other declares nothing, the adapter raises `UnsupportedOperatorError`. Declare both or
-neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+A column-to-column `eq` or `ne` under mixed conventions answers each side as its convention says:
+the `:explicit` side's NULL is a null value, compared definitely, and the other side's NULL is a
+missing attribute, which makes the comparison UNKNOWN under both polarities.
+
+```text
+ne(e, o)  ->  CASE WHEN o IS NULL THEN NULL ELSE NOT (e IS NOT NULL AND e = o) END
+```
+
+See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
+A list literal holding a column, `a in [b, "x"]`, compares each element as `eq` would, under each
+column's own convention (an undeclared column takes the call's): two `:explicit` columns use the
+`eq(a, b)` expansion above, an `:explicit` column beside a constant is guarded `IS NOT NULL`, and a
+NULL `:omitted` column or computed value (`b + 1`) anywhere in the membership makes the whole
+membership UNKNOWN, since CEL fails to build the list. A needle and a member column under different conventions raise
+`UnsupportedOperatorError`, as `eq` does
+([#574](https://github.com/cerbos/query-plan-adapters/issues/574)).
 
 > [!WARNING]
 > **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
@@ -322,6 +340,18 @@ instead of collapsing it to a boolean. You will see this in the SQL:
 
 - A ternary becomes a `CASE` with **no `ELSE`**, so an UNKNOWN condition yields NULL even under a
   `NOT`.
+- A CEL error that the declared types decide, whatever the row holds, becomes `NULL`: a string
+  function or `size()` over a number or a boolean, a list where a boolean belongs, an `int()`
+  beside a non-int. UNKNOWN denies under both polarities as the error does, and any strict
+  operator over it (`==`, `in`, `string()`) stays UNKNOWN. A `NULL` from a computed value, which
+  CEL never holds as `null`, is read as that error by `== null` and `in [..., null]` too.
+- `matches()` is never handed to the store's regex engine, since none is RE2: MySQL's lets `$`
+  match before a final newline, and SQLite has none. The adapter parses the pattern and lowers it
+  only when its matches are a finite set of literals under its anchors (`=`, or `LIKE` prefix,
+  suffix or substring), every character drawn from a small set (`REPLACE` each one away until
+  nothing is left), or a prefix and suffix around a run of non-newline characters. `(?i)` folds
+  as RE2 does, including KELVIN SIGN and LONG S. A pattern RE2 rejects is CEL's error, UNKNOWN.
+  Any other pattern raises; use an operator override for it.
 - Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
   element is true, `all` if any element is false, `exists_one` never does.
 - `string()` over a boolean — a boolean column, or any comparison, logical operator, `in` or
@@ -340,19 +370,13 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | --- | --- |
 | `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
 | `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
-| `arithmetic/add/self-division-plus-constant-greater-than`, `arithmetic/add/self-division-plus-constant-not-equals` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
-| `regex/matches/anchored-prefix` | `matches()` is RE2; no SQL dialect matches it. Use an operator override. |
 | `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
 | `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
-| `cast/int/negative-fraction` | CEL truncates toward zero; PostgreSQL and MySQL round. |
-| `cast/string/from-int-beyond-double-precision`, `cast/string/from-int-past-exponent-threshold`, `cast/string/negated-from-int-past-exponent-threshold` | `string()` over `int()` of a string or double column: the `int()` is refused for the reasons above. |
+| `cast/string/from-int-beyond-double-precision` | `string()` over `int()` of a string column: the `int()` is refused for the reason above. |
 | `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
-| `collection/filter/as-whole-condition`, `collection/map/as-whole-condition` | `filter()`/`map()` as the whole condition is a list, not a boolean. Only `size(filter(...))` and `hasIntersection(map(...), [...])` are boolean. |
-| `collection/filter/as-conjunct` | The same, one level below the root (`filter(...) && R.attr.aBool`). Dropping the untranslatable conjunct would over-grant. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `arithmetic/modulo/negated-double-operand` | `%` over an attribute that has not gone through `int()`. Every number in a request attribute is a double and CEL's `%` has no double overload, so the row errors; SQL would compute a remainder. |
 | `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
@@ -372,8 +396,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 26 / 26 |
-| extended | 58 / 80 |
-| adversarial | 227 / 308 |
+| extended | 69 / 80 |
+| adversarial | 284 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

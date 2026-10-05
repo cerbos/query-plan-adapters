@@ -16,7 +16,57 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
 
+- `contains`, `startsWith`, `endsWith` and `size()` over a number or a boolean (a numeric or boolean column, a computed number or boolean, or a constant), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no such overload, so every row is an error, decided by the declared type rather than the row's value. UNKNOWN denies under both polarities as the error does, and an operator applied to it (`==`, `in`, `string()` and the rest) is UNKNOWN too. A ternary over such an error, and these functions over a temporal column, still raise.
+
+- A collection where a boolean belongs (`filter()`, `map()` or a mapped association as a condition, a conjunct or the operand of `!`), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL's logical operators take only a boolean, so a list there is an error on every row.
+
+- Arithmetic of an `int()` result beside an operand CEL certainly holds as something else (an attribute column, a computed double, a fractional constant), and `%` over such an operand, translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no overload mixing an int with a double, and `%` has no double overload, so every row is an error. Beside an operand whose type the plan does not settle, such as a ternary of whole constants, they still raise.
+
+- `int()` over a double column, truncated toward zero inside CEL's range (-2^63, 2^63) and UNKNOWN outside it ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`, because PostgreSQL and MySQL round a `CAST`. The fraction is now dropped first (`TRUNC`, `TRUNCATE`; SQLite's `CAST` already truncates). `int()` over a decimal column still raises: CEL truncates the double nearest the stored value, which can differ.
+
+- `==` and `!=` between two columns under mixed NULL conventions ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. The `:explicit` side's NULL is compared definitely as a null value, and a NULL on the other side, a missing attribute, makes the comparison UNKNOWN. `in` over a list mixing conventions still raises.
+
+- Map literals and nested lists of constants, compared by CEL equality: `==` and `!=` against a column (always FALSE / TRUE, guarded for a missing attribute), `in` and `hasIntersection` with a list or map element, and a macro over a list of maps reading `m.field` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A map or list literal holding a column, one given to any other operator or to an operator override, and a ternary with a list or map arm still raise. A field a map does not hold is a CEL error, UNKNOWN. `x in map` tests the map's keys, as CEL does.
+
+- `filter()` and `map()` over a list of constants, and `except()` of a list of constants or a scalar relation, evaluated element by element: `size()` of a filtered list or a difference, and `in` over a projected list ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. An element whose body errors makes the whole list an error (UNKNOWN), as `filter()` and `map()` never ignore one, and a missing attribute inside `except()`'s right list errors the call. `except` follows Cerbos's `exceptList`, keeping duplicates. Any other use of these lists still raises.
+
+- `matches()` over a string column with a constant pattern, lowered to exact string predicates without the store's regex engine ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported; unlike drizzle's, it reads a count with a leading zero (`{01}`) as literal text and rejects a nested repetition over 1000 copies, as RE2 does. An operator override for `matches` now replaces this built-in translation.
+
+- `+`, `-` and `*` over a division that may be NaN or Infinity (`x / x + 1`), carried into the division's branches ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A non-finite constant is computed in Ruby with IEEE-754, and NaN beside a double stays NaN wherever that value is present. An Infinity beside a column, which might hold the opposite Infinity, and arithmetic between two such values still raise.
+
 ### Changed
+
+- Arithmetic over a boolean, and `-`, `*`, `/` or `%` over a string, or `+` of a string and a number, is SQL `NULL`, the CEL error it is ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  Attributes are dynamically typed, so `R.attr.aString + R.attr.aNumber == "one5"` type-checks, and CEL has no such overload. The filter concatenated the two and returned the row, and SQLite and MySQL read a boolean or a string as a number. Filters only get narrower.
+
+- `hasIntersection` against a map or a scalar constant is SQL `NULL`, CEL's no-overload error, where it answered FALSE and its negation granted every row ([#577](https://github.com/cerbos/query-plan-adapters/issues/577)). Against a column it raises.
+
+- **Breaking:** arithmetic over a temporal column raises `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  CEL reads a raw temporal attribute as an RFC-3339 string and a `timestamp()` as a timestamp that takes only a duration, so `R.attr.createdAt - 5` is an error, but SQLite and MySQL read the text as a number. A list or map literal in arithmetic, `string()` of a list, map or held collection, and a ternary with a held collection arm raise the same error where a Ruby `TypeError` escaped before.
+
+- `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  CEL never holds a computed value as `null`. `(R.attr.aNumber > 1 && R.attr.aBool) in [false, null]` returned a row whose `aNumber` is NULL, because `IS NULL` read the error as a null value. Filters only get narrower: a ternary whose arm is an `:explicit` column that is NULL, compared with `null`, is now UNKNOWN where CEL would allow it.
 
 - The conformance suite runs on PostgreSQL and MySQL as well as SQLite, and the fixes below are what those stores exposed ([#500](https://github.com/cerbos/query-plan-adapters/issues/500))
 
@@ -84,6 +134,14 @@
 - **Breaking:** arithmetic between an `int()` result and an operand that is not certainly an int (a column, a fractional constant), and `string()` over a ternary of whole-number constants whose int and double spellings differ, raise `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#554](https://github.com/cerbos/query-plan-adapters/issues/554))
 
   CEL has no overload mixing int and double, so `int(R.attr.n) + R.attr.d > 0.0` is an error that denies every row, where SQL added the two and its negation returned rows the PDP denies. The plan carries `1000000` and `1000000.0` as the same number, which CEL's `string()` spells `"1000000"` and `"1e+06"`; `string(R.attr.flag ? 1000000 : 0)` used to cast the int. A ternary with an `int()` arm fixes its other arm as an int and still translates.
+
+- **Breaking:** `in` against a list literal holding a column compares each element under each column's own null convention, as `==` does, and raises `Cerbos::ActiveRecord::UnsupportedOperatorError` when the needle and a member column are under different conventions ([#574](https://github.com/cerbos/query-plan-adapters/issues/574))
+
+  `a in [b]` added a both-NULL branch from the call's convention, never either column's declaration, and wrapped an `:explicit` needle in an `IS NOT NULL` guard meant for a list of constants. So two `:explicit` NULLs did not match, `!(a in [b])` returned that row and missed a value beside a NULL, and two `:omitted` NULLs matched under the call's default `:explicit`. A NULL `:omitted` column now makes the whole membership UNKNOWN, so `a in [b, 2]` no longer grants `a = 2` when `b` is missing.
+
+- `value in R.attr.<relation>` compares an `:explicit` value against the related rows' member column under that declaration, whatever the call's `null_attribute_representation` says ([#591](https://github.com/cerbos/query-plan-adapters/issues/591))
+
+  The both-NULL branch came from the call's convention, so under a call-level `:omitted` a NULL `:explicit` value never matched a NULL member, and `!(value in R.attr.<relation>)` returned that row though the PDP denies it.
 
 ### Removed
 

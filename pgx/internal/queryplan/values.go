@@ -486,6 +486,9 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	if text, ok, err := compareNumberText(op, l, r); err != nil || ok {
 		return text, err
 	}
+	if distributed, ok, err := distributeMixedCase(op, l, r); err != nil || ok {
+		return distributed, err
+	}
 	if mixed, ok := compareMixedTypes(op, l, r); ok {
 		return mixed, nil
 	}

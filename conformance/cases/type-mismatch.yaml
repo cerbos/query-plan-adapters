@@ -313,6 +313,13 @@ cases:
     pdp:
     - 0.54.0
     reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
+- id: 'type-mismatch/less-than/negated-string-field-against-arithmetic'
+  tier: adversarial
+  intent: '!(aString < aNumber + 1.0) OR aNumber == 2: a negated ordering between a string attribute and an arithmetic result.'
+  trap: 'CEL has no string-vs-int ordering, so the comparison is an error under either polarity and only a3/a8 are allowed; a translator that cannot type the arithmetic result lets the store compare as text (SQLite) or order strings above numbers (MongoDB), and the negation returns rows.'
+  condition:
+    match:
+      expr: '!(R.attr.aString < R.attr.aNumber + 1.0) || R.attr.aNumber == 2'
 - id: 'type-mismatch/less-than/negated-string-field-against-number-literal'
   tier: adversarial
   intent: '!(aString < 0) OR aNumber == 2: a negated ordering between a string attribute and a number.'
@@ -320,6 +327,20 @@ cases:
   condition:
     match:
       expr: '!(R.attr.aString < 0) || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/negated-string-field-against-ternary-number'
+  tier: adversarial
+  intent: '!(aString < (aBool ? 1 : 2)) OR aNumber == 2: a negated ordering between a string attribute and a ternary whose arms are numbers.'
+  trap: 'Either arm is a number, so the ordering is a CEL error under either polarity and only a3/a8 are allowed; checking orderability only on a literal operand misses the ternary, and a store that orders strings above numbers answers false and the negation returns every row.'
+  condition:
+    match:
+      expr: '!(R.attr.aString < (R.attr.aBool ? 1 : 2)) || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/number-field-against-mixed-ternary'
+  tier: adversarial
+  intent: 'aNumber < (aBool ? 3.0 : aString) OR aNumber == 2: a number attribute ordered against a ternary whose branches have different types.'
+  trap: 'The number branch orders and the string branch is a CEL error, per row, so only the aBool-true rows below 3 and a3/a8 are allowed; comparing the CASE whole lets a store that orders numbers below every string return every aBool-false row, and SQL coerces both branches to one type.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber < (R.attr.aBool ? 3.0 : R.attr.aString) || R.attr.aNumber == 2'
 - id: 'type-mismatch/less-than/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber < "5" OR aNumber == 2: a number attribute ordered against a numeric string.'
@@ -327,6 +348,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber < "5" || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/number-field-against-ternary-string'
+  tier: adversarial
+  intent: 'aNumber < (aBool ? "a" : "b") OR aNumber == 2: a number attribute ordered against a ternary whose arms are strings.'
+  trap: 'Either arm is a string, so the ordering is a CEL error and only a3/a8 are allowed; a store that orders numbers below every string returns every row without any negation.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber < (R.attr.aBool ? "a" : "b") || R.attr.aNumber == 2'
 - id: 'type-mismatch/less-than/number-literal-against-boolean-field-value-first'
   tier: adversarial
   intent: '0 < aBool OR aNumber == 2: a number literal ordered against a boolean attribute, value first.'
@@ -334,6 +362,13 @@ cases:
   condition:
     match:
       expr: '0 < R.attr.aBool || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/string-field-against-arithmetic'
+  tier: adversarial
+  intent: 'aString < aNumber + 1.0 OR aNumber == 2: a string attribute ordered against an arithmetic result.'
+  trap: 'CEL has no string-vs-int ordering, so only a3/a8 are allowed; SQLite compares the string with the sum as text and adds rows, and a store that orders strings above numbers answers false only by accident.'
+  condition:
+    match:
+      expr: 'R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2'
 - id: 'type-mismatch/not-equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber != "5" AND aNumber > 3: a number attribute compared not-equal with a numeric string.'

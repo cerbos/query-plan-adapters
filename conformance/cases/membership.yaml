@@ -13,6 +13,20 @@ cases:
   degenerate:
     oracle: empty
     reason: 'Nothing is a member of the empty list, so the planner folds the plan to ALWAYS_DENIED. An adapter emitting an empty IN list that the store matches against nothing agrees by accident, which is why it stays compared.'
+- id: 'membership/in/explicit-field-in-list-of-field'
+  tier: adversarial
+  intent: 'Membership of an explicit-null attribute in a literal list holding another explicit-null attribute (owner in [coOwner]).'
+  trap: 'The list holds a column, so each element compares as owner == coOwner does: e1, where both are null, is allowed (null in [null] is true), and a presence guard on owner drops it.'
+  condition:
+    match:
+      expr: 'R.attr.owner in [R.attr.coOwner]'
+- id: 'membership/in/field-in-list-of-field'
+  tier: adversarial
+  intent: 'Membership of an omitted-when-null attribute in a literal list holding another (aString in [aOptionalString]).'
+  trap: 'A NULL aOptionalString is a missing attribute, so its row is denied; adding a both-NULL branch from the call''s convention, not each column''s, can grant it.'
+  condition:
+    match:
+      expr: 'R.attr.aString in [R.attr.aOptionalString]'
 - id: 'membership/in/field-in-resource-list'
   tier: extended
   intent: Membership of one resource attribute in a resource list attribute (owner in tagNames).
@@ -48,6 +62,20 @@ cases:
   condition:
     match:
       expr: '!("inner" in R.attr.parent)'
+- id: 'membership/in/negated-explicit-field-in-list-of-field'
+  tier: adversarial
+  intent: '!(owner in [coOwner]): negated membership of an explicit-null attribute in a list holding another.'
+  trap: 'A row with one null and one value is allowed (null != "x" is true) and e1, both null, denied; plain SQL equality is UNKNOWN for the first, and a presence guard on owner flips the second into a grant.'
+  condition:
+    match:
+      expr: '!(R.attr.owner in [R.attr.coOwner])'
+- id: 'membership/in/negated-field-in-list-of-field'
+  tier: adversarial
+  intent: '!(aString in [aOptionalString]): negated membership in a literal list holding an omitted-when-null attribute.'
+  trap: 'A NULL aOptionalString is a missing attribute and stays denied under the negation; a definite both-NULL or presence branch turns it into a grant.'
+  condition:
+    match:
+      expr: '!(R.attr.aString in [R.attr.aOptionalString])'
 - id: 'membership/in/negated-field-in-resource-list'
   tier: adversarial
   intent: Negated membership of one resource attribute in a resource list attribute.
