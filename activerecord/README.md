@@ -274,9 +274,15 @@ Undeclared, `NULL != 'x'` is UNKNOWN and excludes the row under both polarities 
 the decision, so safe but not in agreement. Ordering and string operators are unchanged: CEL
 raises no-overload on a null receiver, which denies exactly like UNKNOWN.
 
-**Do not mix conventions in a column-to-column comparison.** If one side declares `:explicit` and
-the other declares nothing, the adapter raises `UnsupportedOperatorError`. Declare both or
-neither. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
+A column-to-column `eq` or `ne` under mixed conventions answers each side as its convention says:
+the `:explicit` side's NULL is a null value, compared definitely, and the other side's NULL is a
+missing attribute, which makes the comparison UNKNOWN under both polarities.
+
+```text
+ne(e, o)  ->  CASE WHEN o IS NULL THEN NULL ELSE NOT (e IS NOT NULL AND e = o) END
+```
+
+See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 A list literal holding a column, `a in [b, "x"]`, compares each element as `eq` would, under each
@@ -379,7 +385,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 256 / 318 |
+| adversarial | 257 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

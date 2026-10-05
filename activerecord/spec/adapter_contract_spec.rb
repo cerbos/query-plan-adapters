@@ -898,12 +898,31 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(sql).to match(/"title" IS NULL AND .*"n" IS NULL/)
     end
 
-    it "refuses a comparison between two columns under mixed conventions" do
-      expect { declared_sql(expression("ne", variable("e"), variable("u"))) }
-        .to raise_error(
-          Cerbos::ActiveRecord::UnsupportedOperatorError,
-          /between two columns under mixed null conventions/
-        )
+    # The corpus fixes each attribute's convention, so only a declaration can pair `:explicit`
+    # with `:omitted` in an `eq`. The explicit NULL is a null value, definite wherever the other
+    # side is present; the omitted NULL is a missing attribute, UNKNOWN under any polarity.
+    it "compares two columns under mixed conventions as each side's convention says" do
+      # `n` declares `:explicit`; `author_id` takes the call's `:omitted`. Both are integers, so
+      # the comparison is not a cross-type one.
+      null_n = EdgeDocument.create!(n: nil, author_id: 5)
+      null_author = EdgeDocument.create!(n: 5, author_id: nil)
+      # The explicit IS NOT NULL alone would make `eq` FALSE here, and `ne` TRUE.
+      both_null = EdgeDocument.create!(n: nil, author_id: nil)
+      ids = [null_n.id, null_author.id, both_null.id]
+      allowed = ->(condition) {
+        described_class.query_plan_to_relation(
+          plan: conditional(condition), model: EdgeDocument, attributes: declared,
+          null_attribute_representation: :omitted
+        ).where(id: ids).pluck(:id)
+      }
+      begin
+        equality = expression("eq", variable("f"), variable("u"))
+        expect(allowed.call(equality)).to be_empty
+        expect(allowed.call(expression("not", equality))).to eq([null_n.id])
+        expect(allowed.call(expression("ne", variable("f"), variable("u")))).to eq([null_n.id])
+      ensure
+        [null_n, null_author, both_null].each(&:destroy!)
+      end
     end
 
     it "leaves the order operators alone" do

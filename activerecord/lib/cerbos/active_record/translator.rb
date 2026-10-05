@@ -463,8 +463,6 @@ module Cerbos
         # `NULL IS NULL`, TRUE where CEL denies.
         return cel_type_error if values.any? { |value| cel_error?(value) }
 
-        assert_uniform_null_conventions(operator, values)
-
         override = operator_overrides[operator]
         # Only the built-in eq and ne can resolve string() of a double.
         values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)

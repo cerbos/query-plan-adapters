@@ -32,6 +32,10 @@
 
   It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`, because PostgreSQL and MySQL round a `CAST`. The fraction is now dropped first (`TRUNC`, `TRUNCATE`; SQLite's `CAST` already truncates). `int()` over a decimal column still raises: CEL truncates the double nearest the stored value, which can differ.
 
+- `==` and `!=` between two columns under mixed NULL conventions ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. The `:explicit` side's NULL is compared definitely as a null value, and a NULL on the other side, a missing attribute, makes the comparison UNKNOWN. `in` over a list mixing conventions still raises.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
