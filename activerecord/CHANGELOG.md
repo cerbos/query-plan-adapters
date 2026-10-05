@@ -54,6 +54,10 @@
 
 ### Changed
 
+- A whole-number constant on a ternary arm beside an `int()` arm is bound as an integer, so `string(c ? int(x) : 1000000) == "1000000"` matches the rows CEL allows when the plan comes from the Ruby SDK
+
+  Every plan number is a protobuf double, so `Cerbos::Client#plan_resources` hands the constant over as `1000000.0`, which the `CASE` rendered and `string()` spelled as a double. The filter under-granted every row taking that arm. A raw JSON plan, where the constant decodes as an Integer, was unaffected.
+
 - Arithmetic over a boolean, and `-`, `*`, `/` or `%` over a string, or `+` of a string and a number, is SQL `NULL`, the CEL error it is ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
   Attributes are dynamically typed, so `R.attr.aString + R.attr.aNumber == "one5"` type-checks, and CEL has no such overload. The filter concatenated the two and returned the row, and SQLite and MySQL read a boolean or a string as a number. Filters only get narrower.
