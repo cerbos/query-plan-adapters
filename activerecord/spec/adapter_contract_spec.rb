@@ -1082,4 +1082,53 @@ RSpec.describe Cerbos::ActiveRecord do
       expect(omitted_call(plan, CorpusAttributes::UNDECLARED).pluck(:id)).to be_empty
     end
   end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "a CEL error compared with null" do
+    let(:size_of_number) { expression("size", variable("request.resource.attr.aNumber")) }
+
+    # Corpus gap. `size(R.attr.aNumber)` is an error on every row, and so is any strict operator
+    # over it. The null in the list would otherwise be tested with IS NULL, TRUE for the error.
+    it "denies every row for a membership over the error in a list holding null" do
+      plan = conditional(expression("in", size_of_number, value([1, nil])))
+
+      expect(translate(plan)).to be_empty
+      expect(translate(conditional(expression("not", plan["condition"])))).to be_empty
+    end
+
+    # Corpus gap. CEL never holds a computed value as null, so a NULL one is an error, however it
+    # got there: `error || false` is the error, and so is an `exists` whose every body errors.
+    # Read as a null value, IS NULL would allow the row.
+    it "denies a computed error compared with null after a connective or a quantifier" do
+      contains_on_number = expression("contains", variable("request.resource.attr.aNumber"), value("1"))
+      exists_error = expression("exists", variable("request.resource.attr.tags"),
+        expression("lambda", contains_on_number, variable("t")))
+      disjunction = expression("or", contains_on_number, variable("request.resource.attr.aBool"))
+
+      expect(translate(conditional(expression("in", disjunction, value([true, nil])))).where(a_bool: false))
+        .to be_empty
+      expect(translate(conditional(expression("in", exists_error, value([true, nil]))))).to be_empty
+    end
+
+    # Corpus gap. The same hole without a type error: `null > 1` is an error too, and j2, the one
+    # row with a NULL a_number, has a_bool true, so `error && true` is the error.
+    it "denies a NULL column's error compared with null after a connective" do
+      conjunction = expression("and",
+        expression("gt", variable("request.resource.attr.aNumber"), value(1)),
+        variable("request.resource.attr.aBool"))
+
+      expect(translate(conditional(expression("in", conjunction, value([false, nil])))).where(a_number: nil))
+        .to be_empty
+    end
+
+    # Corpus gap. A CASE over the error arm is NULL wherever the condition picks that arm, which
+    # an enclosing IS NULL would read as TRUE, so the shape is refused.
+    it "refuses a ternary with the error as an arm" do
+      ternary = expression("if", variable("request.resource.attr.aBool"), size_of_number, value(1))
+
+      expect { translate(conditional(expression("in", ternary, value([2, nil])))) }
+        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
+    end
+  end
 end

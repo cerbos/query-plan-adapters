@@ -69,9 +69,15 @@ module Cerbos
                 ArelSupport.quote(needle), present.map { |value| ArelSupport.quote(value) }
               )
             end
-            # A null element matches a null attribute (a null value, not a missing one).
-            predicates << ArelSupport.comparison("eq", needle, nil) if present.length != members.length
+            return ArelSupport.or_node(predicates) if present.length == members.length
+            # A computed needle is never null in CEL; NULL is its error, which errors the whole
+            # membership. See {Comparisons#computed_node?}.
+            if computed_node?(needle)
+              return unknown_if_any([ArelSupport.is_null(needle)], ArelSupport.or_node(predicates))
+            end
 
+            # A null element matches a null attribute (a null value, not a missing one).
+            predicates << ArelSupport.comparison("eq", needle, nil)
             return ArelSupport.or_node(predicates)
           end
 
@@ -141,9 +147,10 @@ module Cerbos
             # Guarded as in membership (#315). Literals of another type never intersect.
             kind = member_kind(left.scope)
             values = values.reject { |value| cross_type_literal?(value, kind) }
-            left.scope.guarded(
-              left.scope.exists(scalar_membership(left.scope.member_column, values))
-            )
+            # A scalar list holds null values, as {Environment#element} registers it, so a null
+            # literal matches a NULL element rather than reading as a computed error.
+            member = register_null_representation(left.scope.member_column, :explicit)
+            left.scope.guarded(left.scope.exists(scalar_membership(member, values)))
           when Values::MappedCollection
             # map() never ignores an element's error, so check for errors before matches.
             left.scope.guarded(

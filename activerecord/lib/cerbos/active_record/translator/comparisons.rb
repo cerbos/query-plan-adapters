@@ -39,9 +39,14 @@ module Cerbos
             return fold_comparison(operator, left, right)
           end
 
-          # `= NULL` is never true in SQL. Put the null on the right so Arel emits IS [NOT] NULL.
-          if left.nil? && %w[eq ne].include?(operator)
-            return ArelSupport.comparison(operator, right, nil)
+          if (left.nil? || right.nil?) && %w[eq ne].include?(operator)
+            operand = left.nil? ? right : left
+            # CEL never holds a computed value as null, so a NULL one is an error, not a null.
+            if computed_node?(operand)
+              return unknown_if_any([ArelSupport.is_null(operand)], operator == "ne")
+            end
+            # `= NULL` is never true in SQL. Put the null on the right so Arel emits IS [NOT] NULL.
+            return ArelSupport.comparison(operator, right, nil) if left.nil?
           end
 
           if different_scalar_types?(left, right)
@@ -157,6 +162,12 @@ module Cerbos
 
         def fold_comparison(operator, left, right)
           left.public_send(RUBY_COMPARISONS.fetch(operator), right)
+        end
+
+        # A node that is no attribute's column (arithmetic, a connective, a quantifier, a CASE).
+        # It is NULL only where CEL errors; see {Translator#null_convention}.
+        def computed_node?(value)
+          ArelSupport.arel_node?(value) && null_convention(value).nil?
         end
 
         # `CASE WHEN <any of missing> THEN NULL ELSE result END`. A missing attribute is an

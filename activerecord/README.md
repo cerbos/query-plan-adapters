@@ -330,6 +330,11 @@ instead of collapsing it to a boolean. You will see this in the SQL:
 
 - A ternary becomes a `CASE` with **no `ELSE`**, so an UNKNOWN condition yields NULL even under a
   `NOT`.
+- A CEL error that the declared types decide, whatever the row holds, becomes `NULL`: a string
+  function or `size()` over a number or a boolean, a list where a boolean belongs, an `int()`
+  beside a non-int. UNKNOWN denies under both polarities as the error does, and any strict
+  operator over it (`==`, `in`, `string()`) stays UNKNOWN. A `NULL` from a computed value, which
+  CEL never holds as `null`, is read as that error by `== null` and `in [..., null]` too.
 - Each collection macro becomes a `CASE` with its own error guard: `exists` ignores errors if any
   element is true, `all` if any element is false, `exists_one` never does.
 - `string()` over a boolean — a boolean column, or any comparison, logical operator, `in` or
@@ -378,7 +383,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 58 / 80 |
-| adversarial | 237 / 318 |
+| adversarial | 245 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

@@ -218,6 +218,7 @@ module Cerbos
         @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
         @omitted_attributes = {}.compare_by_identity
+        @cel_errors = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
       end
@@ -391,6 +392,13 @@ module Cerbos
 
         reject_double_text("if", then_value)
         reject_double_text("if", else_value)
+        # The CASE would hide the error from {#apply}: `(c ? size(aNumber) : 1) in [2, null]`
+        # would test the CASE with IS NULL, TRUE wherever `c` picks the error arm.
+        if [condition, then_value, else_value].any? { |value| cel_error?(value) }
+          raise UnsupportedOperatorError,
+            "A ternary over a CEL type error (a string function or size() over a number or a " \
+            "boolean) cannot keep the error once its branches are folded into a CASE"
+        end
 
         # A non-finite arm must not reach SQL, so defer to the enclosing comparison. So must
         # a string arm beside a number arm: CEL compares the operand with one branch and errors
@@ -451,6 +459,11 @@ module Cerbos
 
       def apply(operator, values)
         assert_arity(operator, values)
+        # Every operator reaching here is strict in CEL: an error operand makes the result the
+        # error, whatever the other operands are. Rendered, `size(aNumber) in [1, null]` would be
+        # `NULL IS NULL`, TRUE where CEL denies.
+        return cel_type_error if values.any? { |value| cel_error?(value) }
+
         assert_uniform_null_conventions(operator, values)
 
         override = operator_overrides[operator]

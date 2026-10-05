@@ -16,7 +16,15 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
 
+- `contains`, `startsWith`, `endsWith` and `size()` over a number or a boolean (a numeric or boolean column, a computed number or boolean, or a constant), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no such overload, so every row is an error, decided by the declared type rather than the row's value. UNKNOWN denies under both polarities as the error does, and an operator applied to it (`==`, `in`, `string()` and the rest) is UNKNOWN too. A ternary over such an error, and these functions over a temporal column, still raise.
+
 ### Changed
+
+- `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  CEL never holds a computed value as `null`. `(R.attr.aNumber > 1 && R.attr.aBool) in [false, null]` returned a row whose `aNumber` is NULL, because `IS NULL` read the error as a null value. Filters only get narrower: a ternary whose arm is an `:explicit` column that is NULL, compared with `null`, is now UNKNOWN where CEL would allow it.
 
 - The conformance suite runs on PostgreSQL and MySQL as well as SQLite, and the fixes below are what those stores exposed ([#500](https://github.com/cerbos/query-plan-adapters/issues/500))
 
