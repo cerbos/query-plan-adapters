@@ -639,3 +639,7 @@ Without PDM installed, run the same commands through the [pyprojectx](https://py
 wrapper, `./pw` (`pw.bat` on Windows), which installs PDM, ruff and isort into `.pyprojectx/` on
 first use: `./pw install`, `./pw test`, `./pw format`, `./pw lint`, or `./pw pdm <command>`. CI runs
 `format` and `lint` on the SQLAlchemy 2.x leg and fails if they leave a diff.
+
+CI links Ubuntu 24.04's SQLite (3.45), usually older than the one a developer's Python bundles, and
+before 3.46 a deeply nested expression overflows SQLite's parser stack. `scripts/test-ci-sqlite.sh`
+runs every suite that needs no Docker store against that SQLite, from `pdm.lock`, in a container.
