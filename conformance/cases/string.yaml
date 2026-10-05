@@ -31,6 +31,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString + R.attr.aOptionalString < "b"'
+- id: 'string/concatenate/three-terms-with-separator'
+  tier: extended
+  intent: 'Equality on a three-term concatenation with a literal separator (aString + "_" + aOptionalString == "one_set").'
+  trap: 'The nested add must keep its order and the separator; a missing operand makes the concatenation error, which CEL denies.'
+  condition:
+    match:
+      expr: 'R.attr.aString + "_" + R.attr.aOptionalString == "one_set"'
 - id: 'string/concatenate/unsatisfiable-not-equals'
   tier: adversarial
   intent: 'Inequality of a concatenated optional string with a literal it can never equal ((aOptionalString + "!") != "nope").'
@@ -192,3 +199,10 @@ cases:
   condition:
     match:
       expr: '("xaX" + "by-tail").startsWith(R.attr.aString)'
+- id: 'string/upper-ascii/non-ascii-untouched'
+  tier: adversarial
+  intent: 'upperAscii() on a string attribute compared with literals, including one with non-ASCII letters.'
+  trap: 'upperAscii folds only ASCII letters, so h7 "é-x-é" becomes "é-X-é"; a Unicode-aware UPPER yields "É-X-É" and matches the wrong literal.'
+  condition:
+    match:
+      expr: 'R.attr.aString.upperAscii() == "é-X-é" || R.attr.aString.upperAscii() == "ONE" || R.attr.aString.upperAscii() == "É-X-É"'

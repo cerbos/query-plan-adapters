@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -154,6 +155,7 @@ func (p *pdp) plan(ctx context.Context, principal map[string]any, action string)
 	if err := replaceNow(resp.Filter, before, after); err != nil {
 		return planResult{}, fmt.Errorf("plan %q: %w", action, err)
 	}
+	sortStructFields(resp.Filter)
 	return planResult{Filter: resp.Filter}, nil
 }
 
@@ -251,6 +253,45 @@ func replaceNow(node any, before, after time.Time) error {
 		}
 	}
 	return nil
+}
+
+// sortStructFields orders the set-field operands of every struct (a map literal the planner
+// kept) by their encoded key. The PDP builds them from a Go map, so their order changes from
+// one plan to the next; a map literal's keys are distinct, so the order carries no meaning.
+func sortStructFields(node any) {
+	switch n := node.(type) {
+	case map[string]any:
+		if n["operator"] == "struct" {
+			if ops, ok := n["operands"].([]any); ok {
+				sort.SliceStable(ops, func(i, j int) bool { return structFieldKey(ops[i]) < structFieldKey(ops[j]) })
+			}
+		}
+		for _, v := range n {
+			sortStructFields(v)
+		}
+	case []any:
+		for _, v := range n {
+			sortStructFields(v)
+		}
+	}
+}
+
+// structFieldKey is the JSON encoding of a set-field's key operand, or "" for anything else.
+func structFieldKey(op any) string {
+	m, _ := op.(map[string]any)
+	expr, _ := m["expression"].(map[string]any)
+	if expr == nil || expr["operator"] != "set-field" {
+		return ""
+	}
+	ops, _ := expr["operands"].([]any)
+	if len(ops) == 0 {
+		return ""
+	}
+	key, err := json.Marshal(ops[0])
+	if err != nil {
+		return ""
+	}
+	return string(key)
 }
 
 func within(t, lo, hi time.Time) bool {

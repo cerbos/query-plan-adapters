@@ -1,0 +1,138 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "c1",
+    "d1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7"
+  ],
+  "degenerateReason": null,
+  "id": "logic/not/none-of-three",
+  "intent": "match.none over three conditions, planned as an n-ary and of three nots.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 30
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": "null"
+                      }
+                    ],
+                    "operator": "startsWith"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aBool"
+                      },
+                      {
+                        "value": false
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "logic/not/none-of-three",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "none": {
+            "of": [
+              {
+                "expr": "R.attr.aNumber > 30"
+              },
+              {
+                "expr": "R.attr.aString.startsWith(\"null\")"
+              },
+              {
+                "expr": "R.attr.aBool == false"
+              }
+            ]
+          }
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "core",
+  "trap": "A translator that reads only the first two operands of an and drops the third negation and over-grants. Each row missing one of the three attributes (j1, j2, j3) is denied by another member, so the erroring member never decides a row."
+}

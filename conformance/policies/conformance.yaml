@@ -522,6 +522,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name == "public")
+    # collection/all/negated-nested-exists-in-body
+    - actions:
+        - collection/all/negated-nested-exists-in-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.all(c, !c.subCategories.exists(s, s.name in ["finance", "legal"]))
+    # collection/all/nested-all-over-literal-list
+    - actions:
+        - collection/all/nested-all-over-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.all(t, ["private", "other"].all(x, x != t))
+    # collection/all/nested-exists-over-literal-list
+    - actions:
+        - collection/all/nested-exists-over-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.all(t, ["pub", "pri"].exists(p, t.startsWith(p)))
     # collection/all/nested-exists-over-same-collection
     - actions:
         - collection/all/nested-exists-over-same-collection
@@ -540,6 +567,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))
+    # collection/concatenate/ternary-list-branches-equals-literal
+    - actions:
+        - collection/concatenate/ternary-list-branches-equals-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["one"] + (R.attr.aBool ? ["three"] : []) + ["two"] == ["one", "three", "two"]'
     # collection/except/as-whole-condition
     - actions:
         - collection/except/as-whole-condition
@@ -549,6 +585,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames.except(["public"])
+    # collection/except/equals-empty-list
+    - actions:
+        - collection/except/equals-empty-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.except(["public"]) == []
     # collection/except/equals-list-literal
     - actions:
         - collection/except/equals-list-literal
@@ -657,6 +702,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.tags.exists(t, t.name == "private")'
+    # collection/exists/literal-list-element-as-contains-needle
+    - actions:
+        - collection/exists/literal-list-element-as-contains-needle
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber == 33 || ["%_o", "X"].exists(t, R.attr.aString.contains(t))
     # collection/exists/negated-element-in-literal-list
     - actions:
         - collection/exists/negated-element-in-literal-list
@@ -747,6 +801,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.categories.exists(c, size(c.subCategories) == 1 && R.attr.tags.exists(t, t.name == "public"))
+    # collection/exists/range-built-from-attributes
+    - actions:
+        - collection/exists/range-built-from-attributes
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '[R.attr.aString, R.attr.aOptionalString].exists(s, s == "set")'
+    # collection/exists/relative-window-in-body
+    - actions:
+        - collection/exists/relative-window-in-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name == "public" && timestamp(R.attr.createdAt) < now() - duration("24h"))
     # collection/exists/scalar-list-equals
     - actions:
         - collection/exists/scalar-list-equals
@@ -765,6 +837,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames.exists(tagName, !(tagName == "public"))
+    # collection/exists/two-variable-index-and-element
+    - actions:
+        - collection/exists/two-variable-index-and-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.exists(i, n, i == 0 && n == "public")
+    # collection/exists/two-variable-map-key-and-value
+    - actions:
+        - collection/exists/two-variable-map-key-and-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.obj.exists(k, v, k == "inner" && v.startsWith("100"))
     # collection/filter/as-conjunct
     - actions:
         - collection/filter/as-conjunct
@@ -786,6 +876,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.filter(t, t.name == "public")
+    # collection/filter/literal-in-filtered-list
+    - actions:
+        - collection/filter/literal-in-filtered-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool)'
     # collection/has-intersection/mapped-names-value-first
     - actions:
         - collection/has-intersection/mapped-names-value-first
@@ -804,6 +903,15 @@ resourcePolicy:
       condition:
         match:
           expr: "hasIntersection(R.attr.tags.map(t, t.name), [\"public\", \"héllo\U0001F680\", \"100%_x\"])"
+    # collection/has-intersection/negated-mapped-names
+    - actions:
+        - collection/has-intersection/negated-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tags.map(t, t.name), ["public"])'
     # collection/has-intersection/value-first
     - actions:
         - collection/has-intersection/value-first
@@ -867,6 +975,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5
+    # collection/index/map-literal-by-attribute-key
+    - actions:
+        - collection/index/map-literal-by-attribute-key
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '{"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString] == "ADMIN"'
+    # collection/index/map-literal-by-attribute-key-under-or
+    - actions:
+        - collection/index/map-literal-by-attribute-key-under-or
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aNumber == 33 || {"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString] == "ADMIN"'
+    # collection/index/map-literal-by-attribute-key-value-first
+    - actions:
+        - collection/index/map-literal-by-attribute-key-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"ADMIN" == {"one": "ADMIN", "same": "ADMIN", "xa_by": "USER"}[R.attr.aString]'
     # collection/index/negated-first-element-of-boolean-list
     - actions:
         - collection/index/negated-first-element-of-boolean-list
@@ -912,6 +1047,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames[-1] == "public" || R.attr.aNumber == 5
+    # collection/intersect/duplicates-in-shorter-list
+    - actions:
+        - collection/intersect/duplicates-in-shorter-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(intersect(R.attr.tagNames, ["public", "other"])) == 1
+    # collection/intersect/equals-empty-list
+    - actions:
+        - collection/intersect/equals-empty-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: intersect(R.attr.tagNames, ["public"]) == []
+    # collection/is-subset/resource-list-of-literal-list
+    - actions:
+        - collection/is-subset/resource-list-of-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.isSubset(["public", "private"])
     # collection/map/as-whole-condition
     - actions:
         - collection/map/as-whole-condition
@@ -930,6 +1092,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.map(t, t.id) == ["t3a", "t3b"]
+    # collection/map/literal-in-mapped-names
+    - actions:
+        - collection/map/literal-in-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"public" in R.attr.tags.map(t, t.name)'
+    # collection/map/literal-in-mapped-upper-ascii
+    - actions:
+        - collection/map/literal-in-mapped-upper-ascii
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"PUBLIC" in R.attr.tagNames.map(t, t.upperAscii())'
+    # collection/map/negated-literal-in-mapped-names
+    - actions:
+        - collection/map/negated-literal-in-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("public" in R.attr.tags.map(t, t.name))'
     # comparison/equals/field-to-field
     - actions:
         - comparison/equals/field-to-field
@@ -939,6 +1128,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString == R.attr.aOptionalString
+    # comparison/equals/map-member-by-string-key
+    - actions:
+        - comparison/equals/map-member-by-string-key
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.obj["inner"] == "one"
     # comparison/equals/nested-map-member
     - actions:
         - comparison/equals/nested-map-member
@@ -948,6 +1146,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.obj.inner == "one"
+    # comparison/equals/value-first
+    - actions:
+        - comparison/equals/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"one" == R.attr.aString'
     # comparison/equals/whole-list-literal
     - actions:
         - comparison/equals/whole-list-literal
@@ -1260,6 +1467,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber < 5
+    # composition/derived-role/runtime-effective-derived-roles
+    - actions:
+        - composition/derived-role/runtime-effective-derived-roles
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"compose_flagged" in runtime.effectiveDerivedRoles && R.attr.aNumber < 10'
     # composition/derived-role/unconditional-deny-for-derived-role
     - actions:
         - composition/derived-role/unconditional-deny-for-derived-role
@@ -1274,6 +1490,23 @@ resourcePolicy:
       effect: EFFECT_DENY
       derivedRoles:
         - compose_flagged
+    # composition/multiple-allow/constant-false-and-conditional
+    - actions:
+        - composition/multiple-allow/constant-false-and-conditional
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.zero == 1
+    - actions:
+        - composition/multiple-allow/constant-false-and-conditional
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber > 30
     # composition/multiple-allow/none-of-condition
     - actions:
         - composition/multiple-allow/none-of-condition
@@ -1630,6 +1863,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.id == "f1"
+    # identifier/equals/literal-value-first
+    - actions:
+        - identifier/equals/literal-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"f1" == R.id'
     # identifier/not-equals/field-to-field
     - actions:
         - identifier/not-equals/field-to-field
@@ -1706,6 +1948,19 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.aNumber < 2)'
+    # logic/not/none-of-three
+    - actions:
+        - logic/not/none-of-three
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          none:
+            of:
+              - expr: R.attr.aNumber > 30
+              - expr: R.attr.aString.startsWith("null")
+              - expr: R.attr.aBool == false
     # logic/not/over-and
     - actions:
         - logic/not/over-and
@@ -1760,6 +2015,19 @@ resourcePolicy:
             of:
               - expr: R.attr.aBool
               - expr: '"public" in R.attr.tagNames'
+    # logic/or/three-disjuncts
+    - actions:
+        - logic/or/three-disjuncts
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.aNumber > 30
+              - expr: R.attr.aString == "one"
+              - expr: R.attr.aBool == false
     # membership/in/empty-list
     - actions:
         - membership/in/empty-list
@@ -1796,6 +2064,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.owner in R.attr.tagNames
+    # membership/in/list-mixing-literal-and-expression
+    - actions:
+        - membership/in/list-mixing-literal-and-expression
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in ["f1", R.attr.aOptionalString + "ret"]
     # membership/in/literal-in-resource-number-list
     - actions:
         - membership/in/literal-in-resource-number-list
@@ -1823,6 +2100,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aString in {"one": 1, "same": 2}'
+    # membership/in/negated-literal-in-resource-list
+    - actions:
+        - membership/in/negated-literal-in-resource-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("public" in R.attr.tagNames)'
     # membership/in/negated-map-attribute-keys
     - actions:
         - membership/in/negated-map-attribute-keys
@@ -1868,6 +2154,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber in [2, 3, 5]
+    # membership/in/resource-list-plus-literal-list
+    - actions:
+        - membership/in/resource-list-plus-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in R.attr.tagNames + ["one"]
     # membership/in/single-element-list
     - actions:
         - membership/in/single-element-list
@@ -1877,6 +2172,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString in ["one"]
+    # membership/in/single-key-map-literal
+    - actions:
+        - membership/in/single-key-map-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aString in {"one": 1}'
     # null/all/negated-null-element
     - actions:
         - null/all/negated-null-element
@@ -2345,6 +2649,15 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)
+    # principal/exists/short-list-value-first
+    - actions:
+        - principal/exists/short-list-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.fewTeams.exists(t, t == R.attr.aOptionalString)
     # principal/filter/size-of-filtered-long-list
     - actions:
         - principal/filter/size-of-filtered-long-list
@@ -3182,6 +3495,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString + R.attr.aOptionalString < "b"
+    # string/concatenate/three-terms-with-separator
+    - actions:
+        - string/concatenate/three-terms-with-separator
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString + "_" + R.attr.aOptionalString == "one_set"
     # string/concatenate/unsatisfiable-not-equals
     - actions:
         - string/concatenate/unsatisfiable-not-equals
@@ -3389,6 +3711,15 @@ resourcePolicy:
       condition:
         match:
           expr: ("xaX" + "by-tail").startsWith(R.attr.aString)
+    # string/upper-ascii/non-ascii-untouched
+    - actions:
+        - string/upper-ascii/non-ascii-untouched
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.upperAscii() == "é-X-é" || R.attr.aString.upperAscii() == "ONE" || R.attr.aString.upperAscii() == "É-X-É"
     # timestamp/equals/field-to-field-without-conversion
     - actions:
         - timestamp/equals/field-to-field-without-conversion
@@ -3425,6 +3756,24 @@ resourcePolicy:
       condition:
         match:
           expr: now() - duration("24h") > timestamp(R.attr.createdAt)
+    # timestamp/greater-than/time-since-duration
+    - actions:
+        - timestamp/greater-than/time-since-duration
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt).timeSince() > duration("24h")
+    # timestamp/less-than/attribute-plus-duration
+    - actions:
+        - timestamp/less-than/attribute-plus-duration
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) + duration("24h") < timestamp("2021-05-06T00:00:00Z")
     # timestamp/less-than/relative-window
     - actions:
         - timestamp/less-than/relative-window
@@ -3740,6 +4089,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber in ["5", 2]
+    # type-mismatch/in/number-field-in-scalar-principal
+    - actions:
+        - type-mismatch/in/number-field-in-scalar-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber in P.attr.zero || R.attr.aString == "one"
+    # type-mismatch/in/string-field-in-dyn-string
+    - actions:
+        - type-mismatch/in/string-field-in-dyn-string
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in dyn("one") || R.attr.aNumber == 2
     # type-mismatch/in/string-field-in-list-of-lists
     - actions:
         - type-mismatch/in/string-field-in-list-of-lists
@@ -3875,6 +4242,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2
+    # type-mismatch/less-than/string-field-against-timestamp
+    - actions:
+        - type-mismatch/less-than/string-field-against-timestamp
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.createdAt < now() - duration("24h") || R.attr.aNumber == 2
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal

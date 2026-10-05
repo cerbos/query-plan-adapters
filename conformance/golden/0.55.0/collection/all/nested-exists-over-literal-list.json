@@ -1,0 +1,124 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "b1",
+    "b2",
+    "b3",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/all/nested-exists-over-literal-list",
+  "intent": "all over a resource list whose body is an exists over a list literal binding both lambda variables (tagNames.all(t, [\"pub\", \"pri\"].exists(p, t.startsWith(p)))).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": [
+                          "pub",
+                          "pri"
+                        ]
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t"
+                                  },
+                                  {
+                                    "variable": "p"
+                                  }
+                                ],
+                                "operator": "startsWith"
+                              }
+                            },
+                            {
+                              "variable": "p"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "all"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/all/nested-exists-over-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.all(t, [\"pub\", \"pri\"].exists(p, t.startsWith(p)))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Confusing the inner and outer variables, or unrolling the inner literal list wrongly, changes which rows pass; an empty list is vacuously true."
+}

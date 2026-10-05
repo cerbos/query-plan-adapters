@@ -31,6 +31,13 @@ cases:
   condition:
     match:
       expr: 'R.id == "f1"'
+- id: 'identifier/equals/literal-value-first'
+  tier: core
+  intent: 'R.id compared with a literal on the left ("f1" == R.id), as P.attr.userQid == R.id plans.'
+  trap: 'An R.id mapping that only fires when request.resource.id is operand 0 misses the value-first spelling, or reads the literal as the id column.'
+  condition:
+    match:
+      expr: '"f1" == R.id'
 - id: 'identifier/not-equals/field-to-field'
   tier: extended
   intent: 'A resource attribute compared != the resource id.'

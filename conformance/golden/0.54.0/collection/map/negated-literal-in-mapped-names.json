@@ -1,0 +1,107 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/map/negated-literal-in-mapped-names",
+  "intent": "The negation of a literal membership in a map() projection over an object list.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "public"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "map"
+                  }
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/map/negated-literal-in-mapped-names",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(\"public\" in R.attr.tags.map(t, t.name))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "NOT EXISTS returns b5 and e1, whose nameless tags make map() error so check() denies them."
+}

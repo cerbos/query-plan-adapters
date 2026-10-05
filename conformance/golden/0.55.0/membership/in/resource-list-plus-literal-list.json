@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1",
+    "a9",
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/resource-list-plus-literal-list",
+  "intent": "Membership in a resource list concatenated with a list literal (aString in tagNames + [\"one\"]).",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": [
+                    "one"
+                  ]
+                }
+              ],
+              "operator": "add"
+            }
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/resource-list-plus-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in R.attr.tagNames + [\"one\"]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dropping either side of the list + under-grants: a1 matches only through the literal, a9 and b4 only through tagNames."
+}
