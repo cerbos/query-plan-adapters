@@ -125,6 +125,10 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
     },
+    "collection/all/negated-nested-exists-in-body": {
+      "status": "unsupported",
+      "reason": "Same refusal as `collection/exists/negated`, one element level down: the all() body negates an exists() over each category's subcategories, and a $nor over that $elemMatch would turn a CEL element error into a match, so the negated macro is refused"
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Same top-level-only $expr restriction as `collection/exists/nested-over-same-collection`, reached through all(): the inner $elemMatch cannot compare its element's id and name with the enclosing element's"
@@ -205,6 +209,18 @@
       "status": "unsupported",
       "reason": "The categories.exists lambda reads the root document's tags collection from inside the element scope. $elemMatch rebases every field path onto the array element, and the only route back to a root field is a $-anchored path inside $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
     },
+    "collection/exists/relative-window-in-body": {
+      "status": "unsupported",
+      "reason": "Same nanosecond-precision now() literal as `timestamp/less-than/relative-window`, which a BSON Date cannot hold; independently, the exists() body compares the root document's createdAt, which $elemMatch can reach only through $expr, and MongoDB rejects $expr below the top level ('$expr can only be applied to the top-level document')"
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable exists() binds each element's list index, and $elemMatch matches an array element by its own value and fields with no access to its position, so the index condition has no element-scoped spelling"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable exists() over a map binds each key, and a MongoDB filter has no form that iterates a subdocument's field names (the same limit as `collection/exists/map-keys`)"
+    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() as a conjunct returns a list, not a boolean; dropping the untranslatable half would over-grant, so the whole plan is refused."
@@ -212,6 +228,10 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() used as the whole condition returns a list, not a boolean; only size(filter(...)) has a boolean meaning, so there is no MongoDB filter to emit."
+    },
+    "collection/filter/literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "Membership in a filter() result is the element match tags.exists(t, t == \"public\" && <predicate>), and the predicate reads the root document's aBool; $elemMatch rebases every path onto the element, and the only route back to a root field is $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
     },
     "collection/index/fractional-position": {
       "status": "unsupported",
@@ -221,6 +241,10 @@
       "status": "unsupported",
       "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."
     },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "size(intersect(...)) counts the elements of whichever list is shorter that the other contains, duplicates included; a find filter matches documents by predicate and cannot compare a relation's element count with the constant list's or count matching elements"
+    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "map() used as the whole condition returns a list, not a boolean; only hasIntersection(map(...), [...]) gives the projection a boolean meaning."
@@ -228,6 +252,10 @@
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "Mongoose handles map() only as the collection operand of hasIntersection, where it becomes an $elemMatch. Comparing the projection itself to a literal list would need $map inside an aggregation expression, which the adapter's expression builder has no case for"
+    },
+    "collection/map/literal-in-mapped-upper-ascii": {
+      "status": "unsupported",
+      "reason": "The map() projection is computed (upperAscii of each element), and $elemMatch compares only an element's stored value; matching a computed projection would need $map in an aggregation expression over the relation, which the adapter's $expr builder does not read relations through"
     },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
@@ -325,6 +353,10 @@
       "status": "unsupported",
       "reason": "variable-in-variable membership requires correlated aggregation scoping"
     },
+    "membership/in/list-mixing-literal-and-expression": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: a MongoDB `$in` query operator takes a list of values, and this list literal holds an expression over another attribute (aOptionalString + \"ret\")"
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a to-one relation, which CEL reads as a map and tests by KEY; the keys are the fields the embedded subdocument carries, and the adapter has no filter over a subdocument's field names, so it refuses rather than let Mongoose cast the needle to the subdocument"
@@ -344,6 +376,10 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
+    },
+    "membership/in/resource-list-plus-literal-list": {
+      "status": "unsupported",
+      "reason": "Membership in a resource list extended by a constant list reduces to `aString == \"one\" || aString in tagNames`, and the second disjunct is the variable-in-variable membership of `membership/in/field-in-resource-list`, which the adapter refuses"
     },
     "null/all/negated-null-element": {
       "status": "unsupported",
@@ -536,6 +572,10 @@
     "type-mismatch/less-than/number-field-against-mixed-ternary": {
       "status": "unsupported",
       "reason": "The ternary's branches have different types, so CEL orders aNumber against the number branch and raises a no-overload error on the string branch, per document. $expr compares the $cond's result whole and falls back to BSON's cross-type order, where every number sorts below every string, which would return every aBool-false document; the comparison is refused instead."
+    },
+    "type-mismatch/less-than/string-field-against-timestamp": {
+      "status": "unsupported",
+      "reason": "Same nanosecond-precision now() literal as `timestamp/less-than/relative-window`: the planner folds now() - duration(\"24h\") into an instant a BSON Date cannot represent without changing it"
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",

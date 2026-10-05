@@ -76,7 +76,7 @@ const isEvaluatedByPipeline = (value: unknown): boolean => {
   return false;
 };
 
-type CelScalarType = "number" | "string" | "boolean";
+type CelScalarType = "number" | "string" | "boolean" | "timestamp" | "duration";
 
 /**
  * The CEL type `operand` evaluates to, as far as the plan settles it: a constant's own, a field's
@@ -100,14 +100,36 @@ const celScalarType = (
     return undefined;
   }
   switch (operand.operator) {
-    // CEL has no mixed-type `+`, so one operand of a known type types the sum.
+    // CEL has no mixed-type `+`, so one operand of a known type types the sum. The one
+    // heterogeneous overload is timestamp + duration, which is a timestamp.
     case "add": {
       const types = operand.operands.map((op) => celScalarType(op, mapper));
-      return types.includes("mixed")
-        ? "mixed"
-        : types.find((type) => type === "string" || type === "number");
+      if (types.includes("mixed")) return "mixed";
+      if (types.includes("timestamp")) return "timestamp";
+      if (types.length > 0 && types.every((type) => type === "duration")) {
+        return "duration";
+      }
+      return types.find((type) => type === "string" || type === "number");
     }
-    case "sub":
+    // timestamp - timestamp is a duration, timestamp - duration a timestamp.
+    case "sub": {
+      const [left, right] = operand.operands.map((op) => celScalarType(op, mapper));
+      if (left === "timestamp") {
+        return right === "timestamp"
+          ? "duration"
+          : right === "duration"
+            ? "timestamp"
+            : undefined;
+      }
+      return left === "duration" ? "duration" : "number";
+    }
+    case "timestamp":
+      return "timestamp";
+    case "duration":
+    case "timeSince":
+      return "duration";
+    case "upperAscii":
+      return "string";
     case "mult":
     case "div":
     case "mod":
@@ -292,7 +314,10 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
   ge: ordering(COMPARISON_OPERATORS.ge),
   and: variadic("$and"),
   or: variadic("$or"),
-  sub: variadic("$subtract"),
+  sub: {
+    build: variadic("$subtract").build,
+    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
+  },
   mult: variadic("$multiply"),
   // CEL's `%` is integer-only: it has no double overload, and every number a resource attribute
   // carries reaches CEL as a double, so `R.attr.x % 2` is a no-such-overload error that denies
@@ -344,6 +369,20 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       if (operands.some((op) => isValue(op) && typeof op.value === "string")) {
         return { $concat: built() };
       }
+      // CEL also overloads `+` on lists, which `$add` rejects as loudly as strings. A list
+      // operand is spelled out in the plan — a list constant, a ternary between two, or a
+      // nested concatenation — and `$concatArrays` keeps CEL's order and duplicates. A list
+      // read from a field is not: a relation projects through its elements, so it is refused.
+      if (operands.some(isListOperand)) {
+        if (!operands.every(isListOperand)) {
+          throw new UnsupportedQueryPlanError(
+            "List concatenation is translated only between list constants and ternaries over " +
+              "them: a list read from the document is a projection over a relation's " +
+              "elements, not an ordered list value $concatArrays can extend",
+          );
+        }
+        return { $concatArrays: built() };
+      }
       // Only two bare field paths reveal nothing. A nested expression keeps the numeric reading
       // it has always had — the divisions and ternaries that reach here are numeric by
       // construction, and narrowing them would refuse shapes this adapter already answers.
@@ -354,8 +393,17 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
             "$add nor $concat can be chosen",
         );
       }
+      // A nested concatenation (`a + "_" + b` is `(a + "_") + b`) carries its string type up
+      // even though no operand of THIS `+` is a constant.
+      if (
+        operands.some((op) => isExpression(op) && celScalarType(op, mapper) === "string")
+      ) {
+        return { $concat: built() };
+      }
       return { $add: built() };
     },
+    // timestamp + duration leaves CEL's timestamp range as an error, where `$add` carries on.
+    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
   },
   div: {
     build: ({ operands }, mapper) => {
@@ -639,7 +687,152 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         ? notNullGuard(expression, mapper)
         : undefined,
   },
+  // A duration is carried as its length in milliseconds, the unit `$add` and `$subtract` apply to
+  // a date and the one the difference of two dates is in. The planner normalises the literal to
+  // seconds ("86400s"); one finer than a millisecond has no exact spelling and is refused, as a
+  // sub-millisecond timestamp literal is.
+  duration: {
+    build: ({ operands }) => {
+      const operand = operands[0];
+      if (!operand || !isValue(operand) || typeof operand.value !== "string") {
+        throw new UnsupportedQueryPlanError(
+          "duration() is translated only over a constant string",
+        );
+      }
+      return parseDurationMilliseconds(operand.value);
+    },
+  },
+  // `timeSince` is relative to the clock of whoever evaluates it, so it is read from the server's
+  // own `$$NOW` at query time, in milliseconds like every duration here.
+  timeSince: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("timeSince requires an operand");
+      }
+      if (celScalarType(operand, mapper) !== "timestamp") {
+        throw new UnsupportedQueryPlanError(
+          "timeSince() is translated only over a timestamp() conversion",
+        );
+      }
+      return {
+        $subtract: ["$$NOW", buildAggregationExpression(operand, mapper)],
+      };
+    },
+  },
+  // CEL's upperAscii folds a-z only and leaves every other character as it is, which is what
+  // MongoDB's `$toUpper` does too. `$toUpper` turns a null into "" and a number into its digits,
+  // where CEL has no overload, so anything but a string is null here and guarded out.
+  upperAscii: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("upperAscii requires an operand");
+      }
+      const input = buildAggregationExpression(operand, mapper);
+      return {
+        $cond: [{ $eq: [{ $type: input }, "string"] }, { $toUpper: input }, null],
+      };
+    },
+    guard: notNullGuard,
+  },
 };
+
+/**
+ * Whether `operand` is a list the plan spells out: a list constant, a ternary whose branches are
+ * both such lists, or a concatenation of them.
+ */
+const isListOperand = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) {
+    return Array.isArray(operand.value);
+  }
+  if (!isExpression(operand)) {
+    return false;
+  }
+  if (operand.operator === "if") {
+    const [, thenOperand, elseOperand] = operand.operands;
+    return (
+      thenOperand !== undefined &&
+      elseOperand !== undefined &&
+      isListOperand(thenOperand) &&
+      isListOperand(elseOperand)
+    );
+  }
+  return (
+    operand.operator === "add" &&
+    operand.operands.length > 0 &&
+    operand.operands.every(isListOperand)
+  );
+};
+
+/** A timestamp computed by `+` or `-` outside CEL's range is an error to CEL, not a date. */
+function timestampRangeGuard(
+  expression: PlanExpression,
+  mapper: Mapper,
+): MongooseFilter | undefined {
+  if (celScalarType(expression, mapper) !== "timestamp") {
+    return undefined;
+  }
+  const computed = buildAggregationExpressionFromExpression(expression, mapper);
+  return {
+    $expr: {
+      $and: [
+        { $gte: [computed, MIN_CEL_TIMESTAMP] },
+        { $lte: [computed, MAX_CEL_TIMESTAMP] },
+      ],
+    },
+  };
+}
+
+const DURATION_UNIT_NANOSECONDS: Record<string, bigint> = {
+  ns: 1n,
+  us: 1_000n,
+  "µs": 1_000n,
+  "μs": 1_000n,
+  ms: 1_000_000n,
+  s: 1_000_000_000n,
+  m: 60_000_000_000n,
+  h: 3_600_000_000_000n,
+};
+
+/**
+ * A Go duration string ("86400s", "1h30m", "-1.5s", "250ms") as a whole number of milliseconds.
+ * Refused when it is not millisecond-exact, or not a duration at all.
+ */
+function parseDurationMilliseconds(literal: string): number {
+  const refuse = (): never => {
+    throw new UnsupportedQueryPlanError(
+      `duration ${JSON.stringify(literal)} is not a millisecond-exact duration: a BSON date ` +
+        "carries milliseconds, so a finer duration has no exact spelling",
+    );
+  };
+  const match = /^([+-]?)((?:\d+(?:\.\d*)?|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+$/.exec(literal);
+  if (!match) {
+    return refuse();
+  }
+  const sign = match[1] === "-" ? -1n : 1n;
+  let nanoseconds = 0n;
+  for (const [, digits, unit] of literal
+    .slice(match[1]!.length)
+    .matchAll(/(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)/g)) {
+    const scale = DURATION_UNIT_NANOSECONDS[unit!]!;
+    const [whole = "", fraction = ""] = digits!.split(".");
+    const fractionScale = 10n ** BigInt(fraction.length);
+    const fractional = BigInt(fraction || "0") * scale;
+    if (fractional % fractionScale !== 0n) {
+      return refuse();
+    }
+    nanoseconds += BigInt(whole || "0") * scale + fractional / fractionScale;
+  }
+  if (nanoseconds % 1_000_000n !== 0n) {
+    return refuse();
+  }
+  const milliseconds = sign * (nanoseconds / 1_000_000n);
+  if (milliseconds > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return refuse();
+  }
+  return Number(milliseconds);
+}
 
 const aggregationOperator = (
   operator: string,

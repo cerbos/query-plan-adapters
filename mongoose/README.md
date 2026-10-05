@@ -252,12 +252,13 @@ per-attribute way to declare the omitted convention.
 | --- | --- | --- |
 | Logical | `and`, `or`, `not` | `$and`, `$or`, `$nor`. |
 | Comparisons | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | `$eq`, `$ne`, `$lt`, `$lte`, `$gt`, `$gte` on the mapped field. |
-| Membership | `in`, `hasIntersection` | `$in`, or `$elemMatch` on array relations. `hasIntersection` takes an array field or a `map` projection, in either operand order. |
+| Membership | `in`, `hasIntersection` | `$in`, or `$elemMatch` on array relations. `hasIntersection` takes an array field or a `map` projection, in either operand order, and so does `needle in coll.map(e, e.field)`. Membership in a ternary between two constant lists is decided per branch, leaving the condition. |
+| List functions | `isSubset`, `except(...) == []`, `intersect(...) == []` | The element-wise `all`/`exists` each reduces to; only the emptiness of an `except` or `intersect` is translated, not its size or contents. |
 | String helpers | `contains`, `startsWith`, `endsWith` | Escaped regular expressions. |
 | Null checks | `eq`/`ne` against `null`, `exists` | `$eq: null`/`$ne: null` on scalars, `$elemMatch` on collections. |
-| Collections | `filter`, `lambda`, `map`, `all` | Scoped `$elemMatch`; over a literal value list, `$or`/`$and` of the substituted body. |
-| Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Document-level `$expr`. Division needs a non-zero constant denominator; `index` needs a non-negative integer constant and adds a bounds check. |
-| Conversions and matching | `string`, `double`, `int`, `timestamp`, `matches` | Guarded conversion and regex expressions (see above). |
+| Collections | `filter`, `lambda`, `map`, `all` | Scoped `$elemMatch`; over a literal value list, or a list built from attributes and constants (`[R.attr.a, R.attr.b].exists(...)`), `$or`/`$and` of the substituted body. Single-variable lambdas only. |
+| Arithmetic and values | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field` | Document-level `$expr`. `+` is `$concat` when a string operand or a nested concatenation types it, and `$concatArrays` between list constants and ternaries over them. Division needs a non-zero constant denominator; `index` needs a non-negative integer constant and adds a bounds check. A map constant indexed by a field and compared with a constant becomes membership in the matching keys, and `obj["key"]` reads the mapped `obj.key`. |
+| Conversions and matching | `string`, `double`, `int`, `timestamp`, `duration`, `timeSince`, `upperAscii`, `matches` | Guarded conversion and regex expressions (see above). A duration is milliseconds (a finer literal throws), `timeSince` reads the server's `$$NOW`, and `upperAscii` is `$toUpper`, which folds ASCII letters only. |
 | Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Literal prefix and ancestor-list filters on a mapped scalar path, including through to-one relations and under negation. |
 
 Translations may use `$expr` but never need an aggregation pipeline.
@@ -312,12 +313,15 @@ queries over the corpus's 42 seed documents on MongoDB 7 and 8. Passed cases on 
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 49 / 80 |
-| adversarial | 207 / 318 |
+| core | 29 / 29 |
+| extended | 61 / 97 |
+| adversarial | 220 / 338 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases and three adversarial cases.
+pass them. On 0.55.0 that is four extended cases and five adversarial cases.
+`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
+the planner rewrites an `in` over a scalar container to `eq`, while `check()` has no such overload
+and denies ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
 receives the omission as absent and denies the document; use `R.attr.x != null` instead of
@@ -378,6 +382,20 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- A negated `hasIntersection` over a `map` projection (`!hasIntersection(R.attr.tags.map(t, t.name),
+  ["public"])`) requires the relation to be an array and no element to lack the projected field,
+  outside the negation. The `$nor` over the positive filter flipped its no-null-projection guard
+  too, and returned the documents whose `map()` raises, which `check()` denies (over-grant fix).
+- **Breaking:** a two-variable `exists`/`all` (`list.exists(i, v, ...)`, `map.exists(k, v, ...)`)
+  throws `UnsupportedQueryPlanError`. The adapter read its first variable, the index or key, as the
+  element, so `tagNames.exists(i, v, i != 0)` matched any element other than `0`; `$elemMatch`
+  exposes neither an element's position nor a subdocument's keys. A nested string concatenation
+  (`a + "_" + b`) and a `+` between list constants translate, where `$add` failed the query on the
+  server, and `upperAscii`, `duration`, `timeSince`, `isSubset`, the emptiness of `except` and
+  `intersect`, membership in a `map` projection or a conditional constant list, and a map constant
+  indexed by a field translate where they threw. An ordering between a `timestamp(...)` or a
+  duration and an operand of another declared type is `false` under either polarity, as CEL's
+  missing overload is, rather than BSON's cross-type order.
 - **Breaking** — under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
   declare `nullable` is treated as `nullable: true`. Comparisons on it gain a
   `{ field: { $ne: null } }` guard, and a `not` over it carries that guard outside the `$nor`, or
