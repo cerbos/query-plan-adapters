@@ -7,8 +7,8 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no adapter workflow starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
+- **The datastore is one.** Drizzle, Prisma, ActiveRecord and Sequel run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`), ActiveRecord's version (8.0, 7.1) and Sequel's (5.69 and the newest 5.x) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
 
@@ -21,7 +21,7 @@ packaged example succeed. Adapter test workflows run directly on pull requests a
 `workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
 filenames stable: npm trusted publishing is configured against them.
 
-Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
+Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*` and `spring-data/v*` only run that adapter's CI
 workflow: neither build configures a Maven Central release (both are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet.

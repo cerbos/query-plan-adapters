@@ -13,6 +13,7 @@ Multi-language ORM adapters that translate Cerbos query plan responses into data
 | langchain-chromadb | TypeScript | `@cerbos/langchain-chromadb` | ChromaDB |
 | sqlalchemy | Python | `cerbos-sqlalchemy` | SQLAlchemy |
 | activerecord | Ruby | `cerbos-activerecord` | ActiveRecord 7.1–8.x |
+| sequel | Ruby | `cerbos-sequel` | Sequel 5.x (5.69+) |
 | ent | Go | `github.com/cerbos/query-plan-adapters/ent` | Ent |
 | pgx | Go | `github.com/cerbos/query-plan-adapters/pgx` | pgx / PostgreSQL |
 | elasticsearch-java | Java | `cerbos-elasticsearch` | Elasticsearch |
@@ -88,6 +89,30 @@ under ActiveRecord 8.0 and 7.1; every other suite runs on SQLite.
 `spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
+
+### Ruby (Sequel)
+```bash
+# The same Docker layout as ActiveRecord, and the same two suites.
+cd sequel
+./scripts/test.sh                                      # all the specs
+./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql; default sqlite
+RUBY_VERSION=3.3 SEQUEL_VERSION="= 5.69.0" ./scripts/test.sh
+./scripts/lint.sh                                      # standardrb
+```
+
+The translator is the ActiveRecord one ported onto Sequel's expression constructors. The
+collection mapping is `Cerbos::Sequel.association` (Sequel's word), and a `many_to_many` is opened
+into its join table and its target in one correlated subquery, a model shape the corpus has no
+spelling for, so `spec/adapter_contract_spec.rb` proves it. Inside `module Cerbos`, `Sequel` is the
+adapter; the library is `::Sequel`.
+
+`ADAPTER_TEST_DB` selects the conformance store, as on ActiveRecord, with the images pinned in
+`sequel/POSTGRES_IMAGE` and `sequel/MYSQL_IMAGE` and started by `scripts/test.sh` through Compose
+profiles. The contract suite refuses any store but SQLite. The MySQL driver is `trilogy`, which
+Sequel supports from 5.69, the gemspec's floor; set the collation with `collation_connection`,
+never `SET NAMES ... COLLATE`, which crashes that driver. CI runs the corpus on all three stores
+under Sequel 5.69 and the newest 5.x.
 
 ### Go (Ent, pgx)
 ```bash
@@ -308,7 +333,7 @@ state. Three kinds of material live only there, and they are not equal:
 - `conformance/` affects all adapters: a change there re-runs every adapter's CI, and a new case runs in every adapter's harness
 - `demo/` likewise re-runs every adapter's example job, and adding a usage shape means implementing it in every example — there is no ledger to opt out with
 - Never edit `policies/conformance.yaml`, `resources.json` or anything under `golden/` by hand: the generator writes them, and CI fails if they are stale
-- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
+- Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, `sequel/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A harness passes corpus data through verbatim: one mapping for every case, no per-case options, no hand-projected subset of the dataset
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. The roster is the set of directories holding a `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something else (cases, seed rows) go in digits
 - Changing what an adapter can translate means updating its `conformance-ledger.json` and its README contract table in the same commit

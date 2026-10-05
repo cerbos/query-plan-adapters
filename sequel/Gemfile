@@ -1,0 +1,24 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+group :development, :test do
+  # CI exercises both ends of the range the gemspec declares. SEQUEL_VERSION names ONE release
+  # (`= 5.69.0` on the low leg); unset or empty, the newest 5.x resolves.
+  sequel_version = ENV.fetch("SEQUEL_VERSION", "")
+  gem "sequel", sequel_version.empty? ? "~> 5.69" : sequel_version
+  # The official Cerbos Ruby SDK (https://github.com/cerbos/cerbos-sdk-ruby). The adapter is
+  # tested against its output types.
+  gem "cerbos", "~> 0.13"
+  # The drivers of the two real stores the conformance harness replays the corpus on
+  # (ADAPTER_TEST_DB=postgres|mysql). trilogy and not mysql2: it needs no MySQL client library,
+  # and Sequel ships an adapter for it.
+  gem "pg", "~> 1.5"
+  gem "trilogy", "~> 2.9"
+  gem "rake", "~> 13.2"
+  gem "rspec", "~> 3.13"
+  gem "sqlite3", "~> 2.6"
+  gem "standard", "~> 1.50"
+end
