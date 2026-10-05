@@ -214,7 +214,7 @@ async function selectAllowed(
   // Every plan kind goes to the backend, ALWAYS_DENIED included, so the adapter decides each case
   // rather than the harness answering one for it.
   return convex.query(api.adversarial.executePlan, {
-    queryPlan: JSON.parse(JSON.stringify(planOf(golden))),
+    queryPlan: JSON.parse(JSON.stringify(await planOf(golden))),
   });
 }
 
@@ -308,9 +308,10 @@ describe("conformance (convex)", () => {
       async (_id, golden) => {
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
+          const queryPlan = await planOf(golden);
           expect(() =>
             queryPlanToConvex({
-              queryPlan: planOf(golden),
+              queryPlan,
               mapper: MAPPER,
               allowPostFilter: true,
             }),

@@ -172,16 +172,16 @@ let collection: Collection | undefined;
  * The default-off behaviour is a caller-supplied argument the corpus cannot vary, so it is pinned
  * in `translator.test.ts` instead.
  */
-function translate(golden: Golden) {
+async function translate(golden: Golden) {
   return queryPlanToChromaDB({
-    queryPlan: planOf(golden),
+    queryPlan: await planOf(golden),
     fieldNameMapper: FIELD_NAME_MAPPER,
     allowPostFilter: true,
   });
 }
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
-  const result = translate(golden);
+  const result = await translate(golden);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   const rows = await collection!.get({
     where: result.kind === PlanKind.CONDITIONAL ? result.filters : undefined,
@@ -285,7 +285,9 @@ describe("conformance (chromadb)", () => {
       async (_id, golden) => {
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
-          expect(() => translate(golden)).toThrow(UnsupportedOperatorError);
+          await expect(translate(golden)).rejects.toThrow(
+            UnsupportedOperatorError,
+          );
           return;
         }
         const ids = await selectAllowed(golden);

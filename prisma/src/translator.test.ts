@@ -27,19 +27,19 @@ import { MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpu
 const CURRENT = pdpTags()[0]!;
 
 /** The current PDP's recorded plan for a corpus case, `__NOW_MINUS_24H__` filled as `now`. */
-function planFor(id: string, now?: string): PlanResourcesResponse {
+function planFor(id: string, now?: string): Promise<PlanResourcesResponse> {
   return planOf(readGolden(CURRENT, id), now);
 }
 
-function translate(
+async function translate(
   id: string,
   options: {
     mapper?: Mapper;
     nullAttributeRepresentation?: NullAttributeRepresentation;
   } = {}
-): QueryPlanToPrismaResult {
+): Promise<QueryPlanToPrismaResult> {
   return queryPlanToPrisma({
-    queryPlan: planFor(id),
+    queryPlan: await planFor(id),
     mapper: options.mapper ?? MAPPER,
     model: MODEL,
     ...(options.nullAttributeRepresentation
@@ -49,10 +49,10 @@ function translate(
 }
 
 describe("the refusal type", () => {
-  test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", () => {
+  test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", async () => {
     let raised: unknown;
     try {
-      translate("collection/index/first-element-of-string-list");
+      await translate("collection/index/first-element-of-string-list");
     } catch (error) {
       raised = error;
     }
@@ -61,10 +61,11 @@ describe("the refusal type", () => {
     expect((raised as Error).name).toBe("UnsupportedQueryPlanError");
   });
 
-  test("mapper misconfiguration is a plain Error, not a refusal", () => {
+  test("mapper misconfiguration is a plain Error, not a refusal", async () => {
+    const queryPlan = await planFor("comparison/equals/field-to-field");
     let raised: unknown;
     try {
-      queryPlanToPrisma({ queryPlan: planFor("comparison/equals/field-to-field"), mapper: MAPPER });
+      queryPlanToPrisma({ queryPlan, mapper: MAPPER });
     } catch (error) {
       raised = error;
     }
@@ -75,9 +76,9 @@ describe("the refusal type", () => {
 });
 
 describe("declared scalar types", () => {
-  test("an undeclared type preserves the legacy mapper contract", () => {
+  test("an undeclared type preserves the legacy mapper contract", async () => {
     expect(
-      translate("type-mismatch/equals/string-field-against-number-principal", {
+      await translate("type-mismatch/equals/string-field-against-number-principal", {
         mapper: { "request.resource.attr.aString": { field: "aString" } },
       }),
     ).toEqual({
@@ -87,7 +88,7 @@ describe("declared scalar types", () => {
     // Declared, the type settles the comparison: CEL's heterogeneous equality answers a string
     // column against a number false for every present value, so nothing is bound for a store to
     // coerce. `NOT LIKE '%'` is that false, kept UNKNOWN on a NULL, which is a missing attribute.
-    expect(translate("type-mismatch/equals/string-field-against-number-principal")).toEqual({
+    expect(await translate("type-mismatch/equals/string-field-against-number-principal")).toEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { NOT: { aString: { startsWith: "" } } },
     });
@@ -123,32 +124,32 @@ describe("nullAttributeRepresentation", () => {
   const MISSING = "null/equals/null-literal-on-missing-attribute";
   const NEVER = { kind: PlanKind.CONDITIONAL, filters: { NOT: { aOptionalString: { startsWith: "" } } } };
 
-  test("explicit (the default): == null is an IS NULL filter", () => {
-    expect(translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
+  test("explicit (the default): == null is an IS NULL filter", async () => {
+    expect(await translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { aOptionalString: { equals: null } },
     });
   });
 
-  test("omitted: the same plan selects no row rather than the NULL ones", () => {
+  test("omitted: the same plan selects no row rather than the NULL ones", async () => {
     // A NULL column sends no attribute, so check() denies on a missing-attribute error while the
     // IS NULL filter would return exactly those rows (#302); a present value is never null, so
     // `== null` is FALSE for it — `NOT LIKE '%'`, which stays UNKNOWN on the NULL rows.
     expect(
-      translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
+      await translate(MISSING, { mapper: UNDECLARED, nullAttributeRepresentation: "omitted" })
     ).toEqual(NEVER);
   });
 
-  test("a per-attribute declaration overrides the call-level option, in both directions", () => {
+  test("a per-attribute declaration overrides the call-level option, in both directions", async () => {
     // Declared omitted, called explicit: no IS NULL filter (#308).
-    expect(translate(MISSING)).toEqual(NEVER);
+    expect(await translate(MISSING)).toEqual(NEVER);
     // Declared explicit (`owner`), called omitted: translated.
     expect(
-      translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" }).kind
+      (await translate("null/equals/null-literal", { nullAttributeRepresentation: "omitted" })).kind
     ).toBe(PlanKind.CONDITIONAL);
     // Strip the declaration and the same call selects no row.
     expect(
-      translate("null/equals/null-literal", {
+      await translate("null/equals/null-literal", {
         mapper: UNDECLARED,
         nullAttributeRepresentation: "omitted",
       })
@@ -161,16 +162,17 @@ describe("nullAttributeRepresentation", () => {
   // A plan whose null comparison settles passes too: `x == null` is FALSE for a present value and
   // an error for a missing one, rendered with presence tests that are UNKNOWN on NULL. Any
   // NULL-selecting filter needs an IS NULL leaf, i.e. a null literal in the emitted where-input.
-  test("no plan carrying a null literal emits an IS NULL filter under call-level omitted", () => {
+  test("no plan carrying a null literal emits an IS NULL filter under call-level omitted", async () => {
     const carrying = readGoldens(CURRENT).filter((golden) => carriesNullLiteral(golden.plan));
     const ids = carrying.map((golden) => golden.id);
     expect(ids).toContain(MISSING);
     expect(ids).toContain("null/has-intersection/literal-list-with-null-element");
 
-    const notRejected = carrying.flatMap((golden) => {
+    const plans = await Promise.all(carrying.map((golden) => planOf(golden)));
+    const notRejected = carrying.flatMap((golden, index) => {
       try {
         const result = queryPlanToPrisma({
-          queryPlan: planOf(golden),
+          queryPlan: plans[index]!,
           mapper: UNDECLARED,
           model: MODEL,
           nullAttributeRepresentation: "omitted",
@@ -201,25 +203,26 @@ describe("reentrant function mappers", () => {
     "null/equals/null-literal-on-missing-attribute",
     "comparison/equals/field-to-field",
     "collection/all/empty-collection",
-  ])("keeps %s isolated from a nested translation", (action) => {
-    const expected = translate(action, { mapper: UNDECLARED });
+  ])("keeps %s isolated from a nested translation", async (action) => {
+    const expected = await translate(action, { mapper: UNDECLARED });
+    const nested = await planFor("arithmetic/add/field-plus-constant");
     let calls = 0;
     const mapper: Mapper = (key) => {
       calls++;
       queryPlanToPrisma({
-        queryPlan: planFor("arithmetic/add/field-plus-constant"),
+        queryPlan: nested,
         mapper: MAPPER,
         model: "NestedModel",
         nullAttributeRepresentation: "omitted",
       });
       return UNDECLARED[key] ?? { field: key };
     };
-    expect(translate(action, { mapper })).toStrictEqual(expected);
+    expect(await translate(action, { mapper })).toStrictEqual(expected);
     expect(calls).toBeGreaterThan(0);
   });
 });
 
-test("an unplannable nested map does not register nullable fields on the outer lambda", () => {
+test("an unplannable nested map does not register nullable fields on the outer lambda", async () => {
   // CEL cannot reach this branch: Cerbos 0.54.0 rejects
   // R.attr.tags.all(t, R.attr.tags.map(x, x.name)) with
   // "expected type 'bool' but found 'list(dyn)'". This is a hand-crafted plan contract. A list
@@ -248,7 +251,7 @@ test("an unplannable nested map does not register nullable fields on the outer l
     ],
   };
   const result = queryPlanToPrisma({
-    queryPlan: { ...planFor("collection/all/empty-collection"), kind: PlanKind.CONDITIONAL, condition },
+    queryPlan: { ...(await planFor("collection/all/empty-collection")), kind: PlanKind.CONDITIONAL, condition },
     mapper: MAPPER,
     model: MODEL,
   });
@@ -263,31 +266,31 @@ describe("timestamp literals", () => {
   // it differs on every capture. That makes this the one plan whose value the reader chooses — so
   // it is also the one place the whole timestamp boundary can be walked, by substituting the
   // instant and asking what the adapter does with it.
-  const at = (plannedAt: string) =>
+  const at = async (plannedAt: string) =>
     queryPlanToPrisma({
-      queryPlan: planFor("timestamp/less-than/relative-window", plannedAt),
+      queryPlan: await planFor("timestamp/less-than/relative-window", plannedAt),
       mapper: MAPPER,
       model: MODEL,
     });
 
-  test("a nanosecond instant — what the PDP actually folds — compares against the next millisecond", () => {
+  test("a nanosecond instant — what the PDP actually folds — compares against the next millisecond", async () => {
     // A DateTime attribute is a whole millisecond, so `a < T` for a T between two milliseconds is
     // `a < ceil(T)`. The corpus loader substitutes a nanosecond instant for the same reason.
-    expect(at("2026-08-11T09:13:39.123456789Z")).toStrictEqual({
+    expect(await at("2026-08-11T09:13:39.123456789Z")).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { createdAt: { lt: "2026-08-11T09:13:39.124Z" } },
     });
   });
 
-  test("the same plan at millisecond precision translates", () => {
-    expect(at("2026-08-11T09:13:39.123Z")).toStrictEqual({
+  test("the same plan at millisecond precision translates", async () => {
+    expect(await at("2026-08-11T09:13:39.123Z")).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { createdAt: { lt: "2026-08-11T09:13:39.123Z" } },
     });
   });
 
-  test("excess fractional digits are accepted only when they are zero", () => {
-    expect(at("2026-08-11T09:13:39.123000Z")).toStrictEqual({
+  test("excess fractional digits are accepted only when they are zero", async () => {
+    expect(await at("2026-08-11T09:13:39.123000Z")).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { createdAt: { lt: "2026-08-11T09:13:39.123Z" } },
     });
@@ -301,8 +304,8 @@ describe("timestamp literals", () => {
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
     ["an offset that pushes past the maximum instant", "9999-12-31T23:00:00-02:00"],
-  ])("%s fails closed", (_label, value) => {
-    expect(() => at(value)).toThrow(/RFC 3339|millisecond|instant range/);
+  ])("%s fails closed", async (_label, value) => {
+    await expect(at(value)).rejects.toThrow(/RFC 3339|millisecond|instant range/);
   });
 });
 
@@ -331,29 +334,29 @@ describe("relation subqueryFilter", () => {
     },
   });
 
-  const filtersFor = (action: string, subqueryFilter?: PrismaFilter) => {
-    const result = translate(action, { mapper: mapperFor(subqueryFilter) });
+  const filtersFor = async (action: string, subqueryFilter?: PrismaFilter) => {
+    const result = await translate(action, { mapper: mapperFor(subqueryFilter) });
     if (result.kind !== PlanKind.CONDITIONAL) {
       throw new Error(`Expected CONDITIONAL result for ${action}`);
     }
     return result.filters;
   };
 
-  test("declared: exists() examines only the records the application serialised", () => {
-    expect(filtersFor("collection/exists/empty-collection", VISIBLE_ONLY)).toStrictEqual({
+  test("declared: exists() examines only the records the application serialised", async () => {
+    expect(await filtersFor("collection/exists/empty-collection", VISIBLE_ONLY)).toStrictEqual({
       tags: {
         some: { AND: [{ name: { not: "hidden" } }, { name: { equals: "public" } }] },
       },
     });
   });
 
-  test("declared: all() narrows the records examined, not the records required", () => {
+  test("declared: all() narrows the records examined, not the records required", async () => {
     // `every: AND(visible, P)` would REQUIRE every record to be visible, dropping any row that
     // holds a hidden tag. The rewrite to `none: AND(visible, NOT P)` is what makes the
     // declaration mean "ignore what the application hides" — including the empty-collection case,
     // where CEL's all() is vacuously true and check() agrees because the application sent an
     // empty list for the same reason.
-    expect(filtersFor("collection/all/empty-collection", VISIBLE_ONLY)).toStrictEqual({
+    expect(await filtersFor("collection/all/empty-collection", VISIBLE_ONLY)).toStrictEqual({
       tags: {
         none: {
           AND: [
@@ -365,21 +368,21 @@ describe("relation subqueryFilter", () => {
     });
   });
 
-  test("declared: an emptiness check counts only the visible records", () => {
-    expect(filtersFor("size/equals/negated-collection-zero", VISIBLE_ONLY)).toStrictEqual({
+  test("declared: an emptiness check counts only the visible records", async () => {
+    expect(await filtersFor("size/equals/negated-collection-zero", VISIBLE_ONLY)).toStrictEqual({
       NOT: { tags: { none: { name: { not: "hidden" } } } },
     });
   });
 
-  test("undeclared: the emitted filter is what it was before the field existed", () => {
+  test("undeclared: the emitted filter is what it was before the field existed", async () => {
     // The non-breaking guarantee. Silence must not add a clause, and must not warn.
-    expect(filtersFor("collection/exists/empty-collection")).toStrictEqual({
+    expect(await filtersFor("collection/exists/empty-collection")).toStrictEqual({
       tags: { some: { name: { equals: "public" } } },
     });
-    expect(filtersFor("collection/all/empty-collection")).toStrictEqual({
+    expect(await filtersFor("collection/all/empty-collection")).toStrictEqual({
       tags: { every: { name: { equals: "public" } } },
     });
-    expect(filtersFor("size/equals/negated-collection-zero")).toStrictEqual({
+    expect(await filtersFor("size/equals/negated-collection-zero")).toStrictEqual({
       NOT: { tags: { none: {} } },
     });
   });
@@ -391,8 +394,8 @@ describe("the mapper contract", () => {
 
   test.each([undefined, true, false])(
     "hierarchy segment nullability %s is respected",
-    (nullable) => {
-      const result = translate("hierarchy/overlaps/path-built-from-list-value-first", {
+    async (nullable) => {
+      const result = await translate("hierarchy/overlaps/path-built-from-list-value-first", {
         mapper: { "request.resource.attr.scope": { field: "scope", nullable } },
       });
       expect(result).toStrictEqual({
@@ -409,9 +412,9 @@ describe("the mapper contract", () => {
     },
   );
 
-  test("a function mapper resolves a scalar reference", () => {
+  test("a function mapper resolves a scalar reference", async () => {
     expect(
-      translate("string/equals/case-sensitive", {
+      await translate("string/equals/case-sensitive", {
         mapper: (key: string) => ({
           field: key.replace("request.resource.attr.", ""),
         }),
@@ -422,9 +425,9 @@ describe("the mapper contract", () => {
     });
   });
 
-  test("a function mapper resolves a relation", () => {
+  test("a function mapper resolves a relation", async () => {
     expect(
-      translate("relation/bare-attribute/one-hop-boolean", {
+      await translate("relation/bare-attribute/one-hop-boolean", {
         mapper: () => ({
           relation: {
             name: "parent",
@@ -441,8 +444,8 @@ describe("the mapper contract", () => {
 
   test.each(["collection/exists/scalar-list-equals", "collection/exists/scalar-list-negated-body"])(
     "%s resolves a projection supplied through a prefix mapper",
-    (action) => {
-      const direct = translate(action);
+    async (action) => {
+      const direct = await translate(action);
       if (direct.kind !== PlanKind.CONDITIONAL) {
         throw new Error("Expected a conditional projection plan");
       }
@@ -459,19 +462,19 @@ describe("the mapper contract", () => {
           },
         },
       };
-      expect(translate(action, { mapper })).toStrictEqual({
+      expect(await translate(action, { mapper })).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: { categories: { some: direct.filters } },
       });
     },
   );
 
-  test("negating an overlaps that folds to an unconditional filter is refused", () => {
+  test("negating an overlaps that folds to an unconditional filter is refused", async () => {
     // `nullable: false` on every segment lets `overlaps(hierarchy("dept"), hierarchy(["dept",
     // scope]))` fold to `{}` (asserted above). Prisma evaluates `{ NOT: {} }` as true, so the
     // negation would match every row where CEL's `!true` matches none; the adapter has no
     // field-free false condition to emit instead (cerbos/query-plan-adapters#495).
-    const fixture = planFor("hierarchy/overlaps/path-built-from-list-value-first");
+    const fixture = await planFor("hierarchy/overlaps/path-built-from-list-value-first");
     if (fixture.kind !== PlanKind.CONDITIONAL) {
       throw new Error("Expected a conditional hierarchy plan");
     }
@@ -513,20 +516,20 @@ describe("the mapper contract", () => {
       ["nullable: true", { name: { field: "name", nullable: true } }, guarded],
       ["nullable: false", { name: { field: "name", nullable: false } }, unguarded],
       ["an element with no field mapping at all", undefined, guarded],
-    ] as const)("%s", (_label, fields, filters) => {
-      expect(allFor(fields as Record<string, MapperConfig> | undefined)).toStrictEqual({
+    ] as const)("%s", async (_label, fields, filters) => {
+      expect(await allFor(fields as Record<string, MapperConfig> | undefined)).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters,
       });
     });
   });
 
-  test("size() against a scalar mapping is refused rather than guessed", () => {
-    expect(() =>
+  test("size() against a scalar mapping is refused rather than guessed", async () => {
+    await expect(
       translate("size/equals/negated-collection-zero", {
         mapper: { "request.resource.attr.tags": { field: "tags" } },
       })
-    ).toThrow("size operator requires a relation mapping");
+    ).rejects.toThrow("size operator requires a relation mapping");
   });
 });
 

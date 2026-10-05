@@ -409,12 +409,14 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
-recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is translated with one mapping, executed on SQLite
-(through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL (`utf8mb4_0900_bin`),
-and the returned ids are compared with the decisions the PDP recorded. The collections are stored as
-JSON on every store; the cases that read a collection declared in `collection_columns` run once more
-on PostgreSQL with them stored as arrays (`pgArray`). The results are the same on every store. For
-the current PDP, 0.55.0, where the total is every golden case recorded in that tier:
+recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is served by a stub PDP and fetched through the SDK's
+HTTP `CerbosClient`, so it arrives as your application receives it, then translated with one mapping,
+executed on SQLite (through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL
+(`utf8mb4_0900_bin`), and the returned ids are compared with the decisions the PDP recorded. The
+collections are stored as JSON on every store; the cases that read a collection declared in
+`collection_columns` run once more on PostgreSQL with them stored as arrays (`pgArray`). The results
+are the same on every store. For the current PDP, 0.55.0, where the total is every golden case
+recorded in that tier:
 
 | Tier | Passed / total |
 | --- | --- |

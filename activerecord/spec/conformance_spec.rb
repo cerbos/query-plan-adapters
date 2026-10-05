@@ -3,14 +3,15 @@
 # The conformance harness. It implements conformance/README.md, "The harness contract":
 #
 # 1. Store the dataset (spec/support/conformance_store.rb) and map it (corpus_attributes.rb).
-# 2. For each PDP and each recorded golden file, translate the plan, run the query, and
-#    compare the ids with the ones check() allowed. conformance-ledger.json lists the
-#    exceptions: `unsupported` must raise the adapter's refusal error, and `divergent` must
-#    still give a wrong answer.
+# 2. For each PDP and each recorded golden file, fetch the plan through the Cerbos Ruby SDK
+#    from a stub PDP that answers with the recorded plan (spec/support/stub_pdp.rb), so the
+#    adapter gets the SDK's output types. Translate it, run the query, and compare the ids
+#    with the ones check() allowed. conformance-ledger.json lists the exceptions: `unsupported`
+#    must raise the adapter's refusal error, and `divergent` must still give a wrong answer.
 # 3. Fail if the ledger names a case that has no golden file.
 #
-# Needs no PDP: the plans and decisions are recorded. The store is SQLite in memory, or
-# PostgreSQL or MySQL (ADAPTER_TEST_DB, spec/support/database.rb).
+# Needs no PDP: the plans and decisions are recorded, and the stub only replays them. The store
+# is SQLite in memory, or PostgreSQL or MySQL (ADAPTER_TEST_DB, spec/support/database.rb).
 
 RSpec.describe "conformance" do
   before { ConformanceStore.establish! }
@@ -44,7 +45,7 @@ RSpec.describe "conformance" do
         it "#{golden.fetch("tier")}: #{golden.fetch("id")}" do
           skip "planner divergence" if ConformanceCorpus.skipped?(golden, tag)
 
-          plan = golden.fetch("plan")
+          plan = ConformanceCorpus.sdk_plan(golden)
           allowed = golden.fetch("allowed").sort
 
           case ConformanceCorpus.ledger_entry(golden.fetch("id"), tag)&.fetch("status")

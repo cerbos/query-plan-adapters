@@ -439,6 +439,10 @@ module Cerbos
           )
         end
 
+        if branch_cel_type(then_value, else_value) == :int
+          then_value = int_constant(then_value)
+          else_value = int_constant(else_value)
+        end
         result = branches(condition, then_value, else_value)
         return record_boolean(result) if boolean_arm?(then_value) || boolean_arm?(else_value)
 
@@ -466,6 +470,15 @@ module Cerbos
         return :ambiguous_number if arms.any? { |arm| ambiguous_number?(arm) }
 
         nil
+      end
+
+      # A whole constant on an arm the other arm types as an int, bound as the Integer CEL holds.
+      # Every plan number is a protobuf double, so the Ruby SDK hands `1000000` over as
+      # `1000000.0`, which SQL would render, and string() spell, as a double.
+      def int_constant(value)
+        return value unless value.is_a?(Float) && value.finite? && value == value.truncate
+
+        INT64_RANGE.cover?(value.to_i) ? value.to_i : value
       end
 
       def ambiguous_number?(value)
