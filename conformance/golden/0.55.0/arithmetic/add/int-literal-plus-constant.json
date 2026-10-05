@@ -35,8 +35,8 @@
   "plannerDivergence": {
     "issue": "https://github.com/cerbos/query-plan-adapters/issues/544",
     "pdp": [
-      "0.54.0",
-      "0.55.0"
+      "0.55.0",
+      "0.56.0"
     ],
     "reason": "The planner drops the int type of the literal 1: the plan is byte-identical to aNumber + 1.0 > 2.0, which allows rows, while check() has no double + int overload and denies every row."
   },

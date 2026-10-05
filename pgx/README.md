@@ -260,17 +260,17 @@ TestAdversarialConformance ./...` replays the corpus under a linguistic order an
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
-Cerbos PDP 0.55.0 recorded for each case are translated, run against the corpus dataset in real
+Cerbos PDP 0.56.0 recorded for each case are translated, run against the corpus dataset in real
 PostgreSQL, and the returned ids are compared with the recorded `check()` decisions. The previous
-PDP's goldens (0.54.0) are replayed too.
+PDP's goldens (0.55.0) are replayed too.
 
-| Tier | Passed / total (PDP 0.55.0) |
+| Tier | Passed / total (PDP 0.56.0) |
 | --- | --- |
 | core | 29 / 29 |
 | extended | 74 / 97 |
 | adversarial | 256 / 338 |
 
-The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
+The total is every golden case in the tier for PDP 0.56.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;

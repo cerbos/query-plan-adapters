@@ -48,8 +48,8 @@
   "plannerDivergence": {
     "issue": "https://github.com/cerbos/query-plan-adapters/issues/596",
     "pdp": [
-      "0.54.0",
-      "0.55.0"
+      "0.55.0",
+      "0.56.0"
     ],
     "reason": "The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aString, \"one\"), eq(aNumber, 2)) and grants a1. check() has no in overload for a string container, errors on that disjunct and allows only a3 and a8. No adapter can tell the eq was an in."
   },

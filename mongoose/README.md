@@ -307,9 +307,9 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
+and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed as real MongoDB
 queries over the corpus's 42 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
-0.55.0, identical on both servers, where the total is every golden case in that tier:
+0.56.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -318,7 +318,7 @@ queries over the corpus's 42 seed documents on MongoDB 7 and 8. Passed cases on 
 | adversarial | 220 / 338 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases and five adversarial cases.
+pass them. On 0.56.0 that is four extended cases and five adversarial cases.
 `type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
 the planner rewrites an `in` over a scalar container to `eq`, while `check()` has no such overload
 and denies ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).

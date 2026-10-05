@@ -266,8 +266,8 @@ cases:
   plannerDivergence:
     issue: https://github.com/cerbos/query-plan-adapters/issues/596
     pdp:
-    - 0.54.0
     - 0.55.0
+    - 0.56.0
     reason: 'The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aNumber, 0), eq(aString, "one")) and grants a7 and h4 (aNumber 0). check() has no in overload for a number container, errors on that disjunct and allows only a1. No adapter can tell the eq was an in.'
 - id: 'type-mismatch/in/string-field-in-dyn-string'
   tier: adversarial
@@ -279,8 +279,8 @@ cases:
   plannerDivergence:
     issue: https://github.com/cerbos/query-plan-adapters/issues/596
     pdp:
-    - 0.54.0
     - 0.55.0
+    - 0.56.0
     reason: 'The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aString, "one"), eq(aNumber, 2)) and grants a1. check() has no in overload for a string container, errors on that disjunct and allows only a3 and a8. No adapter can tell the eq was an in.'
 - id: 'type-mismatch/in/string-field-in-list-of-lists'
   tier: adversarial
@@ -334,11 +334,6 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aBool ? 1.0 : 0.0/0.0) < R.attr.aString) && now() == now()'
-  plannerDivergence:
-    issue: 'Cerbos 0.54 check() errors on an ordering against NaN, which 0.55 evaluates to false'
-    pdp:
-    - 0.54.0
-    reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
 - id: 'type-mismatch/less-than/negated-string-field-against-arithmetic'
   tier: adversarial
   intent: '!(aString < aNumber + 1.0) OR aNumber == 2: a negated ordering between a string attribute and an arithmetic result.'

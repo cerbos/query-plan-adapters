@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a1",
+    "a9"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/map-literal-by-attribute-key",
+  "intent": "A map literal indexed by an attribute and compared at the root ({...}[aString] == \"ADMIN\"), which the planner rewrites to an or of equalities on the key.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "same"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/map-literal-by-attribute-key",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "{\"one\": \"ADMIN\", \"same\": \"ADMIN\", \"xa_by\": \"USER\"}[R.attr.aString] == \"ADMIN\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The keys whose value matches are the answer; a missing key errors in CEL and denies, so no row outside \"one\" and \"same\" passes."
+}

@@ -86,11 +86,12 @@ REPO_ROOT="$(cd "${CONFORMANCE_DIR}/.." && pwd)"
 # validate-corpus.sh fails until each one names the new tag and digest.
 old_image="ghcr.io/cerbos/cerbos:${current_tag}@${current_digest}"
 new_image="ghcr.io/cerbos/cerbos:${new_tag}@${new_digest}"
+# Tracked files only: a plain recursive grep also rewrites other worktrees under the root.
 while IFS= read -r file; do
   sed -i.bak "s|${old_image}|${new_image}|g" "${file}" && rm -f "${file}.bak"
   echo "==> restated pin updated in ${file#"${REPO_ROOT}"/}" >&2
-done < <(grep -rlF "${old_image}" "${REPO_ROOT}" \
-  --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=golden || true)
+done < <(git -C "${REPO_ROOT}" grep -lF "${old_image}" -- ':!conformance/golden/**' \
+  | sed "s|^|${REPO_ROOT}/|" || true)
 
 # The Go modules decode plans with the PDP's own API types, pinned to the current tag
 # (validate-corpus.sh checks ent/go.mod and pgx/go.mod). Each example requires the adapter through
@@ -126,7 +127,9 @@ cat >&2 <<NEXT
 ==> Bumped the PDP: current ${new_tag}, previous ${current_tag} (${dropped_tag} dropped).
 Next:
   1. Review conformance/golden/CHANGES.md: every plan, allowed set and plan error that moved.
-  2. Run every adapter's conformance harness (conformance/scripts/run-harness.sh --all); fix, or add a ledger entry
+  2. A plannerDivergence scoped to the old current tag (${current_tag}) does not cover ${new_tag}:
+     where CHANGES.md shows the plan unchanged, add ${new_tag} to its pdp list and re-run the generator.
+  3. Run every adapter's conformance harness (conformance/scripts/run-harness.sh --all); fix, or add a ledger entry
      (with "pdp" when the change is specific to one version), for anything that breaks.
-  3. Commit it all as one PR, with golden/CHANGES.md as the description.
+  4. Commit it all as one PR, with golden/CHANGES.md as the description.
 NEXT

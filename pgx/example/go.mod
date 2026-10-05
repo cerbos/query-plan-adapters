@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/cerbos/cerbos-sdk-go v0.4.2
-	github.com/cerbos/cerbos/api/genpb v0.55.0
+	github.com/cerbos/cerbos/api/genpb v0.56.0
 	github.com/cerbos/query-plan-adapters/pgx v0.0.0
 	github.com/jackc/pgx/v5 v5.10.0
 )
@@ -13,7 +13,7 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
 	buf.build/go/protovalidate v1.2.0 // indirect
 	cel.dev/expr v0.25.2 // indirect
-	connectrpc.com/connect v1.20.0 // indirect
+	connectrpc.com/connect v1.21.0 // indirect
 	connectrpc.com/otelconnect v0.9.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
@@ -31,7 +31,7 @@ require (
 	github.com/google/cel-go v0.29.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -61,17 +61,17 @@ require (
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect
-	google.golang.org/grpc v1.83.2 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260921155816-b14227669459 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260918162117-cecb64721679 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
