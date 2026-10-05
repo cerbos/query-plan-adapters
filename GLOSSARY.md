@@ -2,7 +2,7 @@
 
 Multi-language adapters that translate a Cerbos query plan into a database-native filter. This
 glossary fixes the vocabulary shared across all adapters. Adapter-local design vocabulary lives in
-that adapter's own `CONTEXT.md` (currently only `spring-data/CONTEXT.md`).
+that adapter's own `GLOSSARY.md` (currently only `spring-data/GLOSSARY.md`).
 
 ## Language
 
