@@ -341,6 +341,54 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  # `value in R.attr.<relation>` compares the value under its own declared convention, against a
+  # stored member that is a null value when NULL (#591). The corpus maps `owner` as `:explicit`
+  # and asserts its goldens only under the call's default, so only this suite can check the
+  # rows returned under the other.
+  describe "membership in a relation under the value's declared convention" do
+    let(:rows) do
+      [[nil, [nil]], [nil, ["x"]], ["x", [nil, "x"]], ["x", [nil]], [nil, []]].map do |title, names|
+        EdgeDocument.create!(title: title).tap do |document|
+          names.each { |name| EdgeTag.create!(name: name, document_id: document.id) }
+        end
+      end
+    end
+
+    let(:in_tags) { expression("in", variable("v"), variable("tags")) }
+
+    after do
+      EdgeTag.where(document_id: rows.map(&:id)).delete_all
+      rows.each(&:destroy!)
+    end
+
+    def relation_ids(condition, value_convention, call)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument,
+        attributes: {
+          "v" => described_class.field("title", null_representation: value_convention),
+          "tags" => relation(:tags, member_field: "name")
+        },
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).pluck(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    %i[explicit omitted].each do |call|
+      context "when the call's convention is #{call}" do
+        it "matches an explicit null value against a null member" do
+          expect(relation_ids(in_tags, :explicit, call)).to eq(rows_at(0, 2))
+          expect(relation_ids(expression("not", in_tags), :explicit, call)).to eq(rows_at(1, 3, 4))
+        end
+
+        it "denies a row whose omitted value is NULL, under either polarity" do
+          expect(relation_ids(in_tags, :omitted, call)).to eq(rows_at(2))
+          expect(relation_ids(expression("not", in_tags), :omitted, call)).to eq(rows_at(3))
+        end
+      end
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
     # UNKNOWN.

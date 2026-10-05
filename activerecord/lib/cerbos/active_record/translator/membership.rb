@@ -27,7 +27,7 @@ module Cerbos
           member = scope.member_column
           condition =
             if explicit_null?(value)
-              null_equality(member, value)
+              explicit_null_equality(member, value)
             elsif cross_type_literal?(value, member_kind(scope))
               # `"2" in [2]` is false in CEL. SQLite would coerce '2' to 2 (and true to 1).
               false
