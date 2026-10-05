@@ -763,9 +763,37 @@ export const buildValueExpression = (
       if (operands.length !== 1) {
         throw new UnsupportedQueryPlanError("'size' operator requires exactly one operand");
       }
+      if (isOperatorCall(operands[0]!, "intersect")) {
+        throw new UnsupportedQueryPlanError(
+          "Cannot translate size(intersect(...)): Cerbos's intersect() keeps the duplicates of " +
+            "whichever list is shorter, so its size depends on comparing the two lists' lengths " +
+            "row by row, which the adapter has no SQL form for",
+        );
+      }
       return buildSizeExpression(operands[0]!, mapper, options);
     case "timestamp":
       return buildTimestampExpression(operands, mapper, options);
+    case "upperAscii": {
+      // CEL's upperAscii folds the 26 ASCII letters and nothing else. UPPER follows the
+      // store's own Unicode case mapping (PostgreSQL and MySQL fold é to É), so the fold is
+      // spelled as 26 byte-exact REPLACEs, which every dialect evaluates identically.
+      const [receiver] = operands;
+      if (operands.length !== 1 || receiver === undefined) {
+        throw new UnsupportedQueryPlanError("'upperAscii' operator requires exactly one operand");
+      }
+      const receiverColumn = columnForOperand(receiver, mapper);
+      if (receiverColumn !== undefined && receiverColumn.dataType !== "string") {
+        throw new UnsupportedQueryPlanError(
+          "Cannot translate upperAscii() over a column that is not a string column",
+        );
+      }
+      let folded = buildValueExpression(receiver, mapper, options);
+      for (let code = 97; code <= 122; code++) {
+        const lower = String.fromCharCode(code);
+        folded = sql`replace(${folded}, ${lower}, ${lower.toUpperCase()})`;
+      }
+      return folded;
+    }
     case "index":
       resolveIndexedColumn(operands, mapper, options);
       throw new UnsupportedQueryPlanError(

@@ -62,6 +62,13 @@ export const extractLambdaComponents = (
   if (!isOperatorCall(lambdaOperand, "lambda")) {
     throw new UnsupportedQueryPlanError(`${context} must be a lambda expression`);
   }
+  if (lambdaOperand.operands.length === 3) {
+    throw new UnsupportedQueryPlanError(
+      "Two-variable comprehensions (exists(i, v, ...), all(k, v, ...)) are not supported: the " +
+        "adapter binds one variable to each element, and a list element's index or a map's key " +
+        "is not a column it can read",
+    );
+  }
   if (lambdaOperand.operands.length !== 2) {
     throw new UnsupportedQueryPlanError("Lambda operand requires exactly two operands");
   }

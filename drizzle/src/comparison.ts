@@ -53,6 +53,7 @@ import {
   constantCondition,
   bindConstant,
   operandExpression,
+  UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
@@ -688,6 +689,21 @@ export const buildComparisonFilter = (
   negated: boolean,
 ): SQL => {
   const context: ComparisonContext = { operator, mapper, options, negated };
+
+  // An attribute is a JSON value — a string, number, boolean, null, list or map — never a CEL
+  // timestamp, and CEL has no ordering between a timestamp and any of those: the comparison is a
+  // no-overload error, denied under both polarities, whatever the column stores. Only a
+  // `timestamp(attribute)` conversion compares as an instant.
+  if (operator !== "eq" && operator !== "ne") {
+    const isAttribute = (operand: PlanExpressionOperand) =>
+      isNameOperand(operand) && operand.name.startsWith("request.");
+    if (
+      (isAttribute(left) && isOperatorCall(right, "timestamp")) ||
+      (isAttribute(right) && isOperatorCall(left, "timestamp"))
+    ) {
+      return UNKNOWN_CONDITION;
+    }
+  }
 
   const indexed = [left, right].find((operand) =>
     isOperatorCall(operand, "index"),

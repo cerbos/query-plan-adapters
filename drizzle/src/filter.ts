@@ -6,6 +6,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildCollectionOperatorFilter,
   isCollectionOperator,
+  substituteLambdaOperand,
 } from "./collections";
 import { buildComparisonFilter } from "./comparison";
 import { buildHierarchyFilter } from "./hierarchy";
@@ -24,6 +25,7 @@ import {
   resolveRelationDefaultField,
 } from "./mapper";
 import {
+  extractLambdaComponents,
   isExpressionOperand,
   isNameOperand,
   isOperatorCall,
@@ -247,6 +249,23 @@ const buildListConstructorMembership = (
   options: BuildFilterOptions,
 ): SQL => {
   if (members.length === 0) return FALSE_CONDITION;
+  const equalities = members.map((member) =>
+    buildComparisonFilter("eq", element, member, mapper, options, false),
+  );
+  return guardConstructorElements(members, or(...equalities)!, mapper, options);
+};
+
+/**
+ * `filter` made UNKNOWN wherever a list constructor's element is a missing attribute (a NULL
+ * column on the omitted convention, or an expression NULL on it): CEL builds the whole list
+ * before reading it, so such an element is an error whatever the rest of the expression says.
+ */
+const guardConstructorElements = (
+  members: PlanExpressionOperand[],
+  filter: SQL,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+): SQL => {
   const errors = members.flatMap((member): SQL[] => {
     if (isValueOperand(member)) return [];
     if (
@@ -257,13 +276,124 @@ const buildListConstructorMembership = (
     }
     return [sql`${resolveScalarOperand(member, mapper, options).expr} is null`];
   });
-  const equalities = members.map((member) =>
-    buildComparisonFilter("eq", element, member, mapper, options, false),
-  );
-  const membership = or(...equalities)!;
   return errors.length === 0
-    ? membership
-    : sql`(case when ${sql.join(errors, sql` or `)} then null else ${membership} end)`;
+    ? filter
+    : sql`(case when ${sql.join(errors, sql` or `)} then null else ${filter} end)`;
+};
+
+/**
+ * `exists` or `all` over a list constructor (`[R.attr.a, R.attr.b].exists(s, ...)`), unrolled into
+ * the or/and of the body over each element. CEL's `exists` is true if any element is, and an error
+ * otherwise if any element errors, which is SQL's OR over UNKNOWN; `all` mirrors it with AND.
+ */
+const buildConstructedListMacro = (
+  operator: "exists" | "all",
+  members: PlanExpressionOperand[],
+  lambdaOperand: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+  negated: boolean,
+): SQL => {
+  const { variable, expression: body } = extractLambdaComponents(
+    lambdaOperand,
+    `'${operator}' lambda operand`,
+  );
+  const combinesWithOr = (operator === "exists") !== negated;
+  const filters = members.map((member) =>
+    buildFilterFromExpression(
+      substituteLambdaOperand(body, variable.name, member),
+      mapper,
+      options,
+      negated,
+    ),
+  );
+  const combined =
+    (combinesWithOr ? or(...filters) : and(...filters)) ??
+    constantCondition(!combinesWithOr);
+  return guardConstructorElements(members, combined, mapper, options);
+};
+
+/**
+ * `"x" in L.map(t, f(t))` or `"x" in L.filter(t, p(t))`: CEL builds the whole list before testing
+ * membership, so an element the projection or the predicate errors on is an error even when
+ * another element matches. The membership is the `exists` that finds a matching element, and it
+ * holds only where the `all` that evaluates the projection or predicate on every element is not
+ * UNKNOWN; elsewhere the result is UNKNOWN, under both polarities.
+ */
+const buildDerivedListMembership = (
+  element: { value: Value },
+  derived: { operator: string; operands: PlanExpressionOperand[] },
+  mapper: Mapper,
+  options: BuildFilterOptions,
+  negated: boolean,
+): SQL => {
+  const [list, lambda] = derived.operands;
+  if (derived.operands.length !== 2 || !list || !lambda) {
+    throw new UnsupportedQueryPlanError(`'${derived.operator}' operator requires two operands`);
+  }
+  const { variable, expression } = extractLambdaComponents(
+    lambda,
+    `'${derived.operator}' lambda operand`,
+  );
+  const call = (operator: string, ...children: PlanExpressionOperand[]): PlanExpressionOperand => ({
+    operator,
+    operands: children,
+  });
+  const macro = (operator: "exists" | "all", body: PlanExpressionOperand) =>
+    buildFilterFromExpression(call(operator, list, call("lambda", body, variable)), mapper, options);
+  const evaluated = (condition: PlanExpressionOperand) =>
+    call("or", condition, call("not", condition));
+  const [match, guard] =
+    derived.operator === "map"
+      ? [
+          call("eq", expression, element),
+          evaluated(call("eq", expression, element)),
+        ]
+      : [call("and", call("eq", variable, element), expression), evaluated(expression)];
+  return withPolarity(
+    sql`(case when ${macro("all", guard)} then ${macro("exists", match)} end)`,
+    negated,
+  );
+};
+
+/**
+ * `{"k1": v1, ...}[x] == c` (or `!=`): a constant map indexed by an attribute. CEL reads the entry
+ * for `x`, and an absent key is an error, so the comparison is `x in <keys whose value compares
+ * true>` among the keys, and UNKNOWN for any other `x`.
+ */
+const buildConstantMapIndexComparison = (
+  operator: "eq" | "ne",
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  mapper: Mapper,
+  options: BuildFilterOptions,
+  negated: boolean,
+): SQL | undefined => {
+  const [index, constant] = isOperatorCall(left, "index") ? [left, right] : [right, left];
+  if (!isOperatorCall(index, "index") || index.operands.length !== 2) return undefined;
+  if (!isValueOperand(constant)) return undefined;
+  const [map, key] = index.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  if (!isValueOperand(map) || !isCompositeValue(map.value) || Array.isArray(map.value)) {
+    return undefined;
+  }
+  if (!isNameOperand(key)) return undefined;
+  const entries = Object.entries(map.value);
+  const scalar = (candidate: Value) =>
+    typeof candidate === "string" || typeof candidate === "number" ||
+    typeof candidate === "boolean";
+  if (!scalar(constant.value) || entries.some(([, entry]) => typeof entry !== typeof constant.value)) {
+    throw new UnsupportedQueryPlanError(
+      "A constant map indexed by an attribute is supported only when every entry and the " +
+        "compared constant are strings, numbers or booleans of one type",
+    );
+  }
+  const matching = entries
+    .filter(([, entry]) => (entry === constant.value) === (operator === "eq"))
+    .map(([mapKey]) => mapKey);
+  const keys = entries.map(([mapKey]) => mapKey);
+  const inKeys = buildMembershipFilter([key, { value: keys }], mapper, options);
+  const inMatching = buildMembershipFilter([key, { value: matching }], mapper, options);
+  return withPolarity(sql`(case when ${inKeys} then ${inMatching} end)`, negated);
 };
 
 const buildMembershipFilter = (
@@ -558,6 +688,17 @@ export const buildFilterFromExpression = (
       if (!left || !right) {
         throw new UnsupportedQueryPlanError("Comparison operator requires two operands");
       }
+      if (operator === "eq" || operator === "ne") {
+        const mapIndex = buildConstantMapIndexComparison(
+          operator,
+          left,
+          right,
+          mapper,
+          options,
+          negated,
+        );
+        if (mapIndex) return mapIndex;
+      }
       return buildComparisonFilter(
         operator,
         left,
@@ -575,6 +716,19 @@ export const buildFilterFromExpression = (
         negated,
       );
     case "in":
+      if (
+        operands.length === 2 &&
+        isValueOperand(operands[0]!) &&
+        (isOperatorCall(operands[1]!, "map") || isOperatorCall(operands[1]!, "filter"))
+      ) {
+        return buildDerivedListMembership(
+          operands[0]!,
+          operands[1] as { operator: string; operands: PlanExpressionOperand[] },
+          mapper,
+          options,
+          negated,
+        );
+      }
       return withPolarity(
         buildMembershipFilter(operands, mapper, options),
         negated,
@@ -607,6 +761,19 @@ export const buildFilterFromExpression = (
         negated,
       );
     default:
+      if (
+        (operator === "exists" || operator === "all") && operands.length === 2 &&
+        isOperatorCall(operands[0]!, "list")
+      ) {
+        return buildConstructedListMacro(
+          operator,
+          (operands[0] as { operands: PlanExpressionOperand[] }).operands,
+          operands[1]!,
+          mapper,
+          options,
+          negated,
+        );
+      }
       if (isCollectionOperator(operator)) {
         return buildCollectionOperatorFilter(
           operator,

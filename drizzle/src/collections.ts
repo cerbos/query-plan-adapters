@@ -368,6 +368,41 @@ const substituteLambdaVariable = (
 };
 
 /**
+ * Substitute a lambda iteration variable with an operand — an element of a list constructor,
+ * such as an attribute reference — inside a lambda body. Only a bare reference to the variable is
+ * replaced; a field read through it (`variable.field`) is refused, since the element is not known
+ * to be a map. A nested macro rebinding the name shadows it, as in `substituteLambdaVariable`.
+ */
+export const substituteLambdaOperand = (
+  operand: PlanExpressionOperand,
+  variableName: string,
+  replacement: PlanExpressionOperand,
+): PlanExpressionOperand => {
+  if (isNameOperand(operand)) {
+    if (operand.name === variableName) return replacement;
+    if (operand.name.startsWith(`${variableName}.`)) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot resolve "${operand.name}": a field read through an element of a list built ` +
+          "from expressions is not supported",
+      );
+    }
+    return operand;
+  }
+  if (!isExpressionOperand(operand)) {
+    return operand;
+  }
+  const substitute = (child: PlanExpressionOperand) =>
+    substituteLambdaOperand(child, variableName, replacement);
+  if (LAMBDA_BINDING_OPERATORS.has(operand.operator) && operand.operands.length === 2) {
+    const [nestedCollection, nestedLambda] = operand.operands;
+    if (nestedCollection && nestedLambda && rebindsVariable(nestedLambda, variableName)) {
+      return { operator: operand.operator, operands: [substitute(nestedCollection), nestedLambda] };
+    }
+  }
+  return { operator: operand.operator, operands: operand.operands.map(substitute) };
+};
+
+/**
  * Fold a collection macro whose collection operand is a literal value list.
  *
  * The planner emits this shape when a known-value collection (typically a
