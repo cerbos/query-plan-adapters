@@ -20,6 +20,10 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no such overload, so every row is an error, decided by the declared type rather than the row's value. UNKNOWN denies under both polarities as the error does, and an operator applied to it (`==`, `in`, `string()` and the rest) is UNKNOWN too. A ternary over such an error, and these functions over a temporal column, still raise.
 
+- A collection where a boolean belongs (`filter()`, `map()` or a mapped association as a condition, a conjunct or the operand of `!`), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
+
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL's logical operators take only a boolean, so a list there is an error on every row.
+
 ### Changed
 
 - `== null`, `!= null` and `in` over a list holding `null` treat a NULL computed value (a connective, a quantifier, arithmetic, a `CASE`) as the CEL error it is, so the row is UNKNOWN ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))

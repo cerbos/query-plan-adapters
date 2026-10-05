@@ -760,15 +760,6 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: matches/)
     end
 
-    it "raises for a collection used as a condition" do
-      expect {
-        translate(conditional(expression("filter",
-          variable("request.resource.attr.tags"),
-          expression("lambda",
-            expression("eq", variable("t.name"), value("public")), variable("t")))))
-      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /not to a boolean/)
-    end
-
     it "raises for a sub-microsecond timestamp literal" do
       # now() has nanoseconds. ActiveRecord would truncate them and change the instant.
       expect { Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }

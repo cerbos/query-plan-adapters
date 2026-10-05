@@ -341,11 +341,10 @@ module Cerbos
       end
 
       def as_predicate(value)
-        if collection?(value)
-          raise UnsupportedOperatorError,
-            "#{describe(value)} cannot be used as a condition: CEL collection expressions " \
-            "such as filter() and map() evaluate to a list, not to a boolean"
-        end
+        # A collection where a boolean belongs (`filter()`, `map()` or a mapped association as a
+        # condition, a conjunct or the operand of `!`) is a list to CEL, whose logical operators
+        # take only a boolean. That is a no-such-overload error on every row, decided by the type.
+        return cel_type_error if collection?(value)
 
         reject_double_text("a condition", value)
 
