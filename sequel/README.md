@@ -46,26 +46,33 @@ into `exists`. If it cannot escape a `LIKE` needle, it never lets the wildcards 
 
 `spec/conformance_spec.rb` replays every plan recorded in
 [`../conformance/golden/`](../conformance/README.md), for both pinned PDPs, against the corpus
-rows and compares the ids with the ones `check()` allowed. It needs no PDP. It runs on SQLite,
-PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+rows and compares the ids with the ones `check()` allowed. It needs no PDP. Each plan reaches the
+adapter through the Cerbos Ruby SDK: `Cerbos::Client#plan_resources` calls an in-process gRPC
+stub (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter receives
+the SDK's output types (a Symbol kind, and every number as a Float), not the JSON on disk. It runs
+on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
 cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 69 / 80 |
-| adversarial | 274 / 308 |
+| core | 29 / 29 |
+| extended | 85 / 97 |
+| adversarial | 300 / 338 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
 wrong result. A case whose golden file records a `plannerDivergence` for the PDP is skipped,
 because the plan and `check()` disagree and no adapter can pass it: on 0.55.0 those are four
-extended cases and three adversarial cases. In `null/has/missing-attribute` and
+extended cases and five adversarial cases. In `null/has/missing-attribute` and
 `null/has/composed-with-comparison` the planner folds `has()` to true by design, while `check()`
 denies the row whose attribute is absent: write `R.attr.x != null` instead of `has(R.attr.x)`.
 In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the plan
 drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
-and denies every row: write `1.0`. In the three `composition/*` cases a DENY condition reads an
+and denies every row: write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container
+to `==`, which `check()` refuses as a type error
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). In the three `composition/*`
+cases a DENY condition reads an
 attribute one row lacks, which the plan and `check()` treat differently
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
@@ -91,6 +98,15 @@ members, or constants, minus a list), and `in` over `map()` of a list of constan
 translated element by element; an element's error makes the whole list UNKNOWN, as it does in
 CEL.
 
+`intersect`, `except` and `isSubset` over an association of scalar members become `EXISTS` and
+`COUNT` subqueries, held until `size()` or a comparison with `[]` gives them a meaning that needs
+no element order. `in` over a list built with `+`, over a ternary's list arms, or over `filter()`
+or `map()` of an association tests each part. A map literal indexed by a string attribute is a
+`CASE` with no `ELSE`, so a missing key is UNKNOWN. A duration (`timeSince()`,
+`timestamp(x) + duration(...)`) moves onto the constant side, as `x < now - d`, with the
+translation's clock read once per plan. `upperAscii()` replaces each ASCII letter on its own,
+since SQL `UPPER` also folds `é`.
+
 `matches()` is parsed by the adapter, never handed to the store (no store's regex dialect is
 RE2, CEL's engine), and lowered only when what it matches can be said with the exact string
 predicates: a finite set of literals under its anchors (`^ab$` is `=`, `^h` is `startsWith`,
@@ -113,12 +129,13 @@ The refusals fall into a few mechanisms:
 
 | Shape | Why the adapter raises an error |
 | --- | --- |
-| `timestamp(...)` against `now() - duration(...)` | The planner folds `now()` into a literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds at best, so the query would compare with a different instant from the one in the policy. |
+| `timestamp(...)` against `now() - duration(...)`, also inside a macro's body | The planner folds `now()` into a literal with nanoseconds. Sequel puts a `Time` into SQL with microseconds at best, so the query would compare with a different instant from the one in the policy. |
 | A division whose denominator is a second column | IEEE-754 keeps the sign of a zero, and `2.0 / -0.0` is -Infinity while `2.0 / 0.0` is +Infinity. SQL cannot tell `-0.0` from `0.0`. A division of a value by itself stays safe, and so does a constant denominator. |
 | Arithmetic between two divisions that can give NaN or Infinity, or an Infinity beside a column | SQL has no NaN and no signed Infinity to carry, and a column's stored value might be the opposite Infinity. |
 | `int()` beside, or `%` over, an operand whose CEL type the plan does not settle (a ternary of whole constants) | The plan carries `2` and `2.0` as the same number, so whether CEL raises cannot be known. |
 | `matches()` with a pattern outside the lowered forms below (a negated class, `\b`, a flag other than a leading `(?i)`, more than 256 literals), or over anything but a string column | No store's regex dialect is RE2, so a pattern is never handed to the store. |
-| `list[i]` | An association has no order of its own, so `index` has no case in the operator dispatch. A caller with a deterministic ordering column can supply an operator override. |
+| `list[i]` | An association has no order of its own, so a position into one has no translation. A caller with a deterministic ordering column can supply an operator override. |
+| A two-variable comprehension (`exists(i, v, ...)`) | It binds each element's position, or each map key. An association's rows have no position, and SQL cannot list a row's columns as keys. |
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a decimal column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. A decimal's attribute is the double nearest it, which can truncate to a different whole number. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
 | A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |

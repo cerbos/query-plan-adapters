@@ -298,6 +298,129 @@ RSpec.describe Cerbos::Sequel do
     end
   end
 
+  # A column inside the list compares as `==` between the two columns does, each under its own
+  # declared convention (#574). The corpus maps one convention per attribute, so only this
+  # suite can mix them or vary the call's default.
+  describe "membership against a column member under declared conventions" do
+    let(:rows) do
+      [[nil, nil], [1, nil], [nil, 1], [1, 1], [1, 2], [2, nil]].map do |author_id, n|
+        EdgeDocument.create(author_id: author_id, n: n)
+      end
+    end
+
+    let(:in_column) { expression("in", variable("a"), expression("list", variable("b"))) }
+    let(:in_column_or_two) do
+      expression("in", variable("a"), expression("list", variable("b"), value(2)))
+    end
+
+    after { rows.each(&:destroy) }
+
+    def mapping(a, b)
+      {
+        "a" => described_class.field("author_id", null_representation: a),
+        "b" => described_class.field("n", null_representation: b)
+      }
+    end
+
+    def member_ids(condition, attributes, call = :explicit)
+      described_class.query_plan_to_dataset(
+        plan: conditional(condition), model: EdgeDocument, attributes: attributes,
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).select_map(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    %i[explicit omitted].each do |call|
+      context "when the call's convention is #{call}" do
+        it "treats two explicit nulls as equal, and an explicit null beside a value as unequal" do
+          explicit = mapping(:explicit, :explicit)
+          expect(member_ids(in_column, explicit, call)).to eq(rows_at(0, 3))
+          expect(member_ids(expression("not", in_column), explicit, call)).to eq(rows_at(1, 2, 4, 5))
+          expect(member_ids(in_column_or_two, explicit, call)).to eq(rows_at(0, 3, 5))
+          expect(member_ids(expression("not", in_column_or_two), explicit, call))
+            .to eq(rows_at(1, 2, 4))
+        end
+
+        it "denies a row where either omitted column is NULL, under any nesting" do
+          omitted = mapping(:omitted, :omitted)
+          expect(member_ids(in_column, omitted, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column), omitted, call)).to eq(rows_at(4))
+          # CEL builds the list first, so a missing member errors even when 2 would match.
+          expect(member_ids(in_column_or_two, omitted, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column_or_two), omitted, call)).to eq(rows_at(4))
+        end
+
+        it "leaves a NULL computed member UNKNOWN, since CEL errors computing it" do
+          # `null + 1` is an error in CEL, never a null that `null in [...]` could match.
+          in_sum = expression("in", variable("a"),
+            expression("list", expression("add", variable("b"), value(1))))
+          explicit = mapping(:explicit, :explicit)
+          expect(member_ids(in_sum, explicit, call)).to be_empty
+          expect(member_ids(expression("not", in_sum), explicit, call)).to eq(rows_at(2, 3, 4))
+        end
+
+        it "refuses a column member under the other convention, as == does" do
+          [mapping(:explicit, :omitted), mapping(:omitted, :explicit)].each do |mixed|
+            [in_column, expression("not", in_column)].each do |condition|
+              expect { member_ids(condition, mixed, call) }.to raise_error(
+                Cerbos::Sequel::UnsupportedOperatorError, /mixed null conventions/
+              )
+            end
+          end
+        end
+      end
+    end
+  end
+
+  # `value in R.attr.<association>` compares the value under its own declared convention,
+  # against a stored member that is a null value when NULL (#591). The corpus maps `owner` as
+  # `:explicit` and asserts its goldens only under the call's default, so only this suite can
+  # check the rows returned under the other.
+  describe "membership in an association under the value's declared convention" do
+    let(:rows) do
+      [[nil, [nil]], [nil, ["x"]], ["x", [nil, "x"]], ["x", [nil]], [nil, []]].map do |title, names|
+        EdgeDocument.create(title: title).tap do |document|
+          names.each { |name| EdgeTag.create(name: name, document_id: document.id) }
+        end
+      end
+    end
+
+    let(:in_tags) { expression("in", variable("v"), variable("tags")) }
+
+    after do
+      EdgeTag.where(document_id: rows.map(&:id)).delete
+      rows.each(&:destroy)
+    end
+
+    def association_ids(condition, value_convention, call)
+      described_class.query_plan_to_dataset(
+        plan: conditional(condition), model: EdgeDocument,
+        attributes: {
+          "v" => described_class.field("title", null_representation: value_convention),
+          "tags" => association(:tags, member_field: "name")
+        },
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).select_map(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    %i[explicit omitted].each do |call|
+      context "when the call's convention is #{call}" do
+        it "matches an explicit null value against a null member" do
+          expect(association_ids(in_tags, :explicit, call)).to eq(rows_at(0, 2))
+          expect(association_ids(expression("not", in_tags), :explicit, call)).to eq(rows_at(1, 3, 4))
+        end
+
+        it "denies a row whose omitted value is NULL, under either polarity" do
+          expect(association_ids(in_tags, :omitted, call)).to eq(rows_at(2))
+          expect(association_ids(expression("not", in_tags), :omitted, call)).to eq(rows_at(3))
+        end
+      end
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. An earlier version built
     # `NULL IN (x)`, which is always UNKNOWN.
@@ -730,10 +853,12 @@ RSpec.describe Cerbos::Sequel do
       }.to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /Unsupported operator: frobnicate/)
     end
 
-    it "raises for a sub-microsecond timestamp literal" do
-      # The planner makes nanoseconds for now(). Sequel would remove the last digits of
-      # that value, and thus it would change the instant in the comparison.
-      expect { Cerbos::Sequel::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }
+    it "raises for putting a sub-microsecond instant into SQL" do
+      # The planner makes nanoseconds for now(). Sequel would remove the last digits of that
+      # value and change the instant, so the literal parses exactly but refuses to reach SQL.
+      instant = Cerbos::Sequel::Timestamps.parse("2026-08-04T08:55:39.185020547Z")
+      expect(instant.nsec).to eq(185_020_547)
+      expect { Cerbos::Sequel::Timestamps.assert_bindable(instant) }
         .to raise_error(Cerbos::Sequel::UnsupportedOperatorError, /sub-microsecond/)
     end
 
@@ -878,6 +1003,33 @@ RSpec.describe Cerbos::Sequel do
       expect(sql).not_to match(/IS NOT NULL/)
     end
 
+    # The corpus fixes each attribute's convention, so only a declaration can pair `:explicit`
+    # with `:omitted` in an `eq`. The explicit NULL is a null value, definite wherever the other
+    # side is present; the omitted NULL is a missing attribute, UNKNOWN under any polarity.
+    it "compares two columns under mixed conventions as each side's convention says" do
+      # `n` declares `:explicit`; `author_id` takes the call's `:omitted`. Both are integers, so
+      # the comparison is not a cross-type one.
+      null_n = EdgeDocument.create(n: nil, author_id: 5)
+      null_author = EdgeDocument.create(n: 5, author_id: nil)
+      # The explicit IS NOT NULL alone would make `eq` FALSE here, and `ne` TRUE.
+      both_null = EdgeDocument.create(n: nil, author_id: nil)
+      ids = [null_n.id, null_author.id, both_null.id]
+      allowed = ->(condition) {
+        described_class.query_plan_to_dataset(
+          plan: conditional(condition), model: EdgeDocument, attributes: declared,
+          null_attribute_representation: :omitted
+        ).where(id: ids).select_map(:id)
+      }
+      begin
+        equality = expression("eq", variable("f"), variable("u"))
+        expect(allowed.call(equality)).to be_empty
+        expect(allowed.call(expression("not", equality))).to eq([null_n.id])
+        expect(allowed.call(expression("ne", variable("f"), variable("u")))).to eq([null_n.id])
+      ensure
+        [null_n, null_author, both_null].each(&:destroy)
+      end
+    end
+
     it "keeps an operator override rather than restructuring around it" do
       # `eq` and `ne` RESTRUCTURE the comparison, so to add the guard would discard the
       # translation of the caller in silence.
@@ -975,6 +1127,122 @@ RSpec.describe Cerbos::Sequel do
 
       expect(sql).to include("(SELECT")
       expect(sql).not_to include("JOIN")
+    end
+  end
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "a CEL error compared with null" do
+    let(:size_of_number) { expression("size", variable("request.resource.attr.aNumber")) }
+
+    # Corpus gap. `size(R.attr.aNumber)` is an error on every row, and so is any strict operator
+    # over it. The null in the list would otherwise be tested with IS NULL, TRUE for the error.
+    it "denies every row for a membership over the error in a list holding null" do
+      plan = conditional(expression("in", size_of_number, value([1, nil])))
+
+      expect(translate(plan)).to be_empty
+      expect(translate(conditional(expression("not", plan["condition"])))).to be_empty
+    end
+
+    # Corpus gap. CEL never holds a computed value as null, so a NULL one is an error, however it
+    # got there: `error || false` is the error, and so is an `exists` whose every body errors.
+    # Read as a null value, IS NULL would allow the row.
+    it "denies a computed error compared with null after a connective or a quantifier" do
+      contains_on_number = expression("contains", variable("request.resource.attr.aNumber"), value("1"))
+      exists_error = expression("exists", variable("request.resource.attr.tags"),
+        expression("lambda", contains_on_number, variable("t")))
+      disjunction = expression("or", contains_on_number, variable("request.resource.attr.aBool"))
+
+      expect(translate(conditional(expression("in", disjunction, value([true, nil])))).where(a_bool: false))
+        .to be_empty
+      expect(translate(conditional(expression("in", exists_error, value([true, nil]))))).to be_empty
+    end
+
+    # Corpus gap. The same hole without a type error: `null > 1` is an error too, and j2, the one
+    # row with a NULL a_number, has a_bool true, so `error && true` is the error.
+    it "denies a NULL column's error compared with null after a connective" do
+      conjunction = expression("and",
+        expression("gt", variable("request.resource.attr.aNumber"), value(1)),
+        variable("request.resource.attr.aBool"))
+
+      expect(translate(conditional(expression("in", conjunction, value([false, nil])))).where(a_number: nil))
+        .to be_empty
+    end
+
+    # Corpus gap. A CASE over the error arm is NULL wherever the condition picks that arm, which
+    # an enclosing IS NULL would read as TRUE, so the shape is refused.
+    it "refuses a ternary with the error as an arm" do
+      ternary = expression("if", variable("request.resource.attr.aBool"), size_of_number, value(1))
+
+      expect { translate(conditional(expression("in", ternary, value([2, nil])))) }
+        .to raise_error(Cerbos::Sequel::UnsupportedOperatorError)
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "arithmetic over a string or a boolean" do
+    # Corpus gap. Attributes are dyn, so each of these type-checks, and CEL has no overload for
+    # any of them: every row is an error. SQL concatenates the string and the number, or reads the
+    # boolean and the string as numbers on SQLite and MySQL.
+    {
+      "a string plus a number" => ["add", "aString", "aNumber", "one5"],
+      "a boolean plus a number" => ["add", "aBool", "aNumber", 6],
+      "a string times zero" => ["mult", "aString", 0, 0],
+      "a string minus a number" => ["sub", "aString", "aNumber", -5]
+    }.each do |shape, (operator, left, right, result)|
+      it "denies every row for #{shape}" do
+        operand = ->(name) { name.is_a?(String) ? variable("request.resource.attr.#{name}") : value(name) }
+        equality = expression("eq", expression(operator, operand.call(left), operand.call(right)), value(result))
+
+        expect(translate(conditional(equality))).to be_empty
+        expect(translate(conditional(expression("not", equality)))).to be_empty
+      end
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "an operand of no type the operator takes" do
+    let(:tags) { variable("request.resource.attr.tags") }
+
+    # Corpus gap. hasIntersection takes two lists; a map or a scalar is CEL's no-overload error.
+    it "denies a hasIntersection against a map or a scalar under negation" do
+      map = expression("struct", expression("set-field", value("a"), value(1)))
+      [map, value("public")].each do |operand|
+        expect(translate(conditional(expression("not", expression("hasIntersection", tags, operand))))).to be_empty
+      end
+    end
+
+    # Corpus gap. Each would hand a list or a held collection to SQL, which cannot quote it.
+    it "refuses a list, a filtered list or a raw timestamp where SQL needs a scalar" do
+      with_timestamp = ATTRS.merge("request.resource.attr.createdAt" => field("created_at"))
+      filtered = ->(bound) {
+        expression("filter", value([1, 2]),
+          expression("lambda", expression("gt", variable("t"), value(bound)), variable("t")))
+      }
+      [
+        expression("eq", expression("size",
+          expression("if", variable("request.resource.attr.aBool"), filtered.call(0), filtered.call(1))), value(1)),
+        expression("eq", expression("add", value([1]), expression("list", variable("request.resource.attr.aNumber"))), value([1, 5])),
+        expression("eq", expression("string", value([1])), value("[1]")),
+        expression("eq", expression("sub", variable("request.resource.attr.createdAt"), value(5)), value(2020))
+      ].each do |condition|
+        expect { translate(conditional(condition), attributes: with_timestamp) }
+          .to raise_error(Cerbos::Sequel::UnsupportedOperatorError)
+      end
+    end
+  end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "a list or map literal" do
+    # Corpus gap. `x in map` tests the keys. The planner folds a literal map to `==`, but a map
+    # can still arrive as a value, and answering FALSE would grant its negation.
+    it "tests the keys of a map value in a membership" do
+      plan = conditional(expression("in", variable("request.resource.attr.aString"), value({"one" => 1})))
+
+      expect(translate(plan).select_map(:a_string).uniq).to eq(["one"])
+      expect(translate(conditional(expression("not", plan["condition"]))).where(a_string: "one")).to be_empty
     end
   end
 end

@@ -21,13 +21,12 @@ module Cerbos
       module_function
 
       # @param literal [String] an RFC-3339 instant from the plan
-      # @return [Time] in UTC
+      # @return [Time] in UTC, at the literal's full precision. {.assert_bindable} refuses the
+      #   instant if it reaches SQL with more precision than a literalized Time keeps.
       def parse(literal)
         unless literal.is_a?(::String) && RFC3339.match?(literal)
           raise InvalidPlanError, "Invalid RFC-3339 timestamp literal: #{literal.inspect}"
         end
-
-        assert_representable_precision(literal)
 
         begin
           ::Time.iso8601(literal).utc
@@ -36,21 +35,20 @@ module Cerbos
         end
       end
 
-      # Examines the decimal places of the literal.
+      # Raises if the instant has sub-microsecond precision.
       #
-      # If a literal has more than six decimal places, Sequel removes the last digits
-      # when it puts the literal into SQL. Thus the query compares with a different instant
-      # from the instant in the policy. The planner makes such a literal for +now()+, and thus
-      # this is a real shape and not only a theoretical one. The adapter must raise an error.
+      # Sequel removes the digits past the sixth when it puts a Time into SQL, so the query
+      # would compare with a different instant from the one in the policy. The planner makes
+      # such a literal for +now()+. Checked where a Time reaches SQL, not where it is parsed: a
+      # literal that never reaches SQL (one a type mismatch makes an error, or one compared with
+      # another literal) is exact in Ruby.
       #
       # @api private
-      def assert_representable_precision(literal)
-        digits = RFC3339.match(literal)[4].to_s
-        return if digits.length <= MAX_SUBSECOND_DIGITS
-        return if digits[MAX_SUBSECOND_DIGITS..].each_char.all? { |d| d == "0" }
+      def assert_bindable(time)
+        return if (time.subsec * 1_000_000).denominator == 1
 
         raise UnsupportedOperatorError,
-          "Timestamp literal #{literal.inspect} carries sub-microsecond precision, which " \
+          "Timestamp literal #{time.iso8601(9).inspect} carries sub-microsecond precision, which " \
           "Sequel truncates when literalizing a Time into SQL; translating it would " \
           "compare against a different instant than the policy specifies"
       end

@@ -13,6 +13,10 @@ module Cerbos
         private
 
         def arithmetic(operator, left, right)
+          return concatenate(left, right) if operator == "add" && (list_operand?(left) || list_operand?(right))
+          if [left, right].any? { |operand| temporal_value?(operand) }
+            return duration_arithmetic(operator, left, right)
+          end
           if %w[add sub mult].include?(operator) && (deferred_value?(left) || deferred_value?(right))
             return deferred_arithmetic(operator, left, right)
           end
@@ -21,6 +25,7 @@ module Cerbos
           # comparison calculates it. More arithmetic on those branches has no SQL equivalent,
           # so the adapter raises instead of making an incorrect filter.
           require_scalars(operator, left, right)
+          return cel_type_error if arithmetic_type_error?(operator, left, right)
           return cel_type_error if int_beside_non_int?(operator, left, right)
 
           # CEL uses `+` for strings and for numbers. SQL does not. On SQLite and MySQL,
@@ -29,7 +34,7 @@ module Cerbos
           if operator == "add" && (string_valued?(left) || string_valued?(right))
             return left + right if left.is_a?(::String) && right.is_a?(::String)
 
-            return dialect.concat(left, right)
+            return record_cel_type(dialect.concat(left, right), :string)
           end
 
           if operator == "mod" && !(cel_int?(left) && cel_int?(right))
@@ -140,6 +145,33 @@ module Cerbos
             "operands in int(), or neither."
         end
 
+        # CEL has no arithmetic over a boolean, and over a string only `+` of two strings. Each
+        # such operand is an error on every row, where SQL concatenates a string with a number,
+        # and SQLite and MySQL read a boolean or a string as a number. An operand of unknown kind
+        # decides nothing.
+        def arithmetic_type_error?(operator, left, right)
+          [left, right].each { |operand| reject_non_scalar_arithmetic(operator, operand) }
+          kinds = [scalar_kind(left), scalar_kind(right)]
+          return true if kinds.include?(:boolean)
+          return false unless kinds.include?(:string)
+
+          operator != "add" || kinds.include?(:number)
+        end
+
+        # List concatenation is valid CEL with no SQL form, and the adapter has no durations: a
+        # temporal column is an RFC-3339 string to CEL unless timestamp() wraps it, and a
+        # timestamp takes only a duration. Each is refused.
+        def reject_non_scalar_arithmetic(operator, operand)
+          if operand.is_a?(Array) || operand.is_a?(Hash)
+            raise UnsupportedOperatorError, "#{operator} over a list or map literal is not translated"
+          end
+          return unless TEMPORAL_COLUMN_TYPES.include?(column_type(operand))
+
+          raise UnsupportedOperatorError,
+            "#{operator} over a temporal column is not translated: CEL reads it as an RFC-3339 " \
+            "string, or as a timestamp that takes only a duration"
+        end
+
         # An operand CEL holds as something other than an int whatever the row: a mapped
         # attribute column that has not gone through int() (a request attribute is never an
         # int), a computed double or boolean, a fractional constant, a string or a boolean.
@@ -148,7 +180,7 @@ module Cerbos
           return true if value.is_a?(::String) || value == true || value == false
           return false unless SqlSupport.sql_node?(value)
           return false if cel_type(value) == :int
-          return true if %i[double bool].include?(cel_type(value))
+          return true if %i[double string bool].include?(cel_type(value))
 
           !column_type(value).nil?
         end
@@ -167,6 +199,7 @@ module Cerbos
         # Two ints are the exception: CEL's int division truncates toward zero.
         def divide(numerator, denominator)
           require_scalars("div", numerator, denominator)
+          return cel_type_error if arithmetic_type_error?("div", numerator, denominator)
           return cel_type_error if int_beside_non_int?("div", numerator, denominator)
           return int_divide(numerator, denominator) if int_division?(numerator, denominator)
 

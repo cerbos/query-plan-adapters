@@ -93,6 +93,16 @@ module Cerbos
           )
         end
 
+        def mixed_null_conventions_error(operator)
+          UnsupportedOperatorError.new(
+            "Cannot translate #{operator} between two columns under mixed null conventions. " \
+            "One attribute is under null_representation: :explicit and the other is not, so " \
+            "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
+            "one predicate does both. Declare null_representation on both attributes, or on " \
+            "neither."
+          )
+        end
+
         # The comparison with the declared conventions applied, or +plain+ when no attribute in
         # it declares +:explicit+.
         #
@@ -188,27 +198,21 @@ module Cerbos
           # rows that CEL permits. The translation of the collection already handles the null
           # member.
           return plain unless haystack.is_a?(Array)
+          # A column in the list: `null in [col]` can be TRUE, and each element is already
+          # definite (cerbos/query-plan-adapters#574).
+          return plain if haystack.any? { |member| SqlSupport.sql_node?(member) }
           # A null member already forces the `IS NULL` branch, which is definite by itself.
           return plain if haystack.any?(&:nil?)
 
           SqlSupport.and_node([SqlSupport.comparison("ne", needle, nil), plain])
         end
 
-        # Equality between two columns for a membership test.
-        #
-        # With the `explicit` convention a NULL column sends an attribute whose value is null,
-        # and two nulls are equal in CEL. The result of that comparison in SQL is UNKNOWN, so
-        # the adapter writes the condition out.
-        #
-        # With the `omitted` convention a NULL column sends no attribute. Two NULL columns are
-        # then two MISSING attributes, CEL raises a missing-attribute error, and the PDP denies
-        # the row. Plain equality gives UNKNOWN for a NULL column and keeps the row out, which
-        # is the correct answer for that convention.
-        def null_equality(left, right)
-          equal = SqlSupport.comparison("eq", left, right)
-          return equal if null_attribute_representation == :omitted
-
-          SqlSupport.or_node([equal, both_null(left, right)])
+        # Equality between two operands that each reach CEL as a null value when NULL, such as an
+        # `:explicit` value against a relation's stored member. Two NULLs are equal in CEL. The
+        # value's declaration decides this, never the call's convention
+        # (cerbos/query-plan-adapters#591).
+        def explicit_null_equality(left, right)
+          SqlSupport.or_node([SqlSupport.comparison("eq", left, right), both_null(left, right)])
         end
 
         # +left IS NULL AND right IS NULL+: two explicit nulls, which CEL finds equal.

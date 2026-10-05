@@ -2,6 +2,9 @@
 
 require "sequel"
 
+require_relative "errors"
+require_relative "timestamps"
+
 module Cerbos
   module Sequel
     # Helper functions that make Sequel expression objects.
@@ -71,7 +74,7 @@ module Cerbos
       # for an element. Thus the row stays out of the result, and it also stays out when a NOT
       # operator is around the CASE. An ELSE arm with a value would put those rows into it.
       def case_node(whens, else_value: nil)
-        CaseExpression.new(whens.map { |condition, result| [condition, result] }, else_value)
+        CaseExpression.new(whens.map { |condition, result| [condition, bindable(result)] }, bindable(else_value))
       end
 
       COMPARISON_OPERATORS = {
@@ -97,7 +100,14 @@ module Cerbos
           return BooleanExpression.new(:"IS NOT", left, nil)
         end
 
-        BooleanExpression.new(sql_operator, left, right)
+        BooleanExpression.new(sql_operator, bindable(left), bindable(right))
+      end
+
+      # A Ruby value about to go into SQL, refused if Sequel would literalize it as another
+      # value. A Time keeps six fractional digits there. See {Timestamps.assert_bindable}.
+      def bindable(value)
+        Timestamps.assert_bindable(value) if value.is_a?(::Time)
+        value
       end
 
       def infix(operator, left, right)
@@ -115,7 +125,7 @@ module Cerbos
       end
 
       def in_list(needle, values)
-        BooleanExpression.new(:IN, needle, values)
+        BooleanExpression.new(:IN, needle, values.map { |value| bindable(value) })
       end
     end
   end

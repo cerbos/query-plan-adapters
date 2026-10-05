@@ -82,6 +82,10 @@ module Cerbos
         # (see {#boolean_value?}) — goes through {#boolean_to_string}. A double is held as a
         # {Values::DoubleText} until a comparison resolves it: see {#compare_double_text}.
         def cast_to_string(value)
+          reject_collection("string", value)
+          if value.is_a?(Array) || value.is_a?(Hash)
+            raise UnsupportedOperatorError, "string() of a list or map literal is not translated"
+          end
           return value.to_s if value == true || value == false
           return boolean_to_string(value) if boolean_value?(value)
           if cel_type(value) == :ambiguous_number

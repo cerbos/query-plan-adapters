@@ -18,6 +18,17 @@ module Cerbos
           matcher.match(receiver, needle, **STRING_MATCHES.fetch(operator))
         end
 
+        # CEL's `upperAscii()` folds only `a`-`z`. SQL `UPPER` follows the database's locale
+        # and folds `é` to `É` too, so each ASCII letter is replaced on its own; `REPLACE`
+        # matches exactly, whatever the column's collation.
+        def upper_ascii(value)
+          require_string_operand("upperAscii", value)
+          return value.tr("a-z", "A-Z") if value.is_a?(::String)
+
+          folded = ("a".."z").reduce(value) { |text, letter| SqlSupport.function(:REPLACE, [text, letter, letter.upcase]) }
+          record_cel_type(folded, :string)
+        end
+
         # `receiver.matches(pattern)`, lowered through {Regex.compile} into the exact string
         # predicates this module already writes — never into the store's own regex dialect, none
         # of which is RE2. The receiver must be a string column: a NULL there is a missing
@@ -84,26 +95,28 @@ module Cerbos
         end
 
         # A value CEL certainly holds as a number or a boolean: a constant, a numeric or boolean
-        # column, or a computed int, double or boolean. `contains`, `startsWith`, `endsWith` and
+        # column, or a computed number or boolean. `contains`, `startsWith`, `endsWith` and
         # `size()` have no overload for either, so CEL raises a no-such-overload error on every
         # row, which is decided by the declared type and not by the row's value. A temporal
         # column is NOT one of these: its attribute is an RFC-3339 string in CEL, and its SQL
         # text is a different spelling, so it stays refused below.
         def known_non_string?(value)
-          return true if value.is_a?(Numeric) || value == true || value == false
-          return false unless SqlSupport.sql_node?(value)
-
-          type = column_type(value)
-          NUMERIC_COLUMN_TYPES.include?(type) || type == :boolean ||
-            %i[int double bool].include?(cel_type(value))
+          %i[number boolean].include?(scalar_kind(value))
         end
 
         # The value of an expression that is a CEL error on every row: SQL NULL, a fresh node
         # each time so nothing recorded against it by identity leaks to another use. UNKNOWN
         # denies under both polarities, as the error does: `NOT NULL` is NULL, `NULL OR TRUE` is
         # TRUE as `error || true` is, and `NULL AND FALSE` is FALSE as `error && false` is.
+        # A strict operator over it is the error again ({Translator#apply}), never `NULL IS NULL`.
         def cel_type_error
-          ::Sequel::SQL::Constant.new(:NULL)
+          node = ::Sequel::SQL::Constant.new(:NULL)
+          @cel_errors[node] = true
+          node
+        end
+
+        def cel_error?(value)
+          SqlSupport.sql_node?(value) && @cel_errors.key?(value)
         end
 
         def require_string_operand(operator, value)
