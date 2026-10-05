@@ -102,11 +102,7 @@
       "status": "unsupported"
     },
     "collection/except/equals-list-literal": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
-      "status": "unsupported"
-    },
-    "collection/except/size-of-difference": {
-      "reason": "The SQL translator has no two-list difference value; the walk refuses except in each arrival position.",
+      "reason": "except() over a relation is held until size(), or == and != against an empty list, give it a meaning that needs no element order. Equality with a non-empty list literal compares an ordered list, and a relation's rows have no order, so the comparison is refused.",
       "status": "unsupported"
     },
     "collection/exists/map-keys": {
@@ -116,6 +112,18 @@
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as collection/exists/map-keys, under negation."
+    },
+    "collection/exists/relative-window-in-body": {
+      "reason": "The same sub-microsecond now() literal as `timestamp/less-than/relative-window`, reached inside an exists() body. The comparison binds it against the temporal column, where ActiveRecord would truncate it to microseconds, so the refusal is the same one",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "reason": "A two-variable exists() over a list binds each element's position. tagNames is a has_many relation, and its rows have no position for SQL to bind, so the adapter refuses every two-variable comprehension",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "reason": "A two-variable exists() over a map binds each key beside its value. obj is not a stored map but columns of the resource row, and SQL cannot enumerate a row's columns as keys, so the adapter refuses every two-variable comprehension",
+      "status": "unsupported"
     },
     "collection/filter/as-conjunct": {
       "reason": "filter() yields a list, not a boolean; a filtered relation cannot be used as a condition, even as one conjunct.",

@@ -16,7 +16,23 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
 
+- Translations for list and time shapes the conformance corpus added from the Cerbos planner's own tests. Each previously raised a `Cerbos::ActiveRecord::Error` (a `TypeError` for a list ternary):
+
+  - `intersect`, `except` and `isSubset` over a relation mapped by `member_field` and a list of constants: `isSubset`, `size()` of either result, and `==`/`!=` of either result against `[]`. `size(intersect(...))` counts duplicates from whichever list is shorter on the row, as Cerbos does.
+  - `in` over a list built with `+` from a relation and a literal list, over a ternary of literal lists (such as `runtime.effectiveDerivedRoles`), over `filter()` of a `member_field` relation, and over `map()` of a relation. `+` and `==` over a ternary of literal lists take each branch.
+  - `upperAscii()`, as one `REPLACE` per ASCII letter, since SQL `UPPER` follows the locale and also folds non-ASCII letters.
+  - `timeSince(timestamp(col))` against a duration, and `timestamp(col) ± duration(...)` against a timestamp literal, by moving the duration onto the constant side (`col < now - d`). `now` is the translation's clock, read once per plan.
+  - `index` into a map literal by a string attribute, as a `CASE` with no `ELSE`, so a missing key is UNKNOWN like CEL's error; and `R.attr.m["key"]` by a constant key, which reads the mapping of `R.attr.m.key`.
+
+  A two-variable comprehension (`exists(i, v, ...)`) raises `Cerbos::ActiveRecord::UnsupportedOperatorError`: a relation's rows have no position, and SQL cannot list a row's columns as map keys.
+
 ### Changed
+
+- A macro over a list built from attributes, such as `[R.attr.a, R.attr.b].exists(s, s == "x")`, is UNKNOWN when an element is missing, as CEL errors building the list. It previously OR-ed the bodies and returned a row whose other element matched.
+
+- A bare temporal column (not wrapped in `timestamp()`) compared with a timestamp is answered as CEL answers a string against a timestamp: an ordering is UNKNOWN, `==` is false. It previously compared the column as an instant and returned rows the PDP denies.
+
+- A sub-microsecond timestamp literal raises only where it would be bound into SQL, not where it is parsed, so a literal compared with another literal, or under a type mismatch, no longer raises.
 
 - The conformance suite runs on PostgreSQL and MySQL as well as SQLite, and the fixes below are what those stores exposed ([#500](https://github.com/cerbos/query-plan-adapters/issues/500))
 

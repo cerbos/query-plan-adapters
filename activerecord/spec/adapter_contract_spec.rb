@@ -769,9 +769,12 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /not to a boolean/)
     end
 
-    it "raises for a sub-microsecond timestamp literal" do
-      # now() has nanoseconds. ActiveRecord would truncate them and change the instant.
-      expect { Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }
+    it "raises for binding a sub-microsecond instant" do
+      # now() has nanoseconds. ActiveRecord would truncate them and change the instant, so the
+      # literal parses exactly but refuses to reach SQL.
+      instant = Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z")
+      expect(instant.nsec).to eq(185_020_547)
+      expect { Cerbos::ActiveRecord::Timestamps.assert_bindable(instant) }
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sub-microsecond/)
     end
 

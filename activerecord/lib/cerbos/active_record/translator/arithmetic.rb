@@ -13,6 +13,11 @@ module Cerbos
         private
 
         def arithmetic(operator, left, right)
+          return concatenate(left, right) if operator == "add" && (list_operand?(left) || list_operand?(right))
+          if [left, right].any? { |operand| temporal_value?(operand) }
+            return duration_arithmetic(operator, left, right)
+          end
+
           # Arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
           reject_int_beside_non_int(operator, left, right)

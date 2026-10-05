@@ -13,6 +13,7 @@ module Cerbos
           unless operands.length == 2
             raise InvalidPlanError, "#{operator} takes a collection and a lambda"
           end
+          reject_two_variable_lambda(operator, operands[1])
 
           collection = evaluate(operands[0], environment)
           if collection.is_a?(Array)
@@ -75,17 +76,37 @@ module Cerbos
           body_node, iterator = lambda_parts(lambda_node)
           bodies = values.map { |value| predicate(body_node, environment.bind(iterator, value)) }
 
-          case operator
-          when "exists" then ArelSupport.or_node(bodies)
-          when "all" then ArelSupport.and_node(bodies)
-          when "exists_one" then exactly_one_of(bodies)
-          else
-            # `filter`/`map` here would need a list-valued `size`/`hasIntersection`. No corpus
-            # shape needs it, so refuse.
-            raise UnsupportedOperatorError,
-              "#{operator} over a list of constants is not supported: only exists, all and " \
-              "exists_one have a translation for that shape"
-          end
+          quantified =
+            case operator
+            when "exists" then ArelSupport.or_node(bodies)
+            when "all" then ArelSupport.and_node(bodies)
+            when "exists_one" then exactly_one_of(bodies)
+            else
+              # `filter`/`map` here would need a list-valued `size`/`hasIntersection`. No corpus
+              # shape needs it, so refuse.
+              raise UnsupportedOperatorError,
+                "#{operator} over a list of constants is not supported: only exists, all and " \
+                "exists_one have a translation for that shape"
+            end
+
+          # A list built from attributes, `[R.attr.a, R.attr.b]`, errors as a whole when an
+          # element is missing, before the macro sees any element: an OR of the bodies would
+          # let a true body for the other element grant the row.
+          missing = values.select { |value| ArelSupport.arel_node?(value) && null_convention(value) != :explicit }
+          unknown_if_any(missing.map { |value| ArelSupport.is_null(value) }, quantified)
+        end
+
+        # CEL's two-variable comprehensions bind an element's position (over a list) or a key
+        # (over a map) beside its value. A relation's rows have no position, and a row's
+        # columns are not a map whose keys SQL can enumerate, so neither binding has a
+        # translation.
+        def reject_two_variable_lambda(operator, node)
+          return unless node.is_a?(Plan::Expression) && node.operator == "lambda" && node.operands.length == 3
+
+          raise UnsupportedOperatorError,
+            "#{operator} with two variables binds each element's list position or map key: a " \
+            "relation's rows have no position, and SQL cannot enumerate a row's columns as map " \
+            "keys, so only one-variable comprehensions are translated"
         end
 
         # UNKNOWN if any element errors, else true when exactly one element is true.
@@ -142,6 +163,8 @@ module Cerbos
                 else_value: target.scope.count(target.body)
               )
             )
+          when Values::SetOperation
+            set_operation_size(target)
           when ::String
             target.length
           else

@@ -2,6 +2,9 @@
 
 require "arel"
 
+require_relative "errors"
+require_relative "timestamps"
+
 module Cerbos
   module ActiveRecord
     # Arel node builders. They hide differences between Rails versions (7.1 to 8.x) and between
@@ -26,6 +29,7 @@ module Cerbos
       def quote(value)
         return value if value.nil? || arel_node?(value)
 
+        Timestamps.assert_bindable(value) if value.is_a?(::Time)
         Arel::Nodes.build_quoted(value)
       end
 

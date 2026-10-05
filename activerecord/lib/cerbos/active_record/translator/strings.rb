@@ -19,6 +19,17 @@ module Cerbos
           matcher.match(receiver, needle, **STRING_MATCHES.fetch(operator))
         end
 
+        # CEL's `upperAscii()` folds only `a`-`z`. SQL `UPPER` follows the database's locale
+        # and folds `é` to `É` too, so each ASCII letter is replaced on its own; `REPLACE`
+        # matches exactly, whatever the column's collation.
+        def upper_ascii(value)
+          require_string_operand("upperAscii", value)
+          return value.tr("a-z", "A-Z") if value.is_a?(::String)
+
+          folded = ("a".."z").reduce(value) { |text, letter| ArelSupport.function("REPLACE", [text, letter, letter.upcase]) }
+          record_cel_type(folded, :string)
+        end
+
         def require_string_operand(operator, value)
           type = column_type(value)
           return if value.is_a?(::String) || (ArelSupport.arel_node?(value) && (type.nil? || STRING_COLUMN_TYPES.include?(type)))
