@@ -408,7 +408,7 @@ the planner leaves it unevaluated, and the plan carries no instant to measure fr
 | `string()` over a numeric column | refused: CEL prints Go's shortest `%g` form (`1e+06`, `-0`) | an override matching your database |
 | `int()`, `double()` | refused | an override matching your database |
 | `size()` over a string column | `LENGTH` (`CHAR_LENGTH` on MySQL, whose `LENGTH` counts bytes) | — |
-| `upperAscii()` | a `REPLACE` per ASCII letter (`UPPER` also folds non-ASCII letters on PostgreSQL and MySQL) | — |
+| `upperAscii()` | a `REPLACE` per ASCII letter (`UPPER` also folds non-ASCII letters on PostgreSQL and MySQL); compared with a string literal, only the literal's own letters, which keeps SQLite before 3.46 inside its parser stack | — |
 | `m["key"]` over a map attribute | read as `m.key` when `attr_map` maps that path | — |
 | `{"k": v, ...}[R.attr.x] == literal`, `!=` (a map literal read at an attribute key) | the keys whose value answers it, UNKNOWN for a key outside the map | — |
 | `timestamp(x) ± duration(...)` against a timestamp literal | the literal shifted instead | — |

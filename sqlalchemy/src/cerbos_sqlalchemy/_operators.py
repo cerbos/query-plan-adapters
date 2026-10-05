@@ -35,9 +35,11 @@ from sqlalchemy import (
     null,
     or_,
     true,
+    type_coerce,
 )
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql import operators
 from sqlalchemy.sql.expression import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 
@@ -350,7 +352,66 @@ def _upper_ascii(value: Any, _: Any) -> Any:
     result: Any = value
     for ch in _ASCII_LOWER:
         result = func.replace(result, ch, ch.upper(), type_=String)
+    return type_coerce(result, _UpperAsciiString(value))
+
+
+def _replace_ascii_letters(value: Any, letters: str) -> Any:
+    result: Any = value
+    for ch in letters:
+        result = func.replace(result, ch, ch.upper(), type_=String)
     return result
+
+
+def _upper_ascii_equals(receiver: Any, text: str) -> Any:
+    """``upperAscii(receiver) == text``, replacing only the letters ``text`` holds.
+
+    ``upperAscii()`` never yields a lowercase ASCII letter, so a ``text`` holding one
+    is unequal to every present value. Otherwise a lowercase letter ``text`` does not
+    hold in upper case cannot match whether or not it is replaced, so replacing only
+    ``text``'s own letters answers the same. That keeps the nesting shallow: SQLite
+    before 3.46 overflows its parser stack on all 26 nested ``REPLACE`` calls under a
+    subquery.
+    """
+    if any(ch in _ASCII_LOWER for ch in text):
+        return case((receiver.isnot(None), false()))
+    letters = "".join(sorted({ch.lower() for ch in text} & set(_ASCII_LOWER)))
+    return _replace_ascii_letters(receiver, letters) == text
+
+
+class _UpperAsciiString(String):
+    """The type of an ``upperAscii()`` result, which remembers its receiver.
+
+    Equality and membership against string literals, and the NULL tests, read the
+    receiver directly (see :func:`_upper_ascii_equals`); anything else compares the
+    full 26-letter ``REPLACE`` chain.
+    """
+
+    def __init__(self, receiver: Any) -> None:
+        super().__init__()
+        self.receiver = receiver
+
+    class comparator_factory(String.Comparator):
+        def operate(self, op: Any, *other: Any, **kwargs: Any) -> Any:
+            receiver = self.type.receiver
+            target = other[0] if other else None
+            if op is operators.eq and isinstance(target, str):
+                return _upper_ascii_equals(receiver, target)
+            if op is operators.ne and isinstance(target, str):
+                return not_(_upper_ascii_equals(receiver, target))
+            if (
+                op is operators.in_op
+                and isinstance(target, (list, tuple))
+                and target
+                and all(isinstance(member, str) for member in target)
+            ):
+                return or_(
+                    *(_upper_ascii_equals(receiver, member) for member in target)
+                )
+            if op in (operators.is_, operators.is_not) and target is None:
+                return (
+                    receiver.is_(None) if op is operators.is_ else receiver.isnot(None)
+                )
+            return super().operate(op, *other, **kwargs)
 
 
 def _string_size(value: Any, _: Any) -> Any:
