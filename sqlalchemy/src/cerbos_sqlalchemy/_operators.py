@@ -11,7 +11,7 @@ import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from typing import Any, NoReturn
 
@@ -77,6 +77,19 @@ class ConditionalValue:
 SYMBOLIC_NUMBERS = (IEEEConstant, ConditionalValue)
 
 
+@dataclass(frozen=True)
+class ShiftedInstant:
+    """A timestamp column plus a constant duration, kept until a comparison folds it.
+
+    ``col + d < T`` is rendered as ``col < T - d``, so no dialect's interval arithmetic
+    is needed. CEL raises when the sum leaves its timestamp range, so the comparison
+    is guarded to stay UNKNOWN for such a row.
+    """
+
+    instant: Any
+    delta: timedelta
+
+
 class _CharLength(FunctionElement):
     """A string's length in characters, as CEL's ``size()`` counts it.
 
@@ -140,6 +153,89 @@ def _as_double(value: Any) -> Any:
 
 def _arithmetic(op_fn: Callable[[Any, Any], Any]) -> Callable[[Any, Any], Any]:
     return lambda c, v: op_fn(_as_double(c), _as_double(v))
+
+
+def cel_literal_equal(left: Any, right: Any) -> bool:
+    """CEL's equality between two plan literals.
+
+    Values of different types are unequal rather than coerced (``1 == true`` is false),
+    while ints and doubles compare numerically.
+    """
+    if left is None or right is None:
+        return left is None and right is None
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if _is_number(left) or _is_number(right):
+        return _is_number(left) and _is_number(right) and left == right
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            cel_literal_equal(a, b) for a, b in zip(left, right)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            cel_literal_equal(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, str) and isinstance(right, str):
+        return left == right
+    return False
+
+
+def _is_temporal_column(value: Any) -> bool:
+    return isinstance(_base_type(getattr(value, "type", None)), DateTime)
+
+
+def _shift(instant: Any, delta: timedelta) -> Any:
+    """A timestamp plus a duration: folded for a literal, kept symbolic for a column."""
+    if isinstance(instant, ShiftedInstant):
+        return ShiftedInstant(instant.instant, instant.delta + delta)
+    if isinstance(instant, datetime):
+        try:
+            shifted = instant + delta
+        except OverflowError as exc:
+            raise UnsupportedPlanError(
+                "a timestamp plus a duration leaves CEL's supported instant range"
+            ) from exc
+        if shifted < _MIN_CEL_TIMESTAMP or shifted > _MAX_CEL_TIMESTAMP:
+            raise UnsupportedPlanError(
+                "a timestamp plus a duration leaves CEL's supported instant range"
+            )
+        return shifted
+    if _is_temporal_column(instant):
+        return ShiftedInstant(instant, delta)
+    raise UnsupportedPlanError(
+        "a duration can only be added to a timestamp() value: SQL has no portable "
+        "interval arithmetic for anything else"
+    )
+
+
+def _additive(sign: int) -> Callable[[Any, Any], Any]:
+    """CEL's ``+``/``-``: numbers and strings in SQL, and literal lists and durations folded."""
+    numeric = _arithmetic((lambda c, v: c + v) if sign > 0 else (lambda c, v: c - v))
+
+    def apply(c: Any, v: Any) -> Any:
+        if isinstance(c, timedelta) and isinstance(v, timedelta):
+            return c + v if sign > 0 else c - v
+        if isinstance(v, timedelta):
+            return _shift(c, v if sign > 0 else -v)
+        if isinstance(c, timedelta) and sign > 0:
+            return _shift(v, c)
+        if isinstance(c, (timedelta, ShiftedInstant)) or isinstance(
+            v, (timedelta, ShiftedInstant)
+        ):
+            raise UnsupportedPlanError(
+                "this timestamp and duration arithmetic has no SQL lowering: only "
+                "timestamp() plus or minus a constant duration is rewritten"
+            )
+        if isinstance(c, (list, dict)) or isinstance(v, (list, dict)):
+            if sign > 0 and isinstance(c, list) and isinstance(v, list):
+                return c + v
+            raise UnsupportedPlanError(
+                "list concatenation is folded only between list literals: SQL has no "
+                "ordered list value to concatenate a stored collection into"
+            )
+        return numeric(c, v)
+
+    return apply
 
 
 def _unknown() -> Any:
@@ -233,6 +329,30 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
     return receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR)
 
 
+_ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _upper_ascii(value: Any, _: Any) -> Any:
+    """CEL's ``upperAscii()``: only ``a``-``z`` change, every other character is kept.
+
+    ``UPPER`` folds non-ASCII letters too (``é`` to ``É``) on PostgreSQL and MySQL, so
+    each ASCII letter is replaced on its own. ``REPLACE`` is exact on every dialect.
+    """
+    if isinstance(value, str):
+        return "".join(ch.upper() if ch in _ASCII_LOWER else ch for ch in value)
+    kind = scalar_kind(value)
+    if kind and kind != "string":
+        return null()
+    if not isinstance(value, (ColumnElement, InstrumentedAttribute)):
+        raise UnsupportedPlanError(
+            "upperAscii() needs a string attribute or literal as its receiver"
+        )
+    result: Any = value
+    for ch in _ASCII_LOWER:
+        result = func.replace(result, ch, ch.upper(), type_=String)
+    return result
+
+
 def _string_size(value: Any, _: Any) -> Any:
     if isinstance(_base_type(getattr(value, "type", None)), (JSON, ARRAY)):
         # LENGTH() would measure the text, not count elements. Counting depends on
@@ -240,6 +360,11 @@ def _string_size(value: Any, _: Any) -> Any:
         raise UnsupportedPlanError(
             "size() over a collection-typed column needs its storage declared: map the "
             'attribute in collection_columns with storage "json" or "pgArray"'
+        )
+    if isinstance(value, ConditionalValue):
+        raise UnsupportedPlanError(
+            "size() over a ternary is not lowered: its branches are folded only by "
+            "list concatenation and equality with a literal"
         )
     kind = scalar_kind(value)
     return null() if kind and kind != "string" else _CharLength(value)
@@ -435,7 +560,59 @@ def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
     raise KeyError(operator)
 
 
+def _compare_shifted(operator: str, left: Any, right: Any) -> Any:
+    """Compare ``col + d`` with a timestamp literal as ``col`` against ``T - d``."""
+    if isinstance(right, ShiftedInstant):
+        if isinstance(left, ShiftedInstant):
+            raise UnsupportedPlanError(
+                "comparing two shifted timestamp columns has no SQL lowering"
+            )
+        mirrored = MIRRORED_OPERATORS.get(operator, operator)
+        return _compare_shifted(mirrored, right, left)
+    if not isinstance(right, datetime):
+        raise UnsupportedPlanError(
+            "a timestamp shifted by a duration can only be compared with a timestamp "
+            "literal: SQL has no portable interval arithmetic over two columns"
+        )
+    try:
+        bound = right - left.delta
+    except OverflowError as exc:
+        raise UnsupportedPlanError(
+            "a timestamp minus a duration leaves CEL's supported instant range"
+        ) from exc
+    comparison = _apply_comparison(operator, left.instant, bound)
+    # CEL raises when `col + d` leaves its range: keep that row UNKNOWN.
+    try:
+        if left.delta > timedelta(0):
+            in_range = left.instant <= _MAX_CEL_TIMESTAMP - left.delta
+        elif left.delta < timedelta(0):
+            in_range = left.instant >= _MIN_CEL_TIMESTAMP - left.delta
+        else:
+            return comparison
+    except OverflowError:
+        # The shift is wider than the whole range, so every row's sum raises.
+        return _unknown()
+    return case((in_range, comparison))
+
+
 def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
+    if isinstance(left, ShiftedInstant) or isinstance(right, ShiftedInstant):
+        return _compare_shifted(operator, left, right)
+    if isinstance(left, timedelta) or isinstance(right, timedelta):
+        if not (isinstance(left, timedelta) and isinstance(right, timedelta)):
+            raise UnsupportedPlanError(
+                "a duration can only be compared with a duration literal: SQL has no "
+                "portable interval type to compare a column with"
+            )
+        return _apply_comparison(operator, left, right)
+    if isinstance(left, (list, dict)) and isinstance(right, (list, dict)):
+        # Two literals, e.g. a list concatenation folded per ternary branch.
+        if operator not in ("eq", "ne"):
+            raise UnsupportedPlanError(
+                "CEL does not order lists or maps, so there is no comparison to lower"
+            )
+        equal = cel_literal_equal(left, right)
+        return true() if equal == (operator == "eq") else false()
     if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
         raise UnsupportedPlanError(
             "comparison with a list or map literal cannot be lowered: a SQL column "
@@ -585,6 +762,34 @@ def _timestamp(value: Any, _: Any) -> Any:
     return normalized
 
 
+_DURATION = re.compile(r"^(-)?(\d+)(?:\.(\d{1,9}))?s$")
+
+
+def _duration(value: Any, _: Any) -> timedelta:
+    """Parse a planner duration constant, e.g. ``86400s``, into an exact ``timedelta``."""
+    match = _DURATION.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
+        raise UnsupportedPlanError(
+            f"duration() requires a constant in seconds, e.g. '86400s', got {value!r}"
+        )
+    sign, seconds, fraction = match.groups()
+    fraction = (fraction or "").ljust(9, "0")
+    if fraction[6:] != "000":
+        raise UnsupportedPlanError(
+            f"Duration literal precision exceeds the exact microsecond range: {value}"
+        )
+    delta = timedelta(seconds=int(seconds), microseconds=int(fraction[:6]))
+    return -delta if sign else delta
+
+
+def _time_since(*_: Any) -> NoReturn:
+    raise UnsupportedPlanError(
+        "timeSince() measures from the PDP's evaluation clock, and the plan carries no "
+        "instant for it (the planner folds now() but leaves timeSince() unevaluated): "
+        "the database's clock would move the boundary"
+    )
+
+
 # -- hierarchies -------------------------------------------------------------------------------
 
 
@@ -661,8 +866,8 @@ OPERATOR_FNS = MappingProxyType(
         "ge": _comparison("ge"),
         "in": _in,
         # Arithmetic returns values, composed inside comparisons.
-        "add": _arithmetic(lambda c, v: c + v),
-        "sub": _arithmetic(lambda c, v: c - v),
+        "add": _additive(1),
+        "sub": _additive(-1),
         "mult": _arithmetic(lambda c, v: c * v),
         "div": _float_div,
         "mod": _modulo,
@@ -677,6 +882,9 @@ OPERATOR_FNS = MappingProxyType(
         # String size only. Declared collections never reach this handler.
         "size": _string_size,
         "timestamp": _timestamp,
+        "duration": _duration,
+        "timeSince": _time_since,
+        "upperAscii": _upper_ascii,
         "hierarchy": _hierarchy,
         "ancestorOf": _ancestor_of,
         "descendentOf": _descendent_of,
@@ -685,7 +893,18 @@ OPERATOR_FNS = MappingProxyType(
 )
 
 #: Single-operand operators, called as ``handler(operand, None)``.
-UNARY_VALUE_OPERATORS = frozenset({"string", "double", "int", "size", "timestamp"})
+UNARY_VALUE_OPERATORS = frozenset(
+    {
+        "string",
+        "double",
+        "int",
+        "size",
+        "timestamp",
+        "duration",
+        "timeSince",
+        "upperAscii",
+    }
+)
 
 #: Operators to mirror when a value comes first: `1 < R.attr.x` becomes `x > 1`. See #257.
 MIRRORED_OPERATORS: dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": "le"}
@@ -706,6 +925,8 @@ _LOWERABLE_OPERAND_TYPES = (
     IEEEConstant,
     ConditionalValue,
     Hierarchy,
+    ShiftedInstant,
+    timedelta,
     str,
     bool,
     int,
@@ -717,7 +938,36 @@ _LOWERABLE_OPERAND_TYPES = (
 )
 
 
+def _holds_collection(value: Any) -> bool:
+    if isinstance(value, ConditionalValue):
+        return _holds_collection(value.then_value) or _holds_collection(
+            value.else_value
+        )
+    return isinstance(value, (list, dict))
+
+
+#: Where a shifted timestamp or a duration may go: anywhere else it would be bound as-is.
+_TEMPORAL_OPERATORS = frozenset({"add", "sub", "eq", "ne", "lt", "le", "gt", "ge"})
+
+
 def require_lowerable(operator: str, operand: Any) -> None:
+    if (
+        isinstance(operand, (ShiftedInstant, timedelta))
+        and operator not in _TEMPORAL_OPERATORS
+    ):
+        raise UnsupportedPlanError(
+            f"`{operator}` cannot take a duration or a timestamp shifted by one: only "
+            "+, - and comparisons fold them"
+        )
+    if (
+        isinstance(operand, ConditionalValue)
+        and _holds_collection(operand)
+        and operator not in ("add", "eq", "ne")
+    ):
+        raise UnsupportedPlanError(
+            f"`{operator}` cannot take a ternary of list or map literals: only list "
+            "concatenation and equality with a literal fold it per branch"
+        )
     if not isinstance(operand, _LOWERABLE_OPERAND_TYPES):
         raise UnsupportedPlanError(
             f"`{operator}` received an operand of type "
