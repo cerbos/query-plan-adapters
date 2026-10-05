@@ -739,11 +739,13 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sign of the Infinity/)
     end
 
-    it "raises for more arithmetic on a value that may not be finite" do
+    # NaN is carried through arithmetic; an Infinity beside a column is not, since the column may
+    # hold the opposite Infinity.
+    it "raises for an Infinity carried into arithmetic beside a column" do
       expect {
         described_class.query_plan_to_relation(
           plan: conditional(expression("gt",
-            expression("add", expression("div", variable("n"), variable("n")), value(1.0)),
+            expression("add", expression("div", variable("n"), value(0.0)), variable("n")),
             value(0.0))),
           model: EdgeDocument,
           attributes: {"n" => field("n")}

@@ -13,7 +13,11 @@ module Cerbos
         private
 
         def arithmetic(operator, left, right)
-          # Arithmetic on a NaN/Infinity branch has no SQL form, so raise.
+          if %w[add sub mult].include?(operator) && (deferred_value?(left) || deferred_value?(right))
+            return deferred_arithmetic(operator, left, right)
+          end
+
+          # Any other arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
           return cel_type_error if int_beside_non_int?(operator, left, right)
 
@@ -53,6 +57,53 @@ module Cerbos
           # `aNumber * 0.1 == 0.3` would hold for 3 where CEL computes 0.30000000000000004.
           left, right = [left, right].map { |operand| exact_numeric_column?(operand) ? as_double(operand) : operand }
           record_cel_type(ArelSupport.infix(ARITHMETIC.fetch(operator), left, right), :double)
+        end
+
+        # `+`, `-` or `*` over a value that may be NaN or an Infinity. CEL carries the non-finite
+        # value through the arithmetic; SQL has none to carry. So the arithmetic moves into the
+        # branches the division left, and each branch is computed where it can be: a finite arm in
+        # SQL, a non-finite constant in Ruby with IEEE-754 (`NaN * 0.0` is NaN, `Inf + 1` is Inf),
+        # and NaN beside a double as NaN wherever that value is present (NaN absorbs every double)
+        # and UNKNOWN where it is missing. An Infinity beside a column, whose stored value might be
+        # the opposite Infinity, and two branching operands are refused. The comparison around the
+        # result resolves its branches as before.
+        def deferred_arithmetic(operator, left, right)
+          if left.is_a?(Values::ConditionalValue) && right.is_a?(Values::ConditionalValue)
+            raise UnsupportedOperatorError,
+              "#{operator} of two values that may each be NaN or Infinity is not translated"
+          end
+          if left.is_a?(Values::ConditionalValue)
+            return Values::ConditionalValue.new(
+              condition: left.condition,
+              then_value: arithmetic(operator, left.then_value, right),
+              else_value: arithmetic(operator, left.else_value, right)
+            )
+          end
+          if right.is_a?(Values::ConditionalValue)
+            return Values::ConditionalValue.new(
+              condition: right.condition,
+              then_value: arithmetic(operator, left, right.then_value),
+              else_value: arithmetic(operator, left, right.else_value)
+            )
+          end
+
+          constant, other = left.is_a?(Values::IEEEConstant) ? [left, right] : [right, left]
+          other_value = other.is_a?(Values::IEEEConstant) ? other.value : other
+          if other_value.is_a?(Numeric)
+            operands = left.is_a?(Values::IEEEConstant) ? [constant.value, other_value] : [other_value, constant.value]
+            value = operands[0].to_f.public_send(ARITHMETIC.fetch(operator), operands[1].to_f)
+            return value.finite? ? value : Values::IEEEConstant.new(value: value)
+          end
+          if constant.value.nan? && cel_double?(other)
+            # `other = other` is TRUE wherever the value is present and UNKNOWN where it is NULL,
+            # so the CASE the comparison builds is NaN or NULL, never the unreachable arm.
+            present = ArelSupport.comparison("eq", other, other)
+            return Values::ConditionalValue.new(condition: present, then_value: constant, else_value: constant)
+          end
+
+          raise UnsupportedOperatorError,
+            "#{operator} cannot take an operand that may be NaN or Infinity beside " \
+            "#{describe(other)}: only a number, or NaN beside a double, is carried"
         end
 
         def exact_numeric_column?(value)

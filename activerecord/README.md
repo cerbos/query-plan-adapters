@@ -370,7 +370,6 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | --- | --- |
 | `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
 | `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
-| `arithmetic/add/self-division-plus-constant-greater-than`, `arithmetic/add/self-division-plus-constant-not-equals` | Arithmetic on a division result that may be non-finite. SQL has no NaN or signed Infinity; a NULL would propagate where CEL propagates NaN. |
 | `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
 | `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
@@ -395,7 +394,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 26 / 26 |
 | extended | 69 / 80 |
-| adversarial | 281 / 318 |
+| adversarial | 284 / 318 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
