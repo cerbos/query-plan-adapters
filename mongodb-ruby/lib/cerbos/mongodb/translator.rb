@@ -101,8 +101,65 @@ module Cerbos
           if pairs.none?(&:nil?) && pairs.map(&:first).uniq.length == pairs.length
             return Plan::Value.new(pairs.to_h)
           end
+        when "index"
+          member = map_member(*operands)
+          return member if member
+        when *Aggregation::COMPARISONS.keys
+          truncated = sub_millisecond_comparison(operand.operator, operands)
+          return truncated if truncated
         end
         Plan::Expression.new(operand.operator, operands)
+      end
+
+      # `x["key"]` reads the same map entry as `x.key`, and raises in CEL where the key is missing
+      # just as the selection does, so it takes the mapping the mapper declares for `x.key`. Nil
+      # unless the mapper declares one, and `x` itself is unmapped or a to-one relation (a map).
+      def map_member(container, key)
+        return nil unless variable?(container) && value?(key) && string?(key.value)
+        return nil if key.value.empty? || key.value.include?(".")
+
+        member = "#{container.name}.#{key.value}"
+        return nil if @mapper.resolve_config(member).nil?
+
+        config = @mapper.lookup(container.name)
+        return nil unless config.nil? || config.relation&.type == :one
+
+        Plan::Variable.new(member)
+      end
+
+      # A timestamp compared with a timestamp literal finer than a millisecond (the planner folds
+      # now() to nanoseconds), rewritten to compare with the millisecond below it. The other side
+      # is millisecond-exact by construction: a stored date holds milliseconds, a string converts
+      # only with at most three fractional digits, and a duration is refused unless it is whole
+      # milliseconds. So with t the literal and floor(t) the millisecond below it, f < t and
+      # f <= t are f <= floor(t), f > t and f >= t are f > floor(t), f == t is never true and
+      # f != t always is, each where f evaluates at all: `==` is spelled
+      # (f <= floor(t) && f > floor(t)), which keeps f's errors. Nil for any other shape.
+      def sub_millisecond_comparison(operator, operands)
+        return nil unless operands.length == 2
+
+        literal_at = operands.index { |op| sub_millisecond_literal?(op) }
+        return nil if literal_at.nil?
+
+        other = operands[1 - literal_at]
+        return nil unless Aggregation.cel_kind(other, @mapper) == :timestamp && !sub_millisecond_literal?(other)
+        return nil if expression_with?(other, "timestamp") && value?(other.operands[0])
+
+        floor = Timestamp.sub_millisecond_floor(operands[literal_at].operands[0].value)
+        floor_literal = Plan::Expression.new("timestamp", [Plan::Value.new(floor.iso8601(3))])
+        at_most = Plan::Expression.new("le", [other, floor_literal])
+        above = Plan::Expression.new("gt", [other, floor_literal])
+        case (literal_at == 1) ? operator : MIRRORED.fetch(operator)
+        when "lt", "le" then at_most
+        when "gt", "ge" then above
+        when "eq" then Plan::Expression.new("and", [at_most, above])
+        else Plan::Expression.new("or", [at_most, above])
+        end
+      end
+
+      def sub_millisecond_literal?(operand)
+        expression_with?(operand, "timestamp") && value?(operand.operands[0]) &&
+          !Timestamp.sub_millisecond_floor(operand.operands[0].value).nil?
       end
 
       # Whether a constant is a list or a map, which a scalar field never equals.
@@ -147,12 +204,18 @@ module Cerbos
           with_logic_fallback(expression, mapper, scope, true) { translate_quantifier(operator, operands, mapper, scope) }
         when "exists_one"
           with_logic_fallback(expression, mapper, scope, true) { translate_exists_one(operands, mapper, scope, negated: false) }
-        when "filter", "map", "except"
+        when "filter", "map", "except", "intersect"
           # A list where CEL needs a boolean is a runtime type error, which denies under either
           # polarity: `filter(...)` is not `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
           raise UnsupportedError, "#{operator}() returns a list, not a boolean" if scope.collection?
 
           {"$expr" => {"$eq" => [Logic.truth(expression, mapper), true]}}
+        when "isSubset"
+          if scope.collection?
+            raise UnsupportedError, "isSubset inside a collection predicate needs $expr, which MongoDB accepts only at the top level"
+          end
+
+          Guards.with_evaluation({"$expr" => {"$eq" => [Aggregation.build_expression(expression, mapper), true]}}, [expression], mapper)
         when "lambda" then translate_lambda(operands, mapper, scope)
         when "if"
           raise UnsupportedError, "if aggregation expressions inside collection predicates are unsupported" if scope.collection?
@@ -312,6 +375,18 @@ module Cerbos
         right = operand_at(operands, 1, "#{operator} operator requires a right operand")
         both = [left, right]
 
+        # A timestamp or duration against a value of another type: no ordering overload, so an
+        # error on every document; `==` is false. The guard Aggregation declares for an ordering
+        # keeps every document out, outside any $nor a negation wraps this in.
+        if Aggregation.temporal_mismatch?(left, right, mapper)
+          if scope.collection?
+            raise UnsupportedError, "A comparison between CEL types inside a collection predicate needs $expr"
+          end
+
+          decided = !Aggregation::ORDERINGS.include?(operator) && operator == "ne"
+          return Guards.with_evaluation({"$expr" => decided}, [Plan::Expression.new(operator, both)], mapper)
+        end
+
         # A null constant asks only whether the field is stored, which a Date still says.
         if both.any? { |op| variable?(op) && mapper.value_type(op.name) == :date_time } && both.none? { |op| value?(op) && op.value.nil? }
           raise FinalUnsupportedError,
@@ -326,9 +401,6 @@ module Cerbos
         if composite && expression?(other)
           raise UnsupportedError, "An ordering against a list or map constant inside an expression is unsupported"
         end
-
-        truncated = sub_millisecond_timestamp_comparison(operator, left, right, mapper, scope)
-        return truncated if truncated
 
         # Either operand an expression, or two fields: compare inside $expr.
         if expression?(left) || expression?(right) || (variable?(left) && variable?(right))
@@ -423,6 +495,11 @@ module Cerbos
 
           return projected_list(relation, relation.field, mapper)
         end
+        # A list the plan computes (a concatenation, intersect(), except(), a ternary between
+        # lists): its value, null where CEL raises, which the caller's evaluation guards keep out.
+        if Aggregation.list_typed?(operand) && %w[add intersect except if list].include?(operand.operator)
+          return [Aggregation.build(operand, mapper), nil]
+        end
         unless expression_with?(operand, "map") && operand.operands.length == 2
           raise UnsupportedError, "Whole-list comparison needs a field, a relation projection or a map() over a relation"
         end
@@ -457,31 +534,6 @@ module Cerbos
 
         path = config&.field || field
         [{"$map" => {"input" => "$#{relation.name}", "in" => "$$this.#{path}"}}, {relation.name => {"$type" => "array"}}]
-      end
-
-      # timestamp(field) compared with a timestamp literal finer than a millisecond (the planner
-      # folds now() to nanoseconds). The field side is millisecond-exact by construction: a
-      # stored date holds milliseconds, and a string converts only with at most three fractional
-      # digits. So with t the literal and floor(t) the millisecond below it, f < t and f <= t are
-      # f <= floor(t), f > t and f >= t are f > floor(t), f == t never holds and f != t always
-      # does, each where the field evaluates at all. Nil when the comparison is not that shape.
-      def sub_millisecond_timestamp_comparison(operator, left, right, mapper, scope)
-        literal = [left, right].find { |op| expression_with?(op, "timestamp") && value?(op.operands[0]) }
-        field = [left, right].find { |op| expression_with?(op, "timestamp") && !value?(op.operands[0]) }
-        return nil unless literal && field
-
-        floor = Timestamp.sub_millisecond_floor(literal.operands[0].value)
-        return nil if floor.nil?
-        raise UnsupportedError, "timestamp comparisons inside collection predicates are unsupported" if scope.collection?
-
-        effective = field.equal?(left) ? operator : MIRRORED.fetch(operator)
-        instant = Aggregation.build(field, mapper)
-        compared = case effective
-        when "lt", "le" then {"$lte" => [instant, floor]}
-        when "gt", "ge" then {"$gt" => [instant, floor]}
-        else effective == "ne"
-        end
-        Guards.with_evaluation({"$expr" => compared}, [field], mapper)
       end
 
       # False when CEL cannot order +reference+ against +constant+: the constant is not a number,
@@ -674,6 +726,9 @@ module Cerbos
         collection, lambda = operands
         raise UnsupportedError, "Invalid operands for collection operation" unless variable?(collection) && expression?(lambda)
         raise UnsupportedError, "Second operand must be a lambda expression" unless lambda.operator == "lambda"
+        # A two-variable macro binds a position (or a map key) beside each element, which
+        # $elemMatch cannot see; the three-valued evaluation (Logic) iterates the positions.
+        raise UnsupportedError, "A two-variable #{operator}() has no element-match form" unless lambda.operands.length == 2
 
         condition = operand_at(lambda.operands, 0, "Lambda operand requires a condition")
         variable = operand_at(lambda.operands, 1, "Lambda operand requires a variable")

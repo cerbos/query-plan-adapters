@@ -17,6 +17,10 @@
       "status": "unsupported",
       "reason": "Same key iteration over a to-one relation as `collection/exists/map-keys`, under negation."
     },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable exists() over `obj`, a map: CEL binds each KEY and its value, and the keys are the attribute names the application sends, which no stored document carries (the mapping places `obj.inner` on the aString field, and a mapper entry may rename any key). A two-variable macro is iterated, by position, only over a reference the mapper declares a list or relation."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a to-one relation tests the related map's KEYS, the attribute names the application sends, which the stored subdocument does not carry (see `collection/exists/map-keys`: renamed fields, stored nulls CEL never sees, nested relations mapped separately)."

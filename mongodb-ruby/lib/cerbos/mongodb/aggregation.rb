@@ -35,8 +35,13 @@ module Cerbos
       # Guarded by "the expression is not null": each evaluates to null exactly where CEL raises.
       NOT_NULL_GUARDED = %w[
         string double int size contains startsWith endsWith add sub mult div mod in except
-        hierarchy ancestorOf descendentOf overlaps hasIntersection map
+        hierarchy ancestorOf descendentOf overlaps hasIntersection map intersect isSubset
+        upperAscii timeSince
       ].freeze
+
+      # The comparisons that are orderings: an ordering between two types is an error to CEL,
+      # where `==` between two types is false (heterogeneous equality).
+      ORDERINGS = %w[lt le gt ge].freeze
 
       module_function
 
@@ -111,7 +116,15 @@ module Cerbos
         operator = expression.operator
         operands = expression.operands
         return {VARIADIC.fetch(operator) => operands.map { |op| build(op, mapper) }} if VARIADIC.key?(operator)
-        return compare(operator, *operands.map { |op| build(op, mapper) }) if COMPARISONS.key?(operator)
+        if COMPARISONS.key?(operator)
+          # A timestamp or duration against a value of another CEL type: an ordering is an error
+          # (null), and `==` is decided without reading either side.
+          if temporal_mismatch?(*operands, mapper)
+            return ORDERINGS.include?(operator) ? nil : operator == "ne"
+          end
+
+          return compare(operator, *operands.map { |op| build(op, mapper) })
+        end
 
         case operator
         when "add" then build_add(operands, mapper)
@@ -123,7 +136,12 @@ module Cerbos
         when "in" then build_in(operands, mapper)
         when "filter" then Logic.filter_value(expression, mapper)
         when "except" then build_except(operands, mapper)
+        when "intersect" then build_intersect(operands, mapper)
+        when "isSubset" then build_is_subset(operands, mapper)
         when "hasIntersection" then build_has_intersection(operands, mapper)
+        when "upperAscii" then build_upper_ascii(operands, mapper)
+        when "duration" then build_duration(operands)
+        when "timeSince" then build_time_since(operands, mapper)
         when "map" then Logic.map_value(expression, mapper)
         when "hierarchy" then build_hierarchy(operands, mapper)
         when "ancestorOf" then hierarchy_prefix(operands.map { |op| build(op, mapper) }, :ancestor)
@@ -133,6 +151,8 @@ module Cerbos
         when "double" then build_double(operands, mapper)
         when "if" then build_if(operands, mapper)
         when "index"
+          return build_map_lookup(operands, mapper) if map_literal_index?(operands)
+
           collection, index = constant_index(operands)
           # A negative or fractional position is an error on every document; its guard (below)
           # keeps every document out, so the value the expression stands for is never read.
@@ -194,6 +214,11 @@ module Cerbos
       def guard_for(expression, mapper)
         operator = expression.operator
         operands = expression.operands
+        if COMPARISONS.key?(operator) && temporal_mismatch?(*operands, mapper)
+          # No overload: an ordering raises on every document. `==` is false and needs no guard.
+          return ORDERINGS.include?(operator) ? {"$expr" => false} : nil
+        end
+
         case operator
         when *NOT_NULL_GUARDED then not_null_guard(expression, mapper)
         when "lt", "le", "gt", "ge"
@@ -207,6 +232,9 @@ module Cerbos
           # A literal is validated at translation time; only a field can fail per document.
           (operands[0] && !value?(operands[0])) ? not_null_guard(expression, mapper) : nil
         when "index"
+          # A key the map literal does not hold is an error to CEL, and null here.
+          return not_null_guard(expression, mapper) if map_literal_index?(operands)
+
           # An out-of-range index is an error to CEL, not a missing value.
           collection_operand, index = constant_index(operands)
           # CEL raises for a negative or fractional list position whatever the document holds.
@@ -214,8 +242,8 @@ module Cerbos
 
           collection = build(collection_operand, mapper)
           {"$expr" => {"$cond" => {
-            "if" => {"$isArray" => collection},
-            "then" => {"$gt" => [{"$size" => collection}, index]},
+            "if" => {"$isArray" => [collection]},
+            "then" => {"$gt" => [{"$size" => [collection]}, index]},
             "else" => false
           }}}
         when "matches"
@@ -243,6 +271,14 @@ module Cerbos
           # $concat raises on anything but a string, where CEL has no overload: null instead.
           return with_operands(operands, mapper) { |values|
             {"$cond" => [{"$and" => values.map { |value| {"$eq" => [{"$type" => value}, "string"]} }}, {"$concat" => values}, nil]}
+          }
+        end
+        return build_temporal_arithmetic("add", operands, mapper) if operands.any? { |op| temporal?(op, mapper) }
+        # A list operand settles the overload the same way: every operand is a list, and `+`
+        # concatenates them in order. A non-list operand is an error to CEL, and null here.
+        if operands.any? { |op| list_typed?(op) }
+          return with_operands(operands, mapper) { |values|
+            {"$cond" => [{"$and" => values.map { |value| {"$isArray" => value} }}, {"$concatArrays" => values}, nil]}
           }
         end
 
@@ -325,21 +361,228 @@ module Cerbos
         left, right = operands
         raise InvalidPlanError, "except requires two operands" unless left && right
 
+        scalar_lists(left, right, mapper) {
+          {"$filter" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "cond" => {"$or" => [
+            {"$eq" => ["$$cerbos_item", Float::NAN]},
+            {"$not" => [{"$in" => ["$$cerbos_item", "$$cerbos_right"]}]}
+          ]}}}
+        }
+      end
+
+      # Cerbos's `intersect(a, b)`: Cerbos walks the shorter list (the first on a tie) and keeps,
+      # in order and with its repeats, each element the other list contains, so
+      # `intersect(["x", "x"], ["x", "y", "z"])` is ["x", "x"] and the reverse is ["x"]. Null (a
+      # CEL error) where either is not a list, and for a list or map element, as for except().
+      def build_intersect(operands, mapper)
+        left, right = operands
+        raise InvalidPlanError, "intersect requires two operands" unless left && right
+
+        scalar_lists(left, right, mapper) {
+          {"$let" => {
+            "vars" => {"cerbos_swap" => {"$gt" => [{"$size" => "$$cerbos_left"}, {"$size" => "$$cerbos_right"}]}},
+            "in" => {"$filter" => {
+              "input" => {"$cond" => ["$$cerbos_swap", "$$cerbos_right", "$$cerbos_left"]},
+              "as" => "cerbos_item",
+              "cond" => {"$and" => [
+                {"$ne" => ["$$cerbos_item", Float::NAN]},
+                {"$in" => ["$$cerbos_item", {"$cond" => ["$$cerbos_swap", "$$cerbos_left", "$$cerbos_right"]}]}
+              ]}
+            }}
+          }}
+        }
+      end
+
+      # Cerbos's `a.isSubset(b)`: every element of +a+ is one +b+ contains, which an empty +a+
+      # vacuously is and NaN never is. Null where either is not a list of scalars.
+      def build_is_subset(operands, mapper)
+        left, right = operands
+        raise InvalidPlanError, "isSubset requires two operands" unless left && right
+
+        scalar_lists(left, right, mapper) {
+          {"$allElementsTrue" => [{"$map" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "in" => {"$and" => [
+            {"$ne" => ["$$cerbos_item", Float::NAN]},
+            {"$in" => ["$$cerbos_item", "$$cerbos_right"]}
+          ]}}}]}
+        }
+      end
+
+      # Binds +left+ and +right+ to $$cerbos_left and $$cerbos_right, and evaluates the block's
+      # expression where both are lists of scalars; null (a CEL error) where either is not a list.
+      # A list or map element makes the whole value null too, since MongoDB compares embedded
+      # documents in stored field order where CEL's maps ignore it (which denies where CEL might
+      # allow).
+      def scalar_lists(left, right, mapper)
         scalars = ->(list) { {"$allElementsTrue" => [{"$map" => {"input" => list, "in" => {"$not" => [{"$in" => [{"$type" => "$$this"}, %w[object array]]}]}}}]} }
         {"$let" => {
           "vars" => {"cerbos_left" => build(left, mapper), "cerbos_right" => build(right, mapper)},
           "in" => {"$cond" => [
             {"$and" => [{"$isArray" => "$$cerbos_left"}, {"$isArray" => "$$cerbos_right"}]},
-            {"$cond" => [
-              {"$and" => [scalars.call("$$cerbos_left"), scalars.call("$$cerbos_right")]},
-              {"$filter" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "cond" => {"$or" => [
-                {"$eq" => ["$$cerbos_item", Float::NAN]},
-                {"$not" => [{"$in" => ["$$cerbos_item", "$$cerbos_right"]}]}
-              ]}}},
-              nil
-            ]},
+            {"$cond" => [{"$and" => [scalars.call("$$cerbos_left"), scalars.call("$$cerbos_right")]}, yield, nil]},
             nil
           ]}
+        }}
+      end
+
+      # CEL's upperAscii() folds a-z only and leaves every other character as it is, which is what
+      # $toUpper does to a string. $toUpper also turns a null into "" and a number into its
+      # digits, where CEL has no overload: anything but a string is null here.
+      def build_upper_ascii(operands, mapper)
+        input = build(operand_at(operands, 0, "upperAscii requires an operand"), mapper)
+        {"$let" => {
+          "vars" => {"cerbos_input" => input},
+          "in" => {"$cond" => [{"$eq" => [{"$type" => "$$cerbos_input"}, "string"]}, {"$toUpper" => "$$cerbos_input"}, nil]}
+        }}
+      end
+
+      # A duration is carried as its length in milliseconds, the unit $add and $subtract apply to a
+      # date and the one the difference of two dates is in. A duration finer than a millisecond
+      # has no exact spelling, and is refused as a sub-millisecond timestamp literal is.
+      def build_duration(operands)
+        operand = operand_at(operands, 0, "duration requires an operand")
+        raise UnsupportedError, "duration() is translated only over a constant string" unless value?(operand) && string?(operand.value)
+
+        Timestamp.duration_milliseconds(operand.value) or raise UnsupportedError,
+          "duration #{operand.value.inspect} is not a millisecond-exact duration in CEL's range: a BSON " \
+          "date carries milliseconds, so a finer duration has no exact spelling"
+      end
+
+      # timeSince() is relative to the clock of whoever evaluates it, so it is read from the
+      # server's own $$NOW at query time, in milliseconds like every duration here.
+      def build_time_since(operands, mapper)
+        operand = operand_at(operands, 0, "timeSince requires an operand")
+        unless cel_kind(operand, mapper) == :timestamp
+          raise UnsupportedError, "timeSince() is translated only over a timestamp"
+        end
+
+        {"$let" => {
+          "vars" => {"cerbos_instant" => build(operand, mapper)},
+          "in" => {"$cond" => [
+            {"$eq" => [{"$type" => "$$cerbos_instant"}, "date"]},
+            {"$subtract" => ["$$NOW", "$$cerbos_instant"]},
+            nil
+          ]}
+        }}
+      end
+
+      # timestamp ± duration, timestamp - timestamp and duration ± duration, with a timestamp as a
+      # BSON date and a duration as its milliseconds. A timestamp computed outside CEL's range is
+      # an error to CEL, and null here. CEL has no other overload of `+` or `-` on these types.
+      def build_temporal_arithmetic(operator, operands, mapper)
+        kinds = operands.map { |op| cel_kind(op, mapper) }
+        result = temporal_result(operator, kinds)
+        if result.nil?
+          raise UnsupportedError,
+            "#{operator} over #{kinds.map { |kind| kind || "an untyped operand" }.join(" and ")}: CEL's " \
+            "only temporal overloads are timestamp ± duration, timestamp - timestamp and duration ± duration"
+        end
+
+        with_operands(operands, mapper) { |values|
+          typed = values.zip(kinds).map { |value, kind|
+            (kind == :timestamp) ? {"$eq" => [{"$type" => value}, "date"]} : {"$isNumber" => value}
+          }
+          computed = {ARITHMETIC.fetch(operator) => values}
+          if result == :timestamp
+            computed = {"$let" => {
+              "vars" => {"cerbos_instant" => computed},
+              "in" => {"$cond" => [
+                {"$and" => [{"$gte" => ["$$cerbos_instant", Timestamp::MIN]}, {"$lte" => ["$$cerbos_instant", Timestamp::MAX]}]},
+                "$$cerbos_instant",
+                nil
+              ]}
+            }}
+          end
+          {"$cond" => [{"$and" => typed}, computed, nil]}
+        }
+      end
+
+      # The CEL type of a temporal `+` or `-`, or nil where CEL has no such overload.
+      def temporal_result(operator, kinds)
+        case [operator, *kinds]
+        when ["add", :timestamp, :duration], ["add", :duration, :timestamp], ["sub", :timestamp, :duration] then :timestamp
+        when ["sub", :timestamp, :timestamp], ["add", :duration, :duration], ["sub", :duration, :duration] then :duration
+        end
+      end
+
+      # The CEL type +operand+ evaluates to, as far as the plan and the mapper settle it: a
+      # constant's own, a field's declared value_type (a :date_time field is the string the
+      # application sends), and the result type of an operator that has one. Nil where the plan
+      # does not say.
+      def cel_kind(operand, mapper)
+        if value?(operand)
+          value = operand.value
+          return :string if string?(value)
+          return :bool if boolean?(value)
+
+          return number?(value) ? :number : nil
+        end
+        if variable?(operand)
+          return {string: :string, date_time: :string, number: :number, boolean: :bool}[mapper.value_type(operand.name)]
+        end
+        return nil unless expression?(operand)
+
+        case operand.operator
+        when "timestamp" then :timestamp
+        when "duration", "timeSince" then :duration
+        when "add", "sub" then temporal_result(operand.operator, operand.operands.map { |op| cel_kind(op, mapper) })
+        when "upperAscii", "string" then :string
+        when "int", "double", "size" then :number
+        end
+      end
+
+      def temporal?(operand, mapper) = %i[timestamp duration].include?(cel_kind(operand, mapper))
+
+      # Whether a comparison sets a timestamp or a duration against a value of another known CEL
+      # type. An ordering between them has no overload, which raises; `==` between them is false.
+      # MongoDB would instead order a date against a string by BSON type, and a duration (a
+      # number of milliseconds) against any number.
+      def temporal_mismatch?(left, right, mapper)
+        return false if left.nil? || right.nil?
+
+        kinds = [cel_kind(left, mapper), cel_kind(right, mapper)]
+        return false if kinds.include?(nil) || kinds.uniq.length == 1
+
+        kinds.any? { |kind| %i[timestamp duration].include?(kind) }
+      end
+
+      # Whether +operand+ is a list the plan settles as one: a list constant or constructor, a
+      # ternary whose branches are both lists, a `+` with a list operand, or a list function.
+      def list_typed?(operand)
+        return operand.value.is_a?(Array) if value?(operand)
+        return false unless expression?(operand)
+
+        case operand.operator
+        when "list", "intersect", "except", "filter", "map" then true
+        when "add" then operand.operands.any? { |op| list_typed?(op) }
+        when "if" then operand.operands.length == 3 && operand.operands.drop(1).all? { |op| list_typed?(op) }
+        else false
+        end
+      end
+
+      def map_literal_index?(operands)
+        collection, key = operands
+        value?(collection) && collection.value.is_a?(Hash) && !key.nil?
+      end
+
+      # A map literal indexed by a key the document supplies (`{"a": "X"}[R.attr.k]`): the value
+      # under that key, or null, CEL's no-such-key error, where the map holds none. A key of
+      # another type than string is never one of the map's keys. Only a map of scalars other than
+      # null and NaN is read this way: a null value could not be told from the error.
+      def build_map_lookup(operands, mapper)
+        map, key = operands
+        entries = map.value
+        unless entries.values.all? { |value| !value.nil? && !value.is_a?(Hash) && comparable_element?(value) }
+          raise UnsupportedError,
+            "A map literal is indexed only when every value is a scalar other than null and NaN: a " \
+            "null value reads as the missing key's error"
+        end
+        return nil if entries.empty?
+
+        {"$let" => {
+          "vars" => {"cerbos_key" => build(key, mapper)},
+          "in" => {"$switch" => {
+            "branches" => entries.map { |name, value| {"case" => {"$eq" => ["$$cerbos_key", constant(name)]}, "then" => constant(value)} },
+            "default" => nil
+          }}
         }}
       end
 
@@ -447,6 +690,7 @@ module Cerbos
       #
       # Arithmetic over a CEL int is int arithmetic instead (build_int_arithmetic).
       def build_arithmetic(operator, operands, mapper)
+        return build_temporal_arithmetic(operator, operands, mapper) if operands.any? { |op| temporal?(op, mapper) }
         return build_int_arithmetic(operator, operands, mapper) if operands.any? { |op| int_typed?(op) }
 
         with_operands(operands, mapper) { |values|

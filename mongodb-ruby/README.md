@@ -187,35 +187,39 @@ Anything else raises `Cerbos::MongoDB::UnsupportedError`. Every error is a `Cerb
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 41 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
+queries over the corpus's 42 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
 and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
 current PDP, 0.55.0, identical on both servers and through both, where the total is every golden
 case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 76 / 80 |
-| adversarial | 298 / 308 |
+| core | 29 / 29 |
+| extended | 93 / 97 |
+| adversarial | 325 / 338 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases and three adversarial cases.
+pass them. On 0.55.0 that is four extended cases and five adversarial cases.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true, while `checkResource` receives the
 omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`.
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
 drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
-and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads
+and denies every row; write `1.0`. `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`: the planner rewrites `in` over a scalar container to
+`==`, where `check()` has no such overload and denies
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). Three `composition/*` cases whose DENY condition reads
 `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while `checkResource` treats the
 erroring deny rule as not matching and allows the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with a `Cerbos::MongoDB::Error`;
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is macros and `in` over a to-one relation (CEL iterates a map's keys), `string()`
+The refused set is macros and `in` over a to-one relation, and a two-variable macro over a map (CEL
+iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
 carry, a bare comparison of a
-date field with anything but null (a stored date has lost the string CEL compares), a regular expression using a case-insensitive non-ASCII character, a
+date field with a string or another field (a stored date has lost the string CEL compares), a regular expression using a case-insensitive non-ASCII character, a
 group flag or named group, `\p`/`\Q` and other escapes RE2 has and PCRE2 reads otherwise, or a counted
 repetition nested in another, and a comparison with
 a map constant or with a list holding a list, a map or NaN (MongoDB compares embedded documents in
@@ -245,7 +249,15 @@ the first list the second does not contain, repeats included (null where either 
 map); a hierarchy the filter cannot compare with a literal prefix (a field on both sides, a path
 built with `list()`, an empty separator, which splits into code points as Go's `strings.Split` does)
 is compared as an array of segments; `map()` projects each element and raises if any projection does, and
-`hasIntersection` against a list holding a one-key map constant compares it as a value; and exists_one()
+`hasIntersection` against a list holding a one-key map constant compares it as a value; `intersect()`
+walks the shorter list as Cerbos does, keeping its repeats, and `isSubset()` tests every element; `+`
+with a list operand concatenates; a map literal indexed by an attribute reads the value under that
+key (a missing key is an error), and `x["key"]` takes the mapping of `x.key`; `exists()`, `all()`
+and `exists_one()` range over a list built from attributes, and over a mapped list by position with
+two variables; `upperAscii()` is `$toUpper` on a string; a duration is its milliseconds, `timeSince()`
+reads the server's `$$NOW`, and a timestamp ± a duration outside CEL's range is an error; a timestamp
+or a duration against a value of another type is false under `==` and an error under an ordering;
+and exists_one()
 over a literal list of up to 32 elements expands to "this one and no other". A `matches()`
 pattern is parsed as RE2 and written as the PCRE2 pattern that matches the same strings: `$` as
 `\z`, `.` as `[^\n]`, `\s` as RE2's `[\t\n\f\r ]` (PCRE2's also holds the vertical tab), a POSIX
@@ -279,7 +291,10 @@ No suite starts a PDP.
 
 - `spec/conformance_spec.rb` is the conformance harness. It replays every golden plan for both
   pinned PDPs against a real MongoDB server (`MONGO_IMAGE`, or `MONGO_NEXT_IMAGE`), through the
-  driver and through Mongoid, and compares the ids with the recorded `check()` decisions.
+  driver and through Mongoid, and compares the ids with the recorded `check()` decisions. Each
+  plan is fetched through the Cerbos Ruby SDK's client from an in-process stub PDP
+  (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter reads the SDK's
+  output types.
   `scripts/test.sh` starts the server in Docker, pinned by tag and digest, on a port Docker chooses.
 - `spec/mongoid_spec.rb` asserts, offline, that the Mongoid criteria's selector is the emitted
   filter for every corpus case, and that a bare `where` is not.

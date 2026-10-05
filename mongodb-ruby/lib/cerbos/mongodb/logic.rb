@@ -42,9 +42,9 @@ module Cerbos
         when "exists", "all", "exists_one" then macro(node, mapper, bound)
         when "if" then ternary(node, mapper, bound)
         when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in",
-          "ancestorOf", "descendentOf", "overlaps", "hasIntersection"
+          "ancestorOf", "descendentOf", "overlaps", "hasIntersection", "isSubset"
           leaf(node, mapper, bound)
-        when "filter", "map", "except", "list", "struct"
+        when "filter", "map", "except", "intersect", "list", "struct"
           # A list or map where CEL needs a boolean is a runtime type error.
           nil
         else
@@ -86,6 +86,12 @@ module Cerbos
 
       # A comparison or string predicate: its value where every operand evaluates, else null.
       def leaf(node, mapper, bound)
+        if Aggregation::COMPARISONS.key?(node.operator) && Aggregation.temporal_mismatch?(*node.operands, mapper)
+          # No ordering between the two types (an error on every document); `==` is false.
+          return nil if Aggregation::ORDERINGS.include?(node.operator)
+
+          return guarded(evaluates(node, mapper, bound), node.operator == "ne")
+        end
         if Aggregation::COMPARISONS.key?(node.operator) &&
             node.operands.any? { |op| variable?(op) && mapper.value_type(op.name) == :date_time } &&
             node.operands.none? { |op| value?(op) && op.value.nil? }
@@ -189,6 +195,8 @@ module Cerbos
           raise UnsupportedError, "#{node.operator} requires a collection and a single-variable lambda"
         end
 
+        return two_variable_macro(node, mapper, bound) if lambda.operands.length == 3
+
         variable = lambda.operands[1].name
         input, list_ok, scoped = element_scope(collection, variable, mapper, bound)
         values = {"$map" => {
@@ -196,7 +204,43 @@ module Cerbos
           "as" => "#{BINDING_PREFIX}#{variable}",
           "in" => truth(lambda.operands[0], scoped, bound + [variable])
         }}
-        folded = case node.operator
+        guarded(list_ok, fold_macro(node.operator, values))
+      end
+
+      # exists(i, e, ...), all(i, e, ...) and exists_one(i, e, ...) over a list: CEL binds the
+      # first variable to each position and the second to the element there. Over a map CEL binds
+      # a key and its value instead, and the keys of a to-one relation are attribute names the
+      # stored subdocument does not carry (see element_scope), so only a reference the mapper
+      # declares as a list, or a list the plan builds, is iterated.
+      def two_variable_macro(node, mapper, bound)
+        collection, lambda = node.operands
+        body, index_variable, element_variable = lambda.operands
+        raise UnsupportedError, "#{node.operator} requires named iteration variables" unless variable?(element_variable)
+        if variable?(collection) && mapper.lookup(collection.name).nil? && mapper.relation_of(collection.name).nil?
+          raise UnsupportedError,
+            "A two-variable #{node.operator}() over #{collection.name}, which the mapper declares neither " \
+            "a field nor a relation: over a map CEL ranges over its keys and values, which a stored " \
+            "document does not carry as the application sends them"
+        end
+
+        index = index_variable.name
+        element = element_variable.name
+        input, list_ok, scoped = element_scope(collection, element, mapper, bound)
+        scoped = element_mapper(scoped, index, "$#{BINDING_PREFIX}#{index}", nil)
+        values = {"$map" => {
+          "input" => {"$range" => [0, {"$size" => [input]}]},
+          "as" => "#{BINDING_PREFIX}#{index}",
+          "in" => {"$let" => {
+            "vars" => {"#{BINDING_PREFIX}#{element}" => {"$arrayElemAt" => [input, "$$#{BINDING_PREFIX}#{index}"]}},
+            "in" => truth(body, scoped, bound + [element, index])
+          }}
+        }}
+        guarded(list_ok, fold_macro(node.operator, values))
+      end
+
+      # The elements' truths, folded as CEL folds them for +operator+.
+      def fold_macro(operator, values)
+        folded = case operator
         when "exists"
           {"$cond" => [{"$in" => [true, "$$cerbos_values"]}, true, {"$cond" => [{"$in" => [nil, "$$cerbos_values"]}, nil, false]}]}
         when "all"
@@ -208,7 +252,7 @@ module Cerbos
             {"$eq" => [{"$size" => {"$filter" => {"input" => "$$cerbos_values", "cond" => {"$eq" => ["$$this", true]}}}}, 1]}
           ]}
         end
-        guarded(list_ok, {"$let" => {"vars" => {"cerbos_values" => values}, "in" => folded}})
+        {"$let" => {"vars" => {"cerbos_values" => values}, "in" => folded}}
       end
 
       # filter(): the elements whose condition is true, or null (a CEL error) where the list is
@@ -262,6 +306,12 @@ module Cerbos
           input = Aggregation.constant(collection.value)
           return [input, true, element_mapper(mapper, variable, binding, nil)]
         end
+        # A list the plan builds from attributes (`[R.attr.a, R.attr.b].exists(...)`, a
+        # concatenation): it errors where any part of it does.
+        if expression?(collection) && Aggregation.list_typed?(collection)
+          input = Aggregation.build(collection, mapper)
+          return [input, ok([evaluates(collection, mapper, bound), {"$isArray" => [input]}]), element_mapper(mapper, variable, binding, nil)]
+        end
         raise UnsupportedError, "A macro's collection must be a field or a list" unless variable?(collection)
 
         relation = mapper.lookup(collection.name)&.relation
@@ -276,7 +326,7 @@ module Cerbos
         else
           Aggregation.build(collection, mapper)
         end
-        list_ok = ok(variable_oks([collection.name], mapper, bound) + [{"$isArray" => input}])
+        list_ok = ok(variable_oks([collection.name], mapper, bound) + [{"$isArray" => [input]}])
         [input, list_ok, element_mapper(mapper, variable, binding, relation)]
       end
 
