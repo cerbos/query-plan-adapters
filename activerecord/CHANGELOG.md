@@ -89,6 +89,10 @@
 
   `a in [b]` added a both-NULL branch from the call's convention, never either column's declaration, and wrapped an `:explicit` needle in an `IS NOT NULL` guard meant for a list of constants. So two `:explicit` NULLs did not match, `!(a in [b])` returned that row and missed a value beside a NULL, and two `:omitted` NULLs matched under the call's default `:explicit`. A NULL `:omitted` column now makes the whole membership UNKNOWN, so `a in [b, 2]` no longer grants `a = 2` when `b` is missing.
 
+- `value in R.attr.<relation>` compares an `:explicit` value against the related rows' member column under that declaration, whatever the call's `null_attribute_representation` says ([#591](https://github.com/cerbos/query-plan-adapters/issues/591))
+
+  The both-NULL branch came from the call's convention, so under a call-level `:omitted` a NULL `:explicit` value never matched a NULL member, and `!(value in R.attr.<relation>)` returned that row though the PDP denies it.
+
 ### Removed
 
 - Support for Ruby 3.2 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))

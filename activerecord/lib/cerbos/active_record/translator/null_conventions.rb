@@ -184,14 +184,11 @@ module Cerbos
           ArelSupport.and_node([ArelSupport.comparison("ne", needle, nil), plain])
         end
 
-        # Column-to-column equality for `value in R.attr.<relation>`. Under `:explicit`, two
-        # NULLs are equal in CEL, so add that case. Under `:omitted`, CEL denies the row, and
-        # plain equality (UNKNOWN) already keeps it out.
-        def null_equality(left, right)
-          equal = ArelSupport.comparison("eq", left, right)
-          return equal if null_attribute_representation == :omitted
-
-          ArelSupport.or_node([equal, both_null(left, right)])
+        # Equality between two operands that each reach CEL as a null value when NULL, such as an
+        # `:explicit` value against a relation's stored member. Two NULLs are equal in CEL. The
+        # value's declaration decides this, never the call's convention (#591).
+        def explicit_null_equality(left, right)
+          ArelSupport.or_node([ArelSupport.comparison("eq", left, right), both_null(left, right)])
         end
 
         # `left IS NULL AND right IS NULL`: two explicit nulls are equal in CEL.
