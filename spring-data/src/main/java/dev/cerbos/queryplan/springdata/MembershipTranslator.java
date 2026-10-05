@@ -12,6 +12,8 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 
+import com.google.protobuf.Value;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -48,6 +50,10 @@ final class MembershipTranslator {
     Predicate handleIn(List<Operand> rawOperands, Scope scope) {
         if (rawOperands.size() != 2) {
             throw Refusals.malformed("in requires exactly 2 operands");
+        }
+        if (rawOperands.get(0).getNodeCase() == Operand.NodeCase.VALUE
+                && rawOperands.get(1).getNodeCase() == Operand.NodeCase.VALUE) {
+            return constantIn(rawOperands.get(0).getValue(), rawOperands.get(1).getValue());
         }
         // After normalization the mapping kind (Relation or Field), not the operand order,
         // decides between collection membership and a scalar IN.
@@ -99,6 +105,32 @@ final class MembershipTranslator {
             // The eq leaf decides a type mismatch as CEL's false instead of asking the database.
             return leaf.defaultLeaf("eq", path, val);
         });
+    }
+
+    /**
+     * {@code value in list} or {@code value in map} over two constants, which a ternary
+     * substitution leaves behind ({@code "r" in (c ? ["r"] : [])}): CEL list membership is
+     * element equality, numbers compared by value, and map membership is a key test.
+     */
+    private Predicate constantIn(Value needle, Value collection) {
+        Object member = PlanValues.protoValueToJava(needle);
+        boolean holds = switch (collection.getKindCase()) {
+            case LIST_VALUE -> collection.getListValue().getValuesList().stream()
+                    .map(PlanValues::protoValueToJava)
+                    .anyMatch(element -> celEquals(member, element));
+            case STRUCT_VALUE -> member instanceof String key
+                    && collection.getStructValue().containsFields(key);
+            // CEL has no `in` over a scalar, so the planner cannot emit this.
+            default -> throw Refusals.malformed(
+                    "in requires a list or map, got " + collection.getKindCase());
+        };
+        return holds ? cb.conjunction() : cb.disjunction();
+    }
+
+    private static boolean celEquals(Object left, Object right) {
+        return left instanceof Number l && right instanceof Number r
+                ? l.doubleValue() == r.doubleValue()
+                : Objects.equals(left, right);
     }
 
     /**

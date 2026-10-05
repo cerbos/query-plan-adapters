@@ -62,10 +62,26 @@ func record(ctx context.Context, p *pdp, tag string, corpus *Corpus, ds *Dataset
 	return goldens, nil
 }
 
+// planRepeats is how many times each case is planned. A golden must be the same on every run, and
+// a PDP that builds part of a plan from a Go map (a struct's set-field order, before
+// sortStructFields) changes it from one request to the next: replanning catches the next such
+// source here, rather than as a flaky -check in CI.
+const planRepeats = 3
+
 func recordCase(ctx context.Context, p *pdp, tag string, c *Case, ds *Dataset) (*Golden, error) {
 	pr, err := p.plan(ctx, ds.Principal, c.ID)
 	if err != nil {
 		return nil, err
+	}
+	for range planRepeats - 1 {
+		again, err := p.plan(ctx, ds.Principal, c.ID)
+		if err != nil {
+			return nil, err
+		}
+		if again.Error != pr.Error || !reflect.DeepEqual(again.Filter, pr.Filter) {
+			return nil, fmt.Errorf("two different plans for one request, so the golden would change on every run; normalise the varying part in the generator (see sortStructFields)\n  %s\n  %s",
+				compactJSON(pr.Filter), compactJSON(again.Filter))
+		}
 	}
 	allowed, err := p.check(ctx, ds, c.ID)
 	if err != nil {

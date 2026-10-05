@@ -1,0 +1,102 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "composition/derived-role/runtime-effective-derived-roles",
+  "intent": "A condition reading runtime.effectiveDerivedRoles while the derived role is conditional, so the planner inlines a ternary yielding role lists.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "compose_flagged"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "value": true
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "value": [
+                          "compose_flagged"
+                        ]
+                      },
+                      {
+                        "value": []
+                      }
+                    ],
+                    "operator": "if"
+                  }
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 10
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "composition/derived-role/runtime-effective-derived-roles",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"compose_flagged\" in runtime.effectiveDerivedRoles && R.attr.aNumber < 10"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The membership target is a conditional list; an adapter must express the ternary or throw, and the derived role's aBool condition must survive."
+}

@@ -30,15 +30,22 @@ import { MAPPER, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
 const CURRENT = pdpTags()[0]!;
 const golden = (id: string) => readGolden(CURRENT, id);
 
-function translate(
-  id: string,
-  options: {
-    mapper?: Mapper;
-    nullAttributeRepresentation?: NullAttributeRepresentation;
-  } = {},
+/** The current PDP's recorded plan for a corpus case, as `@cerbos/http` returns it. */
+function planFor(id: string, now?: string): Promise<PlanResourcesResponse> {
+  return planOf(golden(id), now);
+}
+
+interface TranslateOptions {
+  mapper?: Mapper;
+  nullAttributeRepresentation?: NullAttributeRepresentation;
+}
+
+function translatePlan(
+  queryPlan: PlanResourcesResponse,
+  options: TranslateOptions = {},
 ): QueryPlanToMongooseResult {
   return queryPlanToMongoose({
-    queryPlan: planOf(golden(id)),
+    queryPlan,
     mapper: options.mapper ?? MAPPER,
     ...(options.nullAttributeRepresentation
       ? { nullAttributeRepresentation: options.nullAttributeRepresentation }
@@ -46,14 +53,21 @@ function translate(
   });
 }
 
+async function translate(
+  id: string,
+  options: TranslateOptions = {},
+): Promise<QueryPlanToMongooseResult> {
+  return translatePlan(await planFor(id), options);
+}
+
 describe("the refusal type", () => {
   // Every shape this adapter cannot express raises `UnsupportedQueryPlanError`, which the
   // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
   // other side: it is still an `Error`, and a mapper mistake is NOT a refusal.
-  test("a refused shape raises UnsupportedQueryPlanError, which is an Error", () => {
+  test("a refused shape raises UnsupportedQueryPlanError, which is an Error", async () => {
     let thrown: unknown;
     try {
-      translate("regex/matches/lookahead-from-principal");
+      await translate("regex/matches/lookahead-from-principal");
     } catch (error) {
       thrown = error;
     }
@@ -62,12 +76,11 @@ describe("the refusal type", () => {
     expect((thrown as Error).name).toBe("UnsupportedQueryPlanError");
   });
 
-  test("an unmapped reference is a plain Error, not a refusal", () => {
+  test("an unmapped reference is a plain Error, not a refusal", async () => {
+    const queryPlan = await planFor("string/equals/case-sensitive");
     let thrown: unknown;
     try {
-      queryPlanToMongoose({
-        queryPlan: planOf(golden("string/equals/case-sensitive")),
-      });
+      queryPlanToMongoose({ queryPlan });
     } catch (error) {
       thrown = error;
     }
@@ -123,32 +136,38 @@ describe("nullAttributeRepresentation", () => {
   // Mongoose expresses it twice over: per attribute with the `nullable` mapper flag (which the
   // conformance mapping declares, so the harness replays that case under it), and globally with
   // this switch, which is the default for every entry that declares no `nullable` (#493).
-  test("explicit: the null operand is translated", () => {
+  test("explicit: the null operand is translated", async () => {
     expect(
-      translate("null/equals/null-literal-on-missing-attribute", {
+      await translate("null/equals/null-literal-on-missing-attribute", {
         nullAttributeRepresentation: "explicit",
       }),
-    ).toStrictEqual(translate("null/equals/null-literal-on-missing-attribute"));
+    ).toStrictEqual(
+      await translate("null/equals/null-literal-on-missing-attribute"),
+    );
   });
 
-  test("omitted: the same plan is refused rather than translated", () => {
+  test("omitted: the same plan is refused rather than translated", async () => {
     // A NULL field sends no attribute, so check() denies on a missing-attribute error while a
     // null-selecting filter would return exactly those documents (#302).
-    expect(() =>
+    await expect(
       translate("null/equals/null-literal-on-missing-attribute", {
         nullAttributeRepresentation: "omitted",
       }),
-    ).toThrow("missing-attribute error");
+    ).rejects.toThrow("missing-attribute error");
   });
 
   test.each(["explicit", "omitted"] as const)(
     "%s: a reentrant function mapper cannot replace the caller's null representation",
-    (nullAttributeRepresentation) => {
+    async (nullAttributeRepresentation) => {
       const nestedRepresentation =
         nullAttributeRepresentation === "explicit" ? "omitted" : "explicit";
+      const nested = await planFor("string/equals/case-sensitive");
+      const outerPlan = await planFor(
+        "null/equals/null-literal-on-missing-attribute",
+      );
       let nestedCalls = 0;
       const mapper: Mapper = (key) => {
-        translate("string/equals/case-sensitive", {
+        translatePlan(nested, {
           nullAttributeRepresentation: nestedRepresentation,
         });
         nestedCalls += 1;
@@ -157,13 +176,13 @@ describe("nullAttributeRepresentation", () => {
           : (MAPPER[key] ?? { field: key });
       };
       const outer = () =>
-        translate("null/equals/null-literal-on-missing-attribute", {
+        translatePlan(outerPlan, {
           mapper,
           nullAttributeRepresentation,
         });
       if (nullAttributeRepresentation === "explicit") {
         expect(outer()).toStrictEqual(
-          translate("null/equals/null-literal-on-missing-attribute"),
+          await translate("null/equals/null-literal-on-missing-attribute"),
         );
       } else {
         expect(outer).toThrow("missing-attribute error");
@@ -174,12 +193,12 @@ describe("nullAttributeRepresentation", () => {
 
   // The rejection keys off the null OPERAND, not off a list of operators, so a value list carrying
   // one is refused as well.
-  test("omitted: a null element inside a value list is refused too", () => {
-    expect(() =>
+  test("omitted: a null element inside a value list is refused too", async () => {
+    await expect(
       translate("null/in/literal-list-of-only-null", {
         nullAttributeRepresentation: "omitted",
       }),
-    ).toThrow("missing-attribute error");
+    ).rejects.toThrow("missing-attribute error");
   });
 
   // The same claim over every recorded plan, so a new case carrying a null constant is covered
@@ -187,7 +206,7 @@ describe("nullAttributeRepresentation", () => {
   // describes absent fields, not null list elements, which keep their explicit null value. A
   // negated shape may be refused for the negation over a field the option makes nullable before
   // its null operand is reached, so the refusal type is what counts.
-  test("omitted: every golden plan carrying a null literal is refused", () => {
+  test("omitted: every golden plan carrying a null literal is refused", async () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
       const record = node as Record<string, unknown>;
@@ -213,12 +232,17 @@ describe("nullAttributeRepresentation", () => {
       "null/equals/null-literal-on-missing-attribute",
     );
     expect(nullCarrying).toContain(indexedNull);
+    const plans = new Map(
+      await Promise.all(
+        nullCarrying.map(async (id) => [id, await planFor(id)] as const),
+      ),
+    );
 
     // A plan the adapter refuses under "explicit" too is refused for its shape, not its null
     // (a whole-list comparison with `[null]` in the list), so the option has nothing to add.
     const refusedRegardless = (id: string): boolean => {
       try {
-        translate(id);
+        translatePlan(plans.get(id)!);
         return false;
       } catch (error) {
         return error instanceof UnsupportedQueryPlanError;
@@ -227,7 +251,7 @@ describe("nullAttributeRepresentation", () => {
     const notRejected = nullCarrying.filter((id) => {
       if (id === indexedNull || refusedRegardless(id)) return false;
       try {
-        translate(id, { nullAttributeRepresentation: "omitted" });
+        translatePlan(plans.get(id)!, { nullAttributeRepresentation: "omitted" });
         return true;
       } catch (error) {
         return !(error instanceof UnsupportedQueryPlanError);
@@ -235,7 +259,9 @@ describe("nullAttributeRepresentation", () => {
     });
     expect(notRejected).toEqual([]);
     expect(() =>
-      translate(indexedNull, { nullAttributeRepresentation: "omitted" }),
+      translatePlan(plans.get(indexedNull)!, {
+        nullAttributeRepresentation: "omitted",
+      }),
     ).not.toThrow();
   });
 
@@ -244,7 +270,7 @@ describe("nullAttributeRepresentation", () => {
   // the option. The switch narrows what translates; it does not turn the adapter off. With every
   // entry declaring its own `nullable`, nothing is left for the default to decide, so every
   // null-free plan translates exactly as it does under "explicit".
-  test("omitted: with every entry declared, a null-free plan is untouched", () => {
+  test("omitted: with every entry declared, a null-free plan is untouched", async () => {
     const outcome = (build: () => QueryPlanToMongooseResult): unknown => {
       try {
         return build();
@@ -259,13 +285,14 @@ describe("nullAttributeRepresentation", () => {
     );
     // Guard the guard: the loop below must cover real plans.
     expect(nullFree.map((g) => g.id)).toContain("string/equals/case-sensitive");
+    const plans = await Promise.all(nullFree.map((g) => planOf(g)));
     const differing = nullFree
       .filter(
-        (g) =>
-          JSON.stringify(outcome(() => translate(g.id))) !==
+        (_g, index) =>
+          JSON.stringify(outcome(() => translatePlan(plans[index]!))) !==
           JSON.stringify(
             outcome(() =>
-              translate(g.id, {
+              translatePlan(plans[index]!, {
                 mapper: declaringNullable(MAPPER, false),
                 nullAttributeRepresentation: "omitted",
               }),
@@ -343,12 +370,16 @@ describe("omitted: an undeclared entry is nullable", () => {
     ["null/not-equals/explicit-null-against-literal", "aOptionalString"],
   ])(
     "%s requires the field to be present and non-null, outside any negation",
-    (id, field) => {
+    async (id, field) => {
       const mapper = undeclared(field);
-      expect(topLevelConjuncts(translate(id, { mapper }).filters)).not.toContainEqual({
+      expect(
+        topLevelConjuncts((await translate(id, { mapper })).filters),
+      ).not.toContainEqual({
         [field]: { $ne: null },
       });
-      expect(topLevelConjuncts(omitted(id, mapper).filters)).toContainEqual({
+      expect(
+        topLevelConjuncts((await omitted(id, mapper)).filters),
+      ).toContainEqual({
         [field]: { $ne: null },
       });
     },
@@ -361,39 +392,43 @@ describe("omitted: an undeclared entry is nullable", () => {
     ["null/equals/negated-explicit-null-against-literal", "aOptionalString"],
     ["null/in/negated-explicit-null-in-literal-list", "aOptionalString"],
     ["logic/not/over-and", "aString"],
-  ])("%s guards %s outside the negation", (id, field) => {
+  ])("%s guards %s outside the negation", async (id, field) => {
     const mapper = undeclared(field);
-    expect(JSON.stringify(translate(id, { mapper }).filters)).not.toContain(
+    expect(
+      JSON.stringify((await translate(id, { mapper })).filters),
+    ).not.toContain(guard(field));
+    expect(JSON.stringify((await omitted(id, mapper)).filters)).toContain(
       guard(field),
     );
-    expect(JSON.stringify(omitted(id, mapper).filters)).toContain(guard(field));
   });
 
-  test("a function mapper takes the default too", () => {
+  test("a function mapper takes the default too", async () => {
     const mapper = undeclared("aString") as Record<string, MapperConfig>;
     const asFunction: Mapper = (key) => mapper[key]!;
     for (const id of ["string/equals/case-sensitive", "logic/not/over-and"]) {
-      expect(omitted(id, asFunction)).toStrictEqual(omitted(id, mapper));
+      expect(await omitted(id, asFunction)).toStrictEqual(
+        await omitted(id, mapper),
+      );
     }
   });
 
   // `tagNames` projects the `name` field of each `tags` element, which declares no `nullable`.
-  test("a relation's element field takes the default too", () => {
+  test("a relation's element field takes the default too", async () => {
     const id = "collection/exists/scalar-list-equals";
     const guard = JSON.stringify({ name: { $ne: null } });
-    expect(JSON.stringify(translate(id).filters)).not.toContain(guard);
-    expect(JSON.stringify(omitted(id).filters)).toContain(guard);
+    expect(JSON.stringify((await translate(id)).filters)).not.toContain(guard);
+    expect(JSON.stringify((await omitted(id)).filters)).toContain(guard);
   });
 
   // `nullable: false` is the per-entry opt-out: it asserts the field is always stored.
-  test("declaring nullable: false keeps the explicit translation", () => {
+  test("declaring nullable: false keeps the explicit translation", async () => {
     for (const id of [
       "string/equals/case-sensitive",
       "comparison/not-equals/value-first",
       "logic/not/over-and",
     ]) {
-      expect(omitted(id, declaringNullable(MAPPER, false))).toStrictEqual(
-        translate(id),
+      expect(await omitted(id, declaringNullable(MAPPER, false))).toStrictEqual(
+        await translate(id),
       );
     }
   });
@@ -404,26 +439,23 @@ describe("timestamp literals", () => {
   // `timestamp/less-than/relative-window` as a placeholder, because it differs on every capture.
   // That makes this the one golden plan whose value the reader chooses — so it is also the one place the whole timestamp
   // boundary can be walked, by substituting the instant and asking what the adapter does with it.
-  const at = (plannedAt: string) =>
+  const at = async (plannedAt: string) =>
     queryPlanToMongoose({
-      queryPlan: planOf(
-        golden("timestamp/less-than/relative-window"),
-        plannedAt,
-      ),
+      queryPlan: await planFor("timestamp/less-than/relative-window", plannedAt),
       mapper: MAPPER,
     });
 
   // The nanosecond instant the PDP actually folds is refused — that, and nothing else, is why the
   // two `timestamp/*/relative-window*` cases are `unsupported` in conformance-ledger.json.
-  test("the nanosecond instant the PDP folds is refused", () => {
-    expect(() => at("2026-08-11T09:13:39.123456789Z")).toThrow(
+  test("the nanosecond instant the PDP folds is refused", async () => {
+    await expect(at("2026-08-11T09:13:39.123456789Z")).rejects.toThrow(
       UnsupportedQueryPlanError,
     );
   });
 
   // Its counterpart: only the precision differs.
-  test("the same plan at millisecond precision translates", () => {
-    const result = at("2026-08-11T09:13:39.123Z");
+  test("the same plan at millisecond precision translates", async () => {
+    const result = await at("2026-08-11T09:13:39.123Z");
     expect(result.kind).toBe(PlanKind.CONDITIONAL);
     // The comparison operand is the instant, guarded so that a field that is not a date and not an RFC 3339 string converts to
     // null, and null loses every comparison rather than matching one.
@@ -447,8 +479,8 @@ describe("timestamp literals", () => {
       "an offset that pushes past the maximum instant",
       "9999-12-31T23:00:00-02:00",
     ],
-  ])("%s fails closed", (_label, value) => {
-    expect(() => at(value)).toThrow(
+  ])("%s fails closed", async (_label, value) => {
+    await expect(at(value)).rejects.toThrow(
       "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
     );
   });
@@ -458,9 +490,9 @@ describe("the mapper contract", () => {
   // A mapper is caller-supplied, so these are caller shapes rather than policy shapes: no corpus
   // case can produce them, because the corpus fixes one mapper per adapter.
 
-  test("a function mapper resolves a scalar reference", () => {
+  test("a function mapper resolves a scalar reference", async () => {
     expect(
-      translate("string/equals/case-sensitive", {
+      await translate("string/equals/case-sensitive", {
         mapper: (key: string) => ({
           field: key.replace("request.resource.attr.", ""),
         }),
@@ -471,9 +503,9 @@ describe("the mapper contract", () => {
     });
   });
 
-  test("a function mapper resolves a relation", () => {
+  test("a function mapper resolves a relation", async () => {
     expect(
-      translate("relation/bare-attribute/one-hop-boolean", {
+      await translate("relation/bare-attribute/one-hop-boolean", {
         mapper: (key: string) =>
           key === "request.resource.attr.parent"
             ? {
@@ -495,9 +527,9 @@ describe("the mapper contract", () => {
   // stores. The corpus cannot exercise it: its mapper deliberately carries none, because the
   // harness compares document ids against `check()` and a parser that changed a value would change
   // both sides at once.
-  test("a valueParser rewrites the constant of an equality", () => {
+  test("a valueParser rewrites the constant of an equality", async () => {
     expect(
-      translate("string/equals/case-sensitive", {
+      await translate("string/equals/case-sensitive", {
         mapper: {
           "request.resource.attr.aString": {
             field: "aString",
@@ -511,9 +543,9 @@ describe("the mapper contract", () => {
     });
   });
 
-  test("a valueParser rewrites every element of a membership list", () => {
+  test("a valueParser rewrites every element of a membership list", async () => {
     expect(
-      translate("null/in/missing-attribute-in-multi-element-list", {
+      await translate("null/in/missing-attribute-in-multi-element-list", {
         mapper: {
           "request.resource.attr.aOptionalString": {
             field: "aOptionalString",
@@ -531,9 +563,9 @@ describe("the mapper contract", () => {
   // ObjectId collection key is the common real deployment, three of the `identifier/*` cases
   // compare the key against a string field, and one mapping cannot be both. So the coercion is pinned
   // here, against the same golden plan, rather than left to a README example nothing runs.
-  test("a valueParser coerces the primary key to an ObjectId", () => {
+  test("a valueParser coerces the primary key to an ObjectId", async () => {
     expect(
-      translate("identifier/equals/literal", {
+      await translate("identifier/equals/literal", {
         mapper: {
           "request.resource.id": {
             field: "_id",
@@ -548,7 +580,7 @@ describe("the mapper contract", () => {
     });
   });
 
-  test("a valueParser declared on a relation field applies through the hop", () => {
+  test("a valueParser declared on a relation field applies through the hop", async () => {
     const relation = (valueParser?: (value: unknown) => unknown): Mapper => ({
       "request.resource.attr.parent": {
         relation: {
@@ -565,7 +597,7 @@ describe("the mapper contract", () => {
     });
 
     expect(
-      translate("relation/equals/one-hop-string", {
+      await translate("relation/equals/one-hop-string", {
         mapper: relation((value) => String(value).toUpperCase()),
       }),
     ).toStrictEqual({
@@ -575,7 +607,7 @@ describe("the mapper contract", () => {
     // And the same mapping without one, so the assertion above is the parser talking rather than
     // some other normalisation of the constant.
     expect(
-      translate("relation/equals/one-hop-string", { mapper: relation() }),
+      await translate("relation/equals/one-hop-string", { mapper: relation() }),
     ).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { "parent.aString": { $eq: "One" } },
@@ -601,39 +633,36 @@ describe("an unmapped reference", () => {
       "request.resource.attr.aOptionalString",
     ],
     ["logic/not/greater-than", "request.resource.attr.aNumber"],
-  ])("%s is refused when %s has no entry", (id, reference) => {
-    expect(() => translate(id, { mapper: without(reference) })).toThrow(
+  ])("%s is refused when %s has no entry", async (id, reference) => {
+    await expect(translate(id, { mapper: without(reference) })).rejects.toThrow(
       `No mapper entry for ${reference}: an unmapped reference is not used verbatim`,
     );
   });
 
-  test("is refused when a function mapper returns no entry for it", () => {
+  test("is refused when a function mapper returns no entry for it", async () => {
     const mapper = ((key: string) =>
       key === "request.resource.attr.aOptionalString"
         ? undefined
         : (MAPPER as Record<string, MapperConfig>)[key]) as Mapper;
-    expect(() =>
+    await expect(
       translate("null/not-equals/missing-attribute-against-literal", {
         mapper,
       }),
-    ).toThrow("No mapper entry for request.resource.attr.aOptionalString");
+    ).rejects.toThrow("No mapper entry for request.resource.attr.aOptionalString");
   });
 
-  test("is refused under the default mapper", () => {
-    expect(() =>
-      queryPlanToMongoose({
-        queryPlan: planOf(
-          golden("null/not-equals/missing-attribute-against-literal"),
-        ),
-      }),
-    ).toThrow("No mapper entry for request.resource.attr.aOptionalString");
+  test("is refused under the default mapper", async () => {
+    const queryPlan = await planFor(
+      "null/not-equals/missing-attribute-against-literal",
+    );
+    expect(() => queryPlanToMongoose({ queryPlan })).toThrow("No mapper entry for request.resource.attr.aOptionalString");
   });
 
   // The opt-in: an entry that names neither a field nor a relation keeps the plan path, for a
   // caller whose documents really are shaped like it.
-  test("keeps the plan path when an empty entry declares it", () => {
+  test("keeps the plan path when an empty entry declares it", async () => {
     expect(
-      translate("null/not-equals/missing-attribute-against-literal", {
+      await translate("null/not-equals/missing-attribute-against-literal", {
         mapper: { "request.resource.attr.aOptionalString": {} },
       }),
     ).toStrictEqual({
@@ -723,8 +752,8 @@ describe("plans the planner cannot produce", () => {
 // row is #548. CEL denies `!(2 in null)`, where a bare `$nor` over the membership matches a null
 // or absent array (#534). Delete this when a case carrying a null-list row lands.
 describe("a negated membership over a native array field", () => {
-  test("Corpus gap. requires the list to be stored as an array, outside the $nor", () => {
-    const { filters } = translate("null/in/negated-null-literal-in-number-list");
+  test("Corpus gap. requires the list to be stored as an array, outside the $nor", async () => {
+    const { filters } = await translate("null/in/negated-null-literal-in-number-list");
     expect(filters).toMatchObject({
       $and: expect.arrayContaining([{ aNumberList: { $type: "array" } }]),
     });

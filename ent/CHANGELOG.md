@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Breaking:** a bare attribute mapped `ValueTimestamp` compared with a `timestamp()` value
+  (`R.attr.createdAt < now() - duration("24h")`) is answered as CEL answers it: CEL holds the bare
+  attribute as its RFC 3339 string, so an ordering is a no-overload error (UNKNOWN, the row is
+  excluded under both polarities), `==` is false and `!=` true. It used to compare the stored
+  instants and returned rows the PDP denies (`type-mismatch/less-than/string-field-against-timestamp`).
+  Wrap the attribute in `timestamp()` to compare instants.
+- **Breaking:** a list or map literal that still reaches a plain value position fails closed. It
+  used to be bound as one opaque parameter, which is how `"x" in (R.attr.flag ? ["x"] : [])` matched
+  no row at all (`composition/derived-role/runtime-effective-derived-roles`); that shape now
+  translates, with the ternary lifted above the membership.
+- `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
+  a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
+  UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
+  comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
+  as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed
+  elements, UNKNOWN unless every element evaluates; constant map literals, and
+  `{"k": v, …}[x] == c`; `m["key"]` as the mapped member `m.key`; `isSubset()` of a stored list
+  against a literal list; `except(a, b) == []` and `intersect(a, b) == []`; `c in` the result of
+  `filter()` or `map()`; `upperAscii()`, as a `REPLACE` per ASCII letter so no collation's Unicode
+  case folding applies; and `duration()`, `timestamp() ± duration` and `timeSince()`, folded into
+  the constant side of the comparison. `timeSince()` reads the clock at translation, as `check()`
+  reads it at evaluation.
 - `x == null` and `x != null` over an attribute declared `NullConventionOmitted` now translate, to
   `CASE WHEN x IS NULL THEN NULL ELSE FALSE END` (`ELSE TRUE` for `!=`), instead of returning an
   error wrapping `ErrUnsupported`. A NULL column is CEL's missing-attribute error, which the `CASE`

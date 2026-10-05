@@ -1932,16 +1932,6 @@ class SpringDataQueryPlanAdapterTest {
                     "Field-to-field", "matches");
         }
 
-        /**
-         * <strong>Corpus gap.</strong> #509: {@code R.attr.aBool == false} is not carried; the
-         * corpus reaches the boolean column bare ({@code logic/bare-attribute/boolean}).
-         */
-        @Test
-        void equalBoolFalse() {
-            assertEquals(0, runCount(exprOp("eq",
-                    var("request.resource.attr.aBool"), bval(false))));
-        }
-
     }
 
     @Nested

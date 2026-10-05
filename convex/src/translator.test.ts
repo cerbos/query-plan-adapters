@@ -1,4 +1,4 @@
-import { describe, expect, test } from "@jest/globals";
+import { beforeAll, describe, expect, test } from "@jest/globals";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
@@ -29,7 +29,8 @@ import {
  *
  * Which documents a corpus case returns is the conformance harness's job (`adversarial.test.ts`);
  * nothing here pins the filter emitted for a corpus case. Plans come from the current PDP's golden
- * files, read by case id, rather than being typed by hand.
+ * files, read by case id, rather than being typed by hand, and reach the adapter as `@cerbos/http`
+ * decodes them (`planOf`).
  */
 
 const CURRENT = pdpTags()[0]!;
@@ -37,6 +38,19 @@ const GOLDENS = readGoldens(CURRENT).filter(
   (golden) => !golden.plannerDivergence,
 );
 const golden = (id: string) => readGolden(CURRENT, id);
+
+/**
+ * Every current golden's plan, decoded by the SDK before any test runs. Decoding is asynchronous,
+ * so the lookups below — and every list derived from a translation — are filled here rather than
+ * at collection time.
+ */
+const PLANS = new Map<string, PlanResourcesResponse>();
+
+function planFor(id: string): PlanResourcesResponse {
+  const queryPlan = PLANS.get(id);
+  if (!queryPlan) throw new Error(`${id}: no decoded plan`);
+  return queryPlan;
+}
 
 // -- recording what the adapter asks Convex to do -------------------------------------------------
 
@@ -89,7 +103,7 @@ function translate(
   options: TranslateOptions = {},
 ): QueryPlanToConvexResult<Recorder, unknown> {
   return queryPlanToConvex<Recorder, unknown>({
-    queryPlan: planOf(golden(id)),
+    queryPlan: planFor(id),
     mapper: options.mapper ?? MAPPER,
     allowPostFilter: options.allowPostFilter ?? true,
     ...(options.nullAttributeRepresentation
@@ -122,12 +136,25 @@ function recordFilter(label: string, filter: (q: Recorder) => unknown) {
   return emitted;
 }
 
+type Translated = {
+  id: string;
+  result: QueryPlanToConvexResult<Recorder, unknown>;
+};
+
 /** Each translatable golden, with the part Convex's own engine is handed, if any. */
-const TRANSLATED = GOLDENS.flatMap((g) => {
-  const result = translated(g.id);
-  return result === "refused" ? [] : [{ id: g.id, result }];
+let TRANSLATED: Translated[] = [];
+let PUSHED: Translated[] = [];
+
+beforeAll(async () => {
+  const goldens = readGoldens(CURRENT);
+  const plans = await Promise.all(goldens.map((g) => planOf(g)));
+  goldens.forEach((g, index) => PLANS.set(g.id, plans[index]!));
+  TRANSLATED = GOLDENS.flatMap((g) => {
+    const result = translated(g.id);
+    return result === "refused" ? [] : [{ id: g.id, result }];
+  });
+  PUSHED = TRANSLATED.filter(({ result }) => result.filter !== undefined);
 });
-const PUSHED = TRANSLATED.filter(({ result }) => result.filter !== undefined);
 
 // The documents as the PDP saw them (conformance/resources.json), which is also exactly what the
 // conformance harness stores — so a post-filter can be run against them offline.
@@ -157,7 +184,7 @@ describe("the refusal type", () => {
     let thrown: unknown;
     try {
       queryPlanToConvex({
-        queryPlan: planOf(golden("string/equals/case-sensitive")),
+        queryPlan: planFor("string/equals/case-sensitive"),
       });
     } catch (error) {
       thrown = error;
@@ -206,20 +233,21 @@ describe("what the adapter asks Convex to do", () => {
     expect(PUSHED.length).toBeGreaterThan(0);
   });
 
-  test.each(PUSHED.map(({ id, result }) => [id, result] as const))(
-    "%s names only mapped, non-nullable fields",
-    (id, result) => {
-      // A `request.resource.attr.…` name would mean resolution missed a reference the caller DID
-      // map — a path no document stores, which a negation reads as a match on every document.
-      // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
-      // a false one, so it has to stay with the post-filter (#375).
+  test("each pushed case names only mapped, non-nullable fields", () => {
+    // A `request.resource.attr.…` name would mean resolution missed a reference the caller DID
+    // map — a path no document stores, which a negation reads as a match on every document.
+    // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
+    // a false one, so it has to stay with the post-filter (#375).
+    const violations = PUSHED.flatMap(({ id, result }) => {
       const fields = fieldsNamedBy(recordFilter(id, result.filter!));
-      expect({
-        undeclared: fields.filter((field) => !declaredFields.has(field)),
-        nullable: fields.filter((field) => nullableFields.has(field)),
-      }).toEqual({ undeclared: [], nullable: [] });
-    },
-  );
+      const undeclared = fields.filter((field) => !declaredFields.has(field));
+      const nullable = fields.filter((field) => nullableFields.has(field));
+      return undeclared.length || nullable.length
+        ? [{ id, undeclared, nullable }]
+        : [];
+    });
+    expect(violations).toEqual([]);
+  });
 });
 
 /**
@@ -228,20 +256,24 @@ describe("what the adapter asks Convex to do", () => {
  * to every candidate before it is serialised, the untranslatable half of the policy does not run.
  */
 describe("the allowPostFilter gate", () => {
-  test.each(TRANSLATED.map(({ id, result }) => [id, result] as const))(
-    "%s needs the opt-in exactly when it carries a post-filter",
-    (id, result) => {
-      if (result.postFilter !== undefined) {
-        expect(() => translate(id, { allowPostFilter: false })).toThrow(
-          "allowPostFilter",
-        );
-      } else {
-        expect(translate(id, { allowPostFilter: false }).kind).toBe(
-          result.kind,
-        );
+  test("each case needs the opt-in exactly when it carries a post-filter", () => {
+    expect(TRANSLATED.length).toBeGreaterThan(0);
+    const violations = TRANSLATED.flatMap(({ id, result }) => {
+      let outcome: string;
+      try {
+        outcome = translate(id, { allowPostFilter: false }).kind;
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        outcome = error.message.includes("allowPostFilter")
+          ? "opt-in required"
+          : `threw: ${error.message}`;
       }
-    },
-  );
+      const expected =
+        result.postFilter !== undefined ? "opt-in required" : result.kind;
+      return outcome === expected ? [] : [{ id, expected, outcome }];
+    });
+    expect(violations).toEqual([]);
+  });
 });
 
 // -- the mapper contract, which no policy can reach ------------------------------------------------
@@ -564,16 +596,25 @@ describe("an ordering against a value of another type, on a non-nullable field",
     );
   };
 
-  const PUSHED_ORDERINGS = GOLDENS.filter((g) =>
-    ordersSomething(g.plan.condition ?? null),
-  ).flatMap((g) => {
-    const result = translated(g.id, { mapper: NON_NULLABLE });
-    const queryPlan = planOf(g);
-    return result !== "refused" &&
-      result.path === "db" &&
-      queryPlan.kind === PlanKind.CONDITIONAL
-      ? [{ id: g.id, condition: queryPlan.condition, filter: result.filter }]
-      : [];
+  type PushedOrdering = {
+    id: string;
+    condition: PlanExpressionOperand;
+    filter: (q: Recorder) => unknown;
+  };
+  let PUSHED_ORDERINGS: PushedOrdering[] = [];
+
+  beforeAll(() => {
+    PUSHED_ORDERINGS = GOLDENS.filter((g) =>
+      ordersSomething(g.plan.condition ?? null),
+    ).flatMap((g) => {
+      const result = translated(g.id, { mapper: NON_NULLABLE });
+      const queryPlan = planFor(g.id);
+      return result !== "refused" &&
+        result.path === "db" &&
+        queryPlan.kind === PlanKind.CONDITIONAL
+        ? [{ id: g.id, condition: queryPlan.condition, filter: result.filter }]
+        : [];
+    });
   });
 
   // Every field value a document could hold for an attribute CEL reads as a scalar.
@@ -592,33 +633,34 @@ describe("an ordering against a value of another type, on a non-nullable field",
     );
   });
 
-  test.each(PUSHED_ORDERINGS.map((pushed) => [pushed.id, pushed] as const))(
-    "%s: Convex's answer is CEL's for a field of every type",
-    (id, { condition, filter }) => {
-      const emitted = recordFilter(id, filter);
-      const disagreements = FIELDS.flatMap((field) =>
-        VALUES.flatMap((value) => {
-          const doc: Record<string, unknown> = {
-            aNumber: 3,
-            aBool: true,
-            aString: "s",
-            owner: "o",
-            [field]: value,
-          };
-          const cel =
-            evaluate(condition, {
-              doc,
-              mapper: NON_NULLABLE,
-              bindings: {},
-              nullIsMissing: false,
-            }) === true;
-          const convex = convexEvaluate(emitted, doc) === true;
-          return cel === convex ? [] : [{ field, value, cel, convex }];
-        }),
-      );
-      expect(disagreements).toEqual([]);
-    },
-  );
+  test("each pushed ordering: Convex's answer is CEL's for a field of every type", () => {
+    const disagreements = PUSHED_ORDERINGS.flatMap(
+      ({ id, condition, filter }) => {
+        const emitted = recordFilter(id, filter);
+        return FIELDS.flatMap((field) =>
+          VALUES.flatMap((value) => {
+            const doc: Record<string, unknown> = {
+              aNumber: 3,
+              aBool: true,
+              aString: "s",
+              owner: "o",
+              [field]: value,
+            };
+            const cel =
+              evaluate(condition, {
+                doc,
+                mapper: NON_NULLABLE,
+                bindings: {},
+                nullIsMissing: false,
+              }) === true;
+            const convex = convexEvaluate(emitted, doc) === true;
+            return cel === convex ? [] : [{ id, field, value, cel, convex }];
+          }),
+        );
+      },
+    );
+    expect(disagreements).toEqual([]);
+  });
 });
 
 // -- hand-built plans ------------------------------------------------------------------------------
@@ -687,6 +729,61 @@ describe("plans the planner cannot produce", () => {
         mapper: MAPPER,
       }),
     ).toThrow("Unsupported operator: isSet");
+  });
+
+  // The planner emits `set-field` only as a `struct` entry, and a two-variable lambda only under
+  // `exists`, `all` and `exists_one` (CEL's two-variable `transformList` is its own operator).
+  test.each([
+    [
+      "a set-field outside a map literal",
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "set-field",
+            operands: [{ value: "k" }, { value: "v" }],
+          },
+          { value: "v" },
+        ],
+      },
+    ],
+    [
+      "a map literal entry that is not a set-field",
+      {
+        operator: "eq",
+        operands: [
+          { operator: "struct", operands: [{ value: "k" }] },
+          { value: "v" },
+        ],
+      },
+    ],
+    [
+      "a two-variable lambda under map()",
+      {
+        operator: "in",
+        operands: [
+          { value: "x" },
+          {
+            operator: "map",
+            operands: [
+              { name: "request.resource.attr.tagNames" },
+              {
+                operator: "lambda",
+                operands: [{ name: "v" }, { name: "i" }, { name: "v" }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  ])("%s", (_label, condition) => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: plan(condition),
+        mapper: MAPPER,
+        allowPostFilter: true,
+      }),
+    ).toThrow(UnsupportedQueryPlanError);
   });
 });
 

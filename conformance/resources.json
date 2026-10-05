@@ -1417,6 +1417,28 @@
         "tags": []
       },
       "id": "j3"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 36.3,
+        "aNumber": 36,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "$aOptionalStrin",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "$aOptionalStrin"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "k1"
     }
   ]
 }

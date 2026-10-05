@@ -23,6 +23,12 @@ record ParsedLambda(Operand body, String varName) {
             throw Refusals.malformed(notLambdaMessage);
         }
         List<Operand> lambdaOps = lambdaOperand.getExpression().getOperandsList();
+        if (lambdaOps.size() == 3) {
+            // `list.exists(i, v, body)`: the planner emits the two-variable form as a lambda
+            // with two variables, which only exists() and all() translate.
+            throw Refusals.unsupported("A two-variable lambda (index or key, then element) is"
+                    + " supported only by exists() and all()");
+        }
         if (lambdaOps.size() != 2) {
             throw Refusals.malformed(arityMessage);
         }

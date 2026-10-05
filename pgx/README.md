@@ -266,9 +266,9 @@ PDP's goldens (0.54.0) are replayed too.
 
 | Tier | Passed / total (PDP 0.55.0) |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 56 / 80 |
-| adversarial | 229 / 308 |
+| core | 29 / 29 |
+| extended | 74 / 97 |
+| adversarial | 256 / 338 |
 
 The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -281,6 +281,10 @@ planner folds `has()` to true by design, while `check()` receives the omission a
 the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
 planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
 while `check()` has no double + int overload and denies every row, so write `1.0`.
+Two more, `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`, are the planner rewriting `in` over a scalar container
+to `eq`, which `check()` has no overload for
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 ### Known gaps
 
@@ -392,6 +396,29 @@ tags := &cerbospgx.Relation{
 - Cerbos 0.55: folded NaN ordered comparisons return false (so their negation returns true),
   matching the updated CEL evaluator; this differs from Cerbos 0.54. Missing attributes still
   propagate errors.
+- **Breaking:** a bare attribute mapped `ValueTimestamp` compared with a `timestamp()` value
+  (`R.attr.createdAt < now() - duration("24h")`) is answered as CEL answers it: CEL holds the bare
+  attribute as its RFC 3339 string, so an ordering is a no-overload error (UNKNOWN, the row is
+  excluded under both polarities), `==` is false and `!=` true. It used to compare the stored
+  instants and returned rows the PDP denies (`type-mismatch/less-than/string-field-against-timestamp`).
+  Wrap the attribute in `timestamp()` to compare instants.
+- **Breaking:** a list or map literal that still reaches a plain value position fails closed. It
+  used to be bound as one opaque parameter, which is how `"x" in (R.attr.flag ? ["x"] : [])` matched
+  no row at all (`composition/derived-role/runtime-effective-derived-roles`); that shape now
+  translates, with the ternary lifted above the membership.
+- `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
+  a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
+  UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
+  comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
+  as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed
+  elements, UNKNOWN unless every element evaluates; constant map literals, and
+  `{"k": v, …}[x] == c`; `m["key"]` as the mapped member `m.key`; `isSubset()` of a stored list
+  against a literal list; `except(a, b) == []` and `intersect(a, b) == []`; `c in` the result of
+  `filter()` or `map()`; `upperAscii()`, as a `REPLACE` per ASCII letter so no collation's Unicode
+  case folding applies; and `duration()`, `timestamp() ± duration` and `timeSince()`, folded into
+  the constant side of the comparison. `timeSince()` reads the clock at translation, as `check()`
+  reads it at evaluation.
 
 ## Example application
 

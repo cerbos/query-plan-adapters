@@ -7,6 +7,7 @@ require_relative "attribute_mapping"
 require_relative "dialect"
 require_relative "errors"
 require_relative "plan"
+require_relative "regex"
 require_relative "relations"
 require_relative "string_matching"
 require_relative "timestamps"
@@ -16,8 +17,10 @@ require_relative "translator/arithmetic"
 require_relative "translator/casts"
 require_relative "translator/collections"
 require_relative "translator/comparisons"
+require_relative "translator/durations"
 require_relative "translator/environment"
 require_relative "translator/hierarchies"
+require_relative "translator/lists"
 require_relative "translator/membership"
 require_relative "translator/null_conventions"
 require_relative "translator/strings"
@@ -63,8 +66,8 @@ module Cerbos
       # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
       # boolean only when an arm is: see {#ternary}.
       BOOLEAN_OPERATORS = (
-        %w[and or not exists all exists_one in hasIntersection ancestorOf descendentOf overlaps] +
-        COMPARISONS + STRING_MATCHES.keys
+        %w[and or not exists all exists_one in hasIntersection isSubset ancestorOf descendentOf overlaps] +
+        COMPARISONS + STRING_MATCHES.keys + %w[matches]
       ).freeze
 
       # The values that `null_attribute_representation` accepts. See
@@ -92,7 +95,9 @@ module Cerbos
       include Casts
       include Collections
       include Comparisons
+      include Durations
       include Hierarchies
+      include Lists
       include Membership
       include NullConventions
       include Strings
@@ -119,18 +124,27 @@ module Cerbos
           [name, Operator.new(2, ->(receiver, needle) { string_match(name, receiver, needle) })]
         },
         "div" => Operator.new(2, ->(numerator, denominator) { divide(numerator, denominator) }),
+        "matches" => Operator.new(2, ->(receiver, pattern) { regex_match(receiver, pattern) }),
         "in" => Operator.new(2, ->(needle, haystack) { membership(needle, haystack) }),
         "hasIntersection" => Operator.new(2, ->(left, right) { has_intersection(left, right) }),
+        "except" => Operator.new(2, ->(left, right) { except(left, right) }),
         "size" => Operator.new(1, ->(target) { size(target) }),
         "timestamp" => Operator.new(1, ->(value) { timestamp(value) }),
         "string" => Operator.new(1, ->(value) { cast_to_string(value) }),
         "double" => Operator.new(1, ->(value) { cast_to_double(value) }),
         "int" => Operator.new(1, ->(value) { cast_to_int(value) }),
         "list" => Operator.new(nil, ->(*values) { values }),
+        "set-field" => Operator.new(2, ->(key, value) { map_entry(key, value) }),
+        "struct" => Operator.new(nil, ->(*entries) { map_literal(entries) }),
         "hierarchy" => Operator.new(1..2, ->(value, delimiter = nil) { hierarchy(value, delimiter) }),
         "ancestorOf" => Operator.new(2, ->(ancestor, descendent) { ancestor_of(ancestor, descendent) }),
         "descendentOf" => Operator.new(2, ->(descendent, ancestor) { ancestor_of(ancestor, descendent) }),
-        "overlaps" => Operator.new(2, ->(left, right) { overlaps(left, right) })
+        "overlaps" => Operator.new(2, ->(left, right) { overlaps(left, right) }),
+        "intersect" => Operator.new(2, ->(left, right) { set_operation("intersect", left, right) }),
+        "isSubset" => Operator.new(2, ->(left, right) { is_subset(left, right) }),
+        "upperAscii" => Operator.new(1, ->(value) { upper_ascii(value) }),
+        "duration" => Operator.new(1, ->(value) { duration(value) }),
+        "timeSince" => Operator.new(1, ->(value) { time_since(value) })
       }.freeze
 
       # Operand counts from OPERATORS. Kept for compatibility with code that used it before.
@@ -218,6 +232,8 @@ module Cerbos
         @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
         @omitted_attributes = {}.compare_by_identity
+        @now = nil
+        @cel_errors = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
       end
@@ -242,7 +258,8 @@ module Cerbos
       #
       # @private
       def register_null_representation(node, representation)
-        @null_representations[node] = representation if representation
+        # Recorded even when nil, so {#null_convention} can tell an attribute from a computed node.
+        @null_representations[node] = representation
         node
       end
 
@@ -275,9 +292,33 @@ module Cerbos
         @null_representations[node] == :explicit
       end
 
+      # The convention a NULL in the node reaches CEL under: its attribute's declaration, else
+      # the call's. Unlike {#explicit_null?}, an undeclared column takes the call's default.
+      # Nil for a computed node: it is NULL only where CEL errors, so it has no convention.
+      #
+      # @private
+      def null_convention(node)
+        return nil unless @null_representations.key?(node)
+
+        @null_representations[node] || null_attribute_representation
+      end
+
       # @private
       def root_table
         model.arel_table
+      end
+
+      # A field of a constant map bound to a macro's iterator, as `t.name` reads it. A key the map
+      # does not hold, or a field read from a value that is not a map, is a CEL error on every
+      # row: UNKNOWN.
+      #
+      # @private
+      def constant_field(map, path)
+        path.split(".").reduce(map) do |value, key|
+          return cel_type_error unless value.is_a?(Hash) && value.key?(key)
+
+          value[key]
+        end
       end
 
       # Resolves an operand to an Arel node, a Ruby constant, or an intermediate {Values} value.
@@ -316,6 +357,7 @@ module Cerbos
         when "not" then negate(operands, environment)
         when "if" then ternary(operands, environment)
         when "exists", "all", "exists_one", "filter", "map" then macro(operator, operands, environment)
+        when "index" then index_access(operands, environment)
         when "lambda"
           raise InvalidPlanError, "lambda outside a collection macro"
         else
@@ -328,11 +370,17 @@ module Cerbos
       end
 
       def as_predicate(value)
-        if collection?(value)
-          raise UnsupportedOperatorError,
-            "#{describe(value)} cannot be used as a condition: CEL collection expressions " \
-            "such as filter() and map() evaluate to a list, not to a boolean"
+        # A constant list, map, number or string where a boolean belongs is a CEL error on every
+        # row, and none may reach `where`, which reads a Hash or an Array as conditions of its own.
+        if value.is_a?(Hash) || value.is_a?(Array) || value.is_a?(Numeric) ||
+            (value.is_a?(::String) && !ArelSupport.arel_node?(value))
+          return cel_type_error
         end
+
+        # A collection where a boolean belongs (`filter()`, `map()` or a mapped association as a
+        # condition, a conjunct or the operand of `!`) is a list to CEL, whose logical operators
+        # take only a boolean. That is a no-such-overload error on every row, decided by the type.
+        return cel_type_error if collection?(value)
 
         reject_double_text("a condition", value)
 
@@ -379,18 +427,43 @@ module Cerbos
 
         reject_double_text("if", then_value)
         reject_double_text("if", else_value)
+        # The CASE would hide the error from {#apply}: `(c ? size(aNumber) : 1) in [2, null]`
+        # would test the CASE with IS NULL, TRUE wherever `c` picks the error arm.
+        # A map or collection arm has no SQL value for the CASE to hold. A list arm is held
+        # below, for `in`, `==` and `+` to take each arm.
+        if [then_value, else_value].any? { |value| value.is_a?(Hash) || collection?(value) }
+          raise UnsupportedOperatorError, "A ternary with a map or collection arm is not translated"
+        end
+        if [condition, then_value, else_value].any? { |value| cel_error?(value) }
+          raise UnsupportedOperatorError,
+            "A ternary over a CEL type error (a string function or size() over a number or a " \
+            "boolean) cannot keep the error once its branches are folded into a CASE"
+        end
 
-        # A non-finite arm must not reach SQL, so defer to the enclosing comparison.
-        if deferred_value?(then_value) || deferred_value?(else_value)
+        # A non-finite arm must not reach SQL, so defer to the enclosing comparison. So must
+        # a string arm beside a number arm: CEL compares the operand with one branch and errors
+        # on the other, per row, where one CASE would compare both through a single coercion.
+        # And so must a list arm, which SQL has no value for: `in`, `==` and `+` take each arm.
+        arm_kinds = [scalar_kind(then_value), scalar_kind(else_value)]
+        mixed_arms = arm_kinds.uniq.length == 2 && arm_kinds.all? { |kind| %i[string number].include?(kind) }
+        list_arms = then_value.is_a?(Array) || else_value.is_a?(Array)
+        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms || list_arms
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
           )
         end
 
+        if branch_cel_type(then_value, else_value) == :int
+          then_value = int_constant(then_value)
+          else_value = int_constant(else_value)
+        end
         result = branches(condition, then_value, else_value)
         return record_boolean(result) if boolean_arm?(then_value) || boolean_arm?(else_value)
 
-        record_cel_type(result, branch_cel_type(then_value, else_value))
+        # Arms of one kind that fix no finer CEL type still give the CASE that kind, so an ordering
+        # against an operand of another type is answered as one (see {Comparisons#scalar_kind}).
+        shared_kind = arm_kinds.first if arm_kinds.uniq.length == 1 && %i[string number].include?(arm_kinds.first)
+        record_cel_type(result, branch_cel_type(then_value, else_value) || shared_kind)
       end
 
       def boolean_arm?(value)
@@ -413,6 +486,15 @@ module Cerbos
         nil
       end
 
+      # A whole constant on an arm the other arm types as an int, bound as the Integer CEL holds.
+      # Every plan number is a protobuf double, so the Ruby SDK hands `1000000` over as
+      # `1000000.0`, which SQL would render, and string() spell, as a double.
+      def int_constant(value)
+        return value unless value.is_a?(Float) && value.finite? && value == value.truncate
+
+        INT64_RANGE.cover?(value.to_i) ? value.to_i : value
+      end
+
       def ambiguous_number?(value)
         return true if cel_type(value) == :ambiguous_number
         return false unless value.is_a?(Numeric) && value.finite? && value == value.truncate
@@ -432,9 +514,13 @@ module Cerbos
 
       def apply(operator, values)
         assert_arity(operator, values)
-        assert_uniform_null_conventions(operator, values)
+        # Every operator reaching here is strict in CEL: an error operand makes the result the
+        # error, whatever the other operands are. Rendered, `size(aNumber) in [1, null]` would be
+        # `NULL IS NULL`, TRUE where CEL denies.
+        return cel_type_error if values.any? { |value| cel_error?(value) }
 
         override = operator_overrides[operator]
+        reject_map_literals(operator, values, override)
         # Only the built-in eq and ne can resolve string() of a double.
         values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)
         plain = override ? override.call(*values) : dispatch(operator, values)
@@ -464,6 +550,59 @@ module Cerbos
 
       # --- helpers --------------------------------------------------------------------
 
+      # A map literal's entry. Only constants: a map holding a column would need its equality
+      # built element by element, and no shape asks for that.
+      def map_entry(key, value)
+        unless key.is_a?(::String) && deep_constant?(value)
+          raise UnsupportedOperatorError,
+            "A map literal is translated only with string keys and constant values, got " \
+            "#{describe(key)} => #{describe(value)}"
+        end
+
+        Values::MapEntry.new(key: key, value: value)
+      end
+
+      def map_literal(entries)
+        unless entries.all?(Values::MapEntry)
+          raise InvalidPlanError,
+            "struct takes set-field operands, got #{entries.map { |entry| describe(entry) }.join(", ")}"
+        end
+
+        entries.to_h { |entry| [entry.key, entry.value] }
+      end
+
+      # The operators that compare a map literal by CEL equality without binding it into SQL.
+      MAP_OPERATORS = %w[eq ne in hasIntersection list struct].freeze
+
+      def reject_map_literals(operator, values, override)
+        return unless values.any? { |value| holds_map?(value) }
+        return if override.nil? && MAP_OPERATORS.include?(operator)
+
+        raise UnsupportedOperatorError,
+          "#{operator} cannot take a map literal#{" under an operator override" if override}: " \
+          "only eq, ne, in and hasIntersection compare one, by CEL equality"
+      end
+
+      def holds_map?(value)
+        case value
+        when Hash, Values::MapEntry then true
+        when Array then value.any? { |element| holds_map?(element) }
+        else false
+        end
+      end
+
+      # A constant all the way down: a string, number, boolean or null, or a list or map of
+      # those. Not a held {Values} struct: a value that may be NaN or Infinity is no constant.
+      def deep_constant?(value)
+        case value
+        when nil, true, false, Numeric then true
+        when ::String then !ArelSupport.arel_node?(value)
+        when Array then value.all? { |element| deep_constant?(element) }
+        when Hash then value.values.all? { |element| deep_constant?(element) }
+        else false
+        end
+      end
+
       def record_column_type(node, type)
         @column_types[node] = type
         node
@@ -476,7 +615,11 @@ module Cerbos
       def collection?(value)
         value.is_a?(Values::Collection) ||
           value.is_a?(Values::FilteredCollection) ||
-          value.is_a?(Values::MappedCollection)
+          value.is_a?(Values::MappedCollection) ||
+          value.is_a?(Values::ConcatenatedList) ||
+          value.is_a?(Values::SetOperation) ||
+          value.is_a?(Values::ConstantList) ||
+          value.is_a?(Values::ConstantProjection)
       end
 
       # A value that may be NaN or Infinity, kept out of SQL until a comparison resolves it.
@@ -493,6 +636,12 @@ module Cerbos
 
       def reject_deferred(operator, value)
         return unless deferred_value?(value)
+
+        if list_operand?(value)
+          raise UnsupportedOperatorError,
+            "#{operator} cannot take a list chosen by a ternary: SQL has no list value, so only " \
+            "in, ==, != and + take each branch in turn"
+        end
 
         raise UnsupportedOperatorError,
           "#{operator} cannot take an operand that may be NaN or Infinity: only a comparison " \
@@ -511,8 +660,16 @@ module Cerbos
         when Values::Collection then "a relation"
         when Values::FilteredCollection then "a filtered relation"
         when Values::MappedCollection then "a projected relation"
+        when Values::ConstantList then "a filtered list of constants"
+        when Values::ConstantProjection then "a projected list of constants"
         when Values::Hierarchy then "a hierarchy"
         when Values::DoubleText then "string() of a double"
+        when Values::ConcatenatedList then "a concatenation of a relation"
+        when Values::SetOperation then "#{value.kind}() of a relation"
+        when Values::Duration then "a duration"
+        when Values::TimeSince then "timeSince()"
+        when Values::ShiftedTimestamp then "a timestamp shifted by a duration"
+        when Values::ConditionalValue then "a ternary"
         else "#{value.inspect} (#{value.class})"
         end
       end

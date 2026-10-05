@@ -1,0 +1,94 @@
+{
+  "allowed": [
+    "a1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j2",
+    "j3",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/range-built-from-attributes",
+  "intent": "exists over a list literal built from two attributes ([aString, aOptionalString].exists(s, s == \"set\")), which is never unrolled.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ],
+              "operator": "list"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "s"
+                      },
+                      {
+                        "value": "set"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "variable": "s"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/range-built-from-attributes",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[R.attr.aString, R.attr.aOptionalString].exists(s, s == \"set\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The range is an expression, not a stored list; a missing element attribute makes the list error, so the row denies."
+}

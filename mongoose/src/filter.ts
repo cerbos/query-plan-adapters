@@ -5,6 +5,7 @@ import {
   COMPARISON_OPERATORS,
   buildAggregationExpression,
   buildAggregationExpressionFromExpression,
+  isUnorderable,
 } from "./aggregation";
 import type { ComparisonOperator } from "./aggregation";
 import {
@@ -26,6 +27,7 @@ import { LAMBDA_BINDING_OPERATORS, foldLiteralCollection } from "./lambda";
 import {
   applyValueParser,
   createScopedMapper,
+  declaredScalarType,
   isNullableReference,
   relationOfReference,
   resolveFieldReference,
@@ -60,7 +62,43 @@ export const translateCondition = (
   ctx: TranslateContext,
 ): MongooseFilter => {
   rejectNullConstructor(condition, ctx);
-  return buildFilter(condition, ctx);
+  return buildFilter(selectMapMembers(condition, ctx.mapper), ctx);
+};
+
+/** A map key that `obj.key` selects exactly as `obj["key"]` does, and a document path can carry. */
+const SELECTABLE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * `obj["key"]` as the attribute `obj.key`, wherever the caller maps that name. To CEL the two are
+ * the same lookup — a missing key is the same error either way — and the mapped name is the
+ * field the application stores that member in. A key the mapper does not know is left as an
+ * `index`, which is refused there.
+ */
+const selectMapMembers = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): PlanExpressionOperand => {
+  if (!isExpression(operand)) {
+    return operand;
+  }
+  const operands = operand.operands.map((child) => selectMapMembers(child, mapper));
+  const [collection, key] = operands;
+  if (
+    operand.operator === "index" &&
+    operands.length === 2 &&
+    collection !== undefined &&
+    key !== undefined &&
+    isVariable(collection) &&
+    isValue(key) &&
+    typeof key.value === "string" &&
+    SELECTABLE_KEY.test(key.value) &&
+    // A to-many relation is a list to CEL, where a string index is an error, not a member.
+    relationOfReference(collection.name, mapper)?.type !== "many" &&
+    resolveMapperConfig(`${collection.name}.${key.value}`, mapper) !== undefined
+  ) {
+    return { name: `${collection.name}.${key.value}` };
+  }
+  return { operator: operand.operator, operands };
 };
 
 /** A null inside a list/struct literal is a NULL value only under the explicit representation. */
@@ -118,6 +156,15 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
     translateHasIntersection(operands, ctx),
   exists: quantifier("exists"),
   all: quantifier("all"),
+  // `a.isSubset(b)` is "every element of a is in b": CEL's `in` on each element, duplicates and
+  // all, which is the element-wise all() the adapter already translates.
+  isSubset: ({ operands }, ctx) => {
+    const [subset, superset] = operands;
+    if (operands.length !== 2 || subset === undefined || superset === undefined) {
+      throw new UnsupportedQueryPlanError("isSubset requires exactly two operands");
+    }
+    return buildFilter(everyElementIn("all", subset, superset, false), ctx);
+  },
   exists_one: () => {
     throw new UnsupportedQueryPlanError(
       "exists_one requires exact match cardinality and is unsupported",
@@ -197,6 +244,16 @@ const buildFilter = (
       lambdaOperand,
       (body) => buildFilter(body, ctx),
     );
+  }
+  if (
+    (operator === "exists" || operator === "all") &&
+    operands.length === 2 &&
+    collectionOperand !== undefined &&
+    lambdaOperand !== undefined &&
+    isExpression(collectionOperand) &&
+    collectionOperand.operator === "list"
+  ) {
+    return foldConstructedList(operator, collectionOperand, lambdaOperand, ctx);
   }
 
   if (!Object.hasOwn(FILTER_OPERATORS, operator)) {
@@ -348,11 +405,27 @@ const translateNot = (
       ctx,
     );
   }
+  if (isExpression(operand)) {
+    const negated = negatedRewrite(operand, ctx);
+    if (negated !== undefined) {
+      return negated;
+    }
+  }
   // An ordering between a field and a constant negates to its complement, so it keeps the
   // positive leaf's semantics: MongoDB's `$lt` compares only values of the constant's own BSON
   // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
   // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
   // raises an error and denies (cerbos/query-plan-adapters#516).
+  // An ordering CEL can never evaluate is an error under both polarities, so its negation is the
+  // same `false` (cerbos/query-plan-adapters#575). A `$nor` over it would return every document.
+  if (
+    isExpression(operand) &&
+    COMPLEMENTED_ORDERING[operand.operator] !== undefined &&
+    operand.operands.length === 2 &&
+    isUnorderable(operand.operands[0]!, operand.operands[1]!, ctx.mapper)
+  ) {
+    return buildFilter(operand, ctx);
+  }
   const complement = complementedOrdering(operand);
   if (complement) {
     return buildFilter(complement, ctx);
@@ -377,6 +450,189 @@ const translateNot = (
   );
   const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
   return listShape ? { $and: [listShape, guarded] } : guarded;
+};
+
+/**
+ * The negation of a shape this adapter rewrites into another, stated as the rewrite of its
+ * complement so that the errors CEL raises stay errors under both polarities; undefined for any
+ * other shape, which the generic `$nor` path takes.
+ */
+const negatedRewrite = (
+  operand: PlanExpression,
+  ctx: TranslateContext,
+): MongooseFilter | undefined => {
+  const [left, right] = operand.operands;
+  if (operand.operands.length !== 2 || left === undefined || right === undefined) {
+    return undefined;
+  }
+  if (
+    operand.operator === "in" &&
+    isValue(left) &&
+    isExpression(right) &&
+    right.operator === "map"
+  ) {
+    return translateMapIntersection(right, { value: [left.value] }, ctx, true);
+  }
+  // `!hasIntersection(coll.map(e, e.field), [..])`, either operand order: a `$nor` over the
+  // positive filter would flip its no-null-projection guard too, and match the documents whose
+  // map() raises (an element without the field), which CEL denies under either polarity.
+  if (operand.operator === "hasIntersection") {
+    const [map, values] =
+      isExpression(right) && right.operator === "map" ? [right, left] : [left, right];
+    if (isExpression(map) && map.operator === "map") {
+      return translateMapIntersection(map, values, ctx, true);
+    }
+    return undefined;
+  }
+  if (operand.operator === "isSubset") {
+    return buildFilter(everyElementIn("exists", left, right, true), ctx);
+  }
+  if (operand.operator === "eq" || operand.operator === "ne") {
+    const flipped = operand.operator === "eq" ? "ne" : "eq";
+    const rewritten =
+      emptyListComparison(flipped, left, right) ??
+      mapLiteralLookupMembership(flipped, left, right, ctx.mapper);
+    return rewritten === undefined ? undefined : buildFilter(rewritten, ctx);
+  }
+  return undefined;
+};
+
+/** The iteration variable of the macros this module builds itself. */
+const ELEMENT_VARIABLE = "__cerbos_element";
+
+/**
+ * `collection.all(e, e in other)` (or `exists`, and with the membership negated): the element-wise
+ * form CEL's list functions reduce to. A literal collection is folded, a mapped one becomes an
+ * `$elemMatch`, exactly as a policy that spelled the macro out.
+ */
+const everyElementIn = (
+  quantifierOperator: "all" | "exists",
+  collection: PlanExpressionOperand,
+  other: PlanExpressionOperand,
+  negateMembership: boolean,
+): PlanExpression => {
+  const membership: PlanExpression = {
+    operator: "in",
+    operands: [{ name: ELEMENT_VARIABLE }, other],
+  };
+  return {
+    operator: quantifierOperator,
+    operands: [
+      collection,
+      {
+        operator: "lambda",
+        operands: [
+          negateMembership ? { operator: "not", operands: [membership] } : membership,
+          { name: ELEMENT_VARIABLE },
+        ],
+      },
+    ],
+  };
+};
+
+/**
+ * `a.except(b) == []` and `intersect(a, b) == []` (or `!=`) as element-wise macros. Neither list
+ * is materialised: `a - b` is empty exactly when every element of `a` is in `b`, and the
+ * intersection exactly when no element of either is in the other, whichever list Cerbos ranges
+ * over. Only the emptiness of the result is translated; its size or contents are not.
+ */
+const emptyListComparison = (
+  operator: string,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+): PlanExpression | undefined => {
+  if (operator !== "eq" && operator !== "ne") {
+    return undefined;
+  }
+  const isEmptyList = (operand: PlanExpressionOperand): boolean =>
+    isValue(operand) && Array.isArray(operand.value) && operand.value.length === 0;
+  const setOperation = isEmptyList(right) ? left : isEmptyList(left) ? right : undefined;
+  if (
+    setOperation === undefined ||
+    !isExpression(setOperation) ||
+    setOperation.operands.length !== 2
+  ) {
+    return undefined;
+  }
+  const [first, second] = setOperation.operands as [
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+  ];
+  const empty = operator === "eq";
+  if (setOperation.operator === "except") {
+    return empty
+      ? everyElementIn("all", first, second, false)
+      : everyElementIn("exists", first, second, true);
+  }
+  if (setOperation.operator === "intersect") {
+    // Range over the list the document holds; membership in the constant one is a plain `$in`.
+    const [collection, other] =
+      isVariable(second) && !isVariable(first) ? [second, first] : [first, second];
+    return empty
+      ? everyElementIn("all", collection, other, true)
+      : everyElementIn("exists", collection, other, false);
+  }
+  return undefined;
+};
+
+/**
+ * `{"k1": v1, ...}[field] == c` (or `!=`, either side) as `field in [the keys whose value is (or
+ * is not) c]`. A key the map lacks is an error to CEL under both operators, and a field outside
+ * the key list matches neither membership. Only a map of scalar constants is decided here.
+ */
+const mapLiteralLookupMembership = (
+  operator: string,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+  mapper: Mapper,
+): PlanExpression | undefined => {
+  if (operator !== "eq" && operator !== "ne") {
+    return undefined;
+  }
+  const [lookup, constant] = isValue(right) ? [left, right] : [right, left];
+  if (
+    !isValue(constant) ||
+    !isScalarConstant(constant.value) ||
+    !isExpression(lookup) ||
+    lookup.operator !== "index" ||
+    lookup.operands.length !== 2
+  ) {
+    return undefined;
+  }
+  const [map, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  if (!isExpression(map) || map.operator !== "struct" || !isVariable(key)) {
+    return undefined;
+  }
+  if (relationOfReference(key.name, mapper)?.type === "many") {
+    throw new UnsupportedQueryPlanError(
+      "A list cannot be a map key in CEL, so indexing a map constant by a collection is an " +
+        "error, where membership would match its elements",
+    );
+  }
+  const entries = map.operands.map((entry) => {
+    const [entryKey, entryValue] = isExpression(entry) ? entry.operands : [];
+    if (
+      !isExpression(entry) ||
+      entry.operator !== "set-field" ||
+      entry.operands.length !== 2 ||
+      entryKey === undefined ||
+      entryValue === undefined ||
+      !isValue(entryKey) ||
+      !isValue(entryValue) ||
+      !isScalarConstant(entryKey.value) ||
+      !isScalarConstant(entryValue.value)
+    ) {
+      return undefined;
+    }
+    return [entryKey.value, entryValue.value] as const;
+  });
+  if (entries.some((entry) => entry === undefined)) {
+    return undefined;
+  }
+  const keys = entries
+    .filter((entry) => (entry![1] === constant.value) === (operator === "eq"))
+    .map((entry) => entry![0]);
+  return { operator: "in", operands: [key, { value: keys }] };
 };
 
 /** `value OP field` is `field MIRROR(OP) value`. */
@@ -438,6 +694,13 @@ const translateComparison = (
   );
   const bothOperands = [leftOperand, rightOperand];
 
+  const rewritten =
+    emptyListComparison(operator, leftOperand, rightOperand) ??
+    mapLiteralLookupMembership(operator, leftOperand, rightOperand, mapper);
+  if (rewritten !== undefined) {
+    return buildFilter(rewritten, ctx);
+  }
+
   if (
     isVariable(leftOperand) &&
     isVariable(rightOperand) &&
@@ -486,6 +749,16 @@ const translateComparison = (
     }
     const leftAgg = buildAggregationExpression(leftOperand, mapper);
     const rightAgg = buildAggregationExpression(rightOperand, mapper);
+    // CEL has no ordering between types, and `$expr` falls back to BSON's cross-type order, so an
+    // ordering between a string and a computed number is decided here, as the constant path
+    // decides `aNumber < "5"`: false, and its negation reaches here as the same ordering.
+    if (
+      operator !== "eq" &&
+      operator !== "ne" &&
+      isUnorderable(leftOperand, rightOperand, mapper)
+    ) {
+      return { $expr: false };
+    }
     return withEvaluationGuards(
       { $expr: { [COMPARISON_OPERATORS[operator]]: [leftAgg, rightAgg] } },
       bothOperands,
@@ -593,6 +866,29 @@ const translateIn = (
       "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
     );
   }
+  // `needle in coll.map(e, e.field)` is `hasIntersection(coll.map(e, e.field), [needle])`.
+  if (
+    isValue(leftOperand) &&
+    isExpression(rightOperand) &&
+    rightOperand.operator === "map"
+  ) {
+    return translateMapIntersection(
+      rightOperand,
+      { value: [leftOperand.value] },
+      ctx,
+      false,
+    );
+  }
+  if (
+    isValue(leftOperand) &&
+    isExpression(rightOperand) &&
+    rightOperand.operator === "if"
+  ) {
+    return buildFilter(
+      membershipInConditionalList(leftOperand.value, rightOperand),
+      ctx,
+    );
+  }
   if (isValue(leftOperand) && isVariable(rightOperand)) {
     if (relationOfReference(rightOperand.name, ctx.mapper)?.type === "one") {
       throw new UnsupportedQueryPlanError(
@@ -640,6 +936,55 @@ const translateIn = (
   throw new UnsupportedQueryPlanError(
     "in supports only field-in-value-list or value-in-mapped-collection shapes",
   );
+};
+
+const isScalarConstant = (value: unknown): boolean =>
+  value === null || ["string", "number", "boolean"].includes(typeof value);
+
+/**
+ * `needle in (cond ? [..] : [..])` with constant branches: the membership is decided per branch
+ * at translation time, which leaves the condition — still evaluated, and still able to raise.
+ * This is how the planner spells `"role" in runtime.effectiveDerivedRoles`.
+ */
+const membershipInConditionalList = (
+  needle: unknown,
+  conditional: PlanExpression,
+): PlanExpressionOperand => {
+  const [condition, thenOperand, elseOperand] = conditional.operands;
+  if (
+    conditional.operands.length !== 3 ||
+    condition === undefined ||
+    thenOperand === undefined ||
+    elseOperand === undefined
+  ) {
+    throw new UnsupportedQueryPlanError("if operator requires three operands");
+  }
+  const contains = (branch: PlanExpressionOperand): boolean => {
+    if (
+      !isValue(branch) ||
+      !Array.isArray(branch.value) ||
+      !isScalarConstant(needle) ||
+      !branch.value.every(isScalarConstant)
+    ) {
+      throw new UnsupportedQueryPlanError(
+        "Membership in a conditional list is translated only when both branches are lists of " +
+          "scalar constants and the needle is a scalar constant",
+      );
+    }
+    return branch.value.some((element) => element === needle);
+  };
+  const inThen = contains(thenOperand);
+  const inElse = contains(elseOperand);
+  const negatedCondition = { operator: "not", operands: [condition] };
+  if (inThen === inElse) {
+    // Either branch gives the same answer, but CEL still evaluates the condition, whose error
+    // denies: `c || !c` holds exactly where `c` evaluates, `c && !c` nowhere.
+    return {
+      operator: inThen ? "or" : "and",
+      operands: [condition, negatedCondition],
+    };
+  }
+  return inThen ? condition : negatedCondition;
 };
 
 /**
@@ -825,7 +1170,7 @@ const translateHasIntersection = (
   const rightOperand = valueFirst ? firstOperand : secondOperand;
 
   if (isExpression(leftOperand) && leftOperand.operator === "map") {
-    return translateMapIntersection(leftOperand, rightOperand, ctx);
+    return translateMapIntersection(leftOperand, rightOperand, ctx, false);
   }
 
   if (!isVariable(leftOperand) || !isValue(rightOperand)) {
@@ -858,29 +1203,6 @@ const translateHasIntersection = (
       requireExists: values.includes(null),
     },
   );
-};
-
-/**
- * The scalar type a reference's stored value is declared with — for a relation mapped to one
- * element field (`relation.field`), that element field's — or undefined when a constant cannot be
- * checked against it: no `valueType`, a `dateTime` (compared through its own path), or a
- * `valueParser`, which is the caller's explicit override of the constant.
- */
-const declaredScalarType = (
-  reference: string,
-  mapper: Mapper,
-): "number" | "string" | "boolean" | undefined => {
-  const config = resolveMapperConfig(reference, mapper);
-  const relation = config?.relation;
-  const typed = relation
-    ? relation.field
-      ? relation.fields?.[relation.field]
-      : undefined
-    : config;
-  if (!typed || typed.valueParser || config?.valueParser) {
-    return undefined;
-  }
-  return typed.valueType === "dateTime" ? undefined : typed.valueType;
 };
 
 /**
@@ -955,6 +1277,7 @@ const translateMapIntersection = (
   map: PlanExpression,
   valuesOperand: PlanExpressionOperand,
   ctx: TranslateContext,
+  negated: boolean,
 ): MongooseFilter => {
   const { mapper } = ctx;
   const collectionOperand = getOperandAt(
@@ -1019,31 +1342,50 @@ const translateMapIntersection = (
     valuesOperand.value,
     scopedMapper,
   );
-  const matchingElement = {
-    [relation.name]: {
-      $elemMatch: buildGuardedFieldFilter(
-        elementPath,
-        { $in: values },
-        false,
-        values.includes(null),
-      ),
-    },
+  const elementMatch = {
+    $elemMatch: buildGuardedFieldFilter(
+      elementPath,
+      { $in: values },
+      false,
+      values.includes(null),
+    ),
   };
-  if (!isNullableReference(projectionOperand.name, scopedMapper)) {
-    return matchingElement;
-  }
   // A nullable projection is a missing attribute on any element that stores null, which makes
-  // the whole CEL `map` raise: no element may be null.
-  return {
-    $and: [
-      {
-        [relation.name]: {
-          $not: { $elemMatch: buildFieldFilter(elementPath, { $eq: null }) },
+  // the whole CEL `map` raise under either polarity: no element may be null.
+  const noMissingProjection = isNullableReference(
+    projectionOperand.name,
+    scopedMapper,
+  )
+    ? [
+        {
+          [relation.name]: {
+            $not: { $elemMatch: buildFieldFilter(elementPath, { $eq: null }) },
+          },
         },
-      },
-      matchingElement,
-    ],
-  };
+      ]
+    : [];
+  if (negated) {
+    // No element matches, over a collection that is there: an absent or null list is an error
+    // to CEL, which a bare `$not` would match. A relation reached through a parent that can be
+    // absent has no single array to require.
+    if (relation.requiresParent !== undefined) {
+      throw new UnsupportedQueryPlanError(
+        "A negated membership in a projection reached through an absent-able parent cannot " +
+          "require the collection to exist",
+      );
+    }
+    return {
+      $and: [
+        { [relation.name]: { $type: "array" } },
+        ...noMissingProjection,
+        { [relation.name]: { $not: elementMatch } },
+      ],
+    };
+  }
+  const matchingElement = { [relation.name]: elementMatch };
+  return noMissingProjection.length === 0
+    ? matchingElement
+    : { $and: [...noMissingProjection, matchingElement] };
 };
 
 /**
@@ -1070,6 +1412,13 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     }
     if (lambdaOperand.operator !== "lambda") {
       throw new UnsupportedQueryPlanError("Second operand must be a lambda expression");
+    }
+    if (lambdaOperand.operands.length !== 2) {
+      throw new UnsupportedQueryPlanError(
+        `two-variable ${operator}() binds each element's list index or map key, and ` +
+          "$elemMatch exposes neither: it matches an array element by its own fields, and " +
+          "has no form that iterates a subdocument's field names",
+      );
     }
     const conditionOperand = getOperandAt(
       lambdaOperand.operands,
@@ -1118,6 +1467,95 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     };
   };
 }
+
+/**
+ * `[R.attr.a, R.attr.b].exists(s, body)`: a macro over a list the policy builds from attributes,
+ * unrolled into the body once per element, as a literal list is. CEL builds the whole list before
+ * it ranges over it, so one element it cannot evaluate — a missing attribute — is an error that
+ * denies the document whatever the bodies say: every element's guard is ANDed outside them.
+ */
+const foldConstructedList = (
+  operator: "exists" | "all",
+  list: PlanExpression,
+  lambda: PlanExpressionOperand,
+  ctx: TranslateContext,
+): MongooseFilter => {
+  if (ctx.scope.kind !== "root") {
+    throw new UnsupportedQueryPlanError(
+      `${operator}() over a constructed list inside a collection predicate is unsupported`,
+    );
+  }
+  if (
+    !isExpression(lambda) ||
+    lambda.operator !== "lambda" ||
+    lambda.operands.length !== 2
+  ) {
+    throw new UnsupportedQueryPlanError(
+      `${operator}() over a constructed list requires a single-variable lambda`,
+    );
+  }
+  const [body, variable] = lambda.operands as [
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+  ];
+  if (!isVariable(variable)) {
+    throw new UnsupportedQueryPlanError("Lambda variable must have a name");
+  }
+  const elements = list.operands;
+  if (!elements.every((element) => isVariable(element) || isValue(element))) {
+    throw new UnsupportedQueryPlanError(
+      `${operator}() over a constructed list is translated only when every element is an ` +
+        "attribute or a constant",
+    );
+  }
+  if (elements.length === 0) {
+    return { $expr: operator === "all" };
+  }
+  const bodies = elements.map((element) =>
+    buildFilter(substituteElement(body, variable.name, element), ctx),
+  );
+  return withEvaluationGuards(
+    operator === "exists" ? { $or: bodies } : { $and: bodies },
+    elements,
+    ctx.mapper,
+  );
+};
+
+/**
+ * `body` with every reference to the iteration variable replaced by `element`. A nested macro
+ * that rebinds the name shadows it; a field read through the variable (`s.name`) is refused,
+ * since the element is a scalar attribute or constant here.
+ */
+const substituteElement = (
+  operand: PlanExpressionOperand,
+  name: string,
+  element: PlanExpressionOperand,
+): PlanExpressionOperand => {
+  if (isVariable(operand)) {
+    if (operand.name === name) {
+      return element;
+    }
+    if (operand.name.startsWith(`${name}.`)) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot read ${operand.name}: the elements of a constructed list are translated as scalars`,
+      );
+    }
+    return operand;
+  }
+  if (!isExpression(operand)) {
+    return operand;
+  }
+  if (operand.operator === "lambda") {
+    const bound = operand.operands.slice(1);
+    if (bound.some((child) => isVariable(child) && child.name === name)) {
+      return operand;
+    }
+  }
+  return {
+    operator: operand.operator,
+    operands: operand.operands.map((child) => substituteElement(child, name, element)),
+  };
+};
 
 const translateLambda = (
   operands: PlanExpressionOperand[],

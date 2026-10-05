@@ -266,6 +266,26 @@ function recordNullableElementField(
 }
 
 /**
+ * Records that `operand`, the bare variable of a projected scalar list (`tagNames.all(t, ...)`),
+ * is read by a function that raises an error on a null element (`t.startsWith(...)`,
+ * `t.upperAscii()`). A null element of such a list is a VALUE, so resolving the variable records
+ * nothing; it is the function that errors, and the enclosing macro needs the same guard as for a
+ * missing element column.
+ */
+export function recordErroringNullElement(
+  context: TranslationContext,
+  operand: PlanExpressionOperand,
+  resolved: ResolvedOperand
+): void {
+  if (!isNamedOperand(operand) || !isResolvedFieldReference(resolved)) return;
+  if (resolved.nullable === false || (resolved.relations?.length ?? 0) > 0) return;
+  const scope = [...context.scopes]
+    .reverse()
+    .find((candidate) => candidate.variableName === operand.name);
+  scope?.nullableFields.add(getLeafField(resolved.path));
+}
+
+/**
  * The context for a lambda body iterating `collectionPath`: `scope` is pushed, and references
  * to the lambda variable resolve against the collection's element mapping.
  */
@@ -293,6 +313,7 @@ export function enterLambdaScope(
             lookupElementFields(fullMapper, collectionPath)?.[projection]?.valueType,
           // A projected list carries null values, unlike missing fields on object elements.
           nullAttributeRepresentation: "explicit",
+          nullable: lookupElementFields(fullMapper, collectionPath)?.[projection]?.nullable,
         };
       }
     }

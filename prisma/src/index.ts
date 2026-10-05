@@ -7,6 +7,7 @@ import type { TranslationContext } from "./mapping";
 import { isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
+import { rewriteFunctionCalls } from "./functions";
 import { expandLiteralCollections } from "./literals";
 import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
@@ -170,7 +171,7 @@ export function queryPlanToPrisma({
     case PlanKind.CONDITIONAL: {
       const settled = settleTypeMismatches(
         hoistOuterScopeReferences(
-          expandLiteralCollections(queryPlan.condition),
+          expandLiteralCollections(rewriteFunctionCalls(queryPlan.condition, context)),
           []
         ),
         context

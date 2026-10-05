@@ -31,6 +31,20 @@ cases:
   condition:
     match:
       expr: 'now() - duration("24h") > timestamp(R.attr.createdAt)'
+- id: 'timestamp/greater-than/time-since-duration'
+  tier: extended
+  intent: 'timeSince() on a timestamp attribute compared with a duration literal (timestamp(createdAt).timeSince() > duration("24h")).'
+  trap: 'timeSince is relative to the query clock, and the duration is not a string: rows dated in the future (2036, 2037) deny, and a3 has no createdAt.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt).timeSince() > duration("24h")'
+- id: 'timestamp/less-than/attribute-plus-duration'
+  tier: extended
+  intent: 'A timestamp attribute shifted by a duration and compared with a timestamp literal.'
+  trap: 'Dropping the duration over-grants a7, b3 and h4 (2021-05-05T05:05:05Z), which are inside the window only before the shift.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) + duration("24h") < timestamp("2021-05-06T00:00:00Z")'
 - id: 'timestamp/less-than/relative-window'
   tier: extended
   intent: 'timestamp(field) < now() - duration("24h"), which the planner folds to a constant instant.'

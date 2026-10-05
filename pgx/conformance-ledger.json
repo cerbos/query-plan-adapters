@@ -129,6 +129,14 @@
       "reason": "Same refusal as collection/exists/map-keys, under negation.",
       "status": "unsupported"
     },
+    "collection/exists/two-variable-index-and-element": {
+      "reason": "The two-variable exists() binds each element's list index, and a related table has no row order to read an index from, so every two-variable lambda is refused.",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "reason": "The two-variable exists() over a map binds each key, and the map is no table: the mapper declares only obj.inner as a column, and SQL has no form for the set of a row's keys. Every two-variable lambda is refused.",
+      "status": "unsupported"
+    },
     "collection/filter/as-conjunct": {
       "reason": "filter() yields a collection, not a boolean; it translates only inside size() or hasIntersection().",
       "status": "unsupported"
@@ -138,23 +146,23 @@
       "status": "unsupported"
     },
     "collection/index/first-element-of-boolean-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/first-element-of-number-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/first-element-of-object-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from.",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from.",
       "status": "unsupported"
     },
     "collection/index/first-element-of-string-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/first-element-of-string-list-equals-null": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/fractional-position": {
@@ -162,15 +170,15 @@
       "status": "unsupported"
     },
     "collection/index/negated-first-element-of-boolean-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/negated-first-element-of-number-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/negated-first-element-of-string-list": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "collection/index/negated-out-of-bounds": {
@@ -179,6 +187,10 @@
     },
     "collection/index/negative-position": {
       "reason": "Ordered list indexing has no SQL relation lowering; a relation has no positional order or CEL out-of-bounds/error semantics.",
+      "status": "unsupported"
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "reason": "intersect() keeps the duplicates of the shorter list, so its size turns on which list is shorter and on the stored list's multiplicity; the translator lowers intersect() only as an emptiness test, which is !hasIntersection().",
       "status": "unsupported"
     },
     "collection/map/as-whole-condition": {
@@ -214,11 +226,11 @@
       "status": "unsupported"
     },
     "hierarchy/overlaps/path-built-from-identifier": {
-      "reason": "The planner builds the path from a list() constructor, which has no SQL scalar lowering in this translator.",
+      "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and the translator lowers only a delimited string.",
       "status": "unsupported"
     },
     "hierarchy/overlaps/path-built-from-list-value-first": {
-      "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
+      "reason": "Same refusal as hierarchy/overlaps/path-built-from-identifier: hierarchy() over a list() of segments has no lowering.",
       "status": "unsupported"
     },
     "membership/in/map-attribute-keys": {
@@ -243,14 +255,6 @@
     },
     "principal/exists-one/long-list": {
       "reason": "This macro has no value-list lowering; only exists/all can use the translator’s literal-list fold.",
-      "status": "unsupported"
-    },
-    "principal/exists/list-of-structs": {
-      "reason": "The planner emits list/struct/set-field constructors for principal objects; the macro fold accepts literal value lists or mapped relations, not constructor expressions.",
-      "status": "unsupported"
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "reason": "The planner emits list/struct/set-field constructors for principal objects; the macro fold accepts literal value lists or mapped relations, not constructor expressions.",
       "status": "unsupported"
     },
     "principal/filter/size-of-filtered-long-list": {
@@ -354,11 +358,11 @@
       "status": "unsupported"
     },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
-      "reason": "The translator has no `index` case: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
     "type-mismatch/equals/string-field-against-map-literal": {
@@ -370,15 +374,11 @@
       "status": "unsupported"
     },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
+      "reason": "hasIntersection() lowers only against a literal list, and here the other side is a list() of computed elements, which SQL cannot hold as a set.",
       "status": "unsupported"
     },
     "type-mismatch/in/list-literal-in-resource-string-list": {
       "reason": "A nested list element cannot be bound as a scalar member of this relation.",
-      "status": "unsupported"
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "reason": "The computed list constructor has no SQL scalar lowering in this translator.",
       "status": "unsupported"
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {

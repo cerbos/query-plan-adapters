@@ -136,6 +136,11 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 		{name: "regex", cond: expr("matches", variable("request.resource.attr.name"), val(t, ".*"))},
 		{name: "filter outside size", cond: expr("filter", variable("request.resource.attr.tags"), expr("lambda", val(t, true), variable("t")))},
 		{name: "hasIntersection between two stored collections", cond: expr("hasIntersection", variable("request.resource.attr.tags"), variable("request.resource.attr.tags"))},
+		{name: "isSubset with one operand", cond: expr("isSubset", variable("request.resource.attr.tags"))},
+		{name: "index with one operand", cond: expr("eq", expr("index", variable("request.resource.attr.tags")), val(t, "x"))},
+		{name: "upperAscii with two operands", cond: expr("eq", expr("upperAscii", variable("request.resource.attr.name"), val(t, "x")), val(t, "X"))},
+		{name: "timeSince with no operands", cond: expr("gt", expr("timeSince"), expr("duration", val(t, "1s")))},
+		{name: "struct entry that is not a set-field", cond: expr("eq", expr("index", expr("struct", val(t, "k")), variable("request.resource.attr.name")), val(t, "x"))},
 	}
 
 	for _, tc := range cases {

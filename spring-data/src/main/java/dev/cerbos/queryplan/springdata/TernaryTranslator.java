@@ -11,6 +11,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Predicate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
@@ -36,31 +37,82 @@ final class TernaryTranslator {
     /**
      * Rewrites {@code cmp(if(c, a, b), other)} as {@code cmp(a, other)} and
      * {@code cmp(b, other)}. Runs on the raw operands, before any mirroring. Nested ternaries
-     * and a ternary on the other side are handled by the recursion.
+     * and a ternary on the other side are handled by the recursion. {@code cmp} is a comparison
+     * or {@code in}, and the ternary may sit under list or string {@code +}
+     * ({@code ["a"] + (c ? ["b"] : []) == [...]}): {@code +} evaluates both operands, so
+     * substituting a branch in place keeps CEL's meaning. A substituted constant
+     * {@code add(list, list)} is folded ({@link PlanLiterals#fold}).
      *
      * @return the rewritten predicate, or {@code null} if this comparison has no ternary
      */
     Predicate tryTernaryComparison(String op, List<Operand> operands, Scope scope) {
-        if (!ComparisonTranslator.COMPARISON_OPS.contains(op) || operands.size() != 2) {
+        if ((!ComparisonTranslator.COMPARISON_OPS.contains(op) && !"in".equals(op))
+                || operands.size() != 2) {
             return null;
         }
-        int idx;
-        if (isIfExpression(operands.get(0))) {
-            idx = 0;
-        } else if (isIfExpression(operands.get(1))) {
-            idx = 1;
-        } else {
-            return null;
+        for (int idx = 0; idx < 2; idx++) {
+            List<Integer> path = ternaryUnderAdd(operands.get(idx));
+            if (path == null) {
+                continue;
+            }
+            int at = idx;
+            List<Operand> ifOps = at(operands.get(idx), path).getExpression().getOperandsList();
+            return translateTernary(ifOps, branch -> {
+                Operand substituted = PlanLiterals.fold(
+                        replaceAt(operands.get(at), path, 0, branch));
+                return walker.traverseExpression(
+                        substituteOperand(op, operands, at, substituted), scope);
+            }, scope);
         }
-        List<Operand> ifOps = operands.get(idx).getExpression().getOperandsList();
-        return translateTernary(ifOps,
-                branch -> walker.traverseExpression(substituteOperand(op, operands, idx, branch), scope),
-                scope);
+        return null;
+    }
+
+    /**
+     * The operand indices from {@code o} down to the first {@code if} that is {@code o} or is
+     * reached from it through {@code add} only; {@code null} when there is none.
+     */
+    private static List<Integer> ternaryUnderAdd(Operand o) {
+        if (isIfExpression(o)) {
+            return List.of();
+        }
+        if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "add".equals(o.getExpression().getOperator())) {
+            for (int i = 0; i < o.getExpression().getOperandsCount(); i++) {
+                List<Integer> below = ternaryUnderAdd(o.getExpression().getOperands(i));
+                if (below != null) {
+                    List<Integer> path = new ArrayList<>();
+                    path.add(i);
+                    path.addAll(below);
+                    return path;
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean isIfExpression(Operand o) {
         return o.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && "if".equals(o.getExpression().getOperator());
+    }
+
+    private static Operand at(Operand root, List<Integer> path) {
+        Operand current = root;
+        for (int i : path) {
+            current = current.getExpression().getOperands(i);
+        }
+        return current;
+    }
+
+    private static Operand replaceAt(Operand root, List<Integer> path, int depth,
+                                     Operand replacement) {
+        if (depth == path.size()) {
+            return replacement;
+        }
+        int i = path.get(depth);
+        PlanResourcesFilter.Expression.Builder rebuilt = root.getExpression().toBuilder();
+        rebuilt.setOperands(i, replaceAt(root.getExpression().getOperands(i), path, depth + 1,
+                replacement));
+        return Operand.newBuilder().setExpression(rebuilt).build();
     }
 
     /**

@@ -82,22 +82,14 @@ module Cerbos
           )
         end
 
-        # Refuses `eq`/`ne` between two columns with different null conventions (#308).
-        # The explicit side needs a definite answer for NULL; the other side needs UNKNOWN.
-        # No single predicate does both. `values` always holds two operands here.
-        def assert_uniform_null_conventions(operator, values)
-          return unless %w[eq ne].include?(operator)
-
-          left, right = values
-          return unless ArelSupport.arel_node?(left) && ArelSupport.arel_node?(right)
-          return if explicit_null?(left) == explicit_null?(right)
-
-          raise UnsupportedOperatorError,
+        def mixed_null_conventions_error(operator)
+          UnsupportedOperatorError.new(
             "Cannot translate #{operator} between two columns under mixed null conventions. " \
-            "One attribute declares null_representation: :explicit and the other does not, so " \
+            "One attribute is under null_representation: :explicit and the other is not, so " \
             "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
             "one predicate does both. Declare null_representation on both attributes, or on " \
             "neither."
+          )
         end
 
         # Applies declared null conventions to `plain`, the normal translation. Returns `plain`
@@ -160,8 +152,16 @@ module Cerbos
 
           equal = ArelSupport.and_node(present + [ArelSupport.comparison("eq", left, right)])
           equal = ArelSupport.or_node([both_null(left, right), equal]) if left_explicit && right_explicit
+          result = (operator == "ne") ? ArelSupport.not_node(equal) : equal
 
-          (operator == "ne") ? ArelSupport.not_node(equal) : equal
+          # A column that is not `:explicit` is a missing attribute when NULL, and CEL errors on it
+          # whatever the explicit side holds. Without the guard, an explicit NULL beside it would
+          # make `eq` FALSE and `ne` TRUE, a grant the PDP never makes. With it, the explicit side
+          # still answers its null definitely wherever the other side is present (#308).
+          missing = [[left, left_explicit], [right, right_explicit]].filter_map { |operand, explicit|
+            ArelSupport.is_null(operand) if !explicit && ArelSupport.arel_node?(operand)
+          }
+          unknown_if_any(missing, result)
         end
 
         # Adds `needle IS NOT NULL` next to the `in` translation, so overrides still apply.
@@ -170,20 +170,20 @@ module Cerbos
           # A stored collection may hold a null, and then `null in coll` is TRUE. The guard
           # would drop those rows; the collection translation handles them already.
           return plain unless haystack.is_a?(Array)
+          # A column in the list: `null in [col]` can be TRUE, and each element is already
+          # definite (#574).
+          return plain if haystack.any? { |member| ArelSupport.arel_node?(member) }
           # A null member already adds a definite `IS NULL` branch.
           return plain if haystack.any?(&:nil?)
 
           ArelSupport.and_node([ArelSupport.comparison("ne", needle, nil), plain])
         end
 
-        # Column-to-column equality for a membership test. Under `:explicit`, two NULLs are
-        # equal in CEL, so add that case. Under `:omitted`, CEL denies the row, and plain
-        # equality (UNKNOWN) already keeps it out.
-        def null_equality(left, right)
-          equal = ArelSupport.comparison("eq", left, right)
-          return equal if null_attribute_representation == :omitted
-
-          ArelSupport.or_node([equal, both_null(left, right)])
+        # Equality between two operands that each reach CEL as a null value when NULL, such as an
+        # `:explicit` value against a relation's stored member. Two NULLs are equal in CEL. The
+        # value's declaration decides this, never the call's convention (#591).
+        def explicit_null_equality(left, right)
+          ArelSupport.or_node([ArelSupport.comparison("eq", left, right), both_null(left, right)])
         end
 
         # `left IS NULL AND right IS NULL`: two explicit nulls are equal in CEL.

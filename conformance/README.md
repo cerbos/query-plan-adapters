@@ -26,7 +26,7 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 41 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 42 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |
@@ -120,6 +120,13 @@ Each adapter implements this once, in its own language. It needs no PDP.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
+   - Where the adapter's language has a Cerbos SDK that reshapes the `PlanResources` response
+     (JavaScript, Python's HTTP client, Ruby), hand the adapter what that SDK returns: serve the
+     recorded plan from a stubbed PDP and fetch it with the SDK's own client, over every
+     transport the SDK offers (`@cerbos/http` and `@cerbos/grpc`; Python's HTTP and gRPC
+     clients), never a hand-built imitation of its types. The stub writes numbers as protojson
+     does (`-0` keeps its sign). The Go and Java SDKs return the protobuf itself, which those
+     harnesses decode directly.
    - **No entry:** translate the plan, run the query, and assert the returned ids equal `allowed`
      exactly.
    - **`unsupported`:** assert that translating throws the adapter's refusal error type.
@@ -203,6 +210,13 @@ a value the store has already lost:
   PDP the stored (truncated) value. The corpus carries no case for this, because the fault is in the
   mapping, not the translation, and every millisecond store would ledger it
   ([#519](https://github.com/cerbos/query-plan-adapters/issues/519)).
+- **A value the PDP cannot receive.** `check()` rejects a NaN attribute
+  (`google.protobuf.Value.number_value: invalid NaN value`), and a policy spelling `double("NaN")`
+  fails to plan, so a row whose number column holds NaN can never be the resource the PDP decided.
+  What any adapter returns for such a row is outside the contract: stores disagree on where NaN
+  orders (MongoDB's `$expr` sorts it below every number, PostgreSQL above), and no golden can
+  record a decision to hold them to. Normalise NaN before it is stored, or before the filter runs
+  ([#573](https://github.com/cerbos/query-plan-adapters/issues/573)).
 
 ## Changing the corpus
 
@@ -210,10 +224,20 @@ a value the store has already lost:
    it to `seeds.json` / `derived-fields.json` and teach `generator/resources.go` the projection.
 2. Run the generator. A new case must have a discriminating oracle: add a seed that tells a right
    translation from the wrong one it targets.
-3. Run every adapter's harness. Each new failure is exactly one of:
+
+   Watch j1, j2 and j3 (each missing one of `aString`, `aNumber`, `aBool`) under a negation, a
+   `match.none` or a DENY. The plan leaves the attribute unknown, so its comparison denies the row;
+   `check()` sends it absent, the condition errors, and the error counts as not matching, so the
+   row is allowed (#530). Unless the case is about that disagreement, let another member decide
+   those rows (`logic/not/none-of-three` does), or the case is a `plannerDivergence` no adapter
+   can pass.
+3. Run every adapter's harness: `scripts/run-harness.sh <adapter>` brings up its store, runs it and
+   tears it down; `--all` runs the roster one adapter at a time. Each new failure is exactly one of:
    - a translation bug: fix it;
    - a shape the store cannot express: make it throw, and add an `unsupported` ledger entry;
    - a known wrong result tracked by an issue: add a `divergent` ledger entry.
+4. Update each affected README's contract table. `validate-corpus.sh` recounts it from the goldens
+   and the ledger and fails on a stale one.
 
 ## Bumping the PDP
 
