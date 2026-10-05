@@ -55,8 +55,12 @@ module Cerbos
         BooleanExpression.new(:OR, *nodes)
       end
 
+      # Sequel writes +NOT x+ with no parentheses around it, and every store binds +IS+ and the
+      # comparison operators tighter than +NOT+: +NOT x IS NULL+ reads as +NOT (x IS NULL)+. A
+      # negation that becomes the operand of +IS NULL+ (an element guard in a macro) or of a
+      # comparison would test the wrong expression, so the negation carries its own parentheses.
       def not_node(value)
-        BooleanExpression.new(:NOT, value)
+        ::Sequel::SQL::PlaceholderLiteralString.new(["(NOT ", ")"], [value])
       end
 
       # Makes +CASE WHEN c1 THEN v1 [WHEN c2 THEN v2 ...] ELSE e END+.
