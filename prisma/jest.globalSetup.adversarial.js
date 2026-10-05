@@ -196,12 +196,9 @@ module.exports = async function globalSetup() {
     );
   }
 
-  // No `--force-reset` here, unlike the SQLite leg in package.json: that leg pushes into
-  // `prisma/dev-adversarial.db`, a file which survives between runs and has to be dropped. This
-  // database was created by the container a few seconds ago and is empty, so the reset is a no-op
-  // — and a destructive flag that does nothing is one Prisma Migrate refuses to run under an AI
-  // agent, which would otherwise make these legs the only ones a contributor cannot reproduce
-  // exactly as CI runs them.
+  // No `--force-reset`, here or on the SQLite legs in package.json (which delete their file
+  // first): this database was created by the container a few seconds ago and is empty, so a reset
+  // would be a no-op, and it is a destructive flag Prisma Migrate refuses to run under an AI agent.
   execFileSync(
     process.execPath,
     [

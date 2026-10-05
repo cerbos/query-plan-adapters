@@ -224,10 +224,20 @@ a value the store has already lost:
    it to `seeds.json` / `derived-fields.json` and teach `generator/resources.go` the projection.
 2. Run the generator. A new case must have a discriminating oracle: add a seed that tells a right
    translation from the wrong one it targets.
-3. Run every adapter's harness. Each new failure is exactly one of:
+
+   Watch j1, j2 and j3 (each missing one of `aString`, `aNumber`, `aBool`) under a negation, a
+   `match.none` or a DENY. The plan leaves the attribute unknown, so its comparison denies the row;
+   `check()` sends it absent, the condition errors, and the error counts as not matching, so the
+   row is allowed (#530). Unless the case is about that disagreement, let another member decide
+   those rows (`logic/not/none-of-three` does), or the case is a `plannerDivergence` no adapter
+   can pass.
+3. Run every adapter's harness: `scripts/run-harness.sh <adapter>` brings up its store, runs it and
+   tears it down; `--all` runs the roster one adapter at a time. Each new failure is exactly one of:
    - a translation bug: fix it;
    - a shape the store cannot express: make it throw, and add an `unsupported` ledger entry;
    - a known wrong result tracked by an issue: add a `divergent` ledger entry.
+4. Update each affected README's contract table. `validate-corpus.sh` recounts it from the goldens
+   and the ledger and fails on a stale one.
 
 ## Bumping the PDP
 
