@@ -1142,4 +1142,25 @@ RSpec.describe Cerbos::ActiveRecord do
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
     end
   end
+
+  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
+  # gap tracked by #509; delete it when its corpus action lands.
+  describe "a list or map literal" do
+    # Corpus gap. `x in map` tests the keys. The planner folds a literal map to `==`, but a map
+    # can still arrive as a value, and answering FALSE would grant its negation.
+    it "tests the keys of a map value in a membership" do
+      plan = conditional(expression("in", variable("request.resource.attr.aString"), value({"one" => 1})))
+
+      expect(translate(plan).pluck(:a_string).uniq).to eq(["one"])
+      expect(translate(conditional(expression("not", plan["condition"]))).where(a_string: "one")).to be_empty
+    end
+
+    # Corpus gap. `(c ? ["x"] : ["y"]) == ["x"]`: a CASE cannot hold a list.
+    it "refuses a ternary with a list arm" do
+      ternary = expression("if", variable("request.resource.attr.aBool"), value(["x"]), value(["y"]))
+
+      expect { translate(conditional(expression("eq", ternary, value(["x"])))) }
+        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
+    end
+  end
 end

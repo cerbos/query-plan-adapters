@@ -21,6 +21,10 @@ module Cerbos
       # a list of segments with no delimiter, as `hierarchy(["a", R.id])` makes.
       Hierarchy = Struct.new(:value, :segments, :delimiter)
 
+      # One `set-field` of a map literal: a key and its constant value, held until the `struct`
+      # around it builds the Hash.
+      MapEntry = Struct.new(:key, :value)
+
       # `string()` of a value CEL holds as a double, held until `eq` or `ne` compares it with
       # a literal. See {Translator::Casts#compare_double_text}.
       DoubleText = Struct.new(:value)
