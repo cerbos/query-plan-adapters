@@ -48,6 +48,17 @@ module Cerbos
         ArelSupport.infix(mysql? ? "DIV" : "/", left, right)
       end
 
+      # A double truncated toward zero, as a whole-number type: CEL's `int()` of a double in its
+      # range. SQLite's CAST of a REAL to INTEGER already truncates; PostgreSQL's and MySQL's CAST
+      # round, so the fraction is dropped first with TRUNC and TRUNCATE, and the CAST is exact.
+      def truncate_to_int(expression)
+        case adapter_name
+        when "sqlite", "sqlite3" then ArelSupport.cast(expression, "INTEGER")
+        when *MYSQL_ADAPTERS then ArelSupport.cast(ArelSupport.function("TRUNCATE", [expression, 0]), "SIGNED")
+        else ArelSupport.cast(ArelSupport.function("TRUNC", [expression]), "BIGINT")
+        end
+      end
+
       # The CAST type for an IEEE-754 double. Not PostgreSQL `numeric`: it is exact decimal, so
       # fractional arithmetic would not match CEL doubles.
       def double_type

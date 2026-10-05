@@ -16,8 +16,8 @@ module EdgeCaseModels
         t.integer :author_id
         # Zero, positive and negative rows for the division tests: x/0 is NaN, +Inf or -Inf.
         t.integer :n
-        # For the int() cast: CEL truncates toward zero, PostgreSQL and MySQL round.
-        t.float :score
+        # int() refuses an exact decimal: CEL truncates the nearest double, not the stored value.
+        t.decimal :amount, precision: 20, scale: 4
       end
 
       create_table :edge_comments, force: true do |t|
@@ -71,9 +71,9 @@ module EdgeCaseModels
       end
     end
 
-    EdgeDocument.create!(id: 1, title: "zero", n: 0, score: 0.0)
-    EdgeDocument.create!(id: 2, title: "two", n: 2, score: 2.5)
-    EdgeDocument.create!(id: 3, title: "negative", n: -3, score: -0.6)
+    EdgeDocument.create!(id: 1, title: "zero", n: 0)
+    EdgeDocument.create!(id: 2, title: "two", n: 2)
+    EdgeDocument.create!(id: 3, title: "negative", n: -3)
 
     # A chain must tell apart: parent with a matching child, parent without one, and no parent
     # at all. Only the last is a missing path for CEL.

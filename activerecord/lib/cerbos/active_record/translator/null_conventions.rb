@@ -82,19 +82,6 @@ module Cerbos
           )
         end
 
-        # Refuses `eq`/`ne` between two columns with different null conventions (#308).
-        # The explicit side needs a definite answer for NULL; the other side needs UNKNOWN.
-        # No single predicate does both. `values` always holds two operands here.
-        def assert_uniform_null_conventions(operator, values)
-          return unless %w[eq ne].include?(operator)
-
-          left, right = values
-          return unless ArelSupport.arel_node?(left) && ArelSupport.arel_node?(right)
-          return if explicit_null?(left) == explicit_null?(right)
-
-          raise mixed_null_conventions_error(operator)
-        end
-
         def mixed_null_conventions_error(operator)
           UnsupportedOperatorError.new(
             "Cannot translate #{operator} between two columns under mixed null conventions. " \
@@ -165,8 +152,16 @@ module Cerbos
 
           equal = ArelSupport.and_node(present + [ArelSupport.comparison("eq", left, right)])
           equal = ArelSupport.or_node([both_null(left, right), equal]) if left_explicit && right_explicit
+          result = (operator == "ne") ? ArelSupport.not_node(equal) : equal
 
-          (operator == "ne") ? ArelSupport.not_node(equal) : equal
+          # A column that is not `:explicit` is a missing attribute when NULL, and CEL errors on it
+          # whatever the explicit side holds. Without the guard, an explicit NULL beside it would
+          # make `eq` FALSE and `ne` TRUE, a grant the PDP never makes. With it, the explicit side
+          # still answers its null definitely wherever the other side is present (#308).
+          missing = [[left, left_explicit], [right, right_explicit]].filter_map { |operand, explicit|
+            ArelSupport.is_null(operand) if !explicit && ArelSupport.arel_node?(operand)
+          }
+          unknown_if_any(missing, result)
         end
 
         # Adds `needle IS NOT NULL` next to the `in` translation, so overrides still apply.

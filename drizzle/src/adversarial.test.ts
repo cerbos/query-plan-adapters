@@ -922,7 +922,7 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 // -- the replay -----------------------------------------------------------------------------------
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
-  const result = queryPlanToDrizzle({ queryPlan: planOf(golden), mapper });
+  const result = queryPlanToDrizzle({ queryPlan: await planOf(golden), mapper });
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   return store.selectIds(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined);
 }
@@ -987,7 +987,8 @@ describe(`conformance (${STORE_NAME})`, () => {
         expect(golden.pdp).toBe(tag);
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
-          expect(() => queryPlanToDrizzle({ queryPlan: planOf(golden), mapper: MAPPER })).toThrow(
+          const queryPlan = await planOf(golden);
+          expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPER })).toThrow(
             UnsupportedQueryPlanError,
           );
           return;

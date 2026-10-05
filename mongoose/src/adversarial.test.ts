@@ -303,7 +303,7 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
   const result = queryPlanToMongoose({
-    queryPlan: planOf(golden),
+    queryPlan: await planOf(golden),
     mapper: MAPPER,
   });
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
@@ -360,8 +360,9 @@ describe("conformance (mongodb)", () => {
       async (_id, golden) => {
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
+          const queryPlan = await planOf(golden);
           expect(() =>
-            queryPlanToMongoose({ queryPlan: planOf(golden), mapper: MAPPER }),
+            queryPlanToMongoose({ queryPlan, mapper: MAPPER }),
           ).toThrow(UnsupportedQueryPlanError);
           return;
         }

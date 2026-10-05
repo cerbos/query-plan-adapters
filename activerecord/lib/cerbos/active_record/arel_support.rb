@@ -111,6 +111,10 @@ module Cerbos
         )
       end
 
+      def cast(value, type)
+        Arel::Nodes::NamedFunction.new("CAST", [Arel::Nodes::As.new(quote(value), Arel.sql(type))])
+      end
+
       def function(name, args)
         Arel::Nodes::NamedFunction.new(name, args.map { |arg| quote(arg) })
       end

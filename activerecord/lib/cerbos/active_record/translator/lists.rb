@@ -53,8 +53,8 @@ module Cerbos
           Values::ConcatenatedList.new(parts: parts)
         end
 
-        # `intersect(relation, list)` and `except(relation, list)`. Two constant lists are
-        # computed here, as CEL computes them.
+        # `intersect(relation, list)`. Two constant lists are computed here, as CEL computes
+        # them. (`except` is {Collections#except}.)
         def set_operation(kind, left, right)
           if left.is_a?(Array) && right.is_a?(Array)
             require_scalar_constants(kind, left + right)
@@ -72,14 +72,10 @@ module Cerbos
         end
 
         # Cerbos's `intersect` keeps the matching elements of the shorter list, so its
-        # duplicates; `except` keeps the elements of the left list absent from the right.
-        def constant_set_operation(kind, left, right)
-          if kind == "except"
-            left.reject { |element| right.include?(element) }
-          else
-            shorter, longer = (left.length > right.length) ? [right, left] : [left, right]
-            shorter.select { |element| longer.include?(element) }
-          end
+        # duplicates.
+        def constant_set_operation(_kind, left, right)
+          shorter, longer = (left.length > right.length) ? [right, left] : [left, right]
+          shorter.select { |element| longer.include?(element) }
         end
 
         # `isSubset(relation, list)`: every member of the relation is in the list. A relation
@@ -103,9 +99,8 @@ module Cerbos
           )
         end
 
-        # `intersect(...) == []` or `except(...) == []`, and their `!=`. Emptiness needs no
-        # element order: `intersect` is empty when no member is in the list (whichever list
-        # Cerbos walks), and `except` when every member is.
+        # `intersect(...) == []` and its `!=`. Emptiness needs no element order: `intersect` is
+        # empty when no member is in the list, whichever list Cerbos walks.
         def compare_set_operation(operator, left, right)
           operation, other = left.is_a?(Values::SetOperation) ? [left, right] : [right, left]
           unless %w[eq ne].include?(operator) && other == []
@@ -117,17 +112,15 @@ module Cerbos
 
           scope = operation.scope
           contained = member_in_constants(scope, operation.values)
-          witness = (operation.kind == "intersect") ? contained : ArelSupport.not_node(contained)
-          empty = ArelSupport.not_node(scope.exists(witness))
+          empty = ArelSupport.not_node(scope.exists(contained))
           scope.guarded((operator == "eq") ? empty : ArelSupport.not_node(empty))
         end
 
-        # `size()` of an intersect or except result.
+        # `size()` of an intersect result.
         def set_operation_size(operation)
           scope = operation.scope
           values = operation.values
           contained = member_in_constants(scope, values)
-          return scope.guarded(scope.count(ArelSupport.not_node(contained))) if operation.kind == "except"
           return 0 if values.empty?
 
           # Cerbos walks the shorter list and keeps each element the longer one contains, so
@@ -187,7 +180,7 @@ module Cerbos
           # Both shapes come first, even under an override of `index`: the generic walk below
           # would refuse each before an override saw it (`struct` and `set-field` have no
           # translation, and the container is unmapped).
-          return map_literal_lookup(map_literal(container), evaluate(key, environment)) if map_literal?(container)
+          return map_literal_lookup(evaluate(container, environment), evaluate(key, environment)) if map_literal?(container)
 
           if container.is_a?(Plan::Variable) && key.is_a?(Plan::Value) && key.value.is_a?(::String) &&
               attributes[container.name].nil? && attributes["#{container.name}.#{key.value}"].is_a?(AttributeMapping::Field)

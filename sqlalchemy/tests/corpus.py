@@ -8,15 +8,25 @@ stores, and the translator unit test asks what a store cannot. Each adapter keep
 copy of this file on purpose (ADR 0007). Test-only.
 """
 
+import atexit
 import glob
+import itertools
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import grpc
+from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
-from cerbos.sdk.model import PlanResourcesResponse
+from cerbos.sdk.client import CerbosClient
+from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
+from cerbos.sdk.model import PlanResourcesResponse, Principal, ResourceDesc
+from cerbos.svc.v1 import svc_pb2_grpc
 from google.protobuf.json_format import ParseDict
 from sqlalchemy import (
     JSON,
@@ -117,21 +127,142 @@ def _response_dict(case: dict[str, Any], planned_at: str | None) -> dict[str, An
     }
 
 
+# -- the stub PDP -----------------------------------------------------------
+# A golden reaches the adapter through the real SDK clients, so it arrives in the form a
+# user passes. Only the PDP is replaced: a loopback server on each transport answers a
+# PlanResources request with the response registered under the request's id, a token
+# unique to one call, so concurrent and repeated calls never see each other's plan. The
+# stub ignores the principal; it is the corpus's own only so the request is a real one.
+
+_PRINCIPAL = read_corpus_json("seeds.json")["principal"]
+
+
+class _StubPDP:
+    def __init__(self) -> None:
+        self._responses: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._tokens = itertools.count()
+        self._http = self._start_http()
+        self._grpc, grpc_port = self._start_grpc()
+        http_port = self._http.server_address[1]
+        self.http_client = CerbosClient(
+            f"http://127.0.0.1:{http_port}", timeout_secs=30, raise_on_error=True
+        )
+        self.grpc_client = GrpcCerbosClient(
+            f"127.0.0.1:{grpc_port}",
+            tls_verify=False,
+            timeout_secs=30,
+            # The stub is on loopback; never route it through an ambient proxy.
+            channel_options={"grpc.enable_http_proxy": 0},
+        )
+        atexit.register(self.close)
+
+    def register(self, case: dict[str, Any], response: dict[str, Any]) -> str:
+        token = f"{case['id']}#{next(self._tokens)}"
+        with self._lock:
+            self._responses[token] = response
+        return token
+
+    def take(self, token: str) -> dict[str, Any] | None:
+        with self._lock:
+            return self._responses.pop(token, None)
+
+    def _start_http(self) -> ThreadingHTTPServer:
+        stub = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                response = (
+                    stub.take(json.loads(body)["requestId"])
+                    if self.path == "/api/plan/resources"
+                    else None
+                )
+                status = 200
+                if response is None:
+                    status = 404
+                    response = {"code": 5, "message": f"no stub for {self.path}"}
+                payload = json.dumps(response).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _start_grpc(self) -> tuple[grpc.Server, int]:
+        stub = self
+
+        class Servicer(svc_pb2_grpc.CerbosServiceServicer):
+            def PlanResources(self, request, context):
+                response = stub.take(request.request_id)
+                if response is None:
+                    context.abort(
+                        grpc.StatusCode.NOT_FOUND, "no stub for this request id"
+                    )
+                return ParseDict(response, response_pb2.PlanResourcesResponse())
+
+        server = grpc.server(ThreadPoolExecutor(max_workers=8))
+        svc_pb2_grpc.add_CerbosServiceServicer_to_server(Servicer(), server)
+        port = server.add_insecure_port("127.0.0.1:0")
+        server.start()
+        return server, port
+
+    def close(self) -> None:
+        self.http_client.close()
+        self.grpc_client.close()
+        self._http.shutdown()
+        self._grpc.stop(None)
+
+
+_stub: _StubPDP | None = None
+_stub_lock = threading.Lock()
+
+
+def _stub_pdp() -> _StubPDP:
+    global _stub
+    with _stub_lock:
+        if _stub is None:
+            _stub = _StubPDP()
+        return _stub
+
+
 def plan_from_golden(
     case: dict[str, Any], planned_at: str | None = None
 ) -> PlanResourcesResponse:
-    """The recorded plan, decoded as the HTTP SDK client decodes it."""
-    return PlanResourcesResponse.from_dict(_response_dict(case, planned_at))
+    """The recorded plan, as the SDK's HTTP client returns it."""
+    stub = _stub_pdp()
+    token = stub.register(case, _response_dict(case, planned_at))
+    return stub.http_client.plan_resources(
+        case["request"]["action"],
+        request_id=token,
+        principal=Principal(id=_PRINCIPAL["id"], roles=set(_PRINCIPAL["roles"])),
+        resource=ResourceDesc(case["request"]["resourceKind"]),
+    )
 
 
 def grpc_plan_from_golden(
     case: dict[str, Any], planned_at: str | None = None
 ) -> response_pb2.PlanResourcesResponse:
-    """The same plan as the gRPC client's protobuf response."""
-    # Tests the protobuf decoding path only. JSON has already lost a `-0`'s sign, so this
-    # is not a real gRPC frame.
-    return ParseDict(
-        _response_dict(case, planned_at), response_pb2.PlanResourcesResponse()
+    """The same plan as the SDK's gRPC client returns it: the protobuf response."""
+    # A real gRPC round trip, but the stub builds the protobuf from the golden's JSON, which
+    # has already lost a `-0`'s sign: the PDP itself would send a signed double.
+    stub = _stub_pdp()
+    token = stub.register(case, _response_dict(case, planned_at))
+    return stub.grpc_client.plan_resources(
+        case["request"]["action"],
+        request_id=token,
+        principal=engine_pb2.Principal(id=_PRINCIPAL["id"], roles=_PRINCIPAL["roles"]),
+        resource=engine_pb2.PlanResourcesInput.Resource(
+            kind=case["request"]["resourceKind"]
+        ),
     )
 
 
