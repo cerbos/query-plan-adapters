@@ -101,6 +101,18 @@
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/all/negated-nested-exists-in-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.categories` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/all/nested-all-over-literal-list": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475). `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/all/nested-exists-over-literal-list": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475). `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Same as `collection/exists/nested-over-same-collection`, reached through all(). `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -112,6 +124,10 @@
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no except operator; the adapter refuses that operation. `allowPostFilter` does not lift it: the post-filter has no evaluation for `except`."
+    },
+    "collection/except/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "Chroma has no list-difference operator and cannot compare a stored list with a list literal; the post-filter has no evaluation for `except` either. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
@@ -201,6 +217,10 @@
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no count function — a stored list's length cannot be read, and an empty list is not stored at all (its key is dropped) — and no relation model, so a size(...) collection-count operand cannot be translated. `allowPostFilter` does not lift it: `R.attr.categories` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/exists/relative-window-in-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list of objects, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/exists/scalar-list-equals": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475). `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -208,6 +228,14 @@
     "collection/exists/scalar-list-negated-body": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements, so the collection lambda is a nested expression with no Where representation. `$contains` tests list membership, but the adapter does not translate it (#475). `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements, let alone one binding each element's position, and the post-filter has no evaluation for a two-variable comprehension. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "Chroma metadata is a flat scalar map with no nested-object model, so a comprehension over a map attribute's keys and values has no Where form, and the post-filter has no evaluation for a two-variable comprehension. `allowPostFilter` does not lift it: `R.attr.obj` is a map, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
@@ -217,6 +245,10 @@
       "status": "unsupported",
       "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. `allowPostFilter` does not lift it: `filter()` returns a list, not a boolean: CEL rejects it as a condition, and evaluating it would give the shape a meaning the policy never stated."
     },
+    "collection/filter/literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "A filter() projection is a nested expression in an operand position, and the adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/has-intersection/mapped-names-value-first": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -224,6 +256,10 @@
     "collection/has-intersection/mapped-names-with-metacharacters": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/has-intersection/negated-mapped-names": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: `R.attr.tags` is a list of objects, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "collection/has-intersection/value-first": {
       "status": "unsupported",
@@ -273,6 +309,18 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters expose neither computed scalar expressions nor regex matching. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "Chroma has no list-intersection operator and no count function, so size(intersect(...)) has no Where form; the post-filter has no evaluation for `intersect` either. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/intersect/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "Chroma has no list-intersection operator and cannot compare a stored list with a list literal; the post-filter has no evaluation for `intersect` either. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/is-subset/resource-list-of-literal-list": {
+      "status": "unsupported",
+      "reason": "Chroma has no subset operator over a stored list: `$contains` tests one element, and the adapter does not translate it (#475); the post-filter has no evaluation for `isSubset` either. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. `allowPostFilter` does not lift it: `map()` returns a list, not a boolean: CEL rejects it as a condition, and evaluating it would give the shape a meaning the policy never stated."
@@ -280,6 +328,22 @@
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "A map() projection is a nested expression in an operand position, and Chroma has no relation to project from. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/map/literal-in-mapped-names": {
+      "status": "unsupported",
+      "reason": "A map() projection is a nested expression in an operand position, and Chroma has no relation to project from. `allowPostFilter` does not lift it: `R.attr.tags` is a list of objects, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/map/literal-in-mapped-upper-ascii": {
+      "status": "unsupported",
+      "reason": "A map() projection is a nested expression in an operand position, and the adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "collection/map/negated-literal-in-mapped-names": {
+      "status": "unsupported",
+      "reason": "Same refusal as `collection/map/literal-in-mapped-names`, under negation."
+    },
+    "comparison/equals/map-member-by-string-key": {
+      "status": "unsupported",
+      "reason": "An index into a map attribute is a computed operand, and a Chroma `Where` clause can only compare a metadata key with a literal. `allowPostFilter` does not lift it: `R.attr.obj` is a map, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
@@ -325,14 +389,6 @@
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
-    "hierarchy/overlaps/path-built-from-identifier": {
-      "status": "unsupported",
-      "reason": "Chroma metadata filters have no path or prefix operator, and both hierarchy(...) operands are computed — one of them from a list() built around the primary key — so neither side reduces to the bare field or literal a Where clause requires. `allowPostFilter` does not lift it: the post-filter has no evaluation for `list`."
-    },
-    "hierarchy/overlaps/path-built-from-list-value-first": {
-      "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `list`."
-    },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `add` meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
@@ -347,11 +403,7 @@
     },
     "membership/in/explicit-field-in-list-of-field": {
       "status": "unsupported",
-      "reason": "`owner` has no fieldNameMapper entry: Chroma metadata has no null value, so an explicit-null attribute cannot be stored, and the post-filter refuses an attribute it cannot read. The list literal holding `coOwner` would be refused as in `membership/in/field-in-list-of-field` regardless (#574)."
-    },
-    "membership/in/field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Chroma's `$in` takes a list of literal values, never a metadata key, and the post-filter has no evaluation for a `list` operator holding an attribute, so a list literal holding another attribute is refused (#574)."
+      "reason": "`owner` has no fieldNameMapper entry: Chroma metadata has no null value, so an explicit-null attribute cannot be stored, and the post-filter refuses an attribute it cannot read. `coOwner`, the list literal's element, is refused for the same reason (#574)."
     },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
@@ -369,17 +421,21 @@
       "status": "unsupported",
       "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
     },
-    "membership/in/negated-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
-    },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "membership/in/negated-literal-in-resource-list": {
+      "status": "unsupported",
+      "reason": "Value-first membership in a list-valued attribute, under negation. The adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse, and Chroma has no `$not` to negate a `$contains` with. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same flat metadata and missing literal-in-field operator as `membership/in/map-attribute-keys`, under negation"
+    },
+    "membership/in/resource-list-plus-literal-list": {
+      "status": "unsupported",
+      "reason": "The haystack is a list concatenation, a computed operand: Chroma's $in takes a list of literal values, never an expression. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "null/all/negated-null-element": {
       "status": "unsupported",
@@ -507,11 +563,11 @@
     },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `list`."
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the inlined principal list holds map literals, and the post-filter evaluates a map literal only as the target of an index, because the plan's `struct` drops the type name and a message literal is the same node."
     },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `list`."
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the inlined principal list holds map literals, and the post-filter evaluates a map literal only as the target of an index, because the plan's `struct` drops the type name and a message literal is the same node."
     },
     "principal/exists/shadowed-lambda-variable": {
       "status": "unsupported",
@@ -747,11 +803,11 @@
     },
     "type-mismatch/equals/string-field-against-map-literal": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `struct`."
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter evaluates a map literal only as the target of an index, because the plan's `struct` drops the type name and a message literal is the same node."
     },
     "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `struct`."
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter evaluates a map literal only as the target of an index, because the plan's `struct` drops the type name and a message literal is the same node."
     },
     "type-mismatch/exists/element-field-against-number-literal": {
       "status": "unsupported",
@@ -785,10 +841,6 @@
       "status": "unsupported",
       "reason": "ChromaDB filters cannot test whether a literal is contained in a metadata field. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `list`."
-    },
     "type-mismatch/in/string-literal-in-resource-boolean-list": {
       "status": "unsupported",
       "reason": "The boolean mirror of `type-mismatch/in/string-literal-in-resource-number-list`: value-first membership refused when mirroring the operands, taking the aNumber == 5 disjunct with it. The pinned server's $contains does not match \"true\" against a stored [true], but rejects a4's [null, true] and stores the empty lists as absent keys. `allowPostFilter` does not lift it: `R.attr.aBoolList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -815,7 +867,7 @@
     },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
-      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `struct`."
+      "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter evaluates a map literal only as the target of an index, because the plan's `struct` drops the type name and a message literal is the same node."
     }
   }
 }
