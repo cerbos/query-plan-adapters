@@ -688,6 +688,61 @@ describe("plans the planner cannot produce", () => {
       }),
     ).toThrow("Unsupported operator: isSet");
   });
+
+  // The planner emits `set-field` only as a `struct` entry, and a two-variable lambda only under
+  // `exists`, `all` and `exists_one` (CEL's two-variable `transformList` is its own operator).
+  test.each([
+    [
+      "a set-field outside a map literal",
+      {
+        operator: "eq",
+        operands: [
+          {
+            operator: "set-field",
+            operands: [{ value: "k" }, { value: "v" }],
+          },
+          { value: "v" },
+        ],
+      },
+    ],
+    [
+      "a map literal entry that is not a set-field",
+      {
+        operator: "eq",
+        operands: [
+          { operator: "struct", operands: [{ value: "k" }] },
+          { value: "v" },
+        ],
+      },
+    ],
+    [
+      "a two-variable lambda under map()",
+      {
+        operator: "in",
+        operands: [
+          { value: "x" },
+          {
+            operator: "map",
+            operands: [
+              { name: "request.resource.attr.tagNames" },
+              {
+                operator: "lambda",
+                operands: [{ name: "v" }, { name: "i" }, { name: "v" }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  ])("%s", (_label, condition) => {
+    expect(() =>
+      queryPlanToConvex({
+        queryPlan: plan(condition),
+        mapper: MAPPER,
+        allowPostFilter: true,
+      }),
+    ).toThrow(UnsupportedQueryPlanError);
+  });
 });
 
 // -- shapes the corpus does not reach yet ----------------------------------------------------------

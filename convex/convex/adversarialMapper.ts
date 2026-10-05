@@ -51,6 +51,9 @@ export const MAPPER: Record<string, MapperConfig> = {
   // Every seed carries both lists, most of them empty, so neither path is ever absent.
   "request.resource.attr.aNumberList": { field: "aNumberList" },
   "request.resource.attr.aBoolList": { field: "aBoolList" },
+  // The map itself, for the cases that index it by key or range over its entries. Every document
+  // carries it (`{}` when aString is NULL), so the path is never absent.
+  "request.resource.attr.obj": { field: "obj" },
   "request.resource.attr.obj.inner": {
     field: "obj.inner",
     nullable: true,

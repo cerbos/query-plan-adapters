@@ -19,7 +19,10 @@ import {
  * translation-time check (`validate` on its `OPERATORS` entry) passes. Pre-order, so the outermost
  * offending node is the one reported.
  */
-export const validateStructure = (expression: PlanExpressionOperand): void => {
+export const validateStructure = (
+  expression: PlanExpressionOperand,
+  parentOperator?: string,
+): void => {
   if (isValue(expression) || isVariable(expression)) return;
   if (!isExpression(expression)) {
     throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
@@ -30,9 +33,14 @@ export const validateStructure = (expression: PlanExpressionOperand): void => {
       `Unsupported operator: ${expression.operator}`,
     );
   }
+  if (expression.operator === "set-field" && parentOperator !== "struct") {
+    throw new UnsupportedQueryPlanError(
+      "set-field is only meaningful as a map literal's entry",
+    );
+  }
   operator.validate?.(expression);
   for (const op of expression.operands) {
-    validateStructure(op);
+    validateStructure(op, expression.operator);
   }
 };
 
@@ -143,11 +151,11 @@ export const assertEveryReferenceMapped = (
   }
   if (!isExpression(expression)) return;
   if (expression.operator === "lambda") {
-    const { body, variable } = lambdaComponents(expression);
+    const { body, variables } = lambdaComponents(expression);
     assertEveryReferenceMapped(
       body,
       mapper,
-      new Set([...bound, variable.name]),
+      new Set([...bound, ...variables.map((variable) => variable.name)]),
     );
     return;
   }

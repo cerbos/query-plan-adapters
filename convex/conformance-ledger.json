@@ -17,18 +17,6 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`"
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
-    },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
-    },
-    "collection/except/size-of-difference": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
-    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() one level below the root is still a list in a boolean position; refused for the same reason as `collection/filter/as-whole-condition`"
@@ -44,42 +32,6 @@
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches also carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
-    },
-    "hierarchy/overlaps/path-built-from-identifier": {
-      "status": "unsupported",
-      "reason": "The descendant path is CONSTRUCTED by list() from a constant segment and the primary key. `list` is not in the adapter's known-operator set at all — it has never reached the wire from this corpus — so the shape is refused during structural validation, before the hierarchy operators around it are considered"
-    },
-    "hierarchy/overlaps/path-built-from-list-value-first": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
-    },
-    "membership/in/explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
-    },
-    "membership/in/field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "The adapter evaluates `list` only as the constant haystack of `in`; a list literal holding another attribute reaches it as an unsupported `list` operator and is refused (#574)."
-    },
-    "membership/in/negated-explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
-    },
-    "membership/in/negated-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
-    },
-    "principal/except/size-after-removing-resource-value": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: except."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
-    },
-    "principal/exists/list-of-structs-with-null-field": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
     },
     "regex/matches/bounded-repetition": {
       "status": "unsupported",
@@ -152,26 +104,6 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "`\\s` is a character class, outside the literal, anchor and trailing `.*` subset the post-filter answers without a regex engine, and JavaScript's `\\s` matches the Unicode spaces RE2's ASCII-only `\\s` does not, so the pattern is refused"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
-    },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: list."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The Convex adapter refuses this shape during structural validation: Unsupported operator: struct."
     }
   }
 }
