@@ -242,7 +242,8 @@ module Cerbos
       #
       # @private
       def register_null_representation(node, representation)
-        @null_representations[node] = representation if representation
+        # Recorded even when nil, so {#null_convention} can tell an attribute from a computed node.
+        @null_representations[node] = representation
         node
       end
 
@@ -273,6 +274,17 @@ module Cerbos
       # @private
       def explicit_null?(node)
         @null_representations[node] == :explicit
+      end
+
+      # The convention a NULL in the node reaches CEL under: its attribute's declaration, else
+      # the call's. Unlike {#explicit_null?}, an undeclared column takes the call's default.
+      # Nil for a computed node: it is NULL only where CEL errors, so it has no convention.
+      #
+      # @private
+      def null_convention(node)
+        return nil unless @null_representations.key?(node)
+
+        @null_representations[node] || null_attribute_representation
       end
 
       # @private

@@ -213,9 +213,25 @@
       "status": "unsupported",
       "reason": "The path is constructed by list(), which has no SQL lowering, so the walk refuses it before the hierarchy operators are reached."
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "The translator lowers `list` only as the constant haystack of `in`; a list literal holding another attribute reaches it as an unrecognised `list` operator and is refused (#574)."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "in over the to-one parent tests the keys of a map, and the parent is a related row: SQL cannot read which of its columns are non-NULL as the attribute's keys, so the harness's membership override refuses it."
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",

@@ -92,12 +92,17 @@ module Cerbos
           return unless ArelSupport.arel_node?(left) && ArelSupport.arel_node?(right)
           return if explicit_null?(left) == explicit_null?(right)
 
-          raise UnsupportedOperatorError,
+          raise mixed_null_conventions_error(operator)
+        end
+
+        def mixed_null_conventions_error(operator)
+          UnsupportedOperatorError.new(
             "Cannot translate #{operator} between two columns under mixed null conventions. " \
-            "One attribute declares null_representation: :explicit and the other does not, so " \
+            "One attribute is under null_representation: :explicit and the other is not, so " \
             "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
             "one predicate does both. Declare null_representation on both attributes, or on " \
             "neither."
+          )
         end
 
         # Applies declared null conventions to `plain`, the normal translation. Returns `plain`
@@ -170,15 +175,18 @@ module Cerbos
           # A stored collection may hold a null, and then `null in coll` is TRUE. The guard
           # would drop those rows; the collection translation handles them already.
           return plain unless haystack.is_a?(Array)
+          # A column in the list: `null in [col]` can be TRUE, and each element is already
+          # definite (#574).
+          return plain if haystack.any? { |member| ArelSupport.arel_node?(member) }
           # A null member already adds a definite `IS NULL` branch.
           return plain if haystack.any?(&:nil?)
 
           ArelSupport.and_node([ArelSupport.comparison("ne", needle, nil), plain])
         end
 
-        # Column-to-column equality for a membership test. Under `:explicit`, two NULLs are
-        # equal in CEL, so add that case. Under `:omitted`, CEL denies the row, and plain
-        # equality (UNKNOWN) already keeps it out.
+        # Column-to-column equality for `value in R.attr.<relation>`. Under `:explicit`, two
+        # NULLs are equal in CEL, so add that case. Under `:omitted`, CEL denies the row, and
+        # plain equality (UNKNOWN) already keeps it out.
         def null_equality(left, right)
           equal = ArelSupport.comparison("eq", left, right)
           return equal if null_attribute_representation == :omitted

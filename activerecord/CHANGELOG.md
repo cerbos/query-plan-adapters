@@ -85,6 +85,10 @@
 
   CEL has no overload mixing int and double, so `int(R.attr.n) + R.attr.d > 0.0` is an error that denies every row, where SQL added the two and its negation returned rows the PDP denies. The plan carries `1000000` and `1000000.0` as the same number, which CEL's `string()` spells `"1000000"` and `"1e+06"`; `string(R.attr.flag ? 1000000 : 0)` used to cast the int. A ternary with an `int()` arm fixes its other arm as an int and still translates.
 
+- **Breaking:** `in` against a list literal holding a column compares each element under each column's own null convention, as `==` does, and raises `Cerbos::ActiveRecord::UnsupportedOperatorError` when the needle and a member column are under different conventions ([#574](https://github.com/cerbos/query-plan-adapters/issues/574))
+
+  `a in [b]` added a both-NULL branch from the call's convention, never either column's declaration, and wrapped an `:explicit` needle in an `IS NOT NULL` guard meant for a list of constants. So two `:explicit` NULLs did not match, `!(a in [b])` returned that row and missed a value beside a NULL, and two `:omitted` NULLs matched under the call's default `:explicit`. A NULL `:omitted` column now makes the whole membership UNKNOWN, so `a in [b, 2]` no longer grants `a = 2` when `b` is missing.
+
 ### Removed
 
 - Support for Ruby 3.2 ([#508](https://github.com/cerbos/query-plan-adapters/pull/508))

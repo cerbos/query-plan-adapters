@@ -1769,6 +1769,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString in []
+    # membership/in/explicit-field-in-list-of-field
+    - actions:
+        - membership/in/explicit-field-in-list-of-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.owner in [R.attr.coOwner]
+    # membership/in/field-in-list-of-field
+    - actions:
+        - membership/in/field-in-list-of-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in [R.attr.aOptionalString]
     # membership/in/field-in-resource-list
     - actions:
         - membership/in/field-in-resource-list
@@ -1814,6 +1832,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!("inner" in R.attr.parent)'
+    # membership/in/negated-explicit-field-in-list-of-field
+    - actions:
+        - membership/in/negated-explicit-field-in-list-of-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.owner in [R.attr.coOwner])'
+    # membership/in/negated-field-in-list-of-field
+    - actions:
+        - membership/in/negated-field-in-list-of-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString in [R.attr.aOptionalString])'
     # membership/in/negated-field-in-resource-list
     - actions:
         - membership/in/negated-field-in-resource-list

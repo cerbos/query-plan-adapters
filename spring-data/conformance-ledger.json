@@ -129,9 +129,25 @@
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
+    "membership/in/explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
+    },
+    "membership/in/field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "The adapter translates `in` only as an attribute against a list of constants or a value against a mapped collection, and refuses a list literal holding another attribute rather than flatten it into per-element equalities without each column's null convention (#574)."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "in over a map tests its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to test, so R.attr.parent itself is an unmapped attribute."
+    },
+    "membership/in/negated-explicit-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
+    },
+    "membership/in/negated-field-in-list-of-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
