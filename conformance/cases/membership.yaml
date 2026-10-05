@@ -34,6 +34,13 @@ cases:
   condition:
     match:
       expr: R.attr.owner in R.attr.tagNames
+- id: 'membership/in/list-mixing-literal-and-expression'
+  tier: extended
+  intent: 'Membership in a list literal whose elements mix a literal and an expression (aString in ["one", aOptionalString + "ret"]).'
+  trap: 'A translator that expects every element to be a literal value mis-renders the expression element; a missing aOptionalString makes the list error, so the row denies even when aString == "one" would match.'
+  condition:
+    match:
+      expr: 'R.attr.aString in ["f1", R.attr.aOptionalString + "ret"]'
 - id: 'membership/in/literal-in-resource-number-list'
   tier: core
   intent: '2 in aNumberList: a literal''s membership in a number list attribute.'
@@ -55,6 +62,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString in {"one": 1, "same": 2}'
+- id: 'membership/in/negated-literal-in-resource-list'
+  tier: adversarial
+  intent: 'A negated literal membership in a resource string list (!("public" in tagNames)).'
+  trap: 'SQL NOT ("public" = ANY(arr)) is NULL when the array holds a NULL element and no match, dropping b5 [null]; b6 [null, "public"] holds the needle and must deny.'
+  condition:
+    match:
+      expr: '!("public" in R.attr.tagNames)'
 - id: 'membership/in/negated-map-attribute-keys'
   tier: adversarial
   intent: '!("inner" in parent): key membership in a map-valued attribute under negation.'
@@ -90,6 +104,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber in [2, 3, 5]'
+- id: 'membership/in/resource-list-plus-literal-list'
+  tier: extended
+  intent: 'Membership in a resource list concatenated with a list literal (aString in tagNames + ["one"]).'
+  trap: 'Dropping either side of the list + under-grants: a1 matches only through the literal, a9 and b4 only through tagNames.'
+  condition:
+    match:
+      expr: 'R.attr.aString in R.attr.tagNames + ["one"]'
 - id: 'membership/in/single-element-list'
   tier: core
   intent: 'String attribute tested for membership in a one-element literal list.'
@@ -97,3 +118,10 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString in ["one"]'
+- id: 'membership/in/single-key-map-literal'
+  tier: adversarial
+  intent: 'Key membership in a one-key map literal (aString in {"one": 1}), which the planner rewrites to eq(aString, "one").'
+  trap: 'Comparing against the map''s value rather than its key, or refusing a shape that plans to a plain equality.'
+  condition:
+    match:
+      expr: 'R.attr.aString in {"one": 1}'

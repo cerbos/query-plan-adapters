@@ -11,6 +11,11 @@ export function evaluateConstantComparison(
   right: Value
 ): boolean {
   switch (operator) {
+    case "in":
+      if (!Array.isArray(right)) {
+        throw new UnsupportedQueryPlanError("in constant comparison requires a list");
+      }
+      return right.some((element) => areValuesEqual(left, element));
     case "eq":
       return areValuesEqual(left, right);
     case "ne":
@@ -121,6 +126,9 @@ export function foldArithmetic(
   left: Value,
   right: Value
 ): Value {
+  if (operator === "add" && Array.isArray(left) && Array.isArray(right)) {
+    return [...left, ...right];
+  }
   if (
     operator === "add" &&
     (typeof left === "string" || typeof right === "string")

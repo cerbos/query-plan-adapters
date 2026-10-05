@@ -29,11 +29,31 @@ module Cerbos
             return compare_non_finite(operator, left, right)
           end
 
+          return compare_temporal(operator, left, right) if temporal_value?(left) || temporal_value?(right)
+          if left.is_a?(Values::SetOperation) || right.is_a?(Values::SetOperation)
+            return compare_set_operation(operator, left, right)
+          end
+          # `except(...) == []` and its `!=`: a list is empty exactly when its size is 0.
+          if %w[eq ne].include?(operator) && [left, right].include?([]) && [left, right].any? { |value| filtered_list?(value) }
+            return compare(operator, size(filtered_list?(left) ? left : right), 0)
+          end
+
           reject_collection(operator, left)
           reject_collection(operator, right)
           assert_timestamp_wrapped(left, right)
           if [left, right].any? { |value| value.is_a?(Array) || value.is_a?(Hash) }
             return compare_list_literal(operator, left, right)
+          end
+
+          # A timestamp against a value CEL does not hold as one: a bare temporal column is the
+          # RFC-3339 string the request carried. No ordering overload exists, so the comparison
+          # is an error; `==` across types is false. Comparing the column as an instant would
+          # grant the rows the error denies.
+          if left.is_a?(::Time) ^ right.is_a?(::Time)
+            other = left.is_a?(::Time) ? right : left
+            if not_a_timestamp?(other)
+              return heterogeneous_comparison(operator, left, right, explicit_null?(left), explicit_null?(right))
+            end
           end
 
           # Two constants: compute the result here instead of emitting constant SQL.
@@ -81,6 +101,16 @@ module Cerbos
 
           raise UnsupportedOperatorError,
             "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()"
+        end
+
+        # A constant that is not an instant, or a node of a known type that did not go through
+        # `timestamp()`. A computed node of no recorded type (a ternary of instants) is left
+        # alone.
+        def not_a_timestamp?(value)
+          return !value.is_a?(::Time) if constant?(value)
+          return false unless ArelSupport.arel_node?(value)
+
+          !timestamp_operand?(value) && !(column_type(value) || cel_type(value)).nil?
         end
 
         def scalar_kind(value)
@@ -169,6 +199,11 @@ module Cerbos
 
         # A node that is no attribute's column (arithmetic, a connective, a quantifier, a CASE).
         # It is NULL only where CEL errors; see {Translator#null_convention}.
+        # A list a macro or `except()` filtered, whose size {#size} counts.
+        def filtered_list?(value)
+          value.is_a?(Values::FilteredCollection) || value.is_a?(Values::ConstantList)
+        end
+
         def computed_node?(value)
           ArelSupport.arel_node?(value) && null_convention(value).nil?
         end

@@ -256,6 +256,32 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber in ["5", 2]'
+- id: 'type-mismatch/in/number-field-in-scalar-principal'
+  tier: adversarial
+  intent: 'An in whose right-hand side is a scalar principal attribute (aNumber in P.attr.zero), beside an equality that discriminates.'
+  trap: 'CEL has no in overload for a scalar container, so check() errors and denies; a plan rewriting the in to eq(aNumber, 0) grants a7 and h4.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber in P.attr.zero || R.attr.aString == "one"'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/596
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aNumber, 0), eq(aString, "one")) and grants a7 and h4 (aNumber 0). check() has no in overload for a number container, errors on that disjunct and allows only a1. No adapter can tell the eq was an in.'
+- id: 'type-mismatch/in/string-field-in-dyn-string'
+  tier: adversarial
+  intent: 'An in whose right-hand side is a dyn() string literal (aString in dyn("one")), beside an equality that discriminates.'
+  trap: 'CEL has no in overload for a string container, so check() errors on that disjunct; a plan rewriting it to eq(aString, "one") grants a1.'
+  condition:
+    match:
+      expr: 'R.attr.aString in dyn("one") || R.attr.aNumber == 2'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/596
+    pdp:
+    - 0.54.0
+    - 0.55.0
+    reason: 'The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aString, "one"), eq(aNumber, 2)) and grants a1. check() has no in overload for a string container, errors on that disjunct and allows only a3 and a8. No adapter can tell the eq was an in.'
 - id: 'type-mismatch/in/string-field-in-list-of-lists'
   tier: adversarial
   intent: 'Membership of a string attribute in a literal list of one-element lists (aString in [["one"], ["same"]]).'
@@ -369,6 +395,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/string-field-against-timestamp'
+  tier: adversarial
+  intent: 'A string attribute compared directly with a timestamp, without a timestamp() conversion, beside an equality that discriminates.'
+  trap: 'CEL has no string < timestamp overload, so check() errors on that disjunct; a translator that casts the column to a timestamp over-grants the past-dated rows.'
+  condition:
+    match:
+      expr: 'R.attr.createdAt < now() - duration("24h") || R.attr.aNumber == 2'
 - id: 'type-mismatch/not-equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber != "5" AND aNumber > 3: a number attribute compared not-equal with a numeric string.'

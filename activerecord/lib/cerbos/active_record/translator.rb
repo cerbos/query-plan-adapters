@@ -17,8 +17,10 @@ require_relative "translator/arithmetic"
 require_relative "translator/casts"
 require_relative "translator/collections"
 require_relative "translator/comparisons"
+require_relative "translator/durations"
 require_relative "translator/environment"
 require_relative "translator/hierarchies"
+require_relative "translator/lists"
 require_relative "translator/membership"
 require_relative "translator/null_conventions"
 require_relative "translator/strings"
@@ -64,7 +66,7 @@ module Cerbos
       # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
       # boolean only when an arm is: see {#ternary}.
       BOOLEAN_OPERATORS = (
-        %w[and or not exists all exists_one in hasIntersection ancestorOf descendentOf overlaps] +
+        %w[and or not exists all exists_one in hasIntersection isSubset ancestorOf descendentOf overlaps] +
         COMPARISONS + STRING_MATCHES.keys + %w[matches]
       ).freeze
 
@@ -93,7 +95,9 @@ module Cerbos
       include Casts
       include Collections
       include Comparisons
+      include Durations
       include Hierarchies
+      include Lists
       include Membership
       include NullConventions
       include Strings
@@ -135,7 +139,12 @@ module Cerbos
         "hierarchy" => Operator.new(1..2, ->(value, delimiter = nil) { hierarchy(value, delimiter) }),
         "ancestorOf" => Operator.new(2, ->(ancestor, descendent) { ancestor_of(ancestor, descendent) }),
         "descendentOf" => Operator.new(2, ->(descendent, ancestor) { ancestor_of(ancestor, descendent) }),
-        "overlaps" => Operator.new(2, ->(left, right) { overlaps(left, right) })
+        "overlaps" => Operator.new(2, ->(left, right) { overlaps(left, right) }),
+        "intersect" => Operator.new(2, ->(left, right) { set_operation("intersect", left, right) }),
+        "isSubset" => Operator.new(2, ->(left, right) { is_subset(left, right) }),
+        "upperAscii" => Operator.new(1, ->(value) { upper_ascii(value) }),
+        "duration" => Operator.new(1, ->(value) { duration(value) }),
+        "timeSince" => Operator.new(1, ->(value) { time_since(value) })
       }.freeze
 
       # Operand counts from OPERATORS. Kept for compatibility with code that used it before.
@@ -223,6 +232,7 @@ module Cerbos
         @cel_types = {}.compare_by_identity
         @null_representations = {}.compare_by_identity
         @omitted_attributes = {}.compare_by_identity
+        @now = nil
         @cel_errors = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
@@ -347,6 +357,7 @@ module Cerbos
         when "not" then negate(operands, environment)
         when "if" then ternary(operands, environment)
         when "exists", "all", "exists_one", "filter", "map" then macro(operator, operands, environment)
+        when "index" then index_access(operands, environment)
         when "lambda"
           raise InvalidPlanError, "lambda outside a collection macro"
         else
@@ -418,9 +429,10 @@ module Cerbos
         reject_double_text("if", else_value)
         # The CASE would hide the error from {#apply}: `(c ? size(aNumber) : 1) in [2, null]`
         # would test the CASE with IS NULL, TRUE wherever `c` picks the error arm.
-        # A list, map or collection arm has no SQL value for the CASE to hold.
-        if [then_value, else_value].any? { |value| value.is_a?(Array) || value.is_a?(Hash) || collection?(value) }
-          raise UnsupportedOperatorError, "A ternary with a list, map or collection arm is not translated"
+        # A map or collection arm has no SQL value for the CASE to hold. A list arm is held
+        # below, for `in`, `==` and `+` to take each arm.
+        if [then_value, else_value].any? { |value| value.is_a?(Hash) || collection?(value) }
+          raise UnsupportedOperatorError, "A ternary with a map or collection arm is not translated"
         end
         if [condition, then_value, else_value].any? { |value| cel_error?(value) }
           raise UnsupportedOperatorError,
@@ -431,9 +443,11 @@ module Cerbos
         # A non-finite arm must not reach SQL, so defer to the enclosing comparison. So must
         # a string arm beside a number arm: CEL compares the operand with one branch and errors
         # on the other, per row, where one CASE would compare both through a single coercion.
+        # And so must a list arm, which SQL has no value for: `in`, `==` and `+` take each arm.
         arm_kinds = [scalar_kind(then_value), scalar_kind(else_value)]
         mixed_arms = arm_kinds.uniq.length == 2 && arm_kinds.all? { |kind| %i[string number].include?(kind) }
-        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms
+        list_arms = then_value.is_a?(Array) || else_value.is_a?(Array)
+        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms || list_arms
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
           )
@@ -602,6 +616,8 @@ module Cerbos
         value.is_a?(Values::Collection) ||
           value.is_a?(Values::FilteredCollection) ||
           value.is_a?(Values::MappedCollection) ||
+          value.is_a?(Values::ConcatenatedList) ||
+          value.is_a?(Values::SetOperation) ||
           value.is_a?(Values::ConstantList) ||
           value.is_a?(Values::ConstantProjection)
       end
@@ -620,6 +636,12 @@ module Cerbos
 
       def reject_deferred(operator, value)
         return unless deferred_value?(value)
+
+        if list_operand?(value)
+          raise UnsupportedOperatorError,
+            "#{operator} cannot take a list chosen by a ternary: SQL has no list value, so only " \
+            "in, ==, != and + take each branch in turn"
+        end
 
         raise UnsupportedOperatorError,
           "#{operator} cannot take an operand that may be NaN or Infinity: only a comparison " \
@@ -642,6 +664,12 @@ module Cerbos
         when Values::ConstantProjection then "a projected list of constants"
         when Values::Hierarchy then "a hierarchy"
         when Values::DoubleText then "string() of a double"
+        when Values::ConcatenatedList then "a concatenation of a relation"
+        when Values::SetOperation then "#{value.kind}() of a relation"
+        when Values::Duration then "a duration"
+        when Values::TimeSince then "timeSince()"
+        when Values::ShiftedTimestamp then "a timestamp shifted by a duration"
+        when Values::ConditionalValue then "a ternary"
         else "#{value.inspect} (#{value.class})"
         end
       end

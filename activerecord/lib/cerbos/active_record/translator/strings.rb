@@ -20,6 +20,17 @@ module Cerbos
           matcher.match(receiver, needle, **STRING_MATCHES.fetch(operator))
         end
 
+        # CEL's `upperAscii()` folds only `a`-`z`. SQL `UPPER` follows the database's locale
+        # and folds `é` to `É` too, so each ASCII letter is replaced on its own; `REPLACE`
+        # matches exactly, whatever the column's collation.
+        def upper_ascii(value)
+          require_string_operand("upperAscii", value)
+          return value.tr("a-z", "A-Z") if value.is_a?(::String)
+
+          folded = ("a".."z").reduce(value) { |text, letter| ArelSupport.function("REPLACE", [text, letter, letter.upcase]) }
+          record_cel_type(folded, :string)
+        end
+
         # `receiver.matches(pattern)`, lowered through {Regex.compile} into the exact string
         # predicates this module already writes, never into the store's own regex dialect, none of
         # which is RE2. The receiver must be a string column: a NULL there is a missing attribute

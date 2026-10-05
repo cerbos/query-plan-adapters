@@ -363,12 +363,16 @@ instead of collapsing it to a boolean. You will see this in the SQL:
 
 Most of the corpus translates directly: `LIKE … ESCAPE` for string operators, correlated `COUNT`
 subqueries for relation sizes and `exists_one`, arithmetic and string length computed in the
-database, and plain correlated predicates for model-to-model comparisons. What raises (the
+database, and plain correlated predicates for model-to-model comparisons. `intersect`, `except`
+and `isSubset` over a relation of scalar members become `EXISTS` and `COUNT` subqueries; `in` over a
+list built with `+`, `filter()` or `map()` tests each part; a duration (`timeSince()`,
+`timestamp(x) + duration(...)`) moves onto the constant side, as `x < now - d`; and `upperAscii()`
+replaces each ASCII letter on its own, since SQL `UPPER` also folds `é`. What raises (the
 full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)):
 
 | Case | Why the adapter raises |
 | --- | --- |
-| `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
+| `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first`, `collection/exists/relative-window-in-body` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
 | `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
 | `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
@@ -377,6 +381,7 @@ full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)
 | `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
 | `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
 | `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
+| `collection/exists/two-variable-index-and-element`, `collection/exists/two-variable-map-key-and-value` | A two-variable comprehension binds each element's position, or each map key. A relation's rows have no position, and SQL cannot list a row's columns as keys. |
 | `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
@@ -395,19 +400,22 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 69 / 80 |
-| adversarial | 284 / 318 |
+| core | 29 / 29 |
+| extended | 85 / 97 |
+| adversarial | 300 / 338 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
 skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
-four extended cases and three adversarial cases. In `null/has/missing-attribute` and
+four extended cases and five adversarial cases. In `null/has/missing-attribute` and
 `null/has/composed-with-comparison` the plan request leaves an omitted attribute unknown, so the
 planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
 the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
-planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In the other three, all `composition/*`, a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it
+planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container to
+`==`, which `check()` refuses as a type error
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). In the other three, all `composition/*`, a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it
 denies j2, while `check()` receives `aNumber` as absent, treats the erroring DENY as not matching
 and lets the ALLOW stand ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 

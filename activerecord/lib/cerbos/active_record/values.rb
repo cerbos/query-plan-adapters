@@ -45,8 +45,30 @@ module Cerbos
       # `filter(collection, lambda)`, held until `size()` consumes it.
       FilteredCollection = Struct.new(:scope, :body)
 
-      # `map(collection, lambda)`, held until `hasIntersection()` consumes it.
+      # `map(collection, lambda)`, held until `hasIntersection()` or `in` consumes it.
       MappedCollection = Struct.new(:scope, :projection)
+
+      # `a + b` over lists where a part is a relation: the parts in order, each a constant list
+      # or a {Collection}. Held until `in` consumes it, which only asks whether some part holds
+      # the needle, so the order the relation cannot give never matters.
+      ConcatenatedList = Struct.new(:parts)
+
+      # `intersect(relation, list)` or `except(relation, list)` over a relation of scalar
+      # members and a list of constants. Held until `size()`, or `==`/`!=` against an empty
+      # list, gives it a meaning that needs no element order.
+      SetOperation = Struct.new(:kind, :scope, :values)
+
+      # A CEL duration, as a Rational number of seconds.
+      Duration = Struct.new(:seconds)
+
+      # `timeSince(timestamp(column))`: the duration from the column's instant to the
+      # translation's clock. Held until a comparison against a duration moves it onto the
+      # column, as `column <op> now - duration`.
+      TimeSince = Struct.new(:timestamp)
+
+      # `timestamp(column) + duration`. Held until a comparison against an instant moves the
+      # offset onto the constant side, as `column <op> instant - offset`.
+      ShiftedTimestamp = Struct.new(:timestamp, :seconds)
     end
   end
 end

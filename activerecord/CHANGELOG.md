@@ -16,6 +16,16 @@
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A NULL column is a missing attribute, which CEL answers with an error, so the comparison is UNKNOWN and stays UNKNOWN under `not`. It applies to a root column and to one reached through a to-one path such as `parent.tag`. A null in an `in` or `hasIntersection` list, and a null given to an operator override of `eq` or `ne`, still raise.
 
+- Translations for list and time shapes the conformance corpus added from the Cerbos planner's own tests. Each previously raised a `Cerbos::ActiveRecord::Error` (a `TypeError` for a list ternary):
+
+  - `intersect` and `isSubset` over a relation mapped by `member_field` and a list of constants: `isSubset`, `size()` of the intersection, and `==`/`!=` of it against `[]`. `size(intersect(...))` counts duplicates from whichever list is shorter on the row, as Cerbos does. `==`/`!=` of an `except()` against `[]` compares its size with 0.
+  - `in` over a list built with `+` from a relation and a literal list, over a ternary of literal lists (such as `runtime.effectiveDerivedRoles`), over `filter()` of a `member_field` relation, and over `map()` of a relation. `+` and `==` over a ternary of literal lists take each branch.
+  - `upperAscii()`, as one `REPLACE` per ASCII letter, since SQL `UPPER` follows the locale and also folds non-ASCII letters.
+  - `timeSince(timestamp(col))` against a duration, and `timestamp(col) ± duration(...)` against a timestamp literal, by moving the duration onto the constant side (`col < now - d`). `now` is the translation's clock, read once per plan.
+  - `index` into a map literal by a string attribute, as a `CASE` with no `ELSE`, so a missing key is UNKNOWN like CEL's error; and `R.attr.m["key"]` by a constant key, which reads the mapping of `R.attr.m.key`.
+
+  A two-variable comprehension (`exists(i, v, ...)`) raises `Cerbos::ActiveRecord::UnsupportedOperatorError`: a relation's rows have no position, and SQL cannot list a row's columns as map keys.
+
 - `contains`, `startsWith`, `endsWith` and `size()` over a number or a boolean (a numeric or boolean column, a computed number or boolean, or a constant), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. CEL has no such overload, so every row is an error, decided by the declared type rather than the row's value. UNKNOWN denies under both polarities as the error does, and an operator applied to it (`==`, `in`, `string()` and the rest) is UNKNOWN too. A ternary over such an error, and these functions over a temporal column, still raise.
@@ -38,7 +48,7 @@
 
 - Map literals and nested lists of constants, compared by CEL equality: `==` and `!=` against a column (always FALSE / TRUE, guarded for a missing attribute), `in` and `hasIntersection` with a list or map element, and a macro over a list of maps reading `m.field` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
-  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A map or list literal holding a column, one given to any other operator or to an operator override, and a ternary with a list or map arm still raise. A field a map does not hold is a CEL error, UNKNOWN. `x in map` tests the map's keys, as CEL does.
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A map or list literal holding a column, one given to any other operator or to an operator override, and a ternary with a map arm still raise (a ternary with list arms is held for `in`, `==` and `+`, which take each arm). A field a map does not hold is a CEL error, UNKNOWN. `x in map` tests the map's keys, as CEL does.
 
 - `filter()` and `map()` over a list of constants, and `except()` of a list of constants or a scalar relation, evaluated element by element: `size()` of a filtered list or a difference, and `in` over a projected list ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
@@ -53,6 +63,12 @@
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A non-finite constant is computed in Ruby with IEEE-754, and NaN beside a double stays NaN wherever that value is present. An Infinity beside a column, which might hold the opposite Infinity, and arithmetic between two such values still raise.
 
 ### Changed
+
+- A macro over a list built from attributes, such as `[R.attr.a, R.attr.b].exists(s, s == "x")`, is UNKNOWN when an element is missing, as CEL errors building the list. It previously OR-ed the bodies and returned a row whose other element matched.
+
+- A bare temporal column (not wrapped in `timestamp()`) compared with a timestamp is answered as CEL answers a string against a timestamp: an ordering is UNKNOWN, `==` is false. It previously compared the column as an instant and returned rows the PDP denies.
+
+- A sub-microsecond timestamp literal raises only where it would be bound into SQL, not where it is parsed, so a literal compared with another literal, or under a type mismatch, no longer raises.
 
 - A whole-number constant on a ternary arm beside an `int()` arm is bound as an integer, so `string(c ? int(x) : 1000000) == "1000000"` matches the rows CEL allows when the plan comes from the Ruby SDK
 

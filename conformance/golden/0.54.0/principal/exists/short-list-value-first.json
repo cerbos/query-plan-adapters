@@ -1,0 +1,107 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "b2",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "principal/exists/short-list-value-first",
+  "intent": "exists over a short principal list with the lambda variable on the left (fewTeams.exists(t, t == aOptionalString)), unrolled into an or of value-first equalities.",
+  "oracle": "discriminating",
+  "pdp": "0.54.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "set"
+                },
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": ""
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "%_o"
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/exists/short-list-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "P.attr.fewTeams.exists(t, t == R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Each disjunct is eq(literal, column); a field-first assumption breaks every branch, and LIKE metacharacters in \"%_o\" must stay inert."
+}

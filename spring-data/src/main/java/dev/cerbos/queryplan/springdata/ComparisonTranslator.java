@@ -15,6 +15,7 @@ import jakarta.persistence.criteria.Predicate;
 
 import com.google.protobuf.Value;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -178,6 +179,25 @@ final class ComparisonTranslator {
          */
         record IntOfField(String variable) implements Resolved {}
 
+        /**
+         * {@code timestamp(variable) + duration(value)}, {@code duration(value) +
+         * timestamp(variable)} or {@code timestamp(variable) - duration(value)}, with the
+         * signed shift ({@link #shiftedTimestampLeaf}).
+         */
+        record ShiftedTimestampField(String variable, Duration shift) implements Resolved {}
+
+        /** {@code timestamp(variable).timeSince()} ({@link #timeSinceLeaf}). */
+        record TimeSinceField(String variable) implements Resolved {}
+
+        /** {@code duration(value)}. */
+        record DurationConstant(Duration duration) implements Resolved {}
+
+        /**
+         * {@code variable.upperAscii()}, compared with a string constant
+         * ({@link #upperAsciiComparison}).
+         */
+        record UpperAsciiField(String variable) implements Resolved {}
+
         /** An operand no leaf case handles, reported by {@link #leafOperandError}. */
         record Opaque() implements Resolved {}
     }
@@ -205,6 +225,27 @@ final class ComparisonTranslator {
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
                     yield new Resolved.StringOfField(e.getOperands(0).getVariable());
                 }
+                if ("duration".equals(exprOp) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VALUE) {
+                    yield new Resolved.DurationConstant(
+                            CelDuration.parse(e.getOperands(0).getValue()));
+                }
+                if ("timeSince".equals(exprOp) && e.getOperandsCount() == 1) {
+                    String variable = timestampOfVariable(e.getOperands(0));
+                    yield variable != null
+                            ? new Resolved.TimeSinceField(variable) : new Resolved.Opaque();
+                }
+                if (("add".equals(exprOp) || "sub".equals(exprOp)) && e.getOperandsCount() == 2) {
+                    Resolved.ShiftedTimestampField shifted = shiftedTimestamp(exprOp,
+                            e.getOperands(0), e.getOperands(1));
+                    if (shifted != null) {
+                        yield shifted;
+                    }
+                }
+                if ("upperAscii".equals(exprOp) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
+                    yield new Resolved.UpperAsciiField(e.getOperands(0).getVariable());
+                }
                 if ("int".equals(exprOp) && e.getOperandsCount() == 1
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
                     yield new Resolved.IntOfField(e.getOperands(0).getVariable());
@@ -231,6 +272,45 @@ final class ComparisonTranslator {
             }
             default -> new Resolved.Opaque();
         };
+    }
+
+    /** The variable of {@code timestamp(variable)}, else {@code null}. */
+    private static String timestampOfVariable(Operand o) {
+        if (o.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"timestamp".equals(o.getExpression().getOperator())
+                || o.getExpression().getOperandsCount() != 1
+                || o.getExpression().getOperands(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+            return null;
+        }
+        return o.getExpression().getOperands(0).getVariable();
+    }
+
+    /** The duration of {@code duration(value)}, else {@code null}. */
+    private static Duration durationConstant(Operand o) {
+        if (o.getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"duration".equals(o.getExpression().getOperator())
+                || o.getExpression().getOperandsCount() != 1
+                || o.getExpression().getOperands(0).getNodeCase() != Operand.NodeCase.VALUE) {
+            return null;
+        }
+        return CelDuration.parse(o.getExpression().getOperands(0).getValue());
+    }
+
+    private static Resolved.ShiftedTimestampField shiftedTimestamp(String op, Operand l,
+                                                                   Operand r) {
+        String variable = timestampOfVariable(l);
+        Duration shift = durationConstant(r);
+        if (variable != null && shift != null) {
+            return new Resolved.ShiftedTimestampField(variable,
+                    "sub".equals(op) ? shift.negated() : shift);
+        }
+        variable = timestampOfVariable(r);
+        shift = durationConstant(l);
+        // duration - timestamp has no CEL overload.
+        if ("add".equals(op) && variable != null && shift != null) {
+            return new Resolved.ShiftedTimestampField(variable, shift);
+        }
+        return null;
     }
 
     private static boolean isAddRooted(Resolved r) {
@@ -292,6 +372,31 @@ final class ComparisonTranslator {
                     && right instanceof Resolved.TimestampField tsField) {
                 return timestampLeaf(NormalizedBinary.mirror(op), tsField, tsConst, scope);
             }
+            if (left instanceof Resolved.ShiftedTimestampField shifted
+                    && right instanceof Resolved.TimestampConstant tsConst) {
+                return shiftedTimestampLeaf(op, shifted, tsConst.instant(), scope);
+            }
+            if (left instanceof Resolved.TimestampConstant tsConst
+                    && right instanceof Resolved.ShiftedTimestampField shifted) {
+                return shiftedTimestampLeaf(NormalizedBinary.mirror(op), shifted,
+                        tsConst.instant(), scope);
+            }
+            if (left instanceof Resolved.TimeSinceField since
+                    && right instanceof Resolved.DurationConstant d) {
+                return timeSinceLeaf(op, since, d.duration(), scope);
+            }
+            if (left instanceof Resolved.DurationConstant d
+                    && right instanceof Resolved.TimeSinceField since) {
+                return timeSinceLeaf(NormalizedBinary.mirror(op), since, d.duration(), scope);
+            }
+            // An attribute is never a CEL timestamp: check() receives JSON values, so a string,
+            // number, bool, list or map ordered against a timestamp has no overload and errors.
+            if (ORDERING_OPS.contains(op)
+                    && ((left instanceof Resolved.Field && right instanceof Resolved.TimestampConstant)
+                    || (left instanceof Resolved.TimestampConstant
+                            && right instanceof Resolved.Field))) {
+                return tri.unknown();
+            }
             // Reachable through ternary substitution.
             if (left instanceof Resolved.TimestampConstant lts
                     && right instanceof Resolved.TimestampConstant rts) {
@@ -304,6 +409,14 @@ final class ComparisonTranslator {
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
                 return stringOfFieldComparison(op, sf, text, operands, scope);
+            }
+            if (left instanceof Resolved.UpperAsciiField upper
+                    && right instanceof Resolved.Constant c) {
+                return upperAsciiComparison(op, upper, c.value(), scope);
+            }
+            if (left instanceof Resolved.Constant c
+                    && right instanceof Resolved.UpperAsciiField upper) {
+                return upperAsciiComparison(NormalizedBinary.mirror(op), upper, c.value(), scope);
             }
             if (left instanceof Resolved.IntOfField intField
                     && right instanceof Resolved.Constant c
@@ -469,29 +582,83 @@ final class ComparisonTranslator {
      */
     private Predicate timestampLeaf(String op, Resolved.TimestampField field,
                                     Resolved.TimestampConstant constant, Scope scope) {
-        Instant instant = constant.instant();
-        Path<?> path = scope.path(field.variable());
-        return leaf.withOverride(op, path, instant, () -> {
-            Class<?> javaType = path.getJavaType();
-            Object bound;
-            if (Instant.class.equals(javaType)) {
-                bound = instant;
-            } else if (OffsetDateTime.class.equals(javaType)) {
-                bound = instant.atOffset(ZoneOffset.UTC);
-            } else {
-                // Unmapped, not unsupported: the caller fixes it by remapping the column or
-                // registering an override.
-                throw Refusals.unmapped(
-                        "timestamp() comparison requires a column mapped to java.time.Instant "
-                                + "or java.time.OffsetDateTime, but '" + field.variable()
-                                + "' maps to " + javaType.getSimpleName()
-                                + ". Other temporal representations (LocalDateTime, "
-                                + "java.util.Date, String) are ambiguous about the absolute "
-                                + "instant they store; remap the column or register an "
-                                + "OperatorFunction override for '" + op + "'.");
-            }
-            return leaf.defaultLeaf(op, path, bound);
-        });
+        return timestampLeaf(op, field.variable(), constant.instant(), scope);
+    }
+
+    private Predicate timestampLeaf(String op, String variable, Instant instant, Scope scope) {
+        Path<?> path = scope.path(variable);
+        return leaf.withOverride(op, path, instant,
+                () -> leaf.defaultLeaf(op, path, temporalBound(variable, path, op, instant)));
+    }
+
+    /** {@code instant} as the column's Java type; see {@link #timestampLeaf}. */
+    private static Object temporalBound(String variable, Path<?> path, String op,
+                                        Instant instant) {
+        Class<?> javaType = path.getJavaType();
+        if (Instant.class.equals(javaType)) {
+            return instant;
+        }
+        if (OffsetDateTime.class.equals(javaType)) {
+            return instant.atOffset(ZoneOffset.UTC);
+        }
+        // Unmapped, not unsupported: the caller fixes it by remapping the column or
+        // registering an override.
+        throw Refusals.unmapped(
+                "timestamp() comparison requires a column mapped to java.time.Instant "
+                        + "or java.time.OffsetDateTime, but '" + variable
+                        + "' maps to " + javaType.getSimpleName()
+                        + ". Other temporal representations (LocalDateTime, "
+                        + "java.util.Date, String) are ambiguous about the absolute "
+                        + "instant they store; remap the column or register an "
+                        + "OperatorFunction override for '" + op + "'.");
+    }
+
+    /** CEL's timestamp range: years 1 to 9999, in UTC. */
+    private static final Instant MIN_TIMESTAMP = Instant.parse("0001-01-01T00:00:00Z");
+    private static final Instant MAX_TIMESTAMP = Instant.parse("9999-12-31T23:59:59.999999999Z");
+
+    /**
+     * {@code timestamp(field) + shift op c}, solved for the column as
+     * {@code timestamp(field) op c - shift}: adding a duration is exact on instants, so the two
+     * agree wherever the sum is a timestamp. Where it is not, the sum leaves CEL's year-1 to
+     * year-9999 range and CEL errors, so a column within {@code shift} of the bound is UNKNOWN
+     * under both polarities. A solved constant outside that range is refused: it has no
+     * column value on the other side to bind.
+     */
+    private Predicate shiftedTimestampLeaf(String op, Resolved.ShiftedTimestampField shifted,
+                                           Instant c, Scope scope) {
+        Duration shift = shifted.shift();
+        Instant solved = c.minus(shift);
+        if (solved.isBefore(MIN_TIMESTAMP) || solved.isAfter(MAX_TIMESTAMP)) {
+            throw Refusals.unsupported("timestamp() + duration() compared with a timestamp whose"
+                    + " solved bound leaves CEL's timestamp range (years 1 to 9999)");
+        }
+        Predicate base = timestampLeaf(op, shifted.variable(), solved, scope);
+        if (shift.isZero()) {
+            return base;
+        }
+        Path<?> path = scope.path(shifted.variable());
+        // The column values whose sum overflows: past MAX - shift, or before MIN - shift.
+        String overflowOp = shift.isNegative() ? "lt" : "gt";
+        Instant edge = shift.isNegative() ? MIN_TIMESTAMP.minus(shift) : MAX_TIMESTAMP.minus(shift);
+        return tri.baseUnlessUnknown(base, () -> leaf.defaultLeaf(overflowOp, path,
+                temporalBound(shifted.variable(), path, overflowOp, edge)));
+    }
+
+    /**
+     * {@code timestamp(field).timeSince() op d}: {@code now - field op d}, solved for the column
+     * as {@code field op' now - d} with {@code op} mirrored. {@code now} is read when the
+     * Specification builds its predicate, which is when the query asks the question; the
+     * difference of two CEL timestamps always fits a CEL duration.
+     */
+    private Predicate timeSinceLeaf(String op, Resolved.TimeSinceField since, Duration d,
+                                    Scope scope) {
+        Instant bound = Instant.now().minus(d);
+        if (bound.isBefore(MIN_TIMESTAMP) || bound.isAfter(MAX_TIMESTAMP)) {
+            throw Refusals.unsupported("timeSince() compared with a duration whose solved bound"
+                    + " leaves CEL's timestamp range (years 1 to 9999)");
+        }
+        return timestampLeaf(NormalizedBinary.mirror(op), since.variable(), bound, scope);
     }
 
     private Predicate timestampConstantComparison(String op, Instant left, Instant right) {
@@ -689,6 +856,43 @@ final class ComparisonTranslator {
             return matchesNothing(op, path);
         }
         throw leafOperandError(op, operands);
+    }
+
+    private static final String ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz";
+
+    /**
+     * {@code column.upperAscii() op "text"}. CEL's {@code upperAscii()} folds only the 26 ASCII
+     * letters, while SQL {@code UPPER} is Unicode-aware ({@code é} becomes {@code É}, and the
+     * dotless {@code ı} becomes {@code I}), so the fold is spelled as 26 nested
+     * case-sensitive {@code REPLACE}s, each mapping one lowercase ASCII letter to its capital.
+     * The result is compared under the column's own collation, which the harnesses pin
+     * byte-exact. A NULL column is UNKNOWN: {@code upperAscii()} on a missing attribute or on
+     * null is a CEL error.
+     *
+     * <p>A non-string constant is CEL's {@code false} under {@code ==} (and {@code true} under
+     * {@code !=}), and a CEL error under an ordering.
+     */
+    @SuppressWarnings("unchecked")
+    private Predicate upperAsciiComparison(String op, Resolved.UpperAsciiField field,
+                                           Object constant, Scope scope) {
+        Path<?> path = scope.path(field.variable());
+        if (!String.class.equals(path.getJavaType())) {
+            throw Refusals.unsupported("upperAscii() requires a String column: '"
+                    + field.variable() + "' is " + path.getJavaType().getSimpleName());
+        }
+        if (!(constant instanceof String text)) {
+            if (ORDERING_OPS.contains(op)) {
+                return tri.unknown();
+            }
+            return matchesNothing(op, path);
+        }
+        Expression<String> folded = (Path<String>) path;
+        for (char lower : ASCII_LOWER.toCharArray()) {
+            folded = cb.function("replace", String.class, folded,
+                    cb.literal(String.valueOf(lower)),
+                    cb.literal(String.valueOf(Character.toUpperCase(lower))));
+        }
+        return comparePredicate(op, folded, cb.literal(text));
     }
 
     /** eq FALSE and ne TRUE, UNKNOWN for a NULL column. */

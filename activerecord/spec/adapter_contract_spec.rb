@@ -763,9 +763,12 @@ RSpec.describe Cerbos::ActiveRecord do
       }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /Unsupported operator: noSuchOperator/)
     end
 
-    it "raises for a sub-microsecond timestamp literal" do
-      # now() has nanoseconds. ActiveRecord would truncate them and change the instant.
-      expect { Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z") }
+    it "raises for binding a sub-microsecond instant" do
+      # now() has nanoseconds. ActiveRecord would truncate them and change the instant, so the
+      # literal parses exactly but refuses to reach SQL.
+      instant = Cerbos::ActiveRecord::Timestamps.parse("2026-08-04T08:55:39.185020547Z")
+      expect(instant.nsec).to eq(185_020_547)
+      expect { Cerbos::ActiveRecord::Timestamps.assert_bindable(instant) }
         .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /sub-microsecond/)
     end
 
@@ -1248,14 +1251,6 @@ RSpec.describe Cerbos::ActiveRecord do
 
       expect(translate(plan).pluck(:a_string).uniq).to eq(["one"])
       expect(translate(conditional(expression("not", plan["condition"]))).where(a_string: "one")).to be_empty
-    end
-
-    # Corpus gap. `(c ? ["x"] : ["y"]) == ["x"]`: a CASE cannot hold a list.
-    it "refuses a ternary with a list arm" do
-      ternary = expression("if", variable("request.resource.attr.aBool"), value(["x"]), value(["y"]))
-
-      expect { translate(conditional(expression("eq", ternary, value(["x"])))) }
-        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
     end
   end
 end

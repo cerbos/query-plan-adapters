@@ -641,7 +641,39 @@ def _relation_membership(relation: _Relation, value: Any):
     return _require_hops(relation, _exists_where(relation, predicate))
 
 
+def _in_deferred(needle: Any, deferred: tuple):
+    """``needle in map(...)`` or ``needle in filter(...)``, for a literal needle."""
+    kind, rel, body = deferred
+    if needle is None or not isinstance(needle, (str, int, float, bool)):
+        raise UnsupportedPlanError(
+            f"in over {kind}() is lowered for a scalar literal needle only"
+        )
+    if kind == "map":
+        # Same as hasIntersection(map(...), [needle]): map never absorbs errors.
+        return _has_intersection_fn(deferred, [needle])
+    if rel.member_field is None:
+        raise UnsupportedPlanError(
+            f"in over filter() needs the relation's member field: {rel!r}"
+        )
+    # filter never absorbs errors either: any NULL body makes the list, and `in`, error.
+    return _require_hops(
+        rel,
+        case(
+            (_exists_where(rel, body.is_(None)), null()),
+            (
+                _exists_where(
+                    rel, body, _scalar_membership(rel.member_field, [needle])
+                ),
+                true(),
+            ),
+            else_=false(),
+        ),
+    )
+
+
 def _in_fn(column: Any, value: Any):
+    if isinstance(value, tuple) and value and value[0] in ("map", "filter"):
+        return _in_deferred(column, value)
     if isinstance(column, _ToOneRow) or isinstance(value, _ToOneRow):
         raise UnsupportedPlanError(
             "in over the to-one parent tests the keys of a map, and the parent is a "
@@ -760,6 +792,7 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.parent.inner.aNumber": "omitted",
     "request.resource.attr.parent.inner.aOptionalString": "omitted",
     "tagName": "explicit",
+    "t": "explicit",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
 }
@@ -826,7 +859,10 @@ ATTR_MAP = {
     ),
     "request.resource.attr.tags": TAGS,
     "request.resource.attr.tagNames": TAG_NAMES,
-    "t": TAGS,
+    # `t` binds a tag row over `tags`, read only as `t.id`/`t.name`, and a tag name over
+    # `tagNames`, read bare (collection/all/nested-all-over-literal-list). Bare, it is the
+    # name; a lambda's binding operand is never resolved to SQL.
+    "t": AdvTag.name,
     "tagName": AdvTag.name,
     "t.id": AdvTag.tag_id,
     "t.name": AdvTag.name,

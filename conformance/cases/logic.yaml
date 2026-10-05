@@ -56,6 +56,17 @@ cases:
   condition:
     match:
       expr: '!(R.attr.aNumber < 2)'
+- id: 'logic/not/none-of-three'
+  tier: core
+  intent: 'match.none over three conditions, planned as an n-ary and of three nots.'
+  trap: 'A translator that reads only the first two operands of an and drops the third negation and over-grants. Each row missing one of the three attributes (j1, j2, j3) is denied by another member, so the erroring member never decides a row.'
+  condition:
+    match:
+      none:
+        of:
+        - expr: 'R.attr.aNumber > 30'
+        - expr: 'R.attr.aString.startsWith("null")'
+        - expr: R.attr.aBool == false
 - id: 'logic/not/over-and'
   tier: core
   intent: 'not over a conjunction, the shape a DENY rule produces.'
@@ -100,3 +111,14 @@ cases:
         of:
         - expr: R.attr.aBool
         - expr: '"public" in R.attr.tagNames'
+- id: 'logic/or/three-disjuncts'
+  tier: core
+  intent: 'match.any over three conditions, planned as an n-ary or with three operands.'
+  trap: 'A translator that reads only the first two operands of an or drops the third disjunct and under-grants the aBool == false rows.'
+  condition:
+    match:
+      any:
+        of:
+        - expr: 'R.attr.aNumber > 30'
+        - expr: 'R.attr.aString == "one"'
+        - expr: R.attr.aBool == false

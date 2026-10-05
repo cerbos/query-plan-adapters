@@ -15,7 +15,19 @@ export const asBoolean = (value: unknown): boolean | EvaluationError =>
   typeof value === "boolean" ? value : EVALUATION_ERROR;
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  !(value instanceof CelDuration) &&
+  !(value instanceof Hierarchy);
+
+/**
+ * A CEL duration, in nanoseconds. A class rather than a bare bigint, which already carries both a
+ * timestamp and an int beyond the safe range: a duration orders and equals only another duration.
+ */
+export class CelDuration {
+  constructor(readonly nanos: bigint) {}
+}
 
 /** Reads a dotted path; an absent key at any level is CEL's missing-attribute error. */
 export const getNestedValue = (obj: unknown, path: string): unknown => {
@@ -37,6 +49,21 @@ const isNumeric = (value: unknown): value is number | bigint =>
   typeof value === "number" || typeof value === "bigint";
 
 export const valuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left instanceof Hierarchy || right instanceof Hierarchy) {
+    return (
+      left instanceof Hierarchy &&
+      right instanceof Hierarchy &&
+      left.segments.length === right.segments.length &&
+      isSegmentPrefix(left.segments, right.segments)
+    );
+  }
+  if (left instanceof CelDuration || right instanceof CelDuration) {
+    return (
+      left instanceof CelDuration &&
+      right instanceof CelDuration &&
+      left.nanos === right.nanos
+    );
+  }
   if (isNumeric(left) && isNumeric(right)) {
     // JavaScript compares a bigint with a number exactly, so 2^53 + 1 never equals 2^53.
     return (
@@ -95,6 +122,9 @@ export const compareValues = (
   } else if (isNumeric(left) && isNumeric(right)) {
     a = left;
     b = right;
+  } else if (left instanceof CelDuration && right instanceof CelDuration) {
+    a = left.nanos;
+    b = right.nanos;
   } else {
     return EVALUATION_ERROR;
   }
@@ -126,23 +156,39 @@ const compareCodePoints = (a: string, b: string): number => {
 
 // -- hierarchies ---------------------------------------------------------------------------------
 
-export interface HierarchyValue {
-  value: string;
-  delimiter: string;
+/**
+ * Cerbos's `hierarchy` type: a list of path segments. The delimiter only splits the input, so
+ * `hierarchy("a:b", ":")`, `hierarchy("a.b")` and `hierarchy(["a", "b"])` are the same value.
+ */
+export class Hierarchy {
+  constructor(readonly segments: readonly string[]) {}
 }
 
-export const isHierarchyValue = (value: unknown): value is HierarchyValue =>
-  isRecord(value) &&
-  typeof value["value"] === "string" &&
-  typeof value["delimiter"] === "string";
+/** Go's `strings.Split`: an empty delimiter splits into code points, not UTF-16 units. */
+export const splitHierarchy = (value: string, delimiter: string): Hierarchy =>
+  new Hierarchy(delimiter === "" ? Array.from(value) : value.split(delimiter));
 
+const isSegmentPrefix = (
+  prefix: readonly string[],
+  of: readonly string[],
+): boolean => prefix.every((segment, index) => of[index] === segment);
+
+/** `a.ancestorOf(d)`: `a`'s segments are a proper prefix of `d`'s. */
 export const isStrictAncestor = (
-  ancestor: HierarchyValue,
-  descendent: HierarchyValue,
+  ancestor: Hierarchy,
+  descendent: Hierarchy,
 ): boolean =>
-  ancestor.delimiter === descendent.delimiter &&
-  ancestor.value !== descendent.value &&
-  descendent.value.startsWith(ancestor.value + ancestor.delimiter);
+  descendent.segments.length > ancestor.segments.length &&
+  isSegmentPrefix(ancestor.segments, descendent.segments);
+
+/** `a.overlaps(b)`: the shorter one's segments are a prefix of the longer one's, equal included. */
+export const hierarchiesOverlap = (
+  left: Hierarchy,
+  right: Hierarchy,
+): boolean =>
+  left.segments.length <= right.segments.length
+    ? isSegmentPrefix(left.segments, right.segments)
+    : isSegmentPrefix(right.segments, left.segments);
 
 // -- timestamps ----------------------------------------------------------------------------------
 
@@ -250,6 +296,131 @@ export const parseRfc3339Timestamp = (
     timestampNanos > MAX_TIMESTAMP_NANOS
     ? EVALUATION_ERROR
     : timestampNanos;
+};
+
+// -- durations -----------------------------------------------------------------------------------
+
+const INT64_MIN_NANOS = -(2n ** 63n);
+const INT64_MAX_NANOS = 2n ** 63n - 1n;
+const TWO_TO_63 = 2n ** 63n;
+
+const DURATION_UNITS: Record<string, bigint> = {
+  ns: 1n,
+  us: 1_000n,
+  "\u00b5s": 1_000n,
+  "\u03bcs": 1_000n,
+  ms: 1_000_000n,
+  s: 1_000_000_000n,
+  m: 60_000_000_000n,
+  h: 3_600_000_000_000n,
+};
+
+const isDigit = (c: string | undefined): boolean =>
+  c !== undefined && c >= "0" && c <= "9";
+
+/**
+ * CEL's `duration(string)`, which is Go's `time.ParseDuration`, ported step for step: an optional
+ * sign, then one or more decimal numbers each with a unit ("1h30m", "1.5s", "-90ms"), or a bare
+ * "0". The fraction is applied the way Go applies it, through a float64 scale, so a value Go
+ * rounds is rounded identically. Anything Go rejects, an int64 overflow included, is an error.
+ */
+export const parseCelDuration = (
+  input: string,
+): CelDuration | EvaluationError => {
+  let s = input;
+  let negative = false;
+  if (s[0] === "-" || s[0] === "+") {
+    negative = s[0] === "-";
+    s = s.slice(1);
+  }
+  if (s === "0") return new CelDuration(0n);
+  if (s === "") return EVALUATION_ERROR;
+  let total = 0n;
+  while (s !== "") {
+    if (!(s[0] === "." || isDigit(s[0]))) return EVALUATION_ERROR;
+    let i = 0;
+    let whole = 0n;
+    while (isDigit(s[i])) {
+      if (whole > TWO_TO_63 / 10n) return EVALUATION_ERROR;
+      whole = whole * 10n + BigInt(s.charCodeAt(i) - 48);
+      if (whole > TWO_TO_63) return EVALUATION_ERROR;
+      i += 1;
+    }
+    const sawWhole = i > 0;
+    s = s.slice(i);
+    let fraction = 0n;
+    let scale = 1;
+    let sawFraction = false;
+    if (s[0] === ".") {
+      s = s.slice(1);
+      let j = 0;
+      let overflow = false;
+      while (isDigit(s[j])) {
+        if (!overflow) {
+          if (fraction > INT64_MAX_NANOS / 10n) {
+            overflow = true;
+          } else {
+            const next = fraction * 10n + BigInt(s.charCodeAt(j) - 48);
+            if (next > TWO_TO_63) {
+              overflow = true;
+            } else {
+              fraction = next;
+              scale *= 10;
+            }
+          }
+        }
+        j += 1;
+      }
+      sawFraction = j > 0;
+      s = s.slice(j);
+    }
+    if (!sawWhole && !sawFraction) return EVALUATION_ERROR;
+    let k = 0;
+    while (k < s.length && !(s[k] === "." || isDigit(s[k]))) k += 1;
+    const unit = DURATION_UNITS[s.slice(0, k)];
+    if (k === 0 || unit === undefined) return EVALUATION_ERROR;
+    s = s.slice(k);
+    if (whole > TWO_TO_63 / unit) return EVALUATION_ERROR;
+    let value = whole * unit;
+    if (fraction > 0n) {
+      value += BigInt(Math.trunc(Number(fraction) * (Number(unit) / scale)));
+      if (value > TWO_TO_63) return EVALUATION_ERROR;
+    }
+    total += value;
+    if (total > TWO_TO_63) return EVALUATION_ERROR;
+  }
+  if (negative) return new CelDuration(-total);
+  return total > INT64_MAX_NANOS ? EVALUATION_ERROR : new CelDuration(total);
+};
+
+const inInt64 = (nanos: bigint): boolean =>
+  nanos >= INT64_MIN_NANOS && nanos <= INT64_MAX_NANOS;
+
+/** A duration from int64 nanoseconds; an overflow is an error, as cel-go reports it. */
+export const checkedDuration = (
+  nanos: bigint,
+): CelDuration | EvaluationError =>
+  inInt64(nanos) ? new CelDuration(nanos) : EVALUATION_ERROR;
+
+/** A timestamp (nanoseconds since the epoch), an error outside CEL's 0001–9999 range. */
+export const checkedTimestamp = (nanos: bigint): bigint | EvaluationError =>
+  nanos < MIN_TIMESTAMP_NANOS || nanos > MAX_TIMESTAMP_NANOS
+    ? EVALUATION_ERROR
+    : nanos;
+
+/**
+ * Cerbos's `timeSince(t)`: Go's `now.Sub(t)`, which saturates at the int64 bounds rather than
+ * failing. `nowNanos` is the evaluating clock — the query's, as the PDP's is its own.
+ */
+export const timeSince = (nowNanos: bigint, timestamp: bigint): CelDuration => {
+  const nanos = nowNanos - timestamp;
+  return new CelDuration(
+    nanos > INT64_MAX_NANOS
+      ? INT64_MAX_NANOS
+      : nanos < INT64_MIN_NANOS
+        ? INT64_MIN_NANOS
+        : nanos,
+  );
 };
 
 // -- type conversions: string(), double(), int() --------------------------------------------------

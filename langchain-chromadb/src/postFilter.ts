@@ -6,6 +6,8 @@ import type {
 } from "@cerbos/core";
 
 import {
+  CelHierarchy,
+  CelTimestamp,
   EVALUATION_ERROR,
   asBoolean,
   compareValues,
@@ -15,10 +17,14 @@ import {
   getNestedValue,
   intArithmetic,
   isEvaluationError,
-  isHierarchyValue,
   isRecord,
+  isSegmentPrefix,
   isStrictAncestor,
+  parseGoDuration,
   parseRfc3339Timestamp,
+  temporalArithmetic,
+  timeSince,
+  toHierarchy,
   valuesEqual,
 } from "./cel";
 import type { ComparisonOperator } from "./cel";
@@ -88,6 +94,8 @@ type StaticType =
   | "attribute"
   /** A timestamp. */
   | "timestamp"
+  /** A duration. */
+  | "duration"
   /** Certainly not a number: a string, a bool, a list, a map. */
   | "other"
   /** Anything else — a list element, a ternary mixing the above. */
@@ -407,6 +415,39 @@ function arithmeticMode(
 }
 
 /**
+ * The result type of timestamp and duration arithmetic, `undefined` when neither operand is a
+ * timestamp or a duration. The overloads are cel-go's: `timestamp ± duration`, `duration +
+ * timestamp`, `timestamp - timestamp` and `duration ± duration`. An operand of any other static
+ * type next to one is refused, since the plan does not say which overload the policy selected.
+ */
+function temporalType(
+  operator: ArithmeticOperator,
+  left: StaticType,
+  right: StaticType,
+): StaticType | undefined {
+  const temporal = (type: StaticType) =>
+    type === "timestamp" || type === "duration";
+  if (!temporal(left) && !temporal(right)) return undefined;
+  const pair = `${left} ${right}`;
+  if (operator === "add") {
+    if (pair === "timestamp duration" || pair === "duration timestamp") {
+      return "timestamp";
+    }
+    if (pair === "duration duration") return "duration";
+  }
+  if (operator === "sub") {
+    if (pair === "timestamp duration") return "timestamp";
+    if (pair === "timestamp timestamp" || pair === "duration duration") {
+      return "duration";
+    }
+  }
+  throw new UnsupportedOperatorError(
+    operator,
+    `${operator} over a ${left} and a ${right}: the post-filter evaluates a timestamp plus or minus a duration, the difference of two timestamps and the sum or difference of two durations only`,
+  );
+}
+
+/**
  * Why the sign of a stored zero is unknown. The chromadb JS client sends metadata as JSON, and
  * `JSON.stringify(-0)` is `"0"`, so a -0.0 the PDP saw as an attribute reads back from Chroma as 0.
  * Only an operation that can observe a zero's sign is affected: a divisor, and `string()`.
@@ -460,6 +501,21 @@ const arithmetic =
   (operator: ArithmeticOperator): Compiler =>
   (operands, ctx) => {
     const [left, right] = compileAll(operands, 2, ctx) as [Compiled, Compiled];
+    const temporal = temporalType(operator, left.type, right.type);
+    if (temporal !== undefined) {
+      return {
+        type: temporal,
+        run: (env) => {
+          const values = runAll([left, right], env);
+          if (isEvaluationError(values)) return values;
+          return temporalArithmetic(
+            operator as "add" | "sub",
+            values[0],
+            values[1],
+          );
+        },
+      };
+    }
     const mode = arithmeticMode(operator, left.type, right.type);
     if (
       operator === "div" &&
@@ -504,6 +560,12 @@ function lambdaComponents(lambda: PlanExpressionOperand | undefined): {
 } {
   if (!lambda || !isExpression(lambda) || lambda.operator !== "lambda") {
     throw Error("Expected a lambda operand");
+  }
+  if (lambda.operands.length === 3) {
+    throw new UnsupportedOperatorError(
+      "lambda",
+      "a two-variable comprehension (index and element, or key and value) has no evaluation in the post-filter",
+    );
   }
   const [first, second] = exactly(lambda.operands, 2, "lambda") as [
     PlanExpressionOperand,
@@ -608,6 +670,18 @@ const macro =
 
 // -- conversions ---------------------------------------------------------------------------------
 
+/** How a refused conversion names the overload its operand may select. */
+const MAY_BE: Readonly<Record<StaticType, string>> = {
+  int: "an int",
+  ambiguous: "an int",
+  double: "a double",
+  attribute: "a stored value",
+  timestamp: "a timestamp",
+  duration: "a duration",
+  other: "a string, bool, list or map",
+  unknown: "of a type the plan does not carry",
+};
+
 /**
  * A one-argument conversion, refused over an operand whose static type selects an overload the
  * evaluator does not model: `int()` and `double()` of a timestamp (seconds since the epoch), and
@@ -625,7 +699,7 @@ const conversion =
     if (refused.includes(operand.type)) {
       throw new UnsupportedOperatorError(
         operator,
-        `${operator}() over an operand that may be ${operator === "timestamp" ? "an int" : "a timestamp"}: the post-filter does not evaluate that overload`,
+        `${operator}() over an operand that may be ${MAY_BE[operand.type]}: the post-filter does not evaluate that overload`,
       );
     }
     return {
@@ -643,7 +717,7 @@ const hierarchyRelation = (
   operator: "ancestorOf" | "descendentOf" | "overlaps",
 ): Compiler =>
   strict(2, "other", ([left, right]) => {
-    if (!isHierarchyValue(left) || !isHierarchyValue(right)) {
+    if (!(left instanceof CelHierarchy) || !(right instanceof CelHierarchy)) {
       return EVALUATION_ERROR;
     }
     switch (operator) {
@@ -652,13 +726,90 @@ const hierarchyRelation = (
       case "descendentOf":
         return isStrictAncestor(right, left);
       default:
-        return (
-          valuesEqual(left, right) ||
-          isStrictAncestor(left, right) ||
-          isStrictAncestor(right, left)
-        );
+        return isSegmentPrefix(left, right) || isSegmentPrefix(right, left);
     }
   });
+
+// -- index ---------------------------------------------------------------------------------------
+
+/** CEL's `[]`: a list by an integral position, a map by a key it holds; anything else is an error. */
+function indexValue(collection: unknown, index: unknown): unknown {
+  if (Array.isArray(collection)) {
+    const position =
+      typeof index === "bigint"
+        ? Number(index)
+        : typeof index === "number" && Number.isInteger(index)
+          ? index
+          : undefined;
+    return position !== undefined &&
+      position >= 0 &&
+      position < collection.length
+      ? collection[position]
+      : EVALUATION_ERROR;
+  }
+  if (isRecord(collection) && typeof index === "string") {
+    return Object.prototype.hasOwnProperty.call(collection, index)
+      ? collection[index]
+      : EVALUATION_ERROR;
+  }
+  return EVALUATION_ERROR;
+}
+
+function indexInto(collection: Compiled, key: Compiled): Compiled {
+  return {
+    type: "unknown",
+    run: (env) => {
+      const values = runAll([collection, key], env);
+      return isEvaluationError(values)
+        ? values
+        : indexValue(values[0], values[1]);
+    },
+  };
+}
+
+/**
+ * A map literal, `{"a": x, "b": y}`, read only as the target of an index: the plan's `struct` drops
+ * the type name, so a message literal is the same node, and only a map can be indexed with `[]`.
+ * Each key must be a string literal, since a JavaScript record cannot tell the CEL key `1` from
+ * `"1"`, and no two keys may repeat. A value that errors makes the whole map one.
+ */
+function compileMapLiteral(
+  entries: PlanExpressionOperand[],
+  ctx: Context,
+): Compiled {
+  const keys = new Set<string>();
+  const fields = entries.map((entry) => {
+    if (!isExpression(entry) || entry.operator !== "set-field") {
+      throw new UnsupportedOperatorError(
+        "struct",
+        "a struct literal whose entries are not set-field pairs has no evaluation in the post-filter",
+      );
+    }
+    const [key, value] = exactly(entry.operands, 2, "set-field") as [
+      PlanExpressionOperand,
+      PlanExpressionOperand,
+    ];
+    if (!isValue(key) || typeof key.value !== "string" || keys.has(key.value)) {
+      throw new UnsupportedOperatorError(
+        "struct",
+        "a map literal is evaluated only with distinct string literal keys: a JavaScript record cannot tell the CEL key 1 from \"1\"",
+      );
+    }
+    keys.add(key.value);
+    return [key.value, compile(value, { ...ctx, parent: "set-field" })] as const;
+  });
+  return {
+    type: "other",
+    run: (env) => {
+      const values = runAll(
+        fields.map(([, value]) => value),
+        env,
+      );
+      if (isEvaluationError(values)) return values;
+      return Object.fromEntries(fields.map(([key], i) => [key, values[i]]));
+    },
+  };
+}
 
 // -- the roster ----------------------------------------------------------------------------------
 
@@ -705,6 +856,12 @@ const OPERATORS: Record<string, Compiler> = {
   contains: stringTest((receiver, needle) => receiver.includes(needle)),
   startsWith: stringTest((receiver, prefix) => receiver.startsWith(prefix)),
   endsWith: stringTest((receiver, suffix) => receiver.endsWith(suffix)),
+  // cel-go's strings extension: only the 26 ASCII letters are folded, every other code point kept.
+  upperAscii: strict(1, "other", ([receiver]) =>
+    typeof receiver === "string"
+      ? receiver.replace(/[a-z]+/g, (letters) => letters.toUpperCase())
+      : EVALUATION_ERROR,
+  ),
   matches: (operands, ctx) => {
     const [receiver, pattern] = exactly(operands, 2, "matches") as [
       PlanExpressionOperand,
@@ -751,27 +908,23 @@ const OPERATORS: Record<string, Compiler> = {
   div: arithmetic("div"),
   mod: arithmetic("mod"),
 
-  index: strict(2, "unknown", ([collection, index]) => {
-    if (Array.isArray(collection)) {
-      const position =
-        typeof index === "bigint"
-          ? Number(index)
-          : typeof index === "number" && Number.isInteger(index)
-            ? index
-            : undefined;
-      return position !== undefined &&
-        position >= 0 &&
-        position < collection.length
-        ? collection[position]
-        : EVALUATION_ERROR;
-    }
-    if (isRecord(collection) && typeof index === "string") {
-      return Object.prototype.hasOwnProperty.call(collection, index)
-        ? collection[index]
-        : EVALUATION_ERROR;
-    }
-    return EVALUATION_ERROR;
-  }),
+  // A list literal the plan builds from expressions: an element that errors makes the whole list one.
+  list: (operands, ctx) => {
+    const compiled = operands.map((op) => compile(op, ctx));
+    return { type: "other", run: (env) => runAll(compiled, env) };
+  },
+
+  index: (operands, ctx) => {
+    const [target, key] = exactly(operands, 2, "index") as [
+      PlanExpressionOperand,
+      PlanExpressionOperand,
+    ];
+    const collection =
+      isExpression(target) && target.operator === "struct"
+        ? compileMapLiteral(target.operands, ctx)
+        : compile(target, ctx);
+    return indexInto(collection, compile(key, ctx));
+  },
   "get-field": (operands, ctx) => {
     const [targetOperand, fieldOperand] = exactly(operands, 2, "get-field") as [
       PlanExpressionOperand,
@@ -799,16 +952,17 @@ const OPERATORS: Record<string, Compiler> = {
   size: strict(1, "int", ([value]) => {
     if (typeof value === "string") return Array.from(value).length;
     if (Array.isArray(value)) return value.length;
+    if (value instanceof CelHierarchy) return value.segments.length;
     if (isRecord(value)) return Object.keys(value).length;
     return EVALUATION_ERROR;
   }),
 
   string: (operands, ctx) => {
     const [operand] = compileAll(operands, 1, ctx) as [Compiled];
-    if (operand.type === "timestamp") {
+    if (operand.type === "timestamp" || operand.type === "duration") {
       throw new UnsupportedOperatorError(
         "string",
-        "string() over a timestamp renders it in RFC 3339, an overload the post-filter does not evaluate",
+        `string() over a ${operand.type} renders it in ${operand.type === "timestamp" ? "RFC 3339" : "seconds"}, an overload the post-filter does not evaluate`,
       );
     }
     if (operand.type === "ambiguous" || operand.type === "unknown") {
@@ -842,19 +996,44 @@ const OPERATORS: Record<string, Compiler> = {
   double: conversion(
     "double",
     "double",
-    ["timestamp", "unknown"],
+    ["timestamp", "duration", "unknown"],
     convertToDouble,
   ),
-  int: conversion("int", "int", ["timestamp", "unknown"], convertToInt),
+  int: conversion(
+    "int",
+    "int",
+    ["timestamp", "duration", "unknown"],
+    convertToInt,
+  ),
   timestamp: conversion(
     "timestamp",
     "timestamp",
-    ["int", "ambiguous", "unknown"],
+    ["int", "ambiguous", "duration", "unknown"],
     (value) =>
       typeof value === "string"
         ? parseRfc3339Timestamp(value)
         : EVALUATION_ERROR,
   ),
+  duration: conversion(
+    "duration",
+    "duration",
+    ["int", "ambiguous", "timestamp", "unknown"],
+    (value) =>
+      typeof value === "string" ? parseGoDuration(value) : EVALUATION_ERROR,
+  ),
+  timeSince: (operands, ctx) => {
+    const [operand] = compileAll(operands, 1, ctx) as [Compiled];
+    // Cerbos evaluates `timeSince` against one clock reading per request. The plan carries none, so
+    // the post-filter takes its own when the plan is translated, and holds it for every record.
+    const now = new CelTimestamp(BigInt(Date.now()) * 1_000_000n);
+    return {
+      type: "duration",
+      run: (env) => {
+        const value = operand.run(env);
+        return isEvaluationError(value) ? value : timeSince(now, value);
+      },
+    };
+  },
 
   if: (operands, ctx) => {
     const [condition, then, otherwise] = exactly(operands, 3, "if").map((op) =>
@@ -882,10 +1061,12 @@ const OPERATORS: Record<string, Compiler> = {
       type: "other",
       run: (env) => {
         const path = value.run(env);
-        const separator = delimiter ? delimiter.run(env) : ".";
-        return typeof path === "string" && typeof separator === "string"
-          ? { value: path, delimiter: separator }
-          : EVALUATION_ERROR;
+        if (isEvaluationError(path)) return path;
+        if (!delimiter) return toHierarchy(path);
+        const separator = delimiter.run(env);
+        return isEvaluationError(separator)
+          ? separator
+          : toHierarchy(path, separator);
       },
     };
   },

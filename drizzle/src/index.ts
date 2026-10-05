@@ -4,6 +4,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import { unrollKnownValueMaps } from "./collections";
 import { buildFilterFromExpression, rejectNullConstructors } from "./filter";
 import { foldConstantConstructors } from "./operands";
+import { rewritePlan } from "./rewrite";
 import type {
   BuildFilterOptions,
   QueryPlanToDrizzleArgs,
@@ -17,7 +18,8 @@ import type {
  * `filter.ts` dispatches every operator in condition position; `comparison.ts`,
  * `collections.ts`, `intersection.ts`, `hierarchy.ts` and `indexed.ts` translate their operator
  * families; `values.ts` renders operands in value position; `predicates.ts` holds the leaf SQL;
- * `mapper.ts` and `relations.ts` resolve references and build the correlated subqueries.
+ * `mapper.ts` and `relations.ts` resolve references and build the correlated subqueries;
+ * `rewrite.ts` rewrites plan shapes into equivalent ones the translators already handle.
  */
 
 export type { Indexable } from "./indexed";
@@ -52,7 +54,10 @@ export function queryPlanToDrizzle({
       return {
         kind: PlanKind.CONDITIONAL,
         filter: buildFilterFromExpression(
-          foldConstantConstructors(unrollKnownValueMaps(queryPlan.condition)),
+          rewritePlan(
+            foldConstantConstructors(unrollKnownValueMaps(queryPlan.condition)),
+            mapper,
+          ),
           mapper,
           options,
         ),

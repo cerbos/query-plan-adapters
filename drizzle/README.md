@@ -163,7 +163,16 @@ See [Mapping hazards](#mapping-hazards).
   contain. `b` must be constant unless `a` is a non-empty literal list, because an erroring `b` makes
   `except()` raise even when `a` is empty.
 - `x in [e1, e2]` with elements built at evaluation is CEL's equality against each, and an error if
-  any element is a missing attribute.
+  any element is a missing attribute. `exists` and `all` over such a list are unrolled the same way,
+  into an `OR` / `AND` of the body over each element.
+- `"x" in L.map(t, f(t))` and `"x" in L.filter(t, p(t))` become an `exists` finding a matching
+  element, UNKNOWN wherever the projection or predicate is UNKNOWN on any element, since CEL builds
+  the whole list first. `x in L + ["a"]` is `x in L || x in ["a"]`, UNKNOWN where `L` is missing.
+- `L.except(K) == []` and `L.isSubset(K)` are `L.all(t, t in K)`, and `intersect(L, K) == []` is
+  `L.all(t, !(t in K))`, for a literal `K`. `size(intersect(...))` throws: Cerbos keeps the
+  duplicates of whichever list is shorter.
+- A two-variable macro (`L.exists(i, v, ...)`) throws: an element's index or a map's key is not a
+  column the adapter reads.
 - `filter()` is supported inside `size(filter(...))`. On its own — like `map()`, or `except()` with
   a list argument — it returns a list, not a boolean, which CEL evaluates to an error: it becomes
   an UNKNOWN condition, denied under both polarities and absorbed by `||` / `&&` as CEL absorbs
@@ -210,6 +219,13 @@ accepts, so such a row is excluded too. On SQLite a timestamp can be compared on
 `timestamp()` constant or another SQLite text timestamp; anywhere else it throws.
 
 `timestamp()` over an untyped string throws.
+
+A constant shift moves to the constant side: `timestamp(x) + duration("24h") < timestamp(T)` is
+`timestamp(x) < timestamp(T - 24h)`, and `timestamp(x).timeSince() > duration("24h")` is
+`timestamp(x) < timestamp(now - 24h)`, with `now` read when the plan is translated. An attribute
+ordered against a `timestamp()` without the conversion (`R.attr.createdAt < now()`) is CEL's
+no-overload error, since an attribute is never a CEL timestamp, and translates to an UNKNOWN
+condition.
 
 ## Indexed collection columns
 
@@ -390,10 +406,10 @@ strings, or a receiver that is not a mapped string column.
 | --- | --- |
 | Logical | `and`, `or`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
-| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `matches()` (see below) |
+| String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `upperAscii()` (26 `REPLACE`s, so only ASCII letters fold), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
-| Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, membership |
-| Other | arithmetic, ternaries, hierarchy operations, typed timestamps, index access, `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
+| Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, `isSubset`, `except` / `intersect` compared with `[]`, membership (including in `map()`, `filter()` and `L + [...]`) |
+| Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
 filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
@@ -426,13 +442,13 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 26 / 26 |
-| extended | 73 / 80 |
-| adversarial | 292 / 318 |
+| core | 29 / 29 |
+| extended | 90 / 97 |
+| adversarial | 307 / 338 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
-reason. Four extended cases and three adversarial cases are declared planner divergences and are
+reason. Four extended cases and five adversarial cases are declared planner divergences and are
 skipped:
 
 - `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
@@ -446,6 +462,10 @@ skipped:
   which j2 lacks: the plan's `not(...)` of it denies j2, while `check()` receives `aNumber` as
   absent and treats the erroring DENY as not matching
   ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+- `type-mismatch/in/number-field-in-scalar-principal` and
+  `type-mismatch/in/string-field-in-dyn-string`: the planner rewrites an `in` over a scalar
+  container to `==`, which `check()` has no overload for and denies
+  ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 ## Mapping hazards
 
@@ -497,6 +517,20 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- **Breaking:** an attribute ordered against a `timestamp()` value without the `timestamp()`
+  conversion (`R.attr.createdAt < now() - duration("24h")`) now translates to an UNKNOWN condition.
+  CEL has no ordering between a timestamp and the string an attribute holds, so `check()` errors and
+  denies; a `valueType: "timestamp"` column used to be compared as an instant, which returned the
+  rows the PDP denies. Write `timestamp(R.attr.createdAt) < ...`.
+- **Breaking:** `!hasIntersection(L.map(t, t.f), [...])` no longer returns rows where an element's
+  projected field is missing. The guard was ANDed with the intersection, so the negation turned a
+  CEL error into TRUE.
+- These now translate instead of throwing: a list ternary folded against a constant
+  (`["a"] + (c ? ["b"] : []) == [...]`, the shape `runtime.effectiveDerivedRoles` plans to), which
+  used to emit SQL the store rejected; a constant map indexed by an attribute; `R.attr.m["key"]`
+  where `R.attr.m.key` is mapped; `exists` / `all` over a list built from attributes; membership in
+  `map()`, `filter()` and `L + [...]`; `except` / `intersect` compared with `[]`; `isSubset`;
+  `upperAscii()`; and a constant `duration()` shift or `timeSince()` against a timestamp.
 - **Breaking:** a `timestamp()` comparison on a SQLite text column compares instants, not strings
   ([#497](https://github.com/cerbos/query-plan-adapters/issues/497)). The constant used to be bound
   as `…00Z` and compared with the stored text as a string. So a row storing `toISOString()` output

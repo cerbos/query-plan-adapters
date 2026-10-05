@@ -33,8 +33,10 @@ from cerbos_sqlalchemy._plan import (
     Operand,
     Value,
     assert_no_same_collection_correlation,
+    assert_single_variable_lambdas,
     declared_collection_name,
     parse_operand,
+    resolve_map_member_paths,
 )
 from cerbos_sqlalchemy._translator import Translator, require_boolean
 from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported for callers
@@ -319,7 +321,10 @@ def get_query(
     if query_plan.filter.kind in _ALLOW_KINDS:
         return select(table)
 
-    condition = _plan_condition(query_plan)
+    condition = resolve_map_member_paths(
+        _plan_condition(query_plan), frozenset(attr_map)
+    )
+    assert_single_variable_lambdas(condition)
     # Always run: an attribute can declare "omitted" under an "explicit" call.
     assert_no_null_comparison_operands(
         condition, null_conventions, null_attribute_representation
@@ -336,6 +341,7 @@ def get_query(
         declared_collections,
         null_fallback=null_attribute_representation,
     )
+    translator.refuse_bare_temporal(condition)
     where = require_boolean(translator.predicate(condition), "condition")
     query = select(table).where(where)
 

@@ -140,6 +140,13 @@ cases:
   condition:
     match:
       expr: 'P.attr.fewTeams.exists(t, R.attr.aOptionalString == t)'
+- id: 'principal/exists/short-list-value-first'
+  tier: adversarial
+  intent: 'exists over a short principal list with the lambda variable on the left (fewTeams.exists(t, t == aOptionalString)), unrolled into an or of value-first equalities.'
+  trap: 'Each disjunct is eq(literal, column); a field-first assumption breaks every branch, and LIKE metacharacters in "%_o" must stay inert.'
+  condition:
+    match:
+      expr: P.attr.fewTeams.exists(t, t == R.attr.aOptionalString)
 - id: 'principal/filter/size-of-filtered-long-list'
   tier: extended
   intent: 'size() of a principal list filtered by equality with a resource attribute, compared > 0.'

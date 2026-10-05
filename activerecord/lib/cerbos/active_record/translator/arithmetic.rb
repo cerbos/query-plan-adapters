@@ -13,6 +13,10 @@ module Cerbos
         private
 
         def arithmetic(operator, left, right)
+          return concatenate(left, right) if operator == "add" && (list_operand?(left) || list_operand?(right))
+          if [left, right].any? { |operand| temporal_value?(operand) }
+            return duration_arithmetic(operator, left, right)
+          end
           if %w[add sub mult].include?(operator) && (deferred_value?(left) || deferred_value?(right))
             return deferred_arithmetic(operator, left, right)
           end

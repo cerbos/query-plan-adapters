@@ -262,7 +262,7 @@ function literalMacro(
 }
 
 /** A list literal: a value list, or a `list(...)` of literals. */
-function literalList(operand: PlanExpressionOperand): Value[] | undefined {
+export function literalList(operand: PlanExpressionOperand): Value[] | undefined {
   if (isValueOperand(operand)) {
     return Array.isArray(operand.value) ? operand.value : undefined;
   }
@@ -279,7 +279,7 @@ function literalList(operand: PlanExpressionOperand): Value[] | undefined {
 }
 
 /** A literal operand's value: a value, or a `struct(set-field(...), ...)` of literals. */
-function literalValue(operand: PlanExpressionOperand): Value | undefined {
+export function literalValue(operand: PlanExpressionOperand): Value | undefined {
   if (isValueOperand(operand)) return operand.value;
   if (!isOperatorOperand(operand)) return undefined;
   if (operand.operator === "list") return literalList(operand);

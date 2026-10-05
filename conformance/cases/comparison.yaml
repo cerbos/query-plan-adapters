@@ -10,6 +10,13 @@ cases:
   condition:
     match:
       expr: R.attr.aString == R.attr.aOptionalString
+- id: 'comparison/equals/map-member-by-string-key'
+  tier: extended
+  intent: 'A map attribute indexed by a string key (obj["inner"] == "one"), as a map indexed by a principal attribute plans once the key folds.'
+  trap: 'The index is a map key, not a list position; resolving it to a column other than obj.inner, or matching rows whose obj has no inner key (j1), is wrong.'
+  condition:
+    match:
+      expr: 'R.attr.obj["inner"] == "one"'
 - id: 'comparison/equals/nested-map-member'
   tier: extended
   intent: 'Equality on a member of a map-valued attribute (obj.inner == "one").'
@@ -17,6 +24,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.obj.inner == "one"'
+- id: 'comparison/equals/value-first'
+  tier: adversarial
+  intent: 'Equality with the literal on the left ("one" == aString), the shape the planner emits once a principal attribute folds (P.attr.x == R.attr.y).'
+  trap: 'A translator that takes operand 0 as the field mistakes the literal for a column; matching must stay exact, so c1 "One" and h6 (soft hyphen) deny and j1 (no aString) denies.'
+  condition:
+    match:
+      expr: '"one" == R.attr.aString'
 - id: 'comparison/equals/whole-list-literal'
   tier: adversarial
   intent: 'Whole-list equality between a list attribute and a one-element list literal (tagNames == ["public"]).'

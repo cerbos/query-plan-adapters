@@ -19,7 +19,17 @@ module Cerbos
           return projection_membership(needle, haystack.projections) if haystack.is_a?(Values::ConstantProjection)
           return relation_membership(needle.scope, haystack) if needle.is_a?(Values::Collection)
 
-          # A filtered or projected relation, or a filtered list, has no membership translation.
+          case haystack
+          when Values::ConditionalValue
+            # A list chosen by a ternary: test each branch. The CASE has no ELSE, so an UNKNOWN
+            # condition stays UNKNOWN.
+            return branches(haystack.condition, membership(needle, haystack.then_value), membership(needle, haystack.else_value))
+          when Values::ConcatenatedList then return concatenated_membership(needle, haystack)
+          when Values::FilteredCollection then return filtered_membership(needle, haystack)
+          when Values::MappedCollection then return mapped_membership(needle, haystack)
+          end
+          # Any other filtered or projected relation, or a filtered list, has no membership
+          # translation.
           reject_collection("in", needle)
           reject_collection("in", haystack)
           scalar_membership(needle, haystack)
@@ -56,24 +66,74 @@ module Cerbos
 
         # `value in R.attr.<relation>`, as an EXISTS over the related rows.
         def relation_membership(scope, value)
-          member = scope.member_column
-          condition =
-            if explicit_null?(value)
-              explicit_null_equality(member, value)
-            elsif cross_type_literal?(value, member_kind(scope))
-              # `"2" in [2]` is false in CEL. SQLite would coerce '2' to 2 (and true to 1).
-              false
-            else
-              ArelSupport.comparison("eq", member, value)
-            end
-
           # Without the guard, `!("x" in chain)` over a missing parent is TRUE and returns a
           # denied row (#315). The guard makes it NULL.
-          result = scope.guarded(scope.exists(condition))
-          if ArelSupport.arel_node?(value) && !explicit_null?(value)
-            return unknown_if_any([ArelSupport.is_null(value)], result)
+          needle_guard(value, scope.guarded(scope.exists(member_equals(scope, value))))
+        end
+
+        # A relation's member equal to the needle, as CEL's `in` compares them.
+        def member_equals(scope, value)
+          member = scope.member_column
+          if explicit_null?(value)
+            explicit_null_equality(member, value)
+          elsif cross_type_literal?(value, member_kind(scope))
+            # `"2" in [2]` is false in CEL. SQLite would coerce '2' to 2 (and true to 1).
+            false
+          else
+            ArelSupport.comparison("eq", member, value)
           end
-          result
+        end
+
+        # A missing needle is an error whatever the list holds, so the membership is UNKNOWN.
+        def needle_guard(needle, result)
+          return result unless ArelSupport.arel_node?(needle) && !explicit_null?(needle)
+
+          unknown_if_any([ArelSupport.is_null(needle)], result)
+        end
+
+        # `value in relation + [constants]`: in some part. A missing parent errors the whole
+        # list, so each relation's hop guard wraps the whole test, not just its own part.
+        def concatenated_membership(needle, list)
+          tests = list.parts.map { |part|
+            next relation_membership(part.scope, needle) if part.is_a?(Values::Collection)
+
+            test = membership(needle, part)
+            explicit_null?(needle) ? in_with_present_guard(needle, part, test) : test
+          }
+          list.parts.grep(Values::Collection).reduce(ArelSupport.or_node(tests)) { |result, part| part.scope.guarded(result) }
+        end
+
+        # `value in relation.filter(x, body)`. filter() never ignores an element's error, so
+        # one UNKNOWN body makes the whole membership UNKNOWN, before any match counts.
+        def filtered_membership(needle, filtered)
+          scope = filtered.scope
+          unless scope.mapping&.member_field
+            raise UnsupportedOperatorError,
+              "in over a filtered relation of structs: only a relation of scalar members " \
+              "(a member_field relation) has elements a value can equal"
+          end
+
+          result = scope.guarded(
+            ArelSupport.case_node(
+              [
+                [scope.exists(ArelSupport.is_null(filtered.body)), nil],
+                [scope.exists(ArelSupport.and_node([filtered.body, member_equals(scope, needle)])), true]
+              ],
+              else_value: false
+            )
+          )
+          needle_guard(needle, result)
+        end
+
+        # `value in relation.map(x, projection)`: {#has_intersection} with a one-element list.
+        def mapped_membership(needle, mapped)
+          unless ArelSupport.arel_node?(mapped.projection)
+            raise UnsupportedOperatorError,
+              "in over a map() whose projection is #{describe(mapped.projection)}: only a " \
+              "projection to a scalar value is translated"
+          end
+
+          needle_guard(needle, has_intersection(mapped, [needle]))
         end
 
         def scalar_membership(needle, values)

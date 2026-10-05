@@ -186,7 +186,11 @@ function buildTernaryComparisonBranch(
   assertDefined(substitutedOperands[0], `${operator} requires a left operand`);
   assertDefined(substitutedOperands[1], `${operator} requires a right operand`);
 
-  const normalized = normalizeBinaryOperands(operator, substitutedOperands);
+  // Membership is not symmetric: its member stays first even when it is the constant.
+  const normalized =
+    operator === "in"
+      ? { operator, operands: substitutedOperands }
+      : normalizeBinaryOperands(operator, substitutedOperands);
 
   const [normalizedFirst, normalizedSecond] = normalized.operands;
   if (
@@ -221,6 +225,15 @@ function buildTernaryComparisonBranch(
     true
   );
   if (nested !== null) return { kind: "filter", filter: nested };
+  if (normalized.operator === "in") {
+    return {
+      kind: "filter",
+      filter: buildNegatedFilter(
+        { operator: "in", operands: normalized.operands },
+        context
+      ),
+    };
+  }
   // Keep missing-value and relation guards inside the selected branch. Constants
   // are negated above, since !(NaN <= n) is true but NaN > n is false in CEL 0.30.
   return {
@@ -237,7 +250,8 @@ function buildTernaryComparisonBranch(
 }
 
 /**
- * A comparison with a ternary operand (`(c ? a : b) == x`), translated by distributing the
+ * A comparison or membership test with a ternary operand (`(c ? a : b) == x`,
+ * `x in (c ? a : b)`), translated by distributing the
  * comparison into both branches; or null when `operator` is not a comparison or no operand is a
  * ternary. `negated` builds the filter for the comparison's negation instead.
  */
@@ -247,7 +261,7 @@ export function tryHandleTernaryComparison(
   context: TranslationContext,
   negated = false
 ): PrismaFilter | null {
-  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined) {
+  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined && operator !== "in") {
     return null;
   }
 

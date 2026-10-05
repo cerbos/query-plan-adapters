@@ -245,10 +245,12 @@ The predicate evaluates CEL, not an approximation of it. A key the record does n
 missing-attribute error; an error propagates through `!`, and through `&&` and `||` unless another
 operand decides them; and a result that is not `true` denies. Equality is CEL's heterogeneous
 equality (`1 == 1.0`, `"1" != 1`), ordering across types is an error, and strings compare by code
-point. It evaluates arithmetic, string helpers (`contains`, `startsWith`, `endsWith`, `+`), casts
-(`int`, `double`, `string`, `timestamp`), field-to-field comparisons, ternaries, `size`,
-hierarchies, and the collection macros over a literal list (a principal attribute's list, which the
-planner inlines). `matches` is answered for a literal pattern with optional anchors and a trailing
+point. It evaluates arithmetic, string helpers (`contains`, `startsWith`, `endsWith`, `upperAscii`,
+`+`), casts (`int`, `double`, `string`, `timestamp`, `duration`), timestamp and duration
+arithmetic and `timeSince` (against the clock when the plan is translated), field-to-field
+comparisons, ternaries, `size`, hierarchies (built from a string or a list of segments), list
+literals built from expressions, an index into a map literal, and the collection macros over a
+literal list (a principal attribute's list, which the planner inlines). `matches` is answered for a literal pattern with optional anchors and a trailing
 `.*` only.
 
 It reads only the metadata the mapper declares, and only scalars: a key holding a list or anything
@@ -268,8 +270,10 @@ the predicate:
   `valueType: "boolean"`): the chromadb client stores metadata through JSON, which writes -0.0 as
   0, so the sign of a stored zero is lost, and it decides both the infinity a division by zero
   gives and `string()`'s `"-0"`;
-- any other `matches` pattern, `filter` or `map` used as a condition, and the operators it has no
-  evaluation for (`except`, list and map literals built by the plan).
+- any other `matches` pattern, `filter` or `map` used as a condition, a two-variable comprehension,
+  a map literal anywhere but the target of an index (the plan's `struct` drops the type name, so a
+  message literal is the same node), and the operators it has no evaluation for (`except`,
+  `intersect`, `isSubset`, among others).
 
 ## Error handling
 
@@ -319,24 +323,27 @@ caller must. Passed cases on the current PDP, 0.55.0, out of every golden case i
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 20 / 26 |
-| extended | 39 / 80 |
-| adversarial | 154 / 318 |
+| core | 23 / 29 |
+| extended | 48 / 97 |
+| adversarial | 167 / 338 |
 
-Without `allowPostFilter`, the 145 cases the post-filter answers throw `UnsupportedOperatorError`
-instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 64
-passing: 18, 10 and 36 in the three tiers.
+Without `allowPostFilter`, the 167 cases the post-filter answers throw `UnsupportedOperatorError`
+instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 71
+passing: 20, 12 and 39 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
-four extended cases and three adversarial cases. `null/has/missing-attribute` and
+four extended cases and five adversarial cases. `null/has/missing-attribute` and
 `null/has/composed-with-comparison`: the plan request leaves an omitted attribute unknown, so the
 planner folds `has()` to true by design, while `checkResource` receives the omission as absent and
 denies the record; use `R.attr.x != null` instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
 cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2,
 while `checkResource` receives `aNumber` as absent and treats the erroring deny rule as not matching
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Two `type-mismatch/in/*` cases
+whose container is a scalar: the planner rewrites `in` over it to `eq`, while `check()` has no `in`
+overload for that container and errors
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 The harness mapping declares no metadata key but the id `required: true`: every other scalar the
 corpus reads through a filter is missing on some seed. It declares the boolean keys
@@ -376,6 +383,15 @@ flat metadata on the record being matched, and every shape that would reach a se
   [Post-filtering](#post-filtering). Without the option nothing changes: the same plans throw
   `UnsupportedOperatorError`, and `QueryPlanToChromaDBResult`'s default type argument keeps
   `filters` a `Where` on every conditional result.
+
+- **Widening, opt-in:** under `allowPostFilter`, the post-filter now evaluates `upperAscii`,
+  `duration()`, `timeSince`, timestamp and duration arithmetic, list literals built from
+  expressions (`R.attr.a in [R.attr.b]`), an index into a map literal, and a hierarchy built from a
+  list of segments. Each used to throw `UnsupportedOperatorError`. A two-variable comprehension,
+  which used to fail with a plain `Error`, now throws `UnsupportedOperatorError`.
+- **Fix, opt-in:** the post-filter compares hierarchies segment by segment, as Cerbos does, so
+  `hierarchy("a:b", ":")` overlaps `hierarchy("a.b")`, and `size()` of a hierarchy counts its
+  segments. It used to require both sides to share a delimiter, and denied such a pair.
 
 - **Widening:** an inequality over a key declared `valueType: "boolean"` (new) or
   `numericType: "integer"` is spelled without `$ne`, so it no longer needs `required: true`

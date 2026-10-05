@@ -109,6 +109,10 @@
       "status": "unsupported",
       "reason": "Same refusal as collection/exists/map-keys, under negation: the to-one parent is mapped per field, and a JPA relation row has no key set to range over."
     },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable macro over a map binds each key and its value, and obj is mapped per key (obj.inner), not as a whole: a JPA row has no key set to range over, so R.attr.obj itself is an unmapped attribute."
+    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a filter() conjunct is refused rather than dropped (dropping it would over-grant)."
@@ -116,6 +120,10 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a bare filter() in boolean position is refused."
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so its size depends on comparing the two lengths row by row; the adapter translates intersect() only compared with an empty list (as hasIntersection) and refuses size(intersect(...))."
     },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
@@ -129,25 +137,9 @@
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
-    "membership/in/explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
-    },
-    "membership/in/field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "The adapter translates `in` only as an attribute against a list of constants or a value against a mapped collection, and refuses a list literal holding another attribute rather than flatten it into per-element equalities without each column's null convention (#574)."
-    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "in over a map tests its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to test, so R.attr.parent itself is an unmapped attribute."
-    },
-    "membership/in/negated-explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
-    },
-    "membership/in/negated-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",

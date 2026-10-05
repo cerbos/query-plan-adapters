@@ -23,7 +23,9 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" &&
   value !== null &&
   !Array.isArray(value) &&
-  !(value instanceof CelTimestamp);
+  !(value instanceof CelTimestamp) &&
+  !(value instanceof CelDuration) &&
+  !(value instanceof CelHierarchy);
 
 /** Reads a dotted path; an absent key at any level is CEL's missing-attribute error. */
 export const getNestedValue = (obj: unknown, path: string): unknown => {
@@ -42,6 +44,11 @@ export const getNestedValue = (obj: unknown, path: string): unknown => {
 
 /** A CEL timestamp: nanoseconds since the epoch, so all nine fractional digits are compared. */
 export class CelTimestamp {
+  constructor(readonly nanos: bigint) {}
+}
+
+/** A CEL duration: a signed count of nanoseconds, bounded as Go's `time.Duration` is (int64). */
+export class CelDuration {
   constructor(readonly nanos: bigint) {}
 }
 
@@ -65,6 +72,16 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       right instanceof CelTimestamp &&
       left.nanos === right.nanos
     );
+  }
+  if (left instanceof CelDuration || right instanceof CelDuration) {
+    return (
+      left instanceof CelDuration &&
+      right instanceof CelDuration &&
+      left.nanos === right.nanos
+    );
+  }
+  if (left instanceof CelHierarchy && right instanceof CelHierarchy) {
+    return valuesEqual(left.segments, right.segments);
   }
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
@@ -98,6 +115,10 @@ export const compareValues = (
     return EVALUATION_ERROR;
   }
   if (operator === "eq" || operator === "ne") {
+    // A hierarchy compares only with a hierarchy: anything else is no-such-overload in Cerbos.
+    if ((left instanceof CelHierarchy) !== (right instanceof CelHierarchy)) {
+      return EVALUATION_ERROR;
+    }
     const equal = valuesEqual(left, right);
     return operator === "eq" ? equal : !equal;
   }
@@ -113,7 +134,10 @@ export const compareValues = (
     // CEL orders bools: false < true.
     a = Number(left);
     b = Number(right);
-  } else if (left instanceof CelTimestamp && right instanceof CelTimestamp) {
+  } else if (
+    (left instanceof CelTimestamp && right instanceof CelTimestamp) ||
+    (left instanceof CelDuration && right instanceof CelDuration)
+  ) {
     a = left.nanos;
     b = right.nanos;
   } else if (Number.isNaN(left) || Number.isNaN(right)) {
@@ -204,23 +228,54 @@ export const intArithmetic = (
 
 // -- hierarchies ---------------------------------------------------------------------------------
 
-export interface HierarchyValue {
-  value: string;
-  delimiter: string;
+/**
+ * A Cerbos hierarchy: its segments, as `hierarchy()` splits them. The delimiter is gone once the
+ * path is split, so `hierarchy("a:b", ":")` and `hierarchy(["a", "b"])` are the same hierarchy.
+ */
+export class CelHierarchy {
+  constructor(readonly segments: readonly string[]) {}
 }
 
-export const isHierarchyValue = (value: unknown): value is HierarchyValue =>
-  isRecord(value) &&
-  typeof value["value"] === "string" &&
-  typeof value["delimiter"] === "string";
+/**
+ * `hierarchy(path)` and `hierarchy(path, delimiter)`: a string split on the delimiter (`.` by
+ * default) as Go's `strings.Split` splits it, or a list whose elements are all strings.
+ */
+export const toHierarchy = (
+  path: unknown,
+  delimiter?: unknown,
+): CelHierarchy | EvaluationError => {
+  if (delimiter !== undefined) {
+    if (typeof path !== "string" || typeof delimiter !== "string") {
+      return EVALUATION_ERROR;
+    }
+    // Go splits on an empty separator between UTF-8 sequences, so by code point, not code unit.
+    return new CelHierarchy(
+      delimiter === "" ? Array.from(path) : path.split(delimiter),
+    );
+  }
+  if (path instanceof CelHierarchy) return path;
+  if (typeof path === "string") return new CelHierarchy(path.split("."));
+  if (Array.isArray(path) && path.every((s) => typeof s === "string")) {
+    return new CelHierarchy(path as string[]);
+  }
+  return EVALUATION_ERROR;
+};
 
-export const isStrictAncestor = (
-  ancestor: HierarchyValue,
-  descendent: HierarchyValue,
+/** Whether `prefix` is a prefix of `of` segment by segment, equal included. */
+export const isSegmentPrefix = (
+  prefix: CelHierarchy,
+  of: CelHierarchy,
 ): boolean =>
-  ancestor.delimiter === descendent.delimiter &&
-  ancestor.value !== descendent.value &&
-  descendent.value.startsWith(ancestor.value + ancestor.delimiter);
+  prefix.segments.length <= of.segments.length &&
+  prefix.segments.every((segment, i) => of.segments[i] === segment);
+
+/** `ancestor.ancestorOf(descendent)`: a proper prefix, so a hierarchy is not its own ancestor. */
+export const isStrictAncestor = (
+  ancestor: CelHierarchy,
+  descendent: CelHierarchy,
+): boolean =>
+  ancestor.segments.length < descendent.segments.length &&
+  isSegmentPrefix(ancestor, descendent);
 
 // -- timestamps ----------------------------------------------------------------------------------
 
@@ -327,6 +382,162 @@ export const parseRfc3339Timestamp = (
     timestampNanos > MAX_TIMESTAMP_NANOS
     ? EVALUATION_ERROR
     : new CelTimestamp(timestampNanos);
+};
+
+// -- durations -----------------------------------------------------------------------------------
+
+const DURATION_MAX = 2n ** 63n - 1n;
+const DURATION_MIN = -(2n ** 63n);
+const UINT_LIMIT = 2n ** 63n;
+
+/** Go's `time.ParseDuration` unit table, the micro sign and the Greek mu both included. */
+const DURATION_UNITS: Readonly<Record<string, bigint>> = {
+  ns: 1n,
+  us: 1_000n,
+  "µs": 1_000n,
+  "μs": 1_000n,
+  ms: 1_000_000n,
+  s: 1_000_000_000n,
+  m: 60_000_000_000n,
+  h: 3_600_000_000_000n,
+};
+
+const isDigit = (c: string | undefined): boolean =>
+  c !== undefined && c >= "0" && c <= "9";
+
+/**
+ * `duration()` of a string: Go's `time.ParseDuration`, which cel-go calls, ported step for step —
+ * the overflow checks and the float64 arithmetic a fractional component goes through included, so
+ * `"1.0000000001s"` rounds as Go rounds it.
+ */
+export const parseGoDuration = (input: string): CelDuration | EvaluationError => {
+  let s = input;
+  let negative = false;
+  if (s[0] === "-" || s[0] === "+") {
+    negative = s[0] === "-";
+    s = s.slice(1);
+  }
+  if (s === "0") return new CelDuration(0n);
+  if (s === "") return EVALUATION_ERROR;
+  let total = 0n;
+  while (s !== "") {
+    if (!(s[0] === "." || isDigit(s[0]))) return EVALUATION_ERROR;
+    // The integer part (Go's leadingInt).
+    let v = 0n;
+    let i = 0;
+    for (; isDigit(s[i]); i++) {
+      if (v > UINT_LIMIT / 10n) return EVALUATION_ERROR;
+      v = v * 10n + BigInt(s.charCodeAt(i) - 48);
+      if (v > UINT_LIMIT) return EVALUATION_ERROR;
+    }
+    const pre = i > 0;
+    s = s.slice(i);
+    // The fraction (Go's leadingFraction): digits past int64 precision are dropped, not an error.
+    let f = 0n;
+    let scale = 1;
+    let post = false;
+    if (s[0] === ".") {
+      s = s.slice(1);
+      let overflow = false;
+      let j = 0;
+      for (; isDigit(s[j]); j++) {
+        if (overflow) continue;
+        if (f > DURATION_MAX / 10n) {
+          overflow = true;
+          continue;
+        }
+        const next = f * 10n + BigInt(s.charCodeAt(j) - 48);
+        if (next > UINT_LIMIT) {
+          overflow = true;
+          continue;
+        }
+        f = next;
+        scale *= 10;
+      }
+      post = j > 0;
+      s = s.slice(j);
+    }
+    if (!pre && !post) return EVALUATION_ERROR;
+    let u = 0;
+    while (u < s.length && s[u] !== "." && !isDigit(s[u])) u++;
+    if (u === 0) return EVALUATION_ERROR;
+    const unit = Object.prototype.hasOwnProperty.call(
+      DURATION_UNITS,
+      s.slice(0, u),
+    )
+      ? DURATION_UNITS[s.slice(0, u)]!
+      : undefined;
+    s = s.slice(u);
+    if (unit === undefined) return EVALUATION_ERROR;
+    if (v > UINT_LIMIT / unit) return EVALUATION_ERROR;
+    v *= unit;
+    if (f > 0n) {
+      v += BigInt(Math.trunc(Number(f) * (Number(unit) / scale)));
+      if (v > UINT_LIMIT) return EVALUATION_ERROR;
+    }
+    total += v;
+    if (total > UINT_LIMIT) return EVALUATION_ERROR;
+  }
+  if (negative) return new CelDuration(-total);
+  return total > DURATION_MAX ? EVALUATION_ERROR : new CelDuration(total);
+};
+
+const checkedDuration = (nanos: bigint): CelDuration | EvaluationError =>
+  nanos < DURATION_MIN || nanos > DURATION_MAX
+    ? EVALUATION_ERROR
+    : new CelDuration(nanos);
+
+/**
+ * `timeSince(t)`: Cerbos binds it to Go's `now.Sub(t)`, which saturates at the bounds of a
+ * `time.Duration` rather than overflowing.
+ */
+export const timeSince = (
+  now: CelTimestamp,
+  value: unknown,
+): CelDuration | EvaluationError => {
+  if (!(value instanceof CelTimestamp)) return EVALUATION_ERROR;
+  const nanos = now.nanos - value.nanos;
+  return new CelDuration(
+    nanos > DURATION_MAX
+      ? DURATION_MAX
+      : nanos < DURATION_MIN
+        ? DURATION_MIN
+        : nanos,
+  );
+};
+
+/**
+ * cel-go's timestamp and duration arithmetic: a timestamp plus or minus a duration, the difference
+ * of two timestamps, and the sum or difference of two durations. A duration result outside int64
+ * nanoseconds is cel-go's overflow error; any other operand pair has no overload.
+ */
+export const temporalArithmetic = (
+  operator: "add" | "sub",
+  left: unknown,
+  right: unknown,
+): CelTimestamp | CelDuration | EvaluationError => {
+  const sign = operator === "add" ? 1n : -1n;
+  if (left instanceof CelTimestamp && right instanceof CelDuration) {
+    return new CelTimestamp(left.nanos + sign * right.nanos);
+  }
+  if (
+    operator === "add" &&
+    left instanceof CelDuration &&
+    right instanceof CelTimestamp
+  ) {
+    return new CelTimestamp(left.nanos + right.nanos);
+  }
+  if (left instanceof CelDuration && right instanceof CelDuration) {
+    return checkedDuration(left.nanos + sign * right.nanos);
+  }
+  if (
+    operator === "sub" &&
+    left instanceof CelTimestamp &&
+    right instanceof CelTimestamp
+  ) {
+    return checkedDuration(left.nanos - right.nanos);
+  }
+  return EVALUATION_ERROR;
 };
 
 // -- type conversions: string(), double(), int() --------------------------------------------------

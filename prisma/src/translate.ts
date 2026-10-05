@@ -10,7 +10,12 @@ import {
   handleLambdaOperator,
   handleMapOperator,
 } from "./collections";
-import { handleInOperator, handleRelationalOperator } from "./comparison";
+import {
+  containsMapLiteralLookup,
+  handleInOperator,
+  handleRelationalOperator,
+  tryHandleMapLiteralLookup,
+} from "./comparison";
 import { ARITHMETIC_OPERATORS, foldArithmetic } from "./evaluate";
 import { buildFieldFilter } from "./fields";
 import {
@@ -153,6 +158,13 @@ export function buildNegatedFilter(
       true
     );
     if (ternary !== null) return ternary;
+    const lookup = tryHandleMapLiteralLookup(
+      operand.operator,
+      operand.operands,
+      context,
+      true
+    );
+    if (lookup !== null) return lookup;
   }
   if (isNamedOperand(operand)) {
     const { relations, ...fieldRef } = resolveFieldReference(
@@ -174,10 +186,12 @@ export function buildNegatedFilter(
   // and `OR[!A, !B]` reproduces that where a single outer NOT over the conjunction — with the
   // hop requirement ANDed outside it — would deny. A to-one hop is the second source of UNKNOWN
   // besides the collection macros, so it opens the same push-down, and each leaf requires only
-  // the hops it reads itself. (A nested `not` was already unwrapped above.)
+  // the hops it reads itself. (A nested `not` was already unwrapped above.) A lookup into a map literal
+  // is the third: a missing key is an error, which the comparison's own negation leaves out.
   if (
     isOperatorOperand(operand) &&
     (containsCollectionOperator(operand) ||
+      containsMapLiteralLookup(operand) ||
       referencesRequiredHop(operand, context))
   ) {
     switch (operand.operator) {
@@ -199,6 +213,14 @@ export function buildNegatedFilter(
           operand.operands,
           context
         );
+    }
+    if (containsMapLiteralLookup(operand)) {
+      // A missing key is an error under both polarities, which a NOT over the positive filter
+      // would turn into a match; only and/or and the comparison itself push the negation down.
+      throw new UnsupportedQueryPlanError(
+        `Cannot negate ${operand.operator} over an index into a map literal: a missing key is an ` +
+          "error under both polarities, and a NOT over its filter would select it"
+      );
     }
   }
 

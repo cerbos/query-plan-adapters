@@ -1,5 +1,5 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, not, sql } from "drizzle-orm";
+import { not, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";
@@ -37,8 +37,13 @@ import type {
  * `map(relation, x, x.field)`.
  */
 
+/**
+ * `filter` where `guard` holds, UNKNOWN where it does not. A CASE, not an AND: under a `not`,
+ * `NOT (filter AND guard)` is TRUE wherever the guard fails, which returns the very rows whose
+ * projection errors.
+ */
 const conjoin = (filter: SQL, guard: SQL | undefined): SQL =>
-  guard ? (and(filter, guard) ?? filter) : filter;
+  guard ? sql`(case when ${guard} then ${filter} end)` : filter;
 
 /**
  * CEL projects EVERY element before intersecting, so an element whose projected attribute is

@@ -13,6 +13,7 @@ module Cerbos
           unless operands.length == 2
             raise InvalidPlanError, "#{operator} takes a collection and a lambda"
           end
+          reject_two_variable_lambda(operator, operands[1])
 
           collection = evaluate(operands[0], environment)
           if collection.is_a?(Array)
@@ -75,22 +76,42 @@ module Cerbos
           body_node, iterator = lambda_parts(lambda_node)
           bodies = values.map { |value| predicate(body_node, environment.bind(iterator, value)) }
 
-          case operator
-          when "exists" then ArelSupport.or_node(bodies)
-          when "all" then ArelSupport.and_node(bodies)
-          when "exists_one" then exactly_one_of(bodies)
-          when "filter" then Values::ConstantList.new(elements: values, keeps: bodies)
-          when "map"
-            projections = values.map { |value| evaluate(body_node, environment.bind(iterator, value)) }
-            projections.each do |projection|
-              reject_double_text("map", projection)
-              reject_collection("map", projection)
-              reject_deferred("map", projection)
+          quantified =
+            case operator
+            when "exists" then ArelSupport.or_node(bodies)
+            when "all" then ArelSupport.and_node(bodies)
+            when "exists_one" then exactly_one_of(bodies)
+            when "filter" then return Values::ConstantList.new(elements: values, keeps: bodies)
+            when "map"
+              projections = values.map { |value| evaluate(body_node, environment.bind(iterator, value)) }
+              projections.each do |projection|
+                reject_double_text("map", projection)
+                reject_collection("map", projection)
+                reject_deferred("map", projection)
+              end
+              return Values::ConstantProjection.new(projections: projections)
+            else
+              raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
             end
-            Values::ConstantProjection.new(projections: projections)
-          else
-            raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
-          end
+
+          # A list built from attributes, `[R.attr.a, R.attr.b]`, errors as a whole when an
+          # element is missing, before the macro sees any element: an OR of the bodies would
+          # let a true body for the other element grant the row.
+          missing = values.select { |value| ArelSupport.arel_node?(value) && null_convention(value) != :explicit }
+          unknown_if_any(missing.map { |value| ArelSupport.is_null(value) }, quantified)
+        end
+
+        # CEL's two-variable comprehensions bind an element's position (over a list) or a key
+        # (over a map) beside its value. A relation's rows have no position, and a row's
+        # columns are not a map whose keys SQL can enumerate, so neither binding has a
+        # translation.
+        def reject_two_variable_lambda(operator, node)
+          return unless node.is_a?(Plan::Expression) && node.operator == "lambda" && node.operands.length == 3
+
+          raise UnsupportedOperatorError,
+            "#{operator} with two variables binds each element's list position or map key: a " \
+            "relation's rows have no position, and SQL cannot enumerate a row's columns as map " \
+            "keys, so only one-variable comprehensions are translated"
         end
 
         # `left.except(right)`: the elements of `left` that no element of `right` equals, by CEL
@@ -231,6 +252,8 @@ module Cerbos
                 else_value: target.scope.count(target.body)
               )
             )
+          when Values::SetOperation
+            set_operation_size(target)
           when ::String
             target.length
           else

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `postFilter` evaluates the `list` and `struct` literals, `except`, `intersect`, `isSubset`, list
+  `+`, `upperAscii`, `duration`, `timeSince` with timestamp and duration arithmetic, the
+  two-variable `exists`/`all`/`exists_one`, and `index` on a map, all of which used to throw
+  `UnsupportedQueryPlanError`. `hierarchy` values compare by segment, as Cerbos's do, rather than
+  by delimiter and string.
+
 - **Breaking:** under `nullAttributeRepresentation: "omitted"`, a mapper entry that does not
   declare `nullable` is treated as `nullable: true`, and `postFilter` reads a stored `null` as a
   missing attribute. Comparisons over such an entry are answered by `postFilter`, so they need
