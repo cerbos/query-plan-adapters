@@ -137,6 +137,10 @@
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model; comparing an element column with an outer column is cross-model, so the adapter throws"
     },
+    "collection/exists/literal-list-element-as-contains-needle": {
+      "status": "unsupported",
+      "reason": "The planner unrolls the exists over the literal list into one contains() per element, and the \"%_o\" needle carries LIKE metacharacters: the same limitation as string/starts-with/percent-in-needle, since Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so the adapter throws instead of matching \"%_o\" as a pattern"
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so a macro over a to-one relation is refused."
@@ -160,6 +164,14 @@
     "collection/exists/outer-collection-inside-lambda": {
       "status": "unsupported",
       "reason": "Embeds a size(...) == 1 count threshold; same limitation as size/greater-than/collection-above-one"
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable exists binds each element's list index as well as the element, and a Prisma relation filter tests related rows, which carry no position (the tagNames rows store no index), so the adapter refuses the two-variable lambda rather than ignore the index"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable exists over a map binds each key as well as its value, and a Prisma filter enumerates no map keys: obj has no column or relation of its own (only obj.inner is mapped), so the adapter refuses the two-variable lambda"
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -204,6 +216,10 @@
     "collection/index/negative-position": {
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "size() of intersect() counts the shared elements, duplicates from the shorter list included, and a Prisma relation filter can only test whether some, every or no related row matches, never count them; only the emptiness of an intersect() is translated"
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
@@ -253,6 +269,10 @@
       "status": "unsupported",
       "reason": "Comparing a related element column with an outer scalar column is cross-model, while Prisma field references are same-model only"
     },
+    "membership/in/list-mixing-literal-and-expression": {
+      "status": "unsupported",
+      "reason": "The list element aOptionalString + \"ret\" makes the membership a comparison of aString with an expression over another column, and a Prisma field reference compares two plain columns of one model, never a column with a concatenation"
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so `in` over a to-one relation is refused."
@@ -272,6 +292,10 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
+    },
+    "membership/in/resource-list-plus-literal-list": {
+      "status": "unsupported",
+      "reason": "Membership in tagNames + [\"one\"] compares the root column aString with the name column of the related tag rows, and a Prisma field reference compares two plain columns of one model, so the concatenated list has no filter form"
     },
     "null/exists-one/negated-null-element": {
       "status": "unsupported",

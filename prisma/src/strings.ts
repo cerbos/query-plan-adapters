@@ -4,7 +4,11 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 
 import { assertStringField, buildFieldFilter } from "./fields";
 import type { PrismaFilter } from "./index";
-import { isResolvedFieldReference, isResolvedValue } from "./mapping";
+import {
+  isResolvedFieldReference,
+  isResolvedValue,
+  recordErroringNullElement,
+} from "./mapping";
 import type { TranslationContext } from "./mapping";
 import { assertDefined } from "./plan";
 import { resolveOperand } from "./translate";
@@ -63,6 +67,9 @@ export function handleStringOperator(
 
   if (isResolvedFieldReference(receiver)) assertStringField(receiver, operator);
   if (isResolvedFieldReference(needle)) assertStringField(needle, operator);
+  // A null element of a projected list is a value, and a string function over it is an error.
+  recordErroringNullElement(context, operands[0]!, receiver);
+  recordErroringNullElement(context, operands[1]!, needle);
 
   // Column receiver, constant needle: Prisma's LIKE-based filter.
   if (isResolvedFieldReference(receiver) && isResolvedValue(needle)) {
