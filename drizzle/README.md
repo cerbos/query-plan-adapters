@@ -699,11 +699,16 @@ composed with an application filter:
 demo/scripts/run-example.sh drizzle
 ```
 
-## Testing
+## Development
+
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
 
 | Command | What it proves | What it needs |
 | --- | --- | --- |
 | `npm test` | Caller-supplied options the corpus cannot vary (mapper forms, `transform`, `subqueryFilter`, declared index storage, `nullAttributeRepresentation`), the refusal type, the timestamp literal contract and malformed input | Node only — no Cerbos, database or Docker |
+| `npm run typecheck` | Type-checks `src/` and the tests | Node only |
 | `npm run test:adversarial` | The rows each recorded plan returns on real SQLite equal the recorded `check()` decisions, for both pinned PDPs | Node only |
 | `npm run test:adversarial:postgres` | The same corpus on real PostgreSQL, plus the list cases under `pgArray` and plain `json` storage | Docker |
 | `npm run test:adversarial:mysql` | The same corpus on real MySQL under `utf8mb4_0900_bin`. Set `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` to measure MySQL's default | Docker |

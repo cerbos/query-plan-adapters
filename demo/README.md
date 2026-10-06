@@ -26,7 +26,7 @@ demo/scripts/validate-demo.sh          # integrity checks; no PDP, database or n
 ```
 
 `run-example.sh` needs `docker` (with compose) and `jq`, plus the adapter's own toolchain. It starts
-the pinned PDP, invokes `<adapter>/example/run.sh`, and diffs its stdout against `expected.json`.
+the pinned PDP (examples are the only tests that run against a live one), invokes `<adapter>/example/run.sh`, and diffs its stdout against `expected.json`.
 Everything language-independent (PDP lifecycle, output capture, canonicalisation, the diff) lives in
 the runner; everything language-specific, including packaging, lives in each `run.sh`.
 

@@ -791,9 +791,9 @@ describe("plans the planner cannot produce", () => {
 
 /**
  * A bridge, not a home. Everything below asserts a translator branch that no corpus case drives
- * today, which is exactly the situation `CLAUDE.md` says a per-adapter unit test must not be
- * allowed to settle into: a unit test pins the filter one adapter emits, and only a corpus action
- * asks the same question of every other adapter.
+ * today, which is exactly the situation `CODING_STANDARDS.md` says a per-adapter unit test must not
+ * be allowed to settle into: a unit test pins the filter one adapter emits, and only a corpus
+ * action asks the same question of every other adapter.
  *
  * The remaining gaps are tracked below; delete these tests when their corpus coverage lands:
  *

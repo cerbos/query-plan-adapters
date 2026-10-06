@@ -44,7 +44,7 @@ Rules:
 
 - **Tag every adapter the issue actually touches**, not just the one the reporter happened to hit.
   A translation bug reported against one adapter has historically been the same bug in several —
-  see "Changing how a condition is translated" in `CLAUDE.md`.
+  see "Changing how a condition is translated" in `conformance/README.md`.
 - **Use `conformance` instead of tagging every adapter** when the issue is about the corpus itself: a new
   case, the dataset, the generator, a recorded golden, or a PDP bump (`conformance/pdp-versions.json`).
   It already means "affects every adapter", so don't also apply a label per adapter — that's noise.

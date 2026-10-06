@@ -415,6 +415,10 @@ demo/scripts/run-example.sh convex
 
 ## Development
 
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
+
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Caller-supplied options the corpus cannot vary (function mappers, the unmapped-reference refusal, the `allowPostFilter` gate, the `nullAttributeRepresentation` boundary), the refusal type, the rules every filter handed to Convex obeys, and malformed input | Node only |

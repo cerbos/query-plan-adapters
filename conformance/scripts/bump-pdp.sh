@@ -126,7 +126,7 @@ cat >&2 <<NEXT
 ==> Bumped the PDP: current ${new_tag}, previous ${current_tag} (${dropped_tag} dropped).
 Next:
   1. Review conformance/golden/CHANGES.md: every plan, allowed set and plan error that moved.
-  2. Run every adapter's conformance harness (CLAUDE.md, "Commands"); fix, or add a ledger entry
+  2. Run every adapter's conformance harness (conformance/scripts/run-harness.sh --all); fix, or add a ledger entry
      (with "pdp" when the change is specific to one version), for anything that breaks.
   3. Commit it all as one PR, with golden/CHANGES.md as the description.
 NEXT

@@ -19,6 +19,8 @@ returns rows the PDP denies. A throw is a bug report.
 ```bash
 go -C conformance/generator run .          # rebuild policy, dataset and goldens (Docker)
 go -C conformance/generator run . -check   # CI: fail if anything committed is stale
+conformance/scripts/validate-corpus.sh     # offline: ledgers, pins, vendored Go tree, README tables; every adapter's CI
+conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its store started and torn down
 ```
 
 ## Layout
@@ -34,6 +36,9 @@ go -C conformance/generator run . -check   # CI: fail if anything committed is s
 | `golden/<tag>/<case id>.json` | For each PDP: the plan, the allowed ids, and the case's intent and trap. | generator |
 | `golden/CHANGES.md` | What changed between the previous and current PDP. | generator |
 | `generator/` | The Go program that writes everything marked "generator". | hand |
+
+A file marked "generator" changes only by editing the cases or the dataset and re-running the
+generator. CI's `-check` fails on a hand-edited or stale one.
 
 ## Case ids
 
@@ -138,6 +143,11 @@ That is the whole contract. The harness asserts no counts and pins no messages. 
 projection is recorded, so a field the harness forgets to store shows up as a wrong result rather than
 a vacuous pass.
 
+Every service image a harness starts is pinned in one constant file that adapter's suites share,
+`<adapter>/<SERVICE>_IMAGE`, as `repo:tag@sha256:...`, never under `conformance/`, since a change
+there re-runs every adapter's workflow. `scripts/validate-corpus.sh` enforces the pin format; add a
+new service's repository to its `IMAGE_REPOSITORIES`.
+
 ### The ledger — `<adapter>/conformance-ledger.json`
 
 ```json
@@ -162,6 +172,14 @@ a vacuous pass.
 - An optional `pdp: ["0.55.0"]` limits an entry to one PDP tag, for a case whose plan differs between
   the two.
 
+## Running a harness
+
+No harness starts a PDP: each replays the goldens. `scripts/run-harness.sh <adapter> [store...]`
+runs one adapter's harness the way its workflow does, starting the store it needs and tearing it
+down; `--list` names each adapter's store legs, and `--all` runs every adapter. Run one leg at a
+time: several harnesses at once overload a laptop into timeouts that read as failures. The commands
+behind each leg, and the adapter's other suites, are in its README's "Development" section.
+
 ## The dataset
 
 - `seeds.json` holds the rows: scalars, a `tags` to-many relation, `subCategoryNames` for the
@@ -171,7 +189,10 @@ a vacuous pass.
   denies under both polarities. The exceptions are `owner` (which aliases `aOptionalString`),
   `coOwner` (which aliases `scope`), `tagNames`, `aNumberList` and `aBoolList`, which send an
   *explicit null value*. Under CEL, `null != "x"` is true. `resources.json` shows each attribute's
-  convention per row. See
+  convention per row. Where it omits an attribute on a row (a NULL column, or an absent `parent`
+  hop), a harness whose adapter has a null convention declares that attribute *omitted* in its
+  mapping. A `null` literal compared against it is then a missing-attribute error that CEL denies,
+  so the adapter throws rather than emit `IS NULL`, unless its store can tell missing from null. See
   [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 - **Every scalar a case reads can be missing.** Seeds `j1`, `j2` and `j3` each leave exactly one of
   `aString` (and `obj.inner`, its alias), `aNumber` and `aBool` NULL, with every other attribute
@@ -218,12 +239,17 @@ a value the store has already lost:
   record a decision to hold them to. Normalise NaN before it is stored, or before the filter runs
   ([#573](https://github.com/cerbos/query-plan-adapters/issues/573)).
 
-## Changing the corpus
+## Changing how a condition is translated
 
-1. Edit or add a case in `cases/<area>.yaml`. If it needs a new column or principal attribute, add
-   it to `seeds.json` / `derived-fields.json` and teach `generator/resources.go` the projection.
-2. Run the generator. A new case must have a discriminating oracle: add a seed that tells a right
-   translation from the wrong one it targets.
+**A change to how an operator, condition or expression shape is translated starts here, in the
+corpus, not in one adapter.** A fix proven only against the adapter in front of you leaves the
+identical bug live in every other adapter.
+
+1. **Add or edit a case** in `cases/<area>.yaml`. If it needs a new column or principal attribute,
+   add it to `seeds.json` / `derived-fields.json` and teach `generator/resources.go` the projection.
+2. **Run the generator** (`go -C conformance/generator run .`, Docker) and read the golden diff. A
+   new case needs a discriminating oracle: add a seed that tells a right translation from the wrong
+   one it targets. An unrelated golden changing means the edit perturbed an existing shape.
 
    Watch j1, j2 and j3 (each missing one of `aString`, `aNumber`, `aBool`) under a negation, a
    `match.none` or a DENY. The plan leaves the attribute unknown, so its comparison denies the row;
@@ -231,13 +257,18 @@ a value the store has already lost:
    row is allowed (#530). Unless the case is about that disagreement, let another member decide
    those rows (`logic/not/none-of-three` does), or the case is a `plannerDivergence` no adapter
    can pass.
-3. Run every adapter's harness: `scripts/run-harness.sh <adapter>` brings up its store, runs it and
-   tears it down; `--all` runs the roster one adapter at a time. Each new failure is exactly one of:
+3. **Run every adapter's harness** ("Running a harness") and triage each new failure into exactly
+   one of:
    - a translation bug: fix it;
-   - a shape the store cannot express: make it throw, and add an `unsupported` ledger entry;
+   - a shape the store genuinely cannot express: make it throw the adapter's refusal type, and add
+     an `unsupported` ledger entry whose `reason` names the real mechanism;
    - a known wrong result tracked by an issue: add a `divergent` ledger entry.
-4. Update each affected README's contract table. `validate-corpus.sh` recounts it from the goldens
-   and the ledger and fails on a stale one.
+
+   A plan/`check()` disagreement is `plannerDivergence` on the case, not a ledger entry.
+4. **The ledger is an output of the run, not an input.** Add an `unsupported` entry only after
+   watching the case fail: declaring it first is how a translatable shape gets permanently skipped.
+5. **Run `scripts/validate-corpus.sh`**, which recounts each README's `Conformance contract` table
+   from the goldens and the ledger, and update the stale ones.
 
 ## Bumping the PDP
 
@@ -245,7 +276,9 @@ Run `scripts/bump-pdp.sh` locally, on a branch. With no argument it bumps to the
 release; `scripts/bump-pdp.sh 0.56.0` picks one. It resolves the new tag's digest, moves `current`
 to `previous` in `pdp-versions.json`, updates every restatement of the pin (the Compose files, the Go
 modules' `cerbos/api/genpb`), drops ledger entries scoped to the old `previous`, runs the generator
-and `validate-corpus.sh`. The PR you open from it:
+and `validate-corpus.sh`, which asserts every restatement agrees on **both** tag and digest
+(`verify-cerbos-digest.sh` asserts each pinned digest is what its tag resolves to). The PR you open
+from it:
 
 1. Carries the regenerated golden directories and `CHANGES.md`, which is its body and the review
    surface: which plans, allowed sets and plan errors changed.
