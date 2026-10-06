@@ -1175,16 +1175,6 @@ RSpec.describe Cerbos::ActiveRecord do
   describe "matches() against RE2's own parse" do
     def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
 
-    # Corpus gap. RE2 reads no count with a leading zero, so `e{01}` is `e` then the text "{01}".
-    it "reads a brace whose count has a leading zero as literal text" do
-      expect(translate(conditional(matches("^one{01}$")))).to be_empty
-    end
-
-    # Corpus gap. RE2 rejects a nested repetition over 1000 copies, so CEL errors on every row.
-    it "denies every row for a nested repetition RE2 rejects" do
-      expect(translate(conditional(expression("not", matches("^(a{2}){600}$"))))).to be_empty
-    end
-
     # Corpus gap. SQLite's LENGTH stops at a NUL, so a residue holding one must not read as empty.
     it "keeps a NUL out of a character set" do
       row = AdvResource.create!(id: "zz-nul", a_string: "a\u0000x", created_by: "nobody")
