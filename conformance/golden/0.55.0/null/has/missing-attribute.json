@@ -50,8 +50,8 @@
   "plannerDivergence": {
     "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
     "pdp": [
-      "0.54.0",
-      "0.55.0"
+      "0.55.0",
+      "0.56.0"
     ],
     "reason": "The plan request omits aOptionalString, so the planner treats it as unknown and assumes the data layer supplies it; it reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED by design. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision."
   },

@@ -270,8 +270,8 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 42 seed documents. Passed cases on the current PDP, 0.55.0, where the
+and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed inside a Convex query
+function over the corpus's 42 seed documents. Passed cases on the current PDP, 0.56.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
@@ -281,7 +281,7 @@ total is every golden case in that tier:
 | adversarial | 312 / 338 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there are nine, four extended and five
+them, because the plan and `check()` disagree. On 0.56.0 there are nine, four extended and five
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
@@ -305,7 +305,7 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.56.0,
 the harness reports:
 
 | Decided by | Cases |

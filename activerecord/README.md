@@ -395,7 +395,7 @@ rows and compares the ids with the ones `check()` allowed. It needs no PDP. Each
 adapter through the Cerbos Ruby SDK: `Cerbos::Client#plan_resources` calls an in-process gRPC
 stub (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter receives
 the SDK's output types (a Symbol kind, and every number as a Float), not the JSON on disk. It
-runs on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+runs on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.56.0),
 cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
@@ -407,7 +407,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
-skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.55.0 those are
+skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.56.0 those are
 four extended cases and five adversarial cases. In `null/has/missing-attribute` and
 `null/has/composed-with-comparison` the plan request leaves an omitted attribute unknown, so the
 planner folds `has()` to true by design, while `check()` receives the omission as absent and denies

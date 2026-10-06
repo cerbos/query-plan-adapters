@@ -1,0 +1,79 @@
+{
+  "allowed": [
+    "a1",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-than/attribute-plus-duration",
+  "intent": "A timestamp attribute shifted by a duration and compared with a timestamp literal.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.createdAt"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "86400s"
+                      }
+                    ],
+                    "operator": "duration"
+                  }
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2021-05-06T00:00:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-than/attribute-plus-duration",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) + duration(\"24h\") < timestamp(\"2021-05-06T00:00:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Dropping the duration over-grants a7, b3 and h4 (2021-05-05T05:05:05Z), which are inside the window only before the shift."
+}

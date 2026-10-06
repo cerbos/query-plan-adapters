@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/equals/value-first",
+  "intent": "Equality with the literal on the left (\"one\" == aString), the shape the planner emits once a principal attribute folds (P.attr.x == R.attr.y).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "one"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/equals/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"one\" == R.attr.aString"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A translator that takes operand 0 as the field mistakes the literal for a column; matching must stay exact, so c1 \"One\" and h6 (soft hyphen) deny and j1 (no aString) denies."
+}

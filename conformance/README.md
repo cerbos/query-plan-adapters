@@ -286,4 +286,8 @@ from it:
    adapter's ledger (with `pdp` when it is specific to one version) before merge.
 
 Entries scoped to the old `previous` tag are deleted in the same PR, since it has stopped being
-tested.
+tested. A `plannerDivergence` on a case is scoped the same way, but the script does not touch it: drop
+the old `previous` from its `pdp` list (delete the declaration when nothing is left), and add the
+new tag wherever the divergence still holds on it, which `CHANGES.md` shows when the plan and
+allowed set did not move. Otherwise the new tag silently starts comparing a case no adapter can
+pass.

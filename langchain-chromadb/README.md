@@ -316,10 +316,10 @@ field name.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
+and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed as real ChromaDB
 metadata queries over the corpus's 42 seed records. The harness translates every case with
 `allowPostFilter: true` and applies the `postFilter` to every record the `where` returns, as a
-caller must. Passed cases on the current PDP, 0.55.0, out of every golden case in the tier:
+caller must. Passed cases on the current PDP, 0.56.0, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -333,7 +333,7 @@ passing: 20, 12 and 39 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
-Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
+Planner-divergence cases are skipped, and count in the total but never as passed. On 0.56.0 that is
 four extended cases and five adversarial cases. `null/has/missing-attribute` and
 `null/has/composed-with-comparison`: the plan request leaves an omitted attribute unknown, so the
 planner folds `has()` to true by design, while `checkResource` receives the omission as absent and

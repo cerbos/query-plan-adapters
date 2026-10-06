@@ -488,7 +488,7 @@ would change the security and performance profile of every filter.
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
 indexes the 42 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
-the current PDP (0.55.0), where the total is every golden case in the tier:
+the current PDP (0.56.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -501,7 +501,7 @@ with a wrong filter, or skipped as a planner divergence. The refused shapes are 
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is four extended cases and five adversarial cases. In
+pass them. On 0.56.0 that is four extended cases and five adversarial cases. In
 `null/has/missing-attribute` and `null/has/composed-with-comparison` the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
 the omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`

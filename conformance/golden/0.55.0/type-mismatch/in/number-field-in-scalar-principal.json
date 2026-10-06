@@ -47,8 +47,8 @@
   "plannerDivergence": {
     "issue": "https://github.com/cerbos/query-plan-adapters/issues/596",
     "pdp": [
-      "0.54.0",
-      "0.55.0"
+      "0.55.0",
+      "0.56.0"
     ],
     "reason": "The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aNumber, 0), eq(aString, \"one\")) and grants a7 and h4 (aNumber 0). check() has no in overload for a number container, errors on that disjunct and allows only a1. No adapter can tell the eq was an in."
   },

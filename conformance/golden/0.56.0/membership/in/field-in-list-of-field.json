@@ -1,0 +1,55 @@
+{
+  "allowed": [
+    "a9",
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/field-in-list-of-field",
+  "intent": "Membership of an omitted-when-null attribute in a literal list holding another (aString in [aOptionalString]).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                }
+              ],
+              "operator": "list"
+            }
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/field-in-list-of-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in [R.attr.aOptionalString]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A NULL aOptionalString is a missing attribute, so its row is denied; adding a both-NULL branch from the call's convention, not each column's, can grant it."
+}

@@ -249,15 +249,15 @@ surface. The [pgx adapter](../pgx) quotes defensively instead.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
-Cerbos PDP 0.55.0 recorded for each case are translated, run against the corpus dataset in real
+Cerbos PDP 0.56.0 recorded for each case are translated, run against the corpus dataset in real
 Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are compared with the
-recorded `check()` decisions. The previous PDP's goldens (0.54.0) are replayed too. The counts are
+recorded `check()` decisions. The previous PDP's goldens (0.55.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
-and counts toward the total but not toward passed — on 0.55.0 that is four extended cases and five
+and counts toward the total but not toward passed — on 0.56.0 that is four extended cases and five
 adversarial cases.
 
-| Tier | Passed / total (PDP 0.55.0) |
+| Tier | Passed / total (PDP 0.56.0) |
 | --- | --- |
 | core | 29 / 29 |
 | extended | 74 / 97 |

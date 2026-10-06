@@ -1,0 +1,75 @@
+{
+  "allowed": [
+    "a3",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/in/string-field-in-dyn-string",
+  "intent": "An in whose right-hand side is a dyn() string literal (aString in dyn(\"one\")), beside an equality that discriminates.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/596",
+    "pdp": [
+      "0.55.0",
+      "0.56.0"
+    ],
+    "reason": "The planner rewrites an in over a scalar container to eq, so the plan is or(eq(aString, \"one\"), eq(aNumber, 2)) and grants a1. check() has no in overload for a string container, errors on that disjunct and allows only a3 and a8. No adapter can tell the eq was an in."
+  },
+  "request": {
+    "action": "type-mismatch/in/string-field-in-dyn-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString in dyn(\"one\") || R.attr.aNumber == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL has no in overload for a string container, so check() errors on that disjunct; a plan rewriting it to eq(aString, \"one\") grants a1."
+}

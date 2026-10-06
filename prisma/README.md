@@ -17,7 +17,7 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
   your application and the adapter must share one copy. npm 7+ installs peers automatically; pnpm
   and Yarn expect you to declare it.
 - **A Cerbos client** (`@cerbos/grpc` or `@cerbos/http`). The adapter depends on neither.
-- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.55.0.
+- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.56.0.
 - **A byte-exact database collation** on mapped columns, and on SQLite
   `PRAGMA case_sensitive_like = ON`. See
   [Database collation is an authorization invariant](#database-collation-is-an-authorization-invariant).
@@ -411,9 +411,9 @@ API and is out of scope.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
+and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed as real Prisma
 queries over the corpus's 42 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
-`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
+`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.56.0, identical on all six combinations,
 out of every golden case in the tier:
 
 | Tier | Passed / total |
@@ -423,9 +423,9 @@ out of every golden case in the tier:
 | adversarial | 250 / 338 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
-on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is four extended cases and five adversarial cases.
+never as passed. On 0.56.0 that is four extended cases and five adversarial cases.
 `null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
 omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
 receives the omission as absent and denies the row; use `R.attr.x != null` instead of
