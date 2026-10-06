@@ -34,7 +34,8 @@
     "j1",
     "j2",
     "j3",
-    "k1"
+    "k1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "collection/is-subset/resource-list-of-literal-list",

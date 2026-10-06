@@ -417,7 +417,7 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.56.0 and 0.55.0, it translates the plan, runs the query against 42 seed rows on
+plan of Cerbos PDP 0.56.0 and 0.55.0, it translates the plan, runs the query against 43 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -426,8 +426,8 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 29 / 29 |
-| extended | 93 / 97 |
-| adversarial | 295 / 338 |
+| extended | 93 / 98 |
+| adversarial | 297 / 340 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
@@ -685,6 +685,14 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
+  repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
+  the literal `one{01}`; it used to be read as `{1}` and matched the row `"one"` (over-grant fix).
+  Nested counts whose copies multiply past 1000 (`(a{2}){600}`), and a count too long for an
+  `int`, are a pattern RE2 rejects, so the condition is UNKNOWN. Nested counts of at most 16 each
+  (`((a{10}){10}){11}`) used to be expanded into one long literal, whose negation matched every row
+  (over-grant fix); larger ones were refused, and an over-long count threw
+  `NumberFormatException`.
 - New translations, where these used to throw: membership in a `map()` over a relation, in a
   `filter()`, in a list concatenation (`R.attr.x in R.attr.tags + ["a"]`) and in a list holding
   attributes (`R.attr.x in [R.attr.a]`); `exists`/`all` over a list holding attributes, and their

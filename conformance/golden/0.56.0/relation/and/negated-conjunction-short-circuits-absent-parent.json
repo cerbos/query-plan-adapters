@@ -35,7 +35,8 @@
     "i9",
     "j1",
     "j2",
-    "k1"
+    "k1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "relation/and/negated-conjunction-short-circuits-absent-parent",

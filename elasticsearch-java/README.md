@@ -421,8 +421,10 @@ throws, because JSON cannot carry it. An integral double is bound as a `long` on
 Lucene's optional operators disabled, so `@` and similar stay literal. Refused: partial non-literal
 patterns, inline flags, RE2 shorthand and Unicode classes, POSIX classes, interior anchors,
 empty-string-only patterns, unescaped `.` (RE2's dot excludes newline, Lucene's does not), an
-unparenthesised top-level `|` (RE2 reads `^a|b$` as two anchored alternatives; write `^(a|b)$`), and
-a `{` that does not start a `{n}`, `{n,}` or `{n,m}` repetition.
+unparenthesised top-level `|` (RE2 reads `^a|b$` as two anchored alternatives; write `^(a|b)$`),
+a `{` that does not start a `{n}`, `{n,}` or `{n,m}` repetition, a count with a leading zero (`{01}`,
+literal text to RE2), and nested counts whose copies multiply past 1000 (`(a{2}){600}`, which RE2
+rejects).
 
 ### Collection macros over known values
 
@@ -486,15 +488,15 @@ would change the security and performance profile of every filter.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
-indexes the 42 seed documents in a real Elasticsearch, translates every plan recorded from the
+indexes the 43 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
 the current PDP (0.56.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 28 / 29 |
-| extended | 34 / 97 |
-| adversarial | 120 / 338 |
+| extended | 34 / 98 |
+| adversarial | 120 / 340 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
@@ -559,6 +561,11 @@ applies to every field, and quietly returns more rows.
 
 ## Behaviour changes
 
+- **Breaking ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)).** `matches()`
+  refuses a repetition count with a leading zero (`^one{01}$`), which RE2 reads as literal text and
+  Lucene as `{1}`, and nested counts whose copies multiply past 1000 (`^(a{2}){600}$`), which RE2
+  rejects and Lucene accepts. Both used to reach Lucene: the first matched `"one"`, and the second's
+  negation matched every document (over-grant fixes).
 - **Breaking.** A comparison against a field with no `scalarTypes` declaration throws
   `UnmappedAttributeException` instead of emitting a query Elasticsearch would coerce
   ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). The positional overloads

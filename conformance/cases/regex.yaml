@@ -80,6 +80,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^(ab|b)$")'
+- id: 'regex/matches/leading-zero-count-is-literal'
+  tier: adversarial
+  intent: 'matches("^(one{01}|one{1,02})$"), where a count with a leading zero opens no repetition, so each brace is literal text.'
+  trap: 'RE2 reads no count with a leading zero, so only k2 "one{01}" matches; reading {01} as {1} or {1,02} as {1,2} matches a1 "one" and over-grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(one{01}|one{1,02})$")'
 - id: 'regex/matches/literal-brace'
   tier: adversarial
   intent: 'matches() with a {q} that is not a repetition plus [*] and [?] literal classes, matching h1 "a{q}*?b".'
@@ -108,6 +115,13 @@ cases:
   condition:
     match:
       expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a)\\1" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "{2}a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a**" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{1001}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "[b-a]" : "^h") || R.attr.aNumber == 5'
+- id: 'regex/matches/negated-nested-repetition-over-budget-from-principal'
+  tier: adversarial
+  intent: 'Five repetition counts past RE2''s budget of 1000 copies, each chosen by a principal-attribute ternary and negated, OR''d with aNumber == 5: (a{2}){600}, (?:a{1000}){2}, ((a{10}){10}){11}, the same nest under an unbounded {0,}, and a count too long for a 32-bit integer.'
+  trap: 'Each count is within 1000 alone (bar the last), but RE2 divides the budget by every enclosing count, passing an unbounded {0,} with the budget it has left, and rejects the pattern, so each matches() is a CEL error and only a1 is allowed. Expanding the nest into one long literal, or stopping the budget at {0,}, makes a negated disjunct true and over-grants every row; parsing the long count into a 32-bit integer overflows.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(a{2}){600}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(?:a{1000}){2}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((a{10}){10}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((?:(a{10}){10}){0,}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a{2147483648}$" : "^h") || R.attr.aNumber == 5'
 - id: 'regex/matches/posix-character-class'
   tier: extended
   intent: 'matches() with a POSIX bracket class [[:digit:]].'
@@ -136,6 +150,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^a|b$")'
+- id: 'regex/matches/unbounded-count'
+  tier: extended
+  intent: 'matches("^.{8,}$"): an unbounded {n,} count, eight or more characters with no newline.'
+  trap: 'An unbounded count has no maximum to check against RE2''s bound of 1000; treating the missing maximum as infinite and past the bound turns a valid pattern into an error and under-grants every long string.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^.{8,}$")'
 - id: regex/matches/unanchored
   tier: extended
   intent: 'matches() with a bare unanchored pattern, which RE2 treats as a substring search.'

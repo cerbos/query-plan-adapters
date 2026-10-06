@@ -325,6 +325,10 @@
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
@@ -338,6 +342,10 @@
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
     "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
@@ -362,6 +370,10 @@
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
     "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
+    },
+    "regex/matches/unbounded-count": {
       "status": "unsupported",
       "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },

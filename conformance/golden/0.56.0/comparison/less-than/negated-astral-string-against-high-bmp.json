@@ -16,7 +16,8 @@
     "h7",
     "i7",
     "j2",
-    "j3"
+    "j3",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "comparison/less-than/negated-astral-string-against-high-bmp",

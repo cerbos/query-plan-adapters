@@ -1,7 +1,8 @@
 {
   "allowed": [
     "a1",
-    "b1"
+    "b1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "string/starts-with/case-sensitive",

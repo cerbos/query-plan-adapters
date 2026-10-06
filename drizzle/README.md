@@ -436,15 +436,15 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed as real Drizzle
-queries over the corpus's 42 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+queries over the corpus's 43 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
 Passed cases on the current PDP, 0.56.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 29 / 29 |
-| extended | 90 / 97 |
-| adversarial | 307 / 338 |
+| extended | 91 / 98 |
+| adversarial | 309 / 340 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -517,6 +517,12 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
+  repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
+  the literal `one{01}`; it used to be read as `{1}` and returned the row `"one"`. Nested counts
+  whose copies multiply past 1000 (`(a{2}){600}`) are a pattern RE2 rejects, so the condition is a
+  CEL error on every row; the pattern used to be expanded into one long literal, so its negation
+  returned every row (over-grant fixes).
 - **Breaking:** an attribute ordered against a `timestamp()` value without the `timestamp()`
   conversion (`R.attr.createdAt < now() - duration("24h")`) now translates to an UNKNOWN condition.
   CEL has no ordering between a timestamp and the string an attribute holds, so `check()` errors and

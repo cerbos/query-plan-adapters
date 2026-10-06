@@ -1,0 +1,182 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-nested-repetition-over-budget-from-principal",
+  "intent": "Five repetition counts past RE2's budget of 1000 copies, each chosen by a principal-attribute ternary and negated, OR'd with aNumber == 5: (a{2}){600}, (?:a{1000}){2}, ((a{10}){10}){11}, the same nest under an unbounded {0,}, and a count too long for a 32-bit integer.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "^(a{2}){600}$"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "^(?:a{1000}){2}$"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": "^((a{10}){10}){11}$"
+                            }
+                          ],
+                          "operator": "matches"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "^((?:(a{10}){10}){0,}){11}$"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aString"
+                                  },
+                                  {
+                                    "value": "^a{2147483648}$"
+                                  }
+                                ],
+                                "operator": "matches"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-nested-repetition-over-budget-from-principal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^(a{2}){600}$\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^(?:a{1000}){2}$\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^((a{10}){10}){11}$\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^((?:(a{10}){10}){0,}){11}$\" : \"^h\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^a{2147483648}$\" : \"^h\") || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Each count is within 1000 alone (bar the last), but RE2 divides the budget by every enclosing count, passing an unbounded {0,} with the budget it has left, and rejects the pattern, so each matches() is a CEL error and only a1 is allowed. Expanding the nest into one long literal, or stopping the budget at {0,}, makes a negated disjunct true and over-grants every row; parsing the long count into a 32-bit integer overflows."
+}

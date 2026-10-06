@@ -56,13 +56,15 @@
 
 - `matches()` over a string column with a constant pattern, lowered to exact string predicates without the store's regex engine ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
-  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported; unlike drizzle's, it reads a count with a leading zero (`{01}`) as literal text and rejects a nested repetition over 1000 copies, as RE2 does. An operator override for `matches` now replaces this built-in translation.
+  It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError` for every pattern. A pattern is lowered when its matches are a finite set of literals under its anchors, every character from a small set, or a prefix and suffix around non-newline characters; `(?i)` folds as RE2 does. A pattern RE2 rejects is UNKNOWN, as CEL's error is. Any other pattern, a pattern held in a column, and a non-string-column receiver still raise. The lowering is drizzle's, ported; it reads a count with a leading zero (`{01}`) as literal text and rejects a nested repetition over 1000 copies, as RE2 does. An operator override for `matches` now replaces this built-in translation.
 
 - `+`, `-` and `*` over a division that may be NaN or Infinity (`x / x + 1`), carried into the division's branches ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
   They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A non-finite constant is computed in Ruby with IEEE-754, and NaN beside a double stays NaN wherever that value is present. An Infinity beside a column, which might hold the opposite Infinity, and arithmetic between two such values still raise.
 
 ### Changed
+
+- `matches()` follows Go's `repeatIsValid` through an unbounded `{0,}` or `*`: the budget it has left reaches the repetitions inside, so `^((?:(a{10}){10}){0,}){11}$` is a pattern RE2 rejects, UNKNOWN on every row. It previously stopped counting at the zero and read the pattern as valid ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)).
 
 - A macro over a list built from attributes, such as `[R.attr.a, R.attr.b].exists(s, s == "x")`, is UNKNOWN when an element is missing, as CEL errors building the list. It previously OR-ed the bodies and returned a row whose other element matched.
 

@@ -149,6 +149,10 @@
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded repetitions x* and a+ have no LIKE spelling (register an OperatorFunction for matches to use a database regex)."
     },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused (register an OperatorFunction for matches to use a database regex)."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"

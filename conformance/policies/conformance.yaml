@@ -2793,6 +2793,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^(ab|b)$")
+    # regex/matches/leading-zero-count-is-literal
+    - actions:
+        - regex/matches/leading-zero-count-is-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^(one{01}|one{1,02})$")
     # regex/matches/literal-brace
     - actions:
         - regex/matches/literal-brace
@@ -2829,6 +2838,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a)\\1" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "{2}a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a**" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{1001}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "[b-a]" : "^h") || R.attr.aNumber == 5'
+    # regex/matches/negated-nested-repetition-over-budget-from-principal
+    - actions:
+        - regex/matches/negated-nested-repetition-over-budget-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(a{2}){600}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(?:a{1000}){2}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((a{10}){10}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((?:(a{10}){10}){0,}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a{2147483648}$" : "^h") || R.attr.aNumber == 5'
     # regex/matches/posix-character-class
     - actions:
         - regex/matches/posix-character-class
@@ -2865,6 +2883,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^a|b$")
+    # regex/matches/unbounded-count
+    - actions:
+        - regex/matches/unbounded-count
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^.{8,}$")
     # regex/matches/unanchored
     - actions:
         - regex/matches/unanchored

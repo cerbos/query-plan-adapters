@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/leading-zero-count-is-literal",
+  "intent": "matches(\"^(one{01}|one{1,02})$\"), where a count with a leading zero opens no repetition, so each brace is literal text.",
+  "oracle": "discriminating",
+  "pdp": "0.55.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^(one{01}|one{1,02})$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/leading-zero-count-is-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^(one{01}|one{1,02})$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 reads no count with a leading zero, so only k2 \"one{01}\" matches; reading {01} as {1} or {1,02} as {1,2} matches a1 \"one\" and over-grants it."
+}

@@ -412,15 +412,15 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed as real Prisma
-queries over the corpus's 42 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+queries over the corpus's 43 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
 `utf8mb4_0900_bin`). Passed cases on the current PDP, 0.56.0, identical on all six combinations,
 out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 29 / 29 |
-| extended | 75 / 97 |
-| adversarial | 250 / 338 |
+| extended | 76 / 98 |
+| adversarial | 252 / 340 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -491,6 +491,12 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
+  repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
+  the literal `one{01}`; it used to be read as `{1}` and returned the row `"one"`. Nested counts
+  whose copies multiply past 1000 (`(a{2}){600}`) are a pattern RE2 rejects, an error on every row;
+  the pattern used to be expanded into one long literal, so its negation returned every row
+  (over-grant fixes). An unbounded count (`a{2,}`) is no longer mistaken for one past 1000.
 - **Fix:** a string function (`startsWith`, `endsWith`, `contains`) over the element
   of a projected list (`R.attr.tagNames.all(t, t.startsWith("p"))`) is an error on a null element,
   and `all()` and a negated `exists()` now deny the row holding one; they used to admit it.
