@@ -699,7 +699,7 @@ composed with an application filter:
 demo/scripts/run-example.sh drizzle
 ```
 
-## Testing
+## Development
 
 Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
 gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every

@@ -50,7 +50,7 @@ Requirements:
   application — an always-allowed plan becomes `Specification.unrestricted()`, added in 3.5.2. From
   the Spring Boot BOM that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
 - Developed against Spring Data JPA 3.5 / Hibernate 6.6; CI also runs every suite under Spring Data
-  JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Build](#build).
+  JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Building](#building).
 - String columns the mapping references need a byte-exact collation — see
   [Database collation requirements](#database-collation-requirements).
 
@@ -793,7 +793,9 @@ mavenLocal as a real Maven coordinate
 three resource kinds, and a program implementing the [shared demo domain](../demo). Run the latter
 from the repository root with `demo/scripts/run-example.sh spring-data`.
 
-## Build
+## Development
+
+### Building
 
 JDK 17+. Gradle comes from the committed wrapper. The suites read `../conformance/`, so build in a
 checkout of the **whole repository**; the conformance suite needs Docker on PostgreSQL and MySQL:
@@ -815,7 +817,7 @@ H2, PostgreSQL and MySQL under both ORM sets. Spring Data JPA 4 removed
 `JpaSpecificationExecutor.delete(Specification)`, so the bulk-delete hazard can't be reached through
 that overload there; the guard still fires on any `CriteriaDelete`.
 
-## Testing
+### Testing
 
 | Suite | Role | Needs |
 |---|---|---|

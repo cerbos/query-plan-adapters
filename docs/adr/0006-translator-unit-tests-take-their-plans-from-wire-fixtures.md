@@ -68,4 +68,4 @@ plan kind, a condition with no operator, a ternary of the wrong arity — has no
 construction, and asserting that the adapter fails loudly on it is input validation on a public
 function, not a shape the corpus should carry. A shape CEL *can* express is the opposite case: it
 belongs in the corpus, where every adapter is asked about it. See "Changing how a condition is
-translated" in `CLAUDE.md`.
+translated" in `conformance/README.md`.

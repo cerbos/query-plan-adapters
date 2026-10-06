@@ -1,17 +1,16 @@
 # Coding standards
 
 Judgement-call rules a reviewer checks a diff against. Mechanical rules belong in a linter or a CI
-check, not here.
+check.
 
 ## Code style
 
-- TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly. No formatter
-  enforces this, so match the surrounding file.
+- TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly. Match the
+  surrounding file: no formatter enforces this.
 - Java: 4-space indent, Java 17+; model closed sets with sealed interfaces and pattern matching.
+- Python: `pdm run format` and `pdm run lint` (isort and ruff) own the style, and CI runs both.
 - Tests sit beside the code: `*.test.ts` in `src/` (TypeScript), `tests/test_*.py` (Python),
   `src/test/` (Java).
-
-Python style is enforced by `pdm run format` and `pdm run lint` (isort and ruff), which CI runs.
 
 ## Refusals
 
@@ -24,20 +23,19 @@ Python style is enforced by `pdm run format` and `pdm run lint` (isort and ruff)
 
 **For a shape a policy can reach, the proof is a case.** Only a case proves the emitted filter
 returns the rows the PDP allows, and only the corpus asks the same question of every other adapter.
-A unit test leaves a corpus case's output to the case: it pins no filter for a case, no refusal
-message, and no count of how many cases throw. A pinned filter proves the adapter still emits what
-it emitted yesterday, not that it was ever right, and it turns every harmless rewrite into a diff
-to approve.
+A unit test leaves everything about a case's output to the case: its filter, its refusal message,
+and how many cases throw. A pinned filter proves the adapter still emits what it emitted yesterday,
+not that it was ever right, and it turns every harmless rewrite into a diff to approve.
 
-What a unit test *does* pin is what the adapter can be asked **without a store** that no case can
-state. Three kinds of material live only there, and they are not equal:
+What a unit test pins is what the adapter can be asked **without a store** that no case can state.
+Three kinds of material live only there, and they are not equal:
 
 1. **A branch CEL itself cannot reach.** An operator CEL does not have (`isSet`) cannot come from
-   any policy. Prove the branch cannot be planned (compile the shape and quote the error) before
-   pinning it; the adapter's own code is no proof of unreachability. A type-checker error alone
-   is not that proof either: `dyn()` defers the check to runtime and the planner drops the wrapper.
-   Try the `dyn()` spelling first. Plans the planner cannot produce at all (an unknown kind, a
-   malformed operand list) belong here too. Permanent.
+   any policy. Prove the branch cannot be planned by compiling the shape and quoting the planner's
+   error before pinning it. Try the `dyn()` spelling first: a type-checker error falls short of
+   proof, because `dyn()` defers the check to runtime and the planner drops the wrapper. Plans the
+   planner cannot produce at all (an unknown kind, a malformed operand list) belong here too.
+   Permanent.
 2. **A caller-supplied argument the corpus structurally cannot vary.** Each harness uses *one*
    mapping, so an operator override, a second mapper form, `allowPostFilter`, a per-call
    `nullAttributeRepresentation`, or `maxMacroDepth` has no case spelling. The adapter's refusal
@@ -50,19 +48,20 @@ state. Three kinds of material live only there, and they are not equal:
    lands. `ElasticsearchQueryPlanAdapterTest` and `SpringDataQueryPlanAdapterTest` are the worked
    examples: a `KIND 3` banner over the block and a `Corpus gap.` lead on every test under it.
 
-## Conformance harnesses
+## The conformance corpus and its harnesses
 
-- A harness passes corpus data through verbatim: one mapping for every case, no per-case options,
-  and the whole dataset rather than a hand-projected subset.
+- A harness passes corpus data through verbatim: one mapping and one set of options for every case,
+  over the whole dataset.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
   `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java
   `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
-  so every adapter stays standalone. A diff extracting a shared loader, or adding a drift check
-  between the copies, is the wrong fix. That is the opposite of the byte-identical rule on the
-  vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
+  so every adapter stays standalone: a loader fix lands in each copy that needs it. Flag a diff that
+  extracts a shared loader or adds a drift check between the copies. The vendored Go *translator*
+  trees follow the opposite rule: byte-identical. See
+  [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
 - `conformance/cases/` is the repository's only policy source for semantics. `demo/policies/`
   (every example application) and `spring-data/example/policies/` (that adapter's onboarding
-  artifact) prove **plumbing**; a new shape in either belongs in a case instead
+  artifact) prove **plumbing**; a new shape proposed in either belongs in a case
   ([ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
 
 ## Prose
@@ -74,6 +73,8 @@ state. Three kinds of material live only there, and they are not equal:
 
 ## Commits
 
+- Conventional Commits, scoped by adapter name (`feat(prisma):`, `fix(mongoose):`), by
+  `conformance` for corpus-wide work, and `chore(deps):` for dependencies.
 - A commit that changes a generated file carries its regeneration: the generator's outputs under
   `conformance/` and any other committed build artifact land in the same commit as their source.
 
