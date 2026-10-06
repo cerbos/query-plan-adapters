@@ -13,7 +13,8 @@
     "i9",
     "j1",
     "j3",
-    "k1"
+    "k1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "logic/or/three-disjuncts",

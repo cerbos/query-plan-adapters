@@ -271,14 +271,14 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.56.0 (and 0.55.0), executed inside a Convex query
-function over the corpus's 42 seed documents. Passed cases on the current PDP, 0.56.0, where the
+function over the corpus's 43 seed documents. Passed cases on the current PDP, 0.56.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 29 / 29 |
-| extended | 88 / 97 |
-| adversarial | 312 / 338 |
+| extended | 88 / 98 |
+| adversarial | 312 / 340 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.56.0 there are nine, four extended and five

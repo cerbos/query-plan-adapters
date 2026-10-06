@@ -605,6 +605,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation. `allowPostFilter` does not lift it: the pattern is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation. `allowPostFilter` does not lift it: the group and `{...}` braces are outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2 (it reads `{01}` as a count)."
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation. `allowPostFilter` does not lift it: the pattern is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
@@ -620,6 +624,10 @@
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator, so there is nothing to negate: `matches` is not in the adapter's negation table because it is not expressible positively either. The invalid patterns and the aNumber == 5 disjunct are refused with it. `allowPostFilter` does not lift it: the pattern is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator, so there is nothing to negate. The over-budget patterns, which RE2 rejects, and the aNumber == 5 disjunct are refused with it. `allowPostFilter` does not lift it: the pattern is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
     },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
@@ -640,6 +648,10 @@
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
       "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation. `allowPostFilter` does not lift it: the pattern is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "Chroma metadata filters have no matches operator; the adapter refuses that operation. `allowPostFilter` does not lift it: `.{8,}` is outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons, and a JavaScript regex engine is not RE2."
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",

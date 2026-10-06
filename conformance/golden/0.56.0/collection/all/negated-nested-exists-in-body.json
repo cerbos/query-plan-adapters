@@ -38,7 +38,8 @@
     "j1",
     "j2",
     "j3",
-    "k1"
+    "k1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "collection/all/negated-nested-exists-in-body",

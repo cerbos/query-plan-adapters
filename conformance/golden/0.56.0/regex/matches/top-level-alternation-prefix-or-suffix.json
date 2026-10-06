@@ -6,7 +6,8 @@
     "a9",
     "b1",
     "c1",
-    "h6"
+    "h6",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "regex/matches/top-level-alternation-prefix-or-suffix",

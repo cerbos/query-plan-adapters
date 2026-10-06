@@ -65,6 +65,10 @@
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "A group and `{...}` braces are outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons; Convex's filter engine has no regex operator to hand it to, so the pattern is refused"
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: matches requires a constant RE2-compatible pattern in the supported literal, anchor, and trailing .* subset."
@@ -80,6 +84,10 @@
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
       "reason": "The patterns are invalid RE2 (a backreference, a bare repetition, a nested quantifier, a repeat count over 1000, a reversed range), and CEL errors on them; the post-filter parses only the literal, anchor and trailing `.*` subset, so it refuses every one of them at translation rather than guess which are errors"
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "The patterns are invalid RE2 (nested counted repetitions past its budget of 1000 copies), and CEL errors on them; the post-filter parses only the literal, anchor and trailing `.*` subset, so it refuses them at translation rather than guess which are errors"
     },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
@@ -100,6 +108,10 @@
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
       "reason": "`*` and `+` on a single character are outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons; Convex's filter engine has no regex operator, so the pattern is refused"
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "`.{8,}` is a counted wildcard, outside the literal, anchor and trailing `.*` subset the post-filter answers with plain string comparisons; Convex's filter engine has no regex operator to hand it to, so the pattern is refused"
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",

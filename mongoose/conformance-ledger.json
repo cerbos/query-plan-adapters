@@ -465,6 +465,10 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. PCRE2 reads {01} as a count where RE2 reads it as literal text, so braces are not sent to $regex."
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
@@ -481,6 +485,10 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. PCRE2 accepts patterns RE2 rejects ((a)\\1, a literal {2}a), so a pattern outside the subset cannot be sent to $regex and is refused."
     },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. PCRE2 accepts nested repetitions past RE2's budget of 1000 copies, which RE2 rejects, so a pattern outside the subset cannot be sent to $regex and is refused."
+    },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
@@ -496,6 +504,10 @@
     "regex/matches/top-level-alternation-single-characters": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset."
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: matches pattern is outside the supported common RE2/PCRE2 subset. The subset sends no `{...}` count to $regex."
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",

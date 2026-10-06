@@ -28,7 +28,8 @@
     "i8",
     "i9",
     "j1",
-    "k1"
+    "k1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "conditional/ternary/value-first",

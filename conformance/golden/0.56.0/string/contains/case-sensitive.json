@@ -3,7 +3,8 @@
     "a1",
     "a2",
     "a3",
-    "b1"
+    "b1",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "string/contains/case-sensitive",

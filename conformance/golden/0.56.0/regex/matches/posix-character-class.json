@@ -11,7 +11,8 @@
     "i4",
     "i5",
     "i6",
-    "i9"
+    "i9",
+    "k2"
   ],
   "degenerateReason": null,
   "id": "regex/matches/posix-character-class",
