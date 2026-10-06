@@ -626,7 +626,7 @@ demo/scripts/run-example.sh sqlalchemy
 | --- | --- | --- |
 | `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised: every case on SQLite (sync and async), PostgreSQL and MySQL, and the cases that read a `collection_columns` declaration once more on PostgreSQL with the collections stored as native arrays. CI runs it under SQLAlchemy 1.4 and 2.x | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
 
 ```bash
 pdm install -G :all

@@ -28,74 +28,40 @@ To run an adapter's conformance harness with its store started and torn down, us
 and `--all` runs every adapter one leg at a time. Run legs one at a time; several harnesses at once
 overload a laptop into timeouts.
 
+Each adapter's README "Development" section (spring-data: "Build" and "Testing") lists its
+commands, suites and the store each one needs. What those READMEs leave implicit:
+
 ### TypeScript adapters
 ```bash
-npm install
-npm run build             # tsc --build -> lib/ (published surface only; test files are excluded)
-npm run typecheck         # tsc -p tsconfig.typecheck.json — noEmit, covers src/ AND *.test.ts
-npm test                  # Jest — offline unit tests (translator.test.ts): no store, no PDP
+npm run typecheck         # covers src/ AND *.test.ts; `npm run build` emits lib/ and skips the tests
+npm test                  # offline unit tests (translator.test.ts): no store, no PDP
 npm run test:adversarial  # the conformance harness (adversarial.test.ts) against a real store
 ```
 
-The harness needs its store: SQLite in-process (drizzle, prisma), `npm run mongo` (mongoose),
-`npm run chroma` (langchain-chromadb), or `npm run convex:up` plus a deploy and `npx convex codegen`
-(convex, whose harness imports `convex/_generated`). Drizzle and Prisma also replay the corpus on
-PostgreSQL and MySQL via testcontainers: `npm run test:adversarial:postgres` / `…:mysql` (plus
-`:v6` / `:v7` on Prisma), selected by `ADAPTER_TEST_DB`; an unknown value fails. The MySQL legs pin
-the byte-exact collation `utf8mb4_0900_bin`: MySQL's default makes `=` case-insensitive, and
-`utf8mb4_0900_as_cs` still ignores a soft hyphen
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Every PostgreSQL leg initialises
-with `--lc-collate=C`, because CEL orders strings by code point and a linguistic collation does not
-([#489](https://github.com/cerbos/query-plan-adapters/issues/489)); `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
-overrides it to reproduce the over-grant.
+Convex's harness imports `convex/_generated`, so it needs `npm run convex:up`, a deploy and
+`npx convex codegen` first. Drizzle and Prisma also replay the corpus on PostgreSQL and MySQL via
+testcontainers (`npm run test:adversarial:postgres` / `…:mysql`, plus `:v6` / `:v7` on Prisma),
+selected by `ADAPTER_TEST_DB`; an unknown value fails. Every MySQL leg pins `utf8mb4_0900_bin` and
+every PostgreSQL leg initialises with `--lc-collate=C`, because CEL compares strings byte-exactly and
+orders them by code point. Why each weaker collation over-grants, and the
+`ADAPTER_TEST_POSTGRES_INITDB_ARGS` override that reproduces it: conformance/README.md, "The dataset".
 
 ### Python (SQLAlchemy)
-```bash
-pdm install -G :all    # or ./pw install: pyprojectx fetches pdm, ruff and isort into .pyprojectx/
-pdm run test           # pytest: unit suites and the conformance harness
-pdm run format         # isort + ruff format
-pdm run lint           # ruff check --fix; CI fails on any diff format or lint leaves
-```
 
-Every `pdm` command also runs through the pyprojectx wrapper, `./pw` (`pw.bat` on Windows), as in
-cerbos-sdk-python: `./pw test`, `./pw format`, `./pw lint`, `./pw pdm build`.
-
-CI links Ubuntu 24.04's SQLite (3.45), usually older than a developer's. `scripts/test-ci-sqlite.sh`
-runs every Docker-free suite against it, from `pdm.lock`, in a container.
-
-`tests/test_adversarial_conformance.py` is the conformance harness: every case on SQLite (sync and
-async), PostgreSQL and MySQL (`sqlalchemy/POSTGRES_IMAGE`, `sqlalchemy/MYSQL_IMAGE`, testcontainers,
-Docker), and the cases that read a `collection_columns` declaration once more on PostgreSQL with the
-collections stored as native arrays. The other suites start nothing. CI runs the whole harness
-under both SQLAlchemy 1.4 and 2.x.
+`pdm` commands, the `./pw` wrapper and `scripts/test-ci-sqlite.sh` (CI's older SQLite):
+`sqlalchemy/README.md`, "Development". CI fails on any diff `pdm run format` or `pdm run lint` leaves.
 
 ### Ruby (ActiveRecord)
-```bash
-# Everything runs in Docker.
-cd activerecord
-./scripts/test.sh                                      # all the specs
-./scripts/test.sh spec/conformance_spec.rb             # the conformance harness
-ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql; default sqlite
-RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
-./scripts/lint.sh                                      # RuboCop on Standard, via `rake lint`
-./scripts/docs.sh                                      # YARD, failing on a warning or an undocumented object
-```
 
-`ADAPTER_TEST_DB` selects the conformance store; an unknown value fails. `scripts/test.sh` starts
-PostgreSQL or MySQL (`utf8mb4_0900_bin`) from `docker-compose.yaml`, with the images pinned in
-`activerecord/POSTGRES_IMAGE` and `activerecord/MYSQL_IMAGE`. CI runs the corpus on all three stores
-under ActiveRecord 8.0 and 7.1; every other suite runs on SQLite.
-`spec/adapter_contract_spec.rb` is the caller-supplied contract. The Gemfile pins each CI leg to one
+Everything runs in Docker through `activerecord/scripts/` (`test.sh`, `lint.sh`, `docs.sh`), so no
+local Ruby is needed: `activerecord/README.md`, "Development". The Gemfile pins each CI leg to one
 minor series: a floating `~> 7.1` resolves to the newest 7.x, and the leg named 7.1 would quietly
 become 7.2.
 
 ### Go (Ent, pgx)
-```bash
-go test ./...             # includes the conformance harness; starts its own store containers
-go test -skip TestAdversarialConformance ./...   # unit suites only, no Docker
-golangci-lint run ./...   # config mirrors github.com/cerbos/cerbos
-golangci-lint fmt ./...
-```
+
+Commands, including the Docker-free `go test -skip TestAdversarialConformance ./...`:
+`ent/README.md` / `pgx/README.md`, "Development".
 
 Both Go modules are standalone: each vendors its own translator under `internal/queryplan` and
 depends on nothing else in this repository, so a consumer only ever pulls in the one module. The two
@@ -111,18 +77,10 @@ with `golangci-lint run --config=../.golangci.yaml ./...` (hence the `gomoddirec
 scoped to `^example/go\.mod$`) and run it with `demo/scripts/run-example.sh <adapter>`.
 
 ### Java (Elasticsearch, Spring Data)
-```bash
-# Run from the adapter directory, in a checkout of the whole repository: the harnesses read the
-# shared corpus at ../conformance/. Each adapter commits its own Gradle wrapper; JDK 17+.
-./gradlew build
-```
 
-Spring-data runs every suite on H2; CI adds an `ADAPTER_TEST_ORM=next` leg (Hibernate 7 / Spring
-Data JPA 4), and runs the conformance suite on PostgreSQL and MySQL (`ADAPTER_TEST_DB`,
-testcontainers; MySQL with client- and server-side prepared statements) under both ORM sets. On elasticsearch-java, `ElasticsearchAdversarialConformanceTest` and
-`ElasticsearchSurfaceTest` need Docker. The surface test measures the store facts most of that
-adapter's ledger reasons cite (an empty array or a JSON null is not indexed; an analyzed field is
-compared per token), since a harness only ever sees the refusal, never the mechanism.
+`./gradlew build` from the adapter directory, in a checkout of the whole repository: the harnesses
+read `../conformance/`. Suites, the Docker-backed ones and spring-data's `ADAPTER_TEST_DB` /
+`ADAPTER_TEST_ORM` legs: each adapter's README.
 
 ## Testing
 
@@ -146,14 +104,8 @@ artifact. A shape worth proving is a case
 
 `conformance/` is the shared adversarial corpus every adapter is proved against. It exists because
 the same semantic bug — value-first operand inversion, LIKE metacharacter leaks, three-valued logic
-under negation — has historically shipped identically to more than one adapter. It holds:
-
-- **cases** (`cases/<area>.yaml`), one Cerbos action each, named `<area>/<operator>/<variant>`,
-  each with a **tier** (`core`, `extended`, `adversarial`), an intent and a trap;
-- **one dataset**: `seeds.json` and `derived-fields.json`, projected into `resources.json`;
-- **two pinned PDPs** in `pdp-versions.json`: `current` (N) and `previous` (N-1), tag and digest;
-- **goldens** (`golden/<tag>/<case id>.json`), written by the generator: for each PDP, the plan it
-  returned and the seed ids `check()` allowed. `golden/CHANGES.md` is the previous → current diff.
+under negation — has historically shipped identically to more than one adapter. Its cases,
+dataset, pinned PDPs and goldens: [conformance/README.md](conformance/README.md), "Layout".
 
 Every adapter carries `<adapter>/conformance-ledger.json`, listing only the cases it cannot pass:
 `unsupported` (translating throws the adapter's refusal type) or `divergent` (a known wrong result,
@@ -172,10 +124,8 @@ conformance/scripts/bump-pdp.sh [tag]       # run locally: current -> previous, 
 ```
 
 A disagreement between the plan and `check()`, which no adapter can pass, is declared **once**, as
-`plannerDivergence` on the case, whether it is a planner bug or the two calls answering different
-questions (an omitted attribute is unknown to the planner and absent to `check()`), optionally scoped to PDP tags, and every harness skips it for that
-tag. An empty or total oracle is only legal when the case declares `degenerate` with its reason; the
-generator fails on an undeclared one, which usually means a discriminating seed is missing.
+`plannerDivergence` on the case, never in a ledger. An empty or total oracle needs `degenerate` on
+the case. Both: conformance/README.md, "Golden files".
 
 Where `resources.json` omits an attribute on a row (a NULL column, or an absent `parent` hop), an
 adapter that has a null convention declares that attribute *omitted* in its harness mapping. A
@@ -184,10 +134,9 @@ throws rather than emit `IS NULL`, unless its store can tell missing from null
 ([ADR 0004](docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md)).
 
 The PDP pin lives in `conformance/pdp-versions.json` and nowhere else. Files that cannot read JSON
-(Compose files, the Go modules' `cerbos/api/genpb`) restate `current`; `validate-corpus.sh`
-asserts every restatement agrees on **both** tag and digest, and `verify-cerbos-digest.sh` asserts
-each pinned digest is what its tag resolves to. A bump is done locally with `bump-pdp.sh` and opened as a PR
-with `golden/CHANGES.md` as its body.
+(Compose files, the Go modules' `cerbos/api/genpb`) restate `current`, and `validate-corpus.sh`
+asserts every restatement agrees on **both** tag and digest. Bumping it: conformance/README.md,
+"Bumping the PDP".
 
 Every other service image is pinned per harness, in one constant file that adapter's suites share
 (`<adapter>/<SERVICE>_IMAGE`), as `repo:tag@sha256:...`. Not a corpus file: `conformance/**` re-runs
@@ -206,14 +155,9 @@ adapter installs, imports, and composes with its ORM's real query methods — wi
 and **no per-adapter exceptions at all**
 ([ADR 0001](docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md)).
 
-Every conformance harness imports its adapter from source, which leaves the published surface —
-`exports` maps, type declarations, `files` allowlists, peer ranges, POM scopes — executed nowhere.
-Each adapter's `example/` installs the packed artifact
-([ADR 0002](docs/adr/0002-examples-install-the-packed-artifact.md); the Go examples use a `replace`
-directive and prove usage shapes only) and exercises five usage shapes, of which the load-bearing one
-is the adapter's filter composed with an application-owned filter. The examples are the one place a
-live PDP still runs: `demo/docker-compose.yml`, pinned to `current` in
-`conformance/pdp-versions.json`, which `validate-demo.sh` asserts.
+Each adapter's `example/` installs the packed artifact and exercises five usage shapes (why, and
+which: demo/README.md). The examples are the one place a live PDP still runs:
+`demo/docker-compose.yml`, pinned to `current` in `conformance/pdp-versions.json`.
 
 ```bash
 demo/scripts/run-example.sh <adapter>   # pack, install, run, diff against demo/expected.json
@@ -232,18 +176,11 @@ rules that are easy to get wrong:
 
 **Read [demo/README.md](demo/README.md) before changing the demo domain.**
 
-## Code Style
+## Code style, commits and pull requests
 
-- TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly
-- Python: Black (88 cols, 4-space), isort-controlled imports
-- Java: 4-space indent, Java 17+, sealed interfaces, pattern matching
-- Tests: co-located as `*.test.ts` in `src/` (TS), `tests/test_*.py` (Python), or `src/test/` (Java)
-
-## Commits & Pull Requests
-
-Conventional Commits: `feat(prisma):`, `fix(mongoose):`, `chore(deps):`. Scope is the adapter name. Keep commits focused, and regenerate build artifacts within the same commit when they change.
-
-For pull requests: give a concise summary, note the affected adapters, link related Cerbos issues, and attach logs for significant behaviour changes. Confirm the relevant build and test commands pass, and call out any services a reviewer needs to reproduce locally. When a change alters what an adapter can translate, say so explicitly and document it as a breaking change — a shape that used to return a filter and now throws is a consumer-visible break, even when the old filter was wrong.
+Commits use Conventional Commits scoped by adapter name (`feat(prisma):`, `fix(mongoose):`,
+`chore(deps):`). The review-time rules for style, commits and pull requests are in
+[CODING_STANDARDS.md](CODING_STANDARDS.md).
 
 ## CI and releases
 
@@ -311,7 +248,6 @@ state. Three kinds of material live only there, and they are not equal:
 - Adapters share data, not code: the corpus loader each adapter carries (`<adapter>/src/corpus.ts`, `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**, so every adapter stays standalone. Do not extract a shared loader, and do not add a drift check between the copies. That is the opposite of the byte-identical rule on the vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md)
 - A harness passes corpus data through verbatim: one mapping for every case, no per-case options, no hand-projected subset of the dataset
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster — in docs, test-file comments and JSON `description`s alike. The roster is the set of directories holding a `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something else (cases, seed rows) go in digits
-- Changing what an adapter can translate means updating its `conformance-ledger.json` and its README contract table in the same commit
 - When an adapter cannot express a shape, make it throw its refusal type with a message naming the real mechanism — never emit a best-effort filter
 
 ## Agent skills
