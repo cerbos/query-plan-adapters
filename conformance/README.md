@@ -19,6 +19,7 @@ returns rows the PDP denies. A throw is a bug report.
 ```bash
 go -C conformance/generator run .          # rebuild policy, dataset and goldens (Docker)
 go -C conformance/generator run . -check   # CI: fail if anything committed is stale
+conformance/scripts/validate-corpus.sh     # offline: ledgers, pins, vendored Go tree, README tables; every adapter's CI
 ```
 
 ## Layout
@@ -138,6 +139,11 @@ That is the whole contract. The harness asserts no counts and pins no messages. 
 projection is recorded, so a field the harness forgets to store shows up as a wrong result rather than
 a vacuous pass.
 
+Every service image a harness starts is pinned in one constant file that adapter's suites share,
+`<adapter>/<SERVICE>_IMAGE`, as `repo:tag@sha256:...`, never under `conformance/`, since a change
+there re-runs every adapter's workflow. `scripts/validate-corpus.sh` enforces the pin format; add a
+new service's repository to its `IMAGE_REPOSITORIES`.
+
 ### The ledger — `<adapter>/conformance-ledger.json`
 
 ```json
@@ -171,7 +177,10 @@ a vacuous pass.
   denies under both polarities. The exceptions are `owner` (which aliases `aOptionalString`),
   `coOwner` (which aliases `scope`), `tagNames`, `aNumberList` and `aBoolList`, which send an
   *explicit null value*. Under CEL, `null != "x"` is true. `resources.json` shows each attribute's
-  convention per row. See
+  convention per row. Where it omits an attribute on a row (a NULL column, or an absent `parent`
+  hop), a harness whose adapter has a null convention declares that attribute *omitted* in its
+  mapping. A `null` literal compared against it is then a missing-attribute error that CEL denies,
+  so the adapter throws rather than emit `IS NULL`, unless its store can tell missing from null. See
   [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 - **Every scalar a case reads can be missing.** Seeds `j1`, `j2` and `j3` each leave exactly one of
   `aString` (and `obj.inner`, its alias), `aNumber` and `aBool` NULL, with every other attribute
@@ -245,7 +254,9 @@ Run `scripts/bump-pdp.sh` locally, on a branch. With no argument it bumps to the
 release; `scripts/bump-pdp.sh 0.56.0` picks one. It resolves the new tag's digest, moves `current`
 to `previous` in `pdp-versions.json`, updates every restatement of the pin (the Compose files, the Go
 modules' `cerbos/api/genpb`), drops ledger entries scoped to the old `previous`, runs the generator
-and `validate-corpus.sh`. The PR you open from it:
+and `validate-corpus.sh`, which asserts every restatement agrees on **both** tag and digest
+(`verify-cerbos-digest.sh` asserts each pinned digest is what its tag resolves to). The PR you open
+from it:
 
 1. Carries the regenerated golden directories and `CHANGES.md`, which is its body and the review
    surface: which plans, allowed sets and plan errors changed.

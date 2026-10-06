@@ -452,9 +452,17 @@ golangci-lint fmt ./...
   return `ErrUnsupported`) or `divergent` (the result must differ, with an issue).
 - The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile
   plans no planner emits. CI runs it as a separate step before the Docker-backed one.
-- `internal/queryplan` is vendored byte-for-byte into the [ent module](../ent);
-  `conformance/scripts/validate-corpus.sh` fails on any difference, so a semantic fix must land in
-  both. Per-engine code belongs in `render.go`, outside the shared tree.
+- The module is standalone: it depends on nothing else in this repository, so a consumer pulls in
+  this one module alone. `internal/queryplan` is therefore vendored byte-for-byte into the
+  [ent module](../ent); `conformance/scripts/validate-corpus.sh` fails on any difference, so a
+  semantic fix lands in both copies. Per-engine code belongs in `render.go`, outside the shared
+  tree. The unit suites (`translate_test.go`, `render_test.go`) mirror the ent module's for the
+  same reason.
+- `./...` stops at a nested `go.mod`, so neither command reaches `example/`. It is its own module on
+  purpose: a directory holding a `go.mod` is excluded from its parent's zip, which keeps the
+  example's dependencies out of a consumer's build. Lint it from `example/` with
+  `golangci-lint run --config=../.golangci.yaml ./...` (hence the `gomoddirectives` exclusion
+  scoped to `^example/go\.mod$`), and run it with `demo/scripts/run-example.sh pgx`.
 
 See [conformance/README.md](../conformance/README.md) before changing how a shape is translated.
 

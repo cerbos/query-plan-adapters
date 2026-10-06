@@ -423,6 +423,10 @@ demo/scripts/run-example.sh langchain-chromadb
 
 ## Development
 
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
+
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, `$ne`/`$nin` only on `required` fields and never on a boolean or integer key, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, `valueType`, the unmapped fallback), what `allowPostFilter` changes and what it leaves alone, and malformed input | Node only |

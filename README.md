@@ -56,7 +56,8 @@ Every adapter is tested against two shared corpora in this repository:
   adapter and uses it with its ORM's real query methods. The Go adapters use a local `replace`
   directive, so their examples cover usage but not packaging.
 
-Contributors: start with [CLAUDE.md](CLAUDE.md) and [conformance/README.md](conformance/README.md).
+Contributors: start with [CLAUDE.md](CLAUDE.md), [conformance/README.md](conformance/README.md) and
+[CODING_STANDARDS.md](CODING_STANDARDS.md).
 
 ## License
 

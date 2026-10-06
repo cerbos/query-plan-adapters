@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# Tests for what the corpus cannot ask. Read CLAUDE.md, "What a translator unit test may pin",
-# before adding here. Three kinds:
+# Tests for what the corpus cannot ask. Read CODING_STANDARDS.md, "What a translator unit test may
+# pin", before adding here. Three kinds:
 #
 # * Caller-supplied arguments (kind 2, permanent): operator overrides, mapper forms, the
 #   per-call null representation, and ActiveRecord model shapes (through, scoped, STI,

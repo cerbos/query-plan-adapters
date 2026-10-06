@@ -487,6 +487,10 @@ demo/scripts/run-example.sh mongoose
 
 ## Development
 
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
+
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Caller-supplied options the corpus cannot vary (`valueParser` incl. `ObjectId` coercion, function mappers, the `nullAttributeRepresentation` boundary), the refusal type, the timestamp literal contract, the no-`$lookup` source scan and malformed input | Node only |

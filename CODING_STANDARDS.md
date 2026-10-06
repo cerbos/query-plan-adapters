@@ -13,6 +13,65 @@ check, not here.
 
 Python style is enforced by `pdm run format` and `pdm run lint` (isort and ruff), which CI runs.
 
+## Refusals
+
+- A refusal throws the adapter's refusal type with a message naming the real mechanism, in the
+  store's own terms. A ledger entry's `reason` names the same mechanism.
+- A change to what an adapter can translate updates its `conformance-ledger.json` and its README's
+  `Conformance contract` table in the same commit.
+
+## What a translator unit test may pin
+
+**For a shape a policy can reach, the proof is a case.** Only a case proves the emitted filter
+returns the rows the PDP allows, and only the corpus asks the same question of every other adapter.
+A unit test leaves a corpus case's output to the case: it pins no filter for a case, no refusal
+message, and no count of how many cases throw. A pinned filter proves the adapter still emits what
+it emitted yesterday, not that it was ever right, and it turns every harmless rewrite into a diff
+to approve.
+
+What a unit test *does* pin is what the adapter can be asked **without a store** that no case can
+state. Three kinds of material live only there, and they are not equal:
+
+1. **A branch CEL itself cannot reach.** An operator CEL does not have (`isSet`) cannot come from
+   any policy. Prove the branch cannot be planned (compile the shape and quote the error) before
+   pinning it; the adapter's own code is no proof of unreachability. A type-checker error alone
+   is not that proof either: `dyn()` defers the check to runtime and the planner drops the wrapper.
+   Try the `dyn()` spelling first. Plans the planner cannot produce at all (an unknown kind, a
+   malformed operand list) belong here too. Permanent.
+2. **A caller-supplied argument the corpus structurally cannot vary.** Each harness uses *one*
+   mapping, so an operator override, a second mapper form, `allowPostFilter`, a per-call
+   `nullAttributeRepresentation`, or `maxMacroDepth` has no case spelling. The adapter's refusal
+   *type* belongs here too. Permanent.
+3. **A corpus gap wearing a unit test**: policy-reachable, and the corpus simply does not carry it
+   yet. This one is a **bridge, not a home**: a shape parked here is asked of one adapter and none
+   of the others, which is the condition every bug this repository exists to stop was living in.
+   Each instance says at the test that it is a corpus gap, names the issue tracking the port
+   ([#509](https://github.com/cerbos/query-plan-adapters/issues/509)), and is deleted when the case
+   lands. `ElasticsearchQueryPlanAdapterTest` and `SpringDataQueryPlanAdapterTest` are the worked
+   examples: a `KIND 3` banner over the block and a `Corpus gap.` lead on every test under it.
+
+## Conformance harnesses
+
+- A harness passes corpus data through verbatim: one mapping for every case, no per-case options,
+  and the whole dataset rather than a hand-projected subset.
+- **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
+  `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java
+  `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
+  so every adapter stays standalone. A diff extracting a shared loader, or adding a drift check
+  between the copies, is the wrong fix. That is the opposite of the byte-identical rule on the
+  vendored Go *translator* trees. See [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
+- `conformance/cases/` is the repository's only policy source for semantics. `demo/policies/`
+  (every example application) and `spring-data/example/policies/` (that adapter's onboarding
+  artifact) prove **plumbing**; a new shape in either belongs in a case instead
+  ([ADR 0008](docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md)).
+
+## Prose
+
+- Write "every adapter" / "every harness" / "every example" wherever prose spans the roster, in docs,
+  test-file comments and JSON `description`s alike. The roster is the set of directories holding a
+  `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something
+  else (cases, seed rows) go in digits.
+
 ## Commits
 
 - A commit that changes a generated file carries its regeneration: the generator's outputs under

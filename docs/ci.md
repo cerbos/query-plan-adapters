@@ -12,6 +12,8 @@ Every adapter workflow runs `validate-corpus.sh` and its conformance harness **i
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. `conformance.yaml` is the only workflow that starts a PDP: it runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
 
+Each adapter's example job stays inside that adapter's own workflow. `renovate.json` automerges non-major bumps, so an ORM bump arrives as one PR touching both the adapter manifest and the example's committed lockfile, and the example job on that PR is what blocks the automerge when the new ORM breaks real usage. A nightly or standalone example workflow silently restores that gap.
+
 Every PR-triggered workflow declares a `concurrency` group that cancels a pull request's superseded run; give a new workflow the same block. Adapter workflows never run on `main`, and a cache written from a pull request is visible to that pull request alone, so `warm-caches.yaml` writes the npm, Go and Gradle caches on `main` for every pull request to restore. It can only do that under the keys the jobs look up, so a job's `cache-dependency-path` (and, for Go, its `go-version-file`) must match the entry in `warm-caches.yaml` — the generator's included. Gradle jobs cache through `setup-java`'s `cache: gradle` with `setup-gradle`'s own cache disabled, because `setup-gradle` keys its entries by job id and writes them only on `main`.
 
 Npm releases use `<package-name>@v<version>` tags (for example, `@cerbos/orm-prisma@v5.0.0`),

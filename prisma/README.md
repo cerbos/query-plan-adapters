@@ -636,6 +636,10 @@ A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-p
 
 ## Development
 
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
+
 | Command | What it runs | Needs |
 | --- | --- | --- |
 | `npm test` | Offline unit tests: caller-supplied options the corpus cannot vary (mapper forms, `subqueryFilter`, element nullability, `nullAttributeRepresentation`), the refusal type, the timestamp literal contract and malformed input | Nothing |
