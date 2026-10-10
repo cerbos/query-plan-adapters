@@ -30,43 +30,6 @@ import (
 // type, so this is buildable here while being something the translator never emits.
 var unrenderable = queryplan.Call{Name: queryplan.FuncName("notAFunction")}
 
-// TestRenderRejectsUnrenderableNodesBeforeReturning pins the probe pass: the failure has to come
-// back from render (and so from Translate) rather than from the caller's query builder, where it
-// would read as a malformed statement rather than a refusal to translate.
-func TestRenderRejectsUnrenderableNodesBeforeReturning(t *testing.T) {
-	t.Parallel()
-
-	for _, d := range []string{dialect.SQLite, dialect.Postgres, dialect.MySQL} {
-		t.Run(d, func(t *testing.T) {
-			t.Parallel()
-
-			predicate, err := render(unrenderable, d)
-			require.Error(t, err)
-			require.ErrorContains(t, err, "notAFunction")
-			require.Nil(t, predicate, "a predicate that cannot render must not be handed back")
-		})
-	}
-}
-
-// TestUnknownCastTargetIsRejected pins that the cast spelling table fails closed. Only the two
-// targets the translator emits have a spelling, and CastType is an exported string type, so a third
-// is buildable here. Falling through to the float spelling would compare against a value the policy
-// never named — a wrong filter where an error is the whole contract.
-func TestUnknownCastTargetIsRejected(t *testing.T) {
-	t.Parallel()
-
-	cast := queryplan.Cast{X: queryplan.Column{Name: "count"}, To: queryplan.CastType("decimal")}
-
-	for _, d := range []string{dialect.SQLite, dialect.Postgres, dialect.MySQL} {
-		t.Run(d, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := render(cast, d)
-			require.ErrorContains(t, err, `cannot render cast to "decimal"`)
-		})
-	}
-}
-
 // TestRenderErrorsEscapeNestedParentheses is the assertion that makes the probe pass trustworthy.
 // sql.Builder.Wrap gives the callback a fresh builder and copies back only its string and args, so
 // an error recorded inside a Wrap is dropped. render's helper therefore has to carry the error out
@@ -112,7 +75,9 @@ func TestSelectorReportsPredicateErrors(t *testing.T) {
 }
 
 // Unknown enum members cannot arise from a planner response. Pin their rejection here so
-// extending the internal tree never silently selects a different SQL operator.
+// extending the internal tree never silently selects a different SQL operator or cast target. The
+// failure has to come back from render (and so from Translate) with no predicate, rather than from
+// the caller's query builder, where it would read as a malformed statement.
 func TestUnknownRenderEnumsAreRejected(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -124,6 +89,8 @@ func TestUnknownRenderEnumsAreRejected(t *testing.T) {
 		{"arithmetic", queryplan.Arith{Op: "futureArithmetic", L: queryplan.Lit{V: 1}, R: queryplan.Lit{V: 2}}, `cannot render arithmetic "futureArithmetic"`},
 		{"subquery", queryplan.Subquery{Kind: 255}, "cannot render subquery kind 255"},
 		{"truth", queryplan.TruthTest{X: queryplan.BoolConst{V: true}, Want: 255}, "cannot render truth value 255"},
+		{"cast", queryplan.Cast{X: queryplan.Column{Name: "count"}, To: queryplan.CastType("decimal")}, `cannot render cast to "decimal"`},
+		{"function", unrenderable, "notAFunction"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
