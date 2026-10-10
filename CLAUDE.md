@@ -25,6 +25,21 @@ returning rows the PDP denies: that is an authorization bug, where a throw is a 
 - **Writing a translator unit test, a commit message or a PR description** →
   [CODING_STANDARDS.md](CODING_STANDARDS.md), which every review checks a diff against.
 
+## Tests
+
+Here the integration test is a conformance case replayed against a real store: it is the proof every
+adapter shares. CODING_STANDARDS.md, "What a translator unit test may pin", names what a unit test
+may still pin.
+
+- Never write unit tests after you write code.
+- Highly prefer E2E or integration tests as the sole testing mechanism. Use them to verify complex
+  features work. At the end of those tests, produce a verifiable and repeatable artifact.
+- If you must test a system in isolation, first write down all the ways it could fail, then write
+  the code.
+- A test that breaks under a behavior-preserving refactor is asserting implementation, not behavior.
+  Do not add it.
+- Never delete or weaken a failing test to make the suite pass. Fix the code, or ask.
+
 ## Agent skills
 
 - **Issue tracker**: GitHub Issues via `gh`, with per-adapter scope labels
