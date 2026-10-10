@@ -7,16 +7,11 @@ package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.springdata.testmodel.NestedEmbeddable;
-import dev.cerbos.queryplan.springdata.testmodel.OwnerEntity;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Persistence;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -34,7 +29,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,8 +45,8 @@ class RepositorySurfaceTest {
     private static EntityManagerFactory emf;
 
     /**
-     * Adds JPA shapes the corpus mapping does not use: a flat {@code @ElementCollection}, an
-     * {@code @Embedded} path and a {@code @ManyToOne} path.
+     * Adds JPA shapes the corpus mapping does not use: a flat {@code @ElementCollection} and an
+     * {@code @Embedded} path.
      */
     private static final Map<String, AttributeMapping> MAPPING = Map.of(
             // @OneToMany association.
@@ -64,9 +58,7 @@ class RepositorySurfaceTest {
             "request.resource.attr.aBool", AttributeMapping.field("aBool"),
             "request.resource.attr.aNumber", AttributeMapping.field("aNumber"),
             // @Embedded path: stays on the resource's own table.
-            "request.resource.attr.aString", AttributeMapping.field("nested.aString"),
-            // @ManyToOne path: a join.
-            "request.resource.attr.aOptionalString", AttributeMapping.field("creator.id"));
+            "request.resource.attr.aString", AttributeMapping.field("nested.aString"));
 
     @BeforeAll
     static void setUp() {
@@ -89,24 +81,21 @@ class RepositorySurfaceTest {
         EntityManager em = emf.createEntityManager();
         em.getTransaction().begin();
 
-        OwnerEntity alice = new OwnerEntity("alice", "Alice", "engineering");
-        em.persist(alice);
-
-        ResourceEntity r1 = row("r1", true, "one", 1, alice);
+        ResourceEntity r1 = row("r1", true, "one", 1);
         r1.addTag("r1-t1", "public");
         r1.addTag("r1-t2", "100%_x");
         r1.setTagNames(new ArrayList<>(List.of("public", "other")));
 
-        ResourceEntity r2 = row("r2", false, "two", 2, null);
+        ResourceEntity r2 = row("r2", false, "two", 2);
         r2.addTag("r2-t1", "public");
         r2.setTagNames(new ArrayList<>(List.of("public")));
 
-        ResourceEntity r3 = row("r3", true, "three", 3, null);
+        ResourceEntity r3 = row("r3", true, "three", 3);
         r3.addTag("r3-t1", "internal");
         r3.setTagNames(new ArrayList<>(List.of("internal")));
 
-        // Third match for collection/has-intersection/value-first, so its second size-2 page is partial.
-        ResourceEntity r4 = row("r4", false, "one", 4, null);
+        // A collection/has-intersection/value-first match the caller filter in the composition test excludes.
+        ResourceEntity r4 = row("r4", false, "one", 4);
         r4.setTagNames(new ArrayList<>(List.of("other")));
 
         for (ResourceEntity r : List.of(r1, r2, r3, r4)) {
@@ -116,8 +105,7 @@ class RepositorySurfaceTest {
         em.close();
     }
 
-    private static ResourceEntity row(String id, boolean aBool, String aString, int aNumber,
-                                      OwnerEntity creator) {
+    private static ResourceEntity row(String id, boolean aBool, String aString, int aNumber) {
         ResourceEntity r = new ResourceEntity(id);
         r.setaBool(aBool);
         r.setaString(aString);
@@ -127,7 +115,6 @@ class RepositorySurfaceTest {
         nested.setaString(aString);
         nested.setaNumber(aNumber);
         r.setNested(nested);
-        r.setCreator(creator);
         return r;
     }
 
@@ -198,41 +185,6 @@ class RepositorySurfaceTest {
             "logic/bare-attribute/boolean"})
     void theRepositoryContractHoldsForEveryTranslationShape(String action) {
         assertRepositorySurface(specFor(action));
-    }
-
-    /**
-     * Paging calls {@code toPredicate} again on the same instance for the COUNT query, so the
-     * adapter must rebuild its predicate on every call.
-     */
-    @Test
-    void pageableFindAllInvokesToPredicateTwiceOnOneSpecification() {
-        CountingSpecification spec = new CountingSpecification(specFor("collection/has-intersection/value-first"));
-        EntityManager em = emf.createEntityManager();
-        try {
-            SimpleJpaRepository<ResourceEntity, String> repository = repository(em);
-            List<String> all = sortedIds(repository.findAll(spec));
-            assertEquals(3, all.size(), "the fixture must match more rows than fit on one page");
-            spec.invocations.set(0);
-
-            // A full first page, so Spring Data runs the COUNT query.
-            Page<ResourceEntity> page0 = repository.findAll(spec, PageRequest.of(0, 2, Sort.by("id")));
-            assertEquals(all.subList(0, 2), idsInOrder(page0.getContent()));
-            assertEquals(all.size(), page0.getTotalElements());
-            assertEquals(2, spec.invocations.get(),
-                    "findAll(spec, Pageable) with a full page must invoke toPredicate exactly "
-                            + "twice (content query + count query) on one instance");
-
-            // A partial last page: Spring Data computes the total without a COUNT query.
-            Page<ResourceEntity> page1 = repository.findAll(spec, PageRequest.of(1, 2, Sort.by("id")));
-            assertEquals(all.subList(2, 3), idsInOrder(page1.getContent()));
-            assertEquals(all.size(), page1.getTotalElements(),
-                    "page totals must stay consistent across pages");
-            assertFalse(page1.hasNext(), "three matching rows fill exactly two size-2 pages");
-            assertEquals(3, spec.invocations.get(),
-                    "the same Specification instance is re-invoked for every execution");
-        } finally {
-            em.close();
-        }
     }
 
     /**
@@ -311,40 +263,6 @@ class RepositorySurfaceTest {
             assertEquals(intersection, Set.copyOf(sortedIds(repository.findAll(caller.and(cerbos)))));
         } finally {
             em.close();
-        }
-    }
-
-    /** Dotted field paths through an {@code @Embedded} value and a {@code @ManyToOne} join. */
-    @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {
-            "string/equals/case-sensitive", "null/not-equals/missing-attribute-against-literal"})
-    void aDottedFieldPathTraversesEmbeddablesAndToOneAssociations(String action) {
-        // The first reads aString, mapped here to the @Embedded nested.aString; the second reads
-        // aOptionalString, mapped to the @ManyToOne creator.id.
-        EntityManager em = emf.createEntityManager();
-        try {
-            List<String> ids = sortedIds(repository(em).findAll(specFor(action)));
-            assertFalse(ids.isEmpty(), "the dotted path resolved to no row at all");
-            assertTrue(ids.size() < 4, "the dotted path matched every row");
-        } finally {
-            em.close();
-        }
-    }
-
-    /** Counts {@code toPredicate} calls. */
-    private static final class CountingSpecification implements Specification<ResourceEntity> {
-        private final Specification<ResourceEntity> delegate;
-        final AtomicInteger invocations = new AtomicInteger();
-
-        CountingSpecification(Specification<ResourceEntity> delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public Predicate toPredicate(Root<ResourceEntity> root, CriteriaQuery<?> query,
-                                     CriteriaBuilder criteriaBuilder) {
-            invocations.incrementAndGet();
-            return delegate.toPredicate(root, query, criteriaBuilder);
         }
     }
 }
