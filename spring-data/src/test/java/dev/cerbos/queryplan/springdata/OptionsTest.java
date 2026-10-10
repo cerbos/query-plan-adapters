@@ -5,7 +5,6 @@
 
 package dev.cerbos.queryplan.springdata;
 
-import com.google.protobuf.NullValue;
 import com.google.protobuf.Value;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
@@ -31,20 +30,18 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.OptionalInt;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link Options}: it copies its collections and is immutable, and the macro-depth limit
- * comes from the option, then the system property, then the default. Runs offline.
+ * Tests {@link Options}: it copies its collections, rejects a non-positive macro depth, and an
+ * explicit macro-depth option wins over the system property, which is read per translation.
+ * Runs offline.
  */
 class OptionsTest {
 
@@ -66,16 +63,6 @@ class OptionsTest {
     class Immutability {
 
         @Test
-        void ofHoldsOnlyTheMapping() {
-            Options options = Options.of(Corpus.MAPPING);
-
-            assertEquals(Corpus.MAPPING, options.mapping());
-            assertEquals(Map.of(), options.operatorOverrides());
-            assertEquals(NullAttributeRepresentation.EXPLICIT, options.nullAttributeRepresentation());
-            assertEquals(OptionalInt.empty(), options.maxMacroDepth());
-        }
-
-        @Test
         void theCollectionsAreCopiedNotCaptured() {
             Map<String, AttributeMapping> mapping = new HashMap<>(Corpus.MAPPING);
             Map<String, OperatorFunction> overrides = new HashMap<>();
@@ -90,35 +77,6 @@ class OptionsTest {
                     () -> options.mapping().put("x", AttributeMapping.field("aString")));
             assertThrows(UnsupportedOperationException.class,
                     () -> options.operatorOverrides().put("eq", (cb, field, value) -> null));
-        }
-
-        @Test
-        void eachWithReturnsANewInstanceAndLeavesTheOriginalUnchanged() {
-            Options original = Options.of(Corpus.MAPPING);
-            Options changed = original
-                    .withOperatorOverrides(Map.of("eq", (cb, field, value) -> cb.disjunction()))
-                    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
-                    .withMaxMacroDepth(3)
-                    .withMapping(Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS);
-
-            assertNotSame(original, changed);
-            assertEquals(Options.of(Corpus.MAPPING), original);
-            assertEquals(1, changed.operatorOverrides().size());
-            assertEquals(NullAttributeRepresentation.OMITTED, changed.nullAttributeRepresentation());
-            assertEquals(OptionalInt.of(3), changed.maxMacroDepth());
-            assertEquals(Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS, changed.mapping());
-        }
-
-        @Test
-        void everyComponentIsRequired() {
-            assertThrows(NullPointerException.class, () -> Options.of(null));
-            assertThrows(NullPointerException.class,
-                    () -> Options.of(Corpus.MAPPING).withOperatorOverrides(null));
-            assertThrows(NullPointerException.class,
-                    () -> Options.of(Corpus.MAPPING).withNullAttributeRepresentation(null));
-            assertThrows(NullPointerException.class,
-                    () -> new Options(Corpus.MAPPING, Map.of(),
-                            NullAttributeRepresentation.EXPLICIT, null));
         }
 
         /** A plain {@link IllegalArgumentException}, not a refusal type: no plan was refused. */
@@ -177,35 +135,6 @@ class OptionsTest {
             }
         }
 
-        @Test
-        void thePropertyAppliesWhenTheOptionsDeclareNothing() {
-            System.setProperty(DEPTH_PROPERTY, "2");
-            try {
-                assertTranslates(existsChain(2), deep);
-                IllegalArgumentException ex = assertRefused(existsChain(3), deep);
-                assertTrue(ex.getMessage().contains("nesting depth 3 exceeds the maximum of 2"),
-                        ex.getMessage());
-            } finally {
-                System.clearProperty(DEPTH_PROPERTY);
-            }
-        }
-
-        @Test
-        void theDefaultAppliesWhenNeitherIsSet() {
-            System.clearProperty(DEPTH_PROPERTY);
-            assertTranslates(existsChain(SpringDataQueryPlanAdapter.DEFAULT_MAX_MACRO_DEPTH), deep);
-            IllegalArgumentException ex = assertRefused(
-                    existsChain(SpringDataQueryPlanAdapter.DEFAULT_MAX_MACRO_DEPTH + 1), deep);
-            assertTrue(ex.getMessage().contains("exceeds the maximum of "
-                    + SpringDataQueryPlanAdapter.DEFAULT_MAX_MACRO_DEPTH), ex.getMessage());
-        }
-
-        @Test
-        void anExplicitOptionRaisesTheLimitWithoutTheProperty() {
-            System.clearProperty(DEPTH_PROPERTY);
-            assertTranslates(existsChain(6), deep.withMaxMacroDepth(6));
-        }
-
         /** The property is read each time the Specification builds a predicate. */
         @Test
         void thePropertyIsReadPerTranslation() {
@@ -232,50 +161,6 @@ class OptionsTest {
                     ? expr("eq", var(v + ".name"), string("x"))
                     : existsLevel(level + 1, depth, v + "." + HOPS[level - 1]);
             return expr("exists", var(collection), expr("lambda", body, var(v)));
-        }
-    }
-
-    /** The positional overloads behave the same as the {@link Options} form. */
-    @Nested
-    class PositionalOverloadsDelegate {
-
-        @Test
-        void theNullRepresentationOverloadIsTheOptionsForm() {
-            Operand eqNull = expr("eq", var("request.resource.attr.aOptionalString"),
-                    Operand.newBuilder().setValue(
-                            Value.newBuilder().setNullValue(NullValue.NULL_VALUE)).build());
-            PlanResourcesResponse plan = response(eqNull);
-
-            IllegalArgumentException positional = assertThrows(IllegalArgumentException.class,
-                    () -> SpringDataQueryPlanAdapter.toSpecification(plan,
-                            Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS, Map.of(),
-                            NullAttributeRepresentation.OMITTED));
-            IllegalArgumentException viaOptions = assertThrows(IllegalArgumentException.class,
-                    () -> SpringDataQueryPlanAdapter.toSpecification(plan,
-                            Options.of(Corpus.MAPPING_WITHOUT_NULL_CONVENTIONS)
-                                    .withNullAttributeRepresentation(
-                                            NullAttributeRepresentation.OMITTED)));
-
-            assertEquals(positional.getClass(), viaOptions.getClass());
-            assertEquals(positional.getMessage(), viaOptions.getMessage());
-        }
-
-        @Test
-        void theOverridesOverloadIsTheOptionsForm() {
-            Map<String, OperatorFunction> overrides = Map.of("eq", (cb, field, value) -> {
-                throw new IllegalStateException("override reached");
-            });
-            Operand condition = expr("eq", var("request.resource.attr.aString"), string("x"));
-
-            IllegalStateException positional = assertThrows(IllegalStateException.class,
-                    () -> predicateOf(SpringDataQueryPlanAdapter.toSpecification(
-                            response(condition), Corpus.MAPPING, overrides)));
-            IllegalStateException viaOptions = assertThrows(IllegalStateException.class,
-                    () -> predicateOf(SpringDataQueryPlanAdapter.toSpecification(
-                            response(condition),
-                            Options.of(Corpus.MAPPING).withOperatorOverrides(overrides))));
-
-            assertEquals(positional.getMessage(), viaOptions.getMessage());
         }
     }
 

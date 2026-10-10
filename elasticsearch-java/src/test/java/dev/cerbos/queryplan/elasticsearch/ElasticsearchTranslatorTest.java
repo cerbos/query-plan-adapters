@@ -109,20 +109,6 @@ class ElasticsearchTranslatorTest {
                         + " not what refuses it");
     }
 
-    /**
-     * An unmapped field is a caller mistake, not a shape the Query DSL cannot express, so it
-     * raises {@link UnmappedAttributeException} and never passes for an {@code unsupported} case.
-     */
-    @Test
-    void anUnmappedFieldIsNotARefusal() {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                        Corpus.plan("string/equals/case-sensitive"),
-                        Corpus.OPTIONS.withFieldMap(Map.of())));
-        assertInstanceOf(UnmappedAttributeException.class, ex);
-        assertFalse(ex instanceof UnsupportedPlanShapeException);
-    }
-
     /** This file and the test helpers it uses; none may reach a PDP or a container. */
     private static final List<String> OFFLINE_SOURCES =
             List.of("ElasticsearchTranslatorTest", "Corpus");

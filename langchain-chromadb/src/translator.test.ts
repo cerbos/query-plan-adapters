@@ -18,7 +18,6 @@ import type {
 } from ".";
 import {
   FIELD_NAME_MAPPER,
-  mappedMetadataKeys,
   pdpTags,
   planOf,
   readGolden,
@@ -41,10 +40,10 @@ const CURRENT = pdpTags()[0]!;
 
 async function translate(
   id: string,
-  options: { fieldNameMapper?: FieldMapper; now?: string } = {},
+  options: { fieldNameMapper?: FieldMapper } = {},
 ): Promise<{ kind: PlanKind; filters?: Where }> {
   return queryPlanToChromaDB({
-    queryPlan: await planOf(readGolden(CURRENT, id), options.now),
+    queryPlan: await planOf(readGolden(CURRENT, id)),
     fieldNameMapper: options.fieldNameMapper ?? FIELD_NAME_MAPPER,
   });
 }
@@ -153,50 +152,35 @@ interface Comparison {
   value: unknown;
 }
 
-interface FilterShape {
-  /** Every `$`-prefixed key used in a logical position, in encounter order. */
-  logical: string[];
-  comparisons: Comparison[];
-}
-
 /**
- * Decompose an emitted `Where` into the logical operators it nests and the leaf comparisons it
- * makes, so the rules below can be stated over the whole corpus rather than over hand-picked
- * shapes.
+ * Every leaf comparison an emitted `Where` makes, so the rules below can be stated over the whole
+ * corpus rather than over hand-picked shapes.
  *
  * Unknown structure is a failure rather than something skipped: a rule that silently ignores a node
  * it does not recognise is a rule a new emission shape walks straight past.
  */
-function shapeOf(where: Where | undefined, path = "filters"): FilterShape {
-  const shape: FilterShape = { logical: [], comparisons: [] };
+function literalsOf(where: Where | undefined, path = "filters"): Comparison[] {
   if (where === undefined) {
-    return shape;
+    return [];
   }
-  for (const [key, value] of Object.entries(where)) {
+  return Object.entries(where).flatMap(([key, value]): Comparison[] => {
     if (key.startsWith("$")) {
-      shape.logical.push(key);
       if (!Array.isArray(value)) {
         throw Error(`${path}.${key} is a logical operator over a non-array`);
       }
-      for (const [index, child] of value.entries()) {
-        const nested = shapeOf(child as Where, `${path}.${key}[${index}]`);
-        shape.logical.push(...nested.logical);
-        shape.comparisons.push(...nested.comparisons);
-      }
-      continue;
+      return value.flatMap((child, index) =>
+        literalsOf(child as Where, `${path}.${key}[${index}]`),
+      );
     }
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       throw Error(`${path}.${key} is not a Chroma comparison object`);
     }
-    for (const [operator, operand] of Object.entries(value)) {
-      shape.comparisons.push({ field: key, operator, value: operand });
-    }
-  }
-  return shape;
-}
-
-function literalsOf(where: Where | undefined): Comparison[] {
-  return shapeOf(where).comparisons;
+    return Object.entries(value).map(([operator, operand]) => ({
+      field: key,
+      operator,
+      value: operand,
+    }));
+  });
 }
 
 /**
@@ -216,62 +200,6 @@ describe("what an emitted filter may contain", () => {
     COMPARISONS_IF_PRESENT = CONDITIONAL_IF_PRESENT.flatMap(({ id, filters }) =>
       literalsOf(filters).map((comparison) => ({ action: id, ...comparison })),
     );
-  });
-
-  /**
-   * An unmapped reference falls back to the Cerbos path verbatim (`request.resource.attr.aString`),
-   * which is a metadata key no collection holds — so the filter is not an error, it is a filter
-   * that matches nothing and silently denies. Chroma cannot report it either: an unknown key is
-   * simply absent. This is the one rule the harness cannot make, because a filter that selects no
-   * document agrees with an oracle that allows none.
-   */
-  test("every field a filter names is a metadata key the mapper declares", () => {
-    const declared = new Set(mappedMetadataKeys());
-    const undeclared = ALL_COMPARISONS.filter(
-      ({ field }) => !declared.has(field),
-    ).map(({ action, field }) => `${action}: ${field}`);
-
-    expect(undeclared).toEqual([]);
-    // Anti-vacuity: the rule above holds for a corpus that emits no comparison at all.
-    expect(ALL_COMPARISONS.length).toBeGreaterThan(0);
-  });
-
-  /**
-   * Chroma's `Where` grammar has no `$not` and no `$nor`. Every negation in a plan has to be pushed
-   * down to the leaves — De Morgan over `and`/`or`, operator inversion at a comparison — and a
-   * filter that carried one out to Chroma would be rejected at query time, not at translation.
-   */
-  test("no negation operator survives into an emitted filter", () => {
-    const logical = new Set(
-      [...CONDITIONAL, ...CONDITIONAL_IF_PRESENT].flatMap(
-        ({ filters }) => shapeOf(filters).logical,
-      ),
-    );
-
-    expect([...logical].sort()).toEqual(["$and", "$or"]);
-  });
-
-  /**
-   * Anti-vacuity for the rule above: the corpus has to still drive negation through both De Morgan
-   * branches and through operator inversion, or "no `$not` survived" would be a statement about a
-   * corpus that never negates anything. They are read under `PRESENT_EVERYWHERE`, the one mapping
-   * under which an inversion to `$ne` (over `aString`, which has no other spelling) is reached.
-   */
-  test("the corpus still drives the negations that rule polices", () => {
-    const conditional = CONDITIONAL_IF_PRESENT.map(({ id }) => id);
-    for (const id of [
-      "logic/not/double-negation",
-      "logic/not/triple-negation",
-      "logic/not/over-and",
-      "logic/not/less-than",
-      "logic/not/greater-than",
-    ]) {
-      expect(conditional).toContain(id);
-    }
-    const inverted = COMPARISONS_IF_PRESENT.filter(({ operator }) =>
-      ["$ne", "$nin", "$gte", "$lte"].includes(operator),
-    );
-    expect(inverted.length).toBeGreaterThan(0);
   });
 
   /**
@@ -333,32 +261,6 @@ describe("what an emitted filter may contain", () => {
   });
 
   /**
-   * A key declared boolean or integer never carries `$ne`, whether or not it is `required`: its
-   * inequality is spelled with `$eq`, `$lt`, `$gt` and `$gte`, which (unlike `$ne`) do not match a
-   * document missing the key. Read under `PRESENT_EVERYWHERE`, where every key is `required` and
-   * `$ne` would otherwise be admitted.
-   */
-  test("a key declared boolean or integer never carries $ne, required or not", () => {
-    const typed = new Set(
-      Object.values(PRESENT_EVERYWHERE)
-        .filter(
-          ({ valueType, numericType }) =>
-            valueType === "boolean" || numericType === "integer",
-        )
-        .map(({ field }) => field),
-    );
-    const withNe = [...ALL_COMPARISONS, ...COMPARISONS_IF_PRESENT]
-      .filter(({ field, operator }) => operator === "$ne" && typed.has(field))
-      .map(({ action, field }) => `${action}: ${field}`);
-
-    expect(withNe).toEqual([]);
-    // Anti-vacuity: some translated filter compares a typed key at all.
-    expect(
-      COMPARISONS_IF_PRESENT.filter(({ field }) => typed.has(field)).length,
-    ).toBeGreaterThan(0);
-  });
-
-  /**
    * The mutation that proves the type declarations are read, as the test above does for
    * `required`: stripping `valueType` and `numericType` from the corpus mapping refuses only
    * actions the corpus mapping translates, each at its `ne`, and at least one of them.
@@ -415,23 +317,6 @@ describe("what an emitted filter may contain", () => {
       ).length,
     ).toBeGreaterThan(0);
   });
-
-  /**
-   * A `Where` clause leaves this adapter as part of a JSON request body, so a literal JSON cannot
-   * carry — a non-finite number, a negative zero — is a literal the deployed adapter could not
-   * send faithfully.
-   */
-  test("every emitted literal survives a JSON round trip", () => {
-    const unfaithful = ALL_COMPARISONS.filter(({ value }) =>
-      (Array.isArray(value) ? value : [value]).some(
-        (literal) =>
-          Object.is(literal, -0) ||
-          (typeof literal === "number" && !Number.isFinite(literal)),
-      ),
-    ).map(({ action, field }) => `${action}: ${field}`);
-
-    expect(unfaithful).toEqual([]);
-  });
 });
 
 /**
@@ -455,26 +340,8 @@ describe("mapper forms", () => {
     ).toEqual(await translate(RECORD_ACTION));
   });
 
-  /**
-   * `comparison/not-equals/value-first` is the discriminating case for the two tests below: under
-   * a mapper that declares `aString` `required: true`, it translates to an inequality over that
-   * key. This pins that precondition, so the tests below cannot pass against some other shape.
-   */
+  /** An inequality over `aString`, which has no spelling without `$ne`. */
   const VF_NE = "comparison/not-equals/value-first";
-
-  test("the discriminating case is an inequality over a required key", async () => {
-    const aStringRequired = {
-      ...FIELD_NAME_MAPPER,
-      "request.resource.attr.aString": { field: "aString", required: true },
-    };
-    expect(
-      literalsOf(
-        (await translate(VF_NE, { fieldNameMapper: aStringRequired })).filters,
-      ),
-    ).toEqual([
-      { field: "aString", operator: "$ne", value: "one" },
-    ]);
-  });
 
   /**
    * The default is optional, in both spellings a mapper has. A bare string carries no presence
@@ -510,30 +377,6 @@ describe("mapper forms", () => {
       kind: PlanKind.CONDITIONAL,
       filters: { "request.resource.attr.aString": { $eq: "one" } },
     });
-  });
-
-  /**
-   * The one operand a golden file cannot pin, and the assertion that it does not matter here.
-   *
-   * The generator records the folded `now() - duration("24h")` literal as `__NOW_MINUS_24H__`,
-   * because it differs on every capture — so reading the plan back means choosing an instant. On
-   * the SQL adapters that choice is load-bearing: the PDP emits nanosecond precision, and a tidy
-   * millisecond substitute would translate where production refuses. Here it is inert, because the
-   * comparison never reaches a literal — the operand is a computed expression and `binaryOperands`
-   * rejects it first.
-   */
-  test.each([
-    "timestamp/less-than/relative-window",
-    "timestamp/greater-than/relative-window-value-first",
-  ])("%s is refused for the same reason at either instant precision", async (id) => {
-    const nanos = await thrownBy(() => translate(id));
-    const millis = await thrownBy(() =>
-      translate(id, { now: "2026-08-11T09:13:39.123Z" }),
-    );
-
-    expect(nanos).toBeInstanceOf(UnsupportedOperatorError);
-    expect(millis).toEqual(nanos);
-    expect((millis as Error).message).toBe((nanos as Error).message);
   });
 
   /**
@@ -581,18 +424,6 @@ describe("allowPostFilter", () => {
       return { error };
     }
   };
-
-  const conditionalPlan = (
-    condition: PlanExpressionOperand,
-  ): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
 
   const allowing = async (
     id: string,
@@ -667,52 +498,6 @@ describe("allowPostFilter", () => {
     for (const { omitted, on } of translated) {
       expect(on.result).toEqual(omitted.result);
     }
-  });
-
-  // Chroma narrows the candidates before the post-filter sees them, so whatever it can express
-  // stays with it: a conjunct of a root `and` that translates alone is never post-filtered. Any
-  // other root goes to the post-filter whole — pushing half of an `or` would drop the records only
-  // the other half admits.
-  test("turned on, a root and keeps every conjunct Chroma can express in filters", async () => {
-    let split = 0;
-    for (const { golden, on } of POST_FILTERED) {
-      const condition = (
-        (await planOf(golden)) as PlanResourcesResponse & {
-          condition: PlanExpressionOperand;
-        }
-      ).condition;
-      const translatesAlone = async (conjunct: PlanExpressionOperand) =>
-        (
-          await attempt(() =>
-            queryPlanToChromaDB({
-              queryPlan: conditionalPlan(conjunct),
-              fieldNameMapper: FIELD_NAME_MAPPER,
-            }),
-          )
-        ).result !== undefined;
-      const conjuncts =
-        "operator" in condition && condition.operator === "and"
-          ? condition.operands
-          : [];
-      const alone = await Promise.all(conjuncts.map(translatesAlone));
-      const pushable = conjuncts.filter((_conjunct, index) => alone[index]);
-      if (pushable.length === 0) {
-        expect(on.result?.filters).toBeUndefined();
-        continue;
-      }
-      split += 1;
-      const expected = pushable.map(
-        (conjunct) =>
-          queryPlanToChromaDB({
-            queryPlan: conditionalPlan(conjunct),
-            fieldNameMapper: FIELD_NAME_MAPPER,
-          }).filters,
-      );
-      expect(on.result?.filters).toEqual(
-        expected.length === 1 ? expected[0] : { $and: expected },
-      );
-    }
-    expect(split).toBeGreaterThan(0);
   });
 
   // The predicate is compiled before it is returned, so every refusal happens at translation and

@@ -365,15 +365,8 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     },
   };
 
-/** Every metadata key the corpus mapping can produce, for the "no undeclared key" rule. */
-export function mappedMetadataKeys(): string[] {
-  return Object.values(FIELD_NAME_MAPPER)
-    .map((entry) => (typeof entry === "string" ? entry : entry.field))
-    .sort();
-}
-
 /**
- * The subset of those keys the mapping asserts is present on every document — the only keys `$ne`
+ * The metadata keys the corpus mapping asserts is present on every document — the only keys `$ne`
  * and `$nin` are sound over, since Chroma's inequalities MATCH a document missing the key.
  *
  * A bare string carries no presence assertion, so it is optional here exactly as it is in the

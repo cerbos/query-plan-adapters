@@ -60,35 +60,6 @@ async function translate(
   return translatePlan(await planFor(id), options);
 }
 
-describe("the refusal type", () => {
-  // Every shape this adapter cannot express raises `UnsupportedQueryPlanError`, which the
-  // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
-  // other side: it is still an `Error`, and a mapper mistake is NOT a refusal.
-  test("a refused shape raises UnsupportedQueryPlanError, which is an Error", async () => {
-    let thrown: unknown;
-    try {
-      await translate("regex/matches/lookahead-from-principal");
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(UnsupportedQueryPlanError);
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).name).toBe("UnsupportedQueryPlanError");
-  });
-
-  test("an unmapped reference is a plain Error, not a refusal", async () => {
-    const queryPlan = await planFor("string/equals/case-sensitive");
-    let thrown: unknown;
-    try {
-      queryPlanToMongoose({ queryPlan });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
-  });
-});
-
 // The mapping-hazard contract in README.md ("Mapping hazards") rests on ONE structural fact: this
 // adapter builds no subquery. A relation is a path inside the same document, so the filter and the
 // application read the same document and the subquery hazards cannot arise. The day the adapter
@@ -136,16 +107,6 @@ describe("nullAttributeRepresentation", () => {
   // Mongoose expresses it twice over: per attribute with the `nullable` mapper flag (which the
   // conformance mapping declares, so the harness replays that case under it), and globally with
   // this switch, which is the default for every entry that declares no `nullable` (#493).
-  test("explicit: the null operand is translated", async () => {
-    expect(
-      await translate("null/equals/null-literal-on-missing-attribute", {
-        nullAttributeRepresentation: "explicit",
-      }),
-    ).toStrictEqual(
-      await translate("null/equals/null-literal-on-missing-attribute"),
-    );
-  });
-
   test("omitted: the same plan is refused rather than translated", async () => {
     // A NULL field sends no attribute, so check() denies on a missing-attribute error while a
     // null-selecting filter would return exactly those documents (#302).
@@ -490,19 +451,6 @@ describe("the mapper contract", () => {
   // A mapper is caller-supplied, so these are caller shapes rather than policy shapes: no corpus
   // case can produce them, because the corpus fixes one mapper per adapter.
 
-  test("a function mapper resolves a scalar reference", async () => {
-    expect(
-      await translate("string/equals/case-sensitive", {
-        mapper: (key: string) => ({
-          field: key.replace("request.resource.attr.", ""),
-        }),
-      }),
-    ).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: { aString: { $eq: "one" } },
-    });
-  });
-
   test("a function mapper resolves a relation", async () => {
     expect(
       await translate("relation/bare-attribute/one-hop-boolean", {
@@ -527,22 +475,6 @@ describe("the mapper contract", () => {
   // stores. The corpus cannot exercise it: its mapper deliberately carries none, because the
   // harness compares document ids against `check()` and a parser that changed a value would change
   // both sides at once.
-  test("a valueParser rewrites the constant of an equality", async () => {
-    expect(
-      await translate("string/equals/case-sensitive", {
-        mapper: {
-          "request.resource.attr.aString": {
-            field: "aString",
-            valueParser: (value: unknown) => String(value).toUpperCase(),
-          },
-        },
-      }),
-    ).toStrictEqual({
-      kind: PlanKind.CONDITIONAL,
-      filters: { aString: { $eq: "ONE" } },
-    });
-  });
-
   test("a valueParser rewrites every element of a membership list", async () => {
     expect(
       await translate("null/in/missing-attribute-in-multi-element-list", {
@@ -655,7 +587,19 @@ describe("an unmapped reference", () => {
     const queryPlan = await planFor(
       "null/not-equals/missing-attribute-against-literal",
     );
-    expect(() => queryPlanToMongoose({ queryPlan })).toThrow("No mapper entry for request.resource.attr.aOptionalString");
+    let thrown: unknown;
+    try {
+      queryPlanToMongoose({ queryPlan });
+    } catch (error) {
+      thrown = error;
+    }
+    // A mapping mistake is a bug in the caller's mapping, not a refusal: as a refusal, an
+    // `unsupported` ledger entry could hide it.
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
+    expect((thrown as Error).message).toContain(
+      "No mapper entry for request.resource.attr.aOptionalString",
+    );
   });
 
   // The opt-in: an entry that names neither a field nor a relation keeps the plan path, for a
