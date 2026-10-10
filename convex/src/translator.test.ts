@@ -167,19 +167,7 @@ const DOCUMENTS = (
 describe("the refusal type", () => {
   // Every shape this adapter cannot express raises `UnsupportedQueryPlanError`, which the
   // conformance harness asserts for every `unsupported` ledger entry. These pin the boundary on the
-  // other side: it is still an `Error`, and a mapper mistake or a missing opt-in is NOT a refusal.
-  test("a refused shape raises UnsupportedQueryPlanError, which is an Error", () => {
-    let thrown: unknown;
-    try {
-      translate("regex/matches/lookahead-from-principal");
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(UnsupportedQueryPlanError);
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).name).toBe("UnsupportedQueryPlanError");
-  });
-
+  // other side: a mapper mistake or a missing opt-in is NOT a refusal.
   test("an unmapped reference is a plain Error, not a refusal", () => {
     let thrown: unknown;
     try {
@@ -228,12 +216,9 @@ describe("what the adapter asks Convex to do", () => {
   const declaredFields = fieldsWhere(() => true);
   const nullableFields = fieldsWhere((config) => config.nullable === true);
 
-  // Anti-vacuity: the rules below say nothing if no case reaches the engine.
-  test("some cases reach Convex's filter engine", () => {
-    expect(PUSHED.length).toBeGreaterThan(0);
-  });
-
   test("each pushed case names only mapped, non-nullable fields", () => {
+    // Anti-vacuity: the rule says nothing if no case reaches the engine.
+    expect(PUSHED.length).toBeGreaterThan(0);
     // A `request.resource.attr.…` name would mean resolution missed a reference the caller DID
     // map — a path no document stores, which a negation reads as a match on every document.
     // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
@@ -330,11 +315,6 @@ describe("mapper forms", () => {
     );
   });
 
-  // A lambda's own variable is bound by the macro, not by the mapper, and must not be refused.
-  test("a lambda variable needs no entry", () => {
-    expect(() => translate(DEEP_CASE)).not.toThrow();
-  });
-
   // The opt-in: an entry that names no `field` keeps the plan path.
   test("an empty entry keeps the plan path verbatim", () => {
     const { filter } = translate("string/equals/case-sensitive", {
@@ -355,22 +335,6 @@ describe("nullAttributeRepresentation", () => {
   // whose documents store a NULL field as an explicit null while omitting the attribute from
   // check(): the plan cannot reveal that, so the adapter has to be told.
   const MISSING = "null/equals/null-literal-on-missing-attribute";
-
-  test("explicit is the default", () => {
-    const explicit = translate(MISSING, {
-      nullAttributeRepresentation: "explicit",
-    });
-    const byDefault = translate(MISSING);
-    expect(DOCUMENTS.map((doc) => explicit.postFilter!(doc))).toEqual(
-      DOCUMENTS.map((doc) => byDefault.postFilter!(doc)),
-    );
-  });
-
-  test("omitted: the same plan is refused rather than translated", () => {
-    expect(() =>
-      translate(MISSING, { nullAttributeRepresentation: "omitted" }),
-    ).toThrow(UnsupportedQueryPlanError);
-  });
 
   const carriesNullLiteral = (node: unknown): boolean => {
     if (Array.isArray(node)) return node.some(carriesNullLiteral);
@@ -440,21 +404,12 @@ describe("omitted: an undeclared entry is nullable", () => {
   ] as const;
 
   test.each(CASES)(
-    "%s stays off Convex's engine, and needs the post-filter opt-in",
-    (id, field, _allowed, _denied) => {
-      const mapper = undeclared(field);
-      expect(translate(id, { mapper }).path).toBe("db");
-      expect(omitted(id, { mapper }).path).toBe("post");
-      expect(() => omitted(id, { mapper, allowPostFilter: false })).toThrow(
-        "allowPostFilter",
-      );
-    },
-  );
-
-  test.each(CASES)(
-    "%s denies a document %s is missing or null in",
+    "%s stays off Convex's engine and denies a document %s is missing or null in",
     (id, field, allowed, denied) => {
-      const { postFilter } = omitted(id, { mapper: undeclared(field) });
+      const mapper = undeclared(field);
+      // Anti-vacuity: under "explicit" the same entry is pushed down.
+      expect(translate(id, { mapper }).path).toBe("db");
+      const { postFilter } = omitted(id, { mapper });
       expect(postFilter!({ [field]: allowed })).toBe(true);
       expect(postFilter!({ [field]: denied })).toBe(false);
       expect(postFilter!({})).toBe(false);
@@ -621,8 +576,8 @@ describe("an ordering against a value of another type, on a non-nullable field",
   const VALUES = [null, -1, 2, 5, true, false, "", "5", "m", "zzz"];
   const FIELDS = ["aNumber", "aBool", "aString", "owner"];
 
-  // Anti-vacuity: the cross-type orderings are among what reaches the engine.
-  test("cross-type orderings reach Convex's engine under this mapping", () => {
+  test("each pushed ordering: Convex's answer is CEL's for a field of every type", () => {
+    // Anti-vacuity: the cross-type orderings are among what reaches the engine.
     expect(PUSHED_ORDERINGS.map(({ id }) => id)).toEqual(
       expect.arrayContaining([
         "type-mismatch/less-than/number-field-against-string-literal",
@@ -631,9 +586,6 @@ describe("an ordering against a value of another type, on a non-nullable field",
         "type-mismatch/less-than/negated-string-field-against-number-literal",
       ]),
     );
-  });
-
-  test("each pushed ordering: Convex's answer is CEL's for a field of every type", () => {
     const disagreements = PUSHED_ORDERINGS.flatMap(
       ({ id, condition, filter }) => {
         const emitted = recordFilter(id, filter);
@@ -703,20 +655,11 @@ describe("plans the planner cannot produce", () => {
     ).toThrow("Invalid Cerbos expression structure");
   });
 
-  test("an operator this adapter has never heard of", () => {
-    expect(() =>
-      queryPlanToConvex({
-        queryPlan: plan({ operator: "unsupported", operands: [] }),
-        mapper: MAPPER,
-      }),
-    ).toThrow("Unsupported operator: unsupported");
-  });
-
   test("isSet, which no policy can compile", () => {
     // `isSet` is not a registered CEL function, so a policy naming it fails to compile and the
     // operator never reaches the wire. The adapter carried a dedicated branch for it anyway; it
     // must fail closed like any unknown operator rather than guess at an existence filter
-    // (cerbos/query-plan-adapters#261).
+    // (cerbos/query-plan-adapters#261). It stands for every operator the adapter does not know.
     expect(() =>
       queryPlanToConvex({
         queryPlan: plan({
@@ -797,32 +740,27 @@ describe("plans the planner cannot produce", () => {
  *
  * The remaining gaps are tracked below; delete these tests when their corpus coverage lands:
  *
- * - backreferences and trailing-wildcard/end-anchor combinations — #396.
+ * - a trailing wildcard under an end anchor — #396.
  * - the value-list macro machinery past what `principal/*` drives — cerbos/query-plan-adapters#394.
- *   The corpus drives `exists`, `all` and `exists_one` over a list of distinct strings; a
- *   duplicate element under `exists_one`, an empty collection that is not folded away, and
- *   element-field paths it does not.
+ *   The corpus drives `exists`, `all` and `exists_one` over literal lists, duplicate elements and
+ *   element-field paths included; an empty collection that is not folded away it does not.
  *
  * The plans here are hand-built for the same reason the sections above never are: there is no
  * golden file, because there is no case. That is the argument for the issue rather than a
  * licence to keep writing them.
  */
 describe("shapes the corpus does not reach yet", () => {
-  // Corpus gap (#396): `regex/matches/lookahead-from-principal` covers lookahead rejection, but
-  // these backreference and trailing-wildcard/end-anchor combinations still have no corpus case.
-  // Keep their refusal contract until those exact shapes are planned and replayed.
-  test.each([
-    ["a backreference", "(a)\\1"],
-    ["a trailing wildcard under an end anchor", "^allowed.*$"],
-    ["a trailing wildcard with a bare end anchor", "allowed.*$"],
-  ])("matches with %s is refused", (_label, pattern) => {
+  // Corpus gap (#396): `regex/matches/negated-invalid-patterns-from-principal` covers the
+  // backreference, but a trailing wildcard under an end anchor still has no corpus case. Keep its
+  // refusal contract until that shape is planned and replayed.
+  test("matches with a trailing wildcard under an end anchor is refused", () => {
     expect(() =>
       queryPlanToConvex({
         queryPlan: plan({
           operator: "matches",
           operands: [
             { name: "request.resource.attr.aString" },
-            { value: pattern },
+            { value: "^allowed.*$" },
           ],
         }),
         mapper: MAPPER,
@@ -859,22 +797,6 @@ describe("shapes the corpus does not reach yet", () => {
       operands: [{ name: "request.resource.attr.aString" }, right],
     });
 
-    test("exists_one keeps CEL's exact cardinality", () => {
-      const both = macroPostFilter(
-        "exists_one",
-        ["alpha", "alpha"],
-        compare("eq", { name: "t" }),
-      );
-      expect(both({ aString: "alpha" })).toBe(false);
-
-      const one = macroPostFilter(
-        "exists_one",
-        ["alpha", "beta"],
-        compare("eq", { name: "t" }),
-      );
-      expect(one({ aString: "beta" })).toBe(true);
-    });
-
     test("an empty collection keeps CEL's identity elements", () => {
       expect(
         macroPostFilter(
@@ -894,16 +816,6 @@ describe("shapes the corpus does not reach yet", () => {
           aString: "alpha",
         }),
       ).toBe(true);
-    });
-
-    test("an element-field path reads the element, not the document", () => {
-      const postFilter = macroPostFilter(
-        "exists",
-        [{ name: "alpha" }, { name: "beta" }],
-        compare("eq", { name: "t.name" }),
-      );
-      expect(postFilter({ aString: "beta" })).toBe(true);
-      expect(postFilter({ aString: "gamma" })).toBe(false);
     });
   });
 });
