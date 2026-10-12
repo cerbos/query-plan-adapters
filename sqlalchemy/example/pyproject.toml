@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 # Exact pins so every Renovate bump opens a PR that the `example` job gates.
 dependencies = [
     "cerbos==0.16.0",
-    "sqlalchemy==2.0.52",
+    "sqlalchemy==2.1.4",
 ]
 
 [tool.pdm]

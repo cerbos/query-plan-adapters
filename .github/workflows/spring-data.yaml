@@ -65,7 +65,7 @@ jobs:
             spring-data/**/gradle-wrapper.properties
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       # build.gradle.kts forwards ADAPTER_TEST_ORM to the suites and declares it as an input.
       - name: Build and test (${{ matrix.orm }})
@@ -75,7 +75,7 @@ jobs:
 
       - name: Store reports
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: "Reports for Java ${{ matrix.java-version }} (${{ matrix.orm }})"
           path: |-
@@ -128,7 +128,7 @@ jobs:
             spring-data/**/gradle-wrapper.properties
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
       - name: Conformance suite (${{ matrix.database }}, ${{ matrix.orm }})
@@ -140,7 +140,7 @@ jobs:
 
       - name: Store reports
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: "Reports for ${{ matrix.database }} (${{ matrix.orm }})${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
           path: |-
@@ -180,7 +180,7 @@ jobs:
             spring-data/**/gradle-wrapper.properties
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       # The example resolves the adapter from mavenLocal.
       - name: Publish the adapter to mavenLocal
@@ -202,7 +202,7 @@ jobs:
 
       - name: Store reports
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: "Reports for the example"
           path: |-
