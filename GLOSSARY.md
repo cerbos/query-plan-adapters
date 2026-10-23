@@ -55,6 +55,13 @@ exceptions only, and is an output of running the harness, not an input. The set 
 holding one is the adapter roster.
 _Avoid_: classification, actions.json, skip list
 
+**Store capability**:
+Something a seed needs of a store beyond holding its attributes, such as `null-list` (a list sent as
+null, kept apart from `[]`). A seed declares it under `requires`; an adapter whose store cannot hold
+such a row declares it under its ledger's `lacks`, with the reason, and its harness does not load
+the seed and strikes its id from `allowed`. A property of the store, never of a case.
+_Avoid_: skipped seed, optional row
+
 **Conformance harness**:
 An adapter's replay of the corpus against its own real store: for each pinned PDP and each golden,
 translate the plan, run the query, and compare the ids with `allowed`, or assert what the ledger

@@ -309,14 +309,14 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
-queries over the corpus's 43 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 44 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
 0.56.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
 | extended | 66 / 102 |
-| adversarial | 225 / 344 |
+| adversarial | 226 / 345 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases.

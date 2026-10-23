@@ -42,8 +42,11 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
-  /** Homogeneous scalar lists. A null ELEMENT is a value, not an absent attribute. */
-  aNumberList: (number | null)[];
+  /**
+   * Homogeneous scalar lists. A null ELEMENT is a value, not an absent attribute; j4 sends the
+   * whole aNumberList as null.
+   */
+  aNumberList: (number | null)[] | null;
   aBoolList: (boolean | null)[];
 }
 

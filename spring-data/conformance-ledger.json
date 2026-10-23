@@ -1,5 +1,8 @@
 {
   "adapter": "spring-data",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as NumberListElementEntity rows, a one-to-many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",

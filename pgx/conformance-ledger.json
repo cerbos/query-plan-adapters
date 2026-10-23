@@ -1,5 +1,8 @@
 {
   "adapter": "pgx",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as element rows in a child table, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
       "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",

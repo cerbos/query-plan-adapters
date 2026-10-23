@@ -1,5 +1,8 @@
 {
   "adapter": "activerecord",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as adversarial_number_list_elements rows, a has_many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/divide/field-by-field": {
       "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable",

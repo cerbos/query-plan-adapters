@@ -28,7 +28,7 @@ conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its stor
 | Path | What it is | Edited by |
 |---|---|---|
 | `cases/<area>.yaml` | The cases: id, tier, intent, trap, and the Cerbos condition (or rules). **The source of truth.** | hand |
-| `seeds.json`, `derived-fields.json` | The dataset as rows: 43 seed resources and the fixed principal. | hand |
+| `seeds.json`, `derived-fields.json` | The dataset as rows: 44 seed resources and the fixed principal. | hand |
 | `pdp-versions.json` | The two pinned PDPs: `current` (N) and `previous` (N-1), each as tag and digest. The only PDP pin in the repository. | `scripts/bump-pdp.sh` |
 | `policies/conformance.yaml` | The resource policy built from the cases (resource kind `conformance`). | generator |
 | `policies/derived_roles.yaml` | The one derived role the composition cases import. | hand |
@@ -121,7 +121,9 @@ Each adapter implements this once, in its own language. It needs no PDP.
 1. **Load the dataset.** Store every row of `seeds.json` and `derived-fields.json` in the adapter's
    real store. `parentSeedId` is a real to-one relation (below). Map the attributes so that each row,
    read back through the mapping, is the resource in `resources.json`. One mapping serves every case;
-   there are no per-case options.
+   there are no per-case options. A seed that `requires` a store capability the adapter's ledger
+   `lacks` is a resource that store cannot hold: do not load it, and strike its id from every
+   golden's `allowed` before comparing.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
@@ -153,6 +155,9 @@ new service's repository to its `IMAGE_REPOSITORIES`.
 ```json
 {
   "adapter": "prisma",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as AdversarialNumberListElement rows, …"
+  },
   "cases": {
     "regex/matches/digit-class": {
       "status": "unsupported",
@@ -168,6 +173,9 @@ new service's repository to its `IMAGE_REPOSITORIES`.
 ```
 
 - The ledger lists exceptions only. A new case is expected to pass until the harness says otherwise.
+- `lacks` (optional) maps a store capability to the reason the store lacks it. It names a property
+  of the store, not of a case: the seeds that require the capability are not loaded, and every case
+  still runs over the rest. Only a capability some seed in `seeds.json` requires may be named.
 - `reason` names the real mechanism, in the store's own terms. `divergent` also requires `issue`.
 - An optional `pdp: ["0.55.0"]` limits an entry to one PDP tag, for a case whose plan differs between
   the two.
@@ -198,6 +206,15 @@ behind each leg, and the adapter's other suites, are in its README's "Developmen
   `aString` (and `obj.inner`, its alias), `aNumber` and `aBool` NULL, with every other attribute
   present, so each negated case over those attributes meets a missing-attribute row, and a failure
   names the column. A harness maps all three as nullable, on the omitted convention.
+- **A row some stores cannot hold.** Seed `j4` sends `aNumberList` as `null`, and `2 in null` has
+  no overload, so CEL denies it under both polarities: a store NOT over a null or absent list (a
+  `$nor`, a NOT EXISTS over no elements) over-grants it. A store that keeps a list as child rows
+  holds null and `[]` as the same zero rows, so `j4` cannot be stored there at all. The seed declares
+  `"requires": ["null-list"]`, and such an adapter's ledger declares the capability under `lacks`
+  (see "The harness contract"). This is a property of the store, so it is neither `unsupported`
+  nor `divergent`. The generator knows each capability (`storeCapabilities` in
+  `generator/resources.go`), and refuses a requiring seed that another seed names as its parent
+  ([#548](https://github.com/cerbos/query-plan-adapters/issues/548)).
 - **The real to-one relation.** `parentSeedId` names the seed whose `aBool`, `aNumber`, `aString`
   and `aOptionalString` form this row's `parent`. That seed's own parent forms `parent.inner`, and the
   chain stops there.
