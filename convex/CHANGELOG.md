@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `postFilter` evaluates `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator. A
+  stored `null` is absent under `nullAttributeRepresentation: "omitted"`.
+
 - `postFilter` evaluates the `list` and `struct` literals, `except`, `intersect`, `isSubset`, list
   `+`, `upperAscii`, `duration`, `timeSince` with timestamp and duration arithmetic, the
   two-variable `exists`/`all`/`exists_one`, and `index` on a map, all of which used to throw
