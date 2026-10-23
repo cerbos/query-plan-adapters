@@ -33,6 +33,7 @@ plus one or more scope labels.
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
 | `spring-data` | Spring Data JPA (Java) |
+| `exposed` | Exposed (Kotlin) |
 
 And one cross-cutting label:
 
