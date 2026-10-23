@@ -245,26 +245,54 @@ internal class RegexTranslator(private val translation: Translation) {
                 // A lazy suffix accepts the same language.
                 if (pos < src.length && peek() == '?') pos++
                 atom = Node.Rep(atom, min, max)
+                // RE2 rejects a repetition whose nested copies exceed RE2_MAX_REPEAT: (a{2}){600}.
+                if (!repeatIsValid(atom, RE2_MAX_REPEAT)) throw InvalidRe2()
             }
             return atom
         }
 
-        /** `{n}`, `{n,}` or `{n,m}`; `null` for a literal brace. */
+        /**
+         * `{n}`, `{n,}` or `{n,m}`; `null` for a literal brace. A count is read as Go's
+         * `regexp/syntax` `parseInt` reads it, which takes no leading zero: `a{01}` is `a` then the
+         * text "{01}".
+         */
         private fun braces(): Pair<Int, Int>? {
             val close = src.indexOf('}', pos)
             if (close < 0) return null
             val body = src.substring(pos + 1, close)
-            if (!body.matches(Regex("[0-9]+(,[0-9]*)?"))) return null
+            if (!body.matches(Regex("(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?"))) return null
             val bounds = body.split(",")
-            val min = bounds[0].toIntOrNull() ?: throw InvalidRe2()
+            val min = parseCount(bounds[0])
             val max = when {
                 bounds.size == 1 -> min
                 bounds[1].isEmpty() -> -1
-                else -> bounds[1].toIntOrNull() ?: throw InvalidRe2()
+                else -> parseCount(bounds[1])
             }
-            if (min > 1000 || max > 1000 || (max in 0 until min)) throw InvalidRe2()
+            if (min > RE2_MAX_REPEAT || max > RE2_MAX_REPEAT || (max in 0 until min)) throw InvalidRe2()
             pos = close + 1
             return min to max
+        }
+
+        /** A count's digits; one too long for an int is past RE2's bound anyway. */
+        private fun parseCount(digits: String): Int =
+            if (digits.length > 4) RE2_MAX_REPEAT + 1 else digits.toInt()
+
+        /**
+         * Go's `repeatIsValid`: each repetition divides the budget by its count (its maximum, or
+         * its minimum when unbounded), and a count beyond what is left is invalid.
+         */
+        private fun repeatIsValid(node: Node, budget: Int): Boolean = when (node) {
+            is Node.Rep -> {
+                if (node.max == 0) {
+                    true
+                } else {
+                    val count = if (node.max >= 0) node.max else node.min
+                    count <= budget && repeatIsValid(node.node, if (count == 0) budget else budget / count)
+                }
+            }
+            is Node.Cat -> node.parts.all { repeatIsValid(it, budget) }
+            is Node.Alt -> node.options.all { repeatIsValid(it, budget) }
+            else -> true
         }
 
         private fun atom(): Node = when (peek()) {
@@ -410,6 +438,9 @@ internal class RegexTranslator(private val translation: Translation) {
         const val MAX_STRINGS: Int = 256
 
         private const val MAX_REPEAT = 16
+
+        /** RE2's bound on the copies a counted repetition, nested ones included, may make. */
+        private const val RE2_MAX_REPEAT = 1000
 
         private fun unsupported(pattern: String, what: String): UnsupportedPlanShapeException = Refusals.unsupported(
             "matches() is translated only where LIKE can spell the pattern exactly, and this one has " +

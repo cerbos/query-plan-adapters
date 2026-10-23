@@ -209,6 +209,10 @@
       "status": "unsupported",
       "reason": "matches() is translated only where LIKE, = and REPLACE spell the RE2 pattern exactly: finite alternatives, anchored .* and .+, and ^[set]*$. An unbounded repetition of a literal (x*, a+) inside a pattern has no finite expansion and no LIKE wildcard that counts only one character's repeats, so it is refused when the pattern is compiled"
     },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "matches() is translated only where LIKE, = and REPLACE spell the RE2 pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused when the pattern is compiled"
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"

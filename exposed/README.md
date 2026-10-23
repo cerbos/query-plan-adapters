@@ -560,7 +560,7 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 91 / 102 |
+| extended | 90 / 102 |
 | adversarial | 292 / 344 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
